@@ -21,10 +21,10 @@ export function SiteHeader({ active, locale, labels }: SiteHeaderProps) {
       <Link className="brand" href={`/${locale}`} aria-label="TITANORGROUP home">
         <Image
           className="brand-logo"
-          src="/assets/pdf/mockup.png"
-          alt="TITANORGROUP"
-          width={460}
-          height={140}
+          src="/assets/brand/titanor-group.png"
+          alt="TITANOR GROUP"
+          width={540}
+          height={184}
           priority
         />
       </Link>
