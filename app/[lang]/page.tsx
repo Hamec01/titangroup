@@ -41,13 +41,13 @@ export default async function HomePage({ params }: HomePageProps) {
 
           <div className="hero-visual">
             <div className="hero-image-card">
-              <div className="hero-badge">Finland / Europe</div>
+              <div className="hero-badge">{content.hero.badge}</div>
               <div className="hero-stat hero-stat-top">
-                <strong>B2B</strong>
+                <strong>{content.hero.statTopTitle}</strong>
                 <span>{content.hero.statTop}</span>
               </div>
               <div className="hero-stat hero-stat-bottom">
-                <strong>Steel. Welding. Repair.</strong>
+                <strong>{content.hero.statBottomTitle}</strong>
                 <span>{content.hero.statBottom}</span>
               </div>
             </div>

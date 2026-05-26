@@ -29,6 +29,9 @@ type Dictionary = {
     description: string;
     primary: string;
     secondary: string;
+    badge: string;
+    statTopTitle: string;
+    statBottomTitle: string;
     statTop: string;
     statBottom: string;
   };
@@ -88,6 +91,9 @@ export const dictionary: Record<Locale, Dictionary> = {
         'Reliable solutions for shipbuilding, vessel repair, steel structures and industrial marine projects.',
       primary: 'Contact us',
       secondary: 'Our services',
+      badge: 'Finland / Europe',
+      statTopTitle: 'B2B',
+      statBottomTitle: 'Steel. Welding. Repair.',
       statTop: 'marine and industrial focus',
       statBottom: 'Structured delivery for demanding shipyard work'
     },
@@ -159,7 +165,7 @@ export const dictionary: Record<Locale, Dictionary> = {
       title: 'Contact'
     },
     contacts: [
-      { label: 'Email', value: 'info@titanorgroup.fi', href: 'mailto:info@titanorgroup.fi' },
+      { label: 'Эл. почта', value: 'info@titanorgroup.fi', href: 'mailto:info@titanorgroup.fi' },
       {
         label: 'Projects',
         value: 'projects@titanorgroup.fi',
@@ -195,6 +201,9 @@ export const dictionary: Record<Locale, Dictionary> = {
         'Luotettavat ratkaisut laivanrakennukseen, alusten korjaukseen, terasrakenteisiin ja teollisiin meriprojekteihin.',
       primary: 'Ota yhteytta',
       secondary: 'Palvelumme',
+      badge: 'Suomi / Eurooppa',
+      statTopTitle: 'B2B',
+      statBottomTitle: 'Teras. Hitsaus. Korjaus.',
       statTop: 'meri- ja teollisuusfokus',
       statBottom: 'Jasennelty toteutus vaativiin telakkatoihin'
     },
@@ -278,7 +287,7 @@ export const dictionary: Record<Locale, Dictionary> = {
         href: 'mailto:office@titanorgroup.fi'
       },
       { label: 'Puhelin', value: '+358 XX XXX XXXX', href: 'tel:+358000000000' },
-      { label: 'Sijainti', value: 'Finland / Europe', href: '#' }
+        { label: 'Sijainti', value: 'Suomi / Eurooppa', href: '#' }
     ],
     form: {
       name: 'Nimi',
@@ -302,6 +311,9 @@ export const dictionary: Record<Locale, Dictionary> = {
         'Надежные решения для судостроения, ремонта судов, металлоконструкций и промышленных морских проектов.',
       primary: 'Связаться',
       secondary: 'Наши услуги',
+      badge: 'Финляндия / Европа',
+      statTopTitle: 'B2B',
+      statBottomTitle: 'Сталь. Сварка. Ремонт.',
       statTop: 'фокус на морских и промышленных проектах',
       statBottom: 'Структурированная реализация сложных задач верфи'
     },
@@ -339,31 +351,31 @@ export const dictionary: Record<Locale, Dictionary> = {
     services: [
       {
         number: '01',
-        title: 'Shipbuilding',
+          title: 'Судостроение',
         text: 'Строительство, сборка и участие в судостроительных проектах.',
         image: serviceImages[0]
       },
       {
         number: '02',
-        title: 'Steel Structures',
+          title: 'Металлоконструкции',
         text: 'Изготовление и монтаж металлических конструкций для морской и промышленной отрасли.',
         image: serviceImages[1]
       },
       {
         number: '03',
-        title: 'Welding & Assembly',
+          title: 'Сварка и сборка',
         text: 'Сварочные, монтажные и подготовительные работы.',
         image: serviceImages[2]
       },
       {
         number: '04',
-        title: 'Ship Repair',
+          title: 'Ремонт судов',
         text: 'Ремонт, обслуживание и восстановление судовых элементов.',
         image: serviceImages[3]
       },
       {
         number: '05',
-        title: 'Technical Support',
+          title: 'Техническая поддержка',
         text: 'Помощь в реализации проектов, документации и технической координации.',
         image: serviceImages[4]
       }
@@ -385,7 +397,7 @@ export const dictionary: Record<Locale, Dictionary> = {
         href: 'mailto:office@titanorgroup.fi'
       },
       { label: 'Телефон', value: '+358 XX XXX XXXX', href: 'tel:+358000000000' },
-      { label: 'Локация', value: 'Finland / Europe', href: '#' }
+        { label: 'Локация', value: 'Финляндия / Европа', href: '#' }
     ],
     form: {
       name: 'Имя',
