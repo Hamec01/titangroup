@@ -14,7 +14,7 @@ const bodyFont = Manrope({
 });
 
 export const metadata: Metadata = {
-  title: 'TITANOR GROUP — Shipbuilding & Marine Engineering',
+  title: 'TITANORGROUP — Shipbuilding & Marine Engineering',
   description:
     'Shipbuilding, steel structures, welding, marine engineering and industrial solutions in Finland and Europe.'
 };

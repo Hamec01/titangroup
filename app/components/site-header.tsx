@@ -1,3 +1,4 @@
+import Image from 'next/image';
 import Link from 'next/link';
 import { Locale, locales } from '../i18n';
 
@@ -17,9 +18,15 @@ export function SiteHeader({ active, locale, labels }: SiteHeaderProps) {
 
   return (
     <header className="site-header">
-      <Link className="brand" href={`/${locale}`} aria-label="TITANOR GROUP home">
-        <span className="brand-title">TITANOR</span>
-        <span className="brand-subtitle">GROUP</span>
+      <Link className="brand" href={`/${locale}`} aria-label="TITANORGROUP home">
+        <Image
+          className="brand-logo"
+          src="/assets/pdf/mockup.png"
+          alt="TITANORGROUP"
+          width={460}
+          height={140}
+          priority
+        />
       </Link>
 
       <nav className="nav-desktop" aria-label="Primary navigation">

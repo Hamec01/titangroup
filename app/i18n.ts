@@ -66,11 +66,11 @@ type Dictionary = {
 };
 
 const serviceImages = [
-  'https://images.unsplash.com/photo-1518623489648-a173ef7824f3?auto=format&fit=crop&w=900&q=80',
-  'https://images.unsplash.com/photo-1504307651254-35680f356dfd?auto=format&fit=crop&w=900&q=80',
-  'https://images.unsplash.com/photo-1517048676732-d65bc937f952?auto=format&fit=crop&w=900&q=80',
-  'https://images.unsplash.com/photo-1500375592092-40eb2168fd21?auto=format&fit=crop&w=900&q=80',
-  'https://images.unsplash.com/photo-1494412651409-8963ce7935a7?auto=format&fit=crop&w=900&q=80'
+  '/assets/pdf/mockup.png',
+  '/assets/pdf/mockup.png',
+  '/assets/pdf/mockup.png',
+  '/assets/pdf/mockup.png',
+  '/assets/pdf/mockup.png'
 ];
 
 export const dictionary: Record<Locale, Dictionary> = {
@@ -155,7 +155,7 @@ export const dictionary: Record<Locale, Dictionary> = {
       }
     ],
     contactHeading: {
-      kicker: 'TITANOR GROUP',
+      kicker: 'TITANORGROUP',
       title: 'Contact'
     },
     contacts: [
@@ -262,7 +262,7 @@ export const dictionary: Record<Locale, Dictionary> = {
       }
     ],
     contactHeading: {
-      kicker: 'TITANOR GROUP',
+      kicker: 'TITANORGROUP',
       title: 'Yhteystiedot'
     },
     contacts: [
@@ -369,7 +369,7 @@ export const dictionary: Record<Locale, Dictionary> = {
       }
     ],
     contactHeading: {
-      kicker: 'TITANOR GROUP',
+      kicker: 'TITANORGROUP',
       title: 'Контакты'
     },
     contacts: [

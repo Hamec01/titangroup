@@ -83,7 +83,7 @@ button {
   inset: 0;
   background:
     linear-gradient(90deg, rgba(0, 0, 0, 0.82) 0%, rgba(0, 0, 0, 0.55) 45%, rgba(0, 0, 0, 0.15) 100%),
-    url('https://images.unsplash.com/photo-1518623489648-a173ef7824f3?auto=format&fit=crop&w=1920&q=80') center/cover;
+    url('/assets/pdf/mockup.png') center/cover;
   z-index: -2;
 }
 
@@ -113,20 +113,13 @@ button {
 
 .brand {
   display: inline-flex;
-  flex-direction: column;
-  gap: 2px;
-  line-height: 0.9;
-  font-family: var(--font-display), sans-serif;
-  letter-spacing: 0.14em;
+  align-items: center;
+  min-width: 240px;
 }
 
-.brand-title {
-  font-size: 2.4rem;
-}
-
-.brand-subtitle {
-  font-size: 0.7rem;
-  letter-spacing: 0.5em;
+.brand-logo {
+  width: clamp(160px, 21vw, 300px);
+  height: auto;
 }
 
 .nav-desktop,
@@ -361,7 +354,7 @@ button {
   border: 1px solid rgba(255, 255, 255, 0.1);
   background:
     linear-gradient(160deg, rgba(5, 7, 11, 0.12), rgba(5, 7, 11, 0.62)),
-    url('https://images.unsplash.com/photo-1518623489648-a173ef7824f3?auto=format&fit=crop&w=1200&q=80') center/cover;
+    url('/assets/pdf/mockup.png') center/cover;
   box-shadow: inset 0 -120px 160px rgba(0, 0, 0, 0.38);
 }
 
@@ -762,8 +755,12 @@ button {
 }
 
 @media (max-width: 480px) {
-  .brand-title {
-    font-size: 1.9rem;
+  .brand {
+    min-width: 170px;
+  }
+
+  .brand-logo {
+    width: 170px;
   }
 
   .hero-actions {
