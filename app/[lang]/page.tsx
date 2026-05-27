@@ -26,7 +26,7 @@ export default async function HomePage({ params }: HomePageProps) {
           <div className="hero-copy">
             <p className="eyebrow">{content.hero.eyebrow}</p>
             <h1>
-              TITANORGROUP
+              Titanor Group
             </h1>
             <p className="hero-text">{content.hero.description}</p>
             <div className="hero-actions">

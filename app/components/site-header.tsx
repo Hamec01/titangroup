@@ -19,7 +19,7 @@ export function SiteHeader({ active, locale, labels }: SiteHeaderProps) {
 
   return (
     <header className="site-header">
-      <Link className="brand" href={`/${locale}`} aria-label="TITANORGROUP home">
+      <Link className="brand" href={`/${locale}`} aria-label="Titanor Group home">
         <Image
           className="brand-logo"
           src="/assets/brand/titanor-group.png"

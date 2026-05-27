@@ -179,7 +179,7 @@ export const dictionary: Record<Locale, Dictionary> = {
       }
     ],
     contactHeading: {
-      kicker: 'TITANORGROUP',
+      kicker: 'Titanor Group',
       title: 'Contact'
     },
     contacts: [
@@ -303,7 +303,7 @@ export const dictionary: Record<Locale, Dictionary> = {
       }
     ],
     contactHeading: {
-      kicker: 'TITANORGROUP',
+      kicker: 'Titanor Group',
       title: 'Yhteystiedot'
     },
     contacts: [
