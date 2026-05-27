@@ -1,4 +1,4 @@
-export const locales = ['fi', 'en', 'ru'] as const;
+export const locales = ['fi', 'en'] as const;
 
 export type Locale = (typeof locales)[number];
 
@@ -105,11 +105,11 @@ export const dictionary: Record<Locale, Dictionary> = {
         'Reliable solutions for shipbuilding, vessel repair, steel structures and industrial marine projects.',
       primary: 'Contact us',
       secondary: 'Our services',
-      badge: 'Finland / Europe',
+      badge: 'Finland / EU',
       statTopTitle: 'B2B',
       statBottomTitle: 'Steel. Welding. Repair.',
       statTop: 'marine and industrial focus',
-      statBottom: 'Structured delivery for demanding shipyard work'
+      statBottom: 'Structured delivery for demanding shipyard work.'
     },
     benefits: [
       {
@@ -195,7 +195,7 @@ export const dictionary: Record<Locale, Dictionary> = {
         href: 'mailto:office@titanorgroup.fi'
       },
       { label: 'Phone', value: '+358 46 943 1354', href: 'tel:+358469431354' },
-      { label: 'Location', value: 'Finland / Europe', href: '#' }
+      { label: 'Location', value: 'Finland / EU', href: '#' }
     ],
     form: {
       title: 'Send us a project inquiry',
@@ -221,78 +221,78 @@ export const dictionary: Record<Locale, Dictionary> = {
       home: 'Etusivu',
       services: 'Palvelut',
       contact: 'Yhteystiedot',
-      cta: 'Ota yhteytta'
+      cta: 'Ota yhteyttä'
     },
     hero: {
-      eyebrow: 'Laivanrakennus, terasrakenteet ja meritekniikka',
+      eyebrow: 'Laivanrakennus, teräsrakenteet ja meritekniset palvelut',
       description:
-        'Luotettavat ratkaisut laivanrakennukseen, alusten korjaukseen, terasrakenteisiin ja teollisiin meriprojekteihin.',
-      primary: 'Ota yhteytta',
+        'Luotettavat ratkaisut laivanrakennukseen, alusten korjaukseen, teräsrakenteisiin ja teollisiin meriprojekteihin.',
+      primary: 'Ota yhteyttä',
       secondary: 'Palvelumme',
-      badge: 'Suomi / Eurooppa',
+      badge: 'Suomi / EU',
       statTopTitle: 'B2B',
-      statBottomTitle: 'Teras. Hitsaus. Korjaus.',
-      statTop: 'meri- ja teollisuusfokus',
-      statBottom: 'Jasennelty toteutus vaativiin telakkatoihin'
+      statBottomTitle: 'Teräs. Hitsaus. Korjaus.',
+      statTop: 'fokus meri- ja teollisuushankkeissa',
+      statBottom: 'Jäsennelty toteutus vaativiin telakkaprojekteihin.'
     },
     benefits: [
       {
         title: 'Kokemus',
-        text: 'Pitka kokemus laivanrakennuksesta ja teollisesta tuotannosta.',
+        text: 'Pitkä kokemus laivanrakennuksesta ja teollisesta tuotannosta.',
         icon: '⚒'
       },
       {
         title: 'Laatu',
-        text: 'Korkeat laatustandardit ja tarkkuus jokaisessa vaiheessa.',
+        text: 'Korkeat laatustandardit ja tarkkuus työn jokaisessa vaiheessa.',
         icon: '◎'
       },
       {
         title: 'Luotettavuus',
-        text: 'Aikataulujen noudattaminen ja yksilollinen lahestymistapa jokaiseen projektiin.',
+        text: 'Aikataulujen pitävyys ja yksilöllinen lähestymistapa jokaiseen projektiin.',
         icon: '⬡'
       },
       {
         title: 'Turvallisuus',
-        text: 'Turvallisuusvaatimusten ja kansainvalisten standardien tarkka noudattaminen.',
+        text: 'Turvallisuusvaatimusten ja kansainvälisten standardien tarkka noudattaminen.',
         icon: '◌'
       },
       {
-        title: 'Kansainvalinen toimintatapa',
-        text: 'Toimimme asiakkaiden kanssa koko Euroopassa ja sen ulkopuolella.',
+        title: 'Kansainvälinen toimintatapa',
+        text: 'Toimimme asiakkaiden kanssa kaikkialla Euroopassa ja sen ulkopuolella.',
         icon: '◍'
       }
     ],
     servicesHeading: {
-      kicker: 'Laivanrakennuksen ja meriteollisuuden ratkaisut',
+      kicker: 'Ratkaisut laivanrakennukseen ja meriteollisuuteen',
       title: 'Palvelut'
     },
     servicesCta: {
-      text: 'Tarvitsetko tukea laivanrakennus- tai terasrakenneprojektiin?',
-      linkLabel: 'Ota yhteytta: projects@titanorgroup.fi'
+      text: 'Tarvitsetko tukea laivanrakennus- tai teräsrakenneprojektiin?',
+      linkLabel: 'Ota yhteyttä: projects@titanorgroup.fi'
     },
     services: [
       {
         number: '01',
         title: 'Laivanrakennus',
-        text: 'Rakennus, kokoonpano ja osallistuminen laivanrakennusprojekteihin.',
+        text: 'Rakentaminen, kokoonpano ja osallistuminen laivanrakennusprojekteihin.',
         image: serviceImages[0]
       },
       {
         number: '02',
-        title: 'Terasrakenteet',
+        title: 'Teräsrakenteet',
         text: 'Metallirakenteiden valmistus ja asennus meri- ja teollisuusalalle.',
         image: serviceImages[1]
       },
       {
         number: '03',
         title: 'Hitsaus ja kokoonpano',
-        text: 'Hitsaus-, asennus- ja esivalmistelutyot.',
+        text: 'Hitsaus-, asennus- ja esivalmistelutyöt.',
         image: serviceImages[2]
       },
       {
         number: '04',
         title: 'Aluskorjaus',
-        text: 'Alusosien korjaus, huolto ja kunnostus.',
+        text: 'Aluksen osien korjaus, huolto ja kunnostus.',
         image: serviceImages[3]
       },
       {
@@ -307,9 +307,9 @@ export const dictionary: Record<Locale, Dictionary> = {
       title: 'Yhteystiedot'
     },
     contacts: [
-      { label: 'Sahkoposti', value: 'info@titanorgroup.fi', href: 'mailto:info@titanorgroup.fi' },
+      { label: 'Yleiset tiedustelut', value: 'info@titanorgroup.fi', href: 'mailto:info@titanorgroup.fi' },
       {
-        label: 'Projektit',
+        label: 'Projektit ja tarjoukset',
         value: 'projects@titanorgroup.fi',
         href: 'mailto:projects@titanorgroup.fi'
       },
@@ -319,147 +319,23 @@ export const dictionary: Record<Locale, Dictionary> = {
         href: 'mailto:office@titanorgroup.fi'
       },
       { label: 'Puhelin', value: '+358 46 943 1354', href: 'tel:+358469431354' },
-      { label: 'Sijainti', value: 'Suomi / Eurooppa', href: '#' }
+      { label: 'Sijainti', value: 'Suomi / EU', href: '#' }
     ],
     form: {
-      title: 'Laheta meille projektikysely',
-      subtitle: 'Kuvaile projekti, sijainti, aikataulu ja tarvittava palvelu.',
-      checklistTitle: 'Yhteydenotossa kerro mielellaan:',
+      title: 'Lähetä meille projektikysely',
+      subtitle: 'Kuvaile projektisi, sijainti, aikataulu ja tarvittava palvelu.',
+      checklistTitle: 'Yhteydenotossa kerro mielellään:',
       checklist: ['Projektin tyyppi', 'Sijainti', 'Tarvittava palvelu', 'Toivottu aikataulu'],
       name: 'Nimi',
       company: 'Yritys',
-      email: 'Sahkoposti',
+      email: 'Sähköposti',
       message: 'Viesti',
-      submit: 'Laheta projektikysely',
-      note: 'Projektipyynnoissa mainitse aluksen tyyppi, sijainti, tavoiteaikataulu ja tyon laajuus.'
+      submit: 'Lähetä projektikysely',
+      note: 'Projektipyynnöissä mainitse aluksen tyyppi, sijainti, tavoiteaikataulu ja työn laajuus.'
     },
     business: {
       company: 'Titanor Group Oy',
       country: 'Suomi',
-      id: 'Y-tunnus: 3541307-5'
-    }
-  },
-  ru: {
-    langLabel: 'Русский',
-    nav: {
-      home: 'Главная',
-      services: 'Услуги',
-      contact: 'Контакты',
-      cta: 'Связаться'
-    },
-    hero: {
-      eyebrow: 'Судостроение, металлоконструкции и морская инженерия',
-      description:
-        'Надежные решения для судостроения, ремонта судов, металлоконструкций и промышленных морских проектов.',
-      primary: 'Связаться',
-      secondary: 'Наши услуги',
-      badge: 'Финляндия / Европа',
-      statTopTitle: 'B2B',
-      statBottomTitle: 'Сталь. Сварка. Ремонт.',
-      statTop: 'фокус на морских и промышленных проектах',
-      statBottom: 'Структурированная реализация сложных задач верфи'
-    },
-    benefits: [
-      {
-        title: 'Опыт',
-        text: 'Многолетний опыт в судостроении и промышленном производстве.',
-        icon: '⚒'
-      },
-      {
-        title: 'Качество',
-        text: 'Высокие стандарты качества и точность на каждом этапе работ.',
-        icon: '◎'
-      },
-      {
-        title: 'Надежность',
-        text: 'Соблюдение сроков и индивидуальный подход к каждому проекту.',
-        icon: '⬡'
-      },
-      {
-        title: 'Безопасность',
-        text: 'Строгое соблюдение норм безопасности и международных стандартов.',
-        icon: '◌'
-      },
-      {
-        title: 'Международный подход',
-        text: 'Работаем с клиентами по всей Европе и за ее пределами.',
-        icon: '◍'
-      }
-    ],
-    servicesHeading: {
-      kicker: 'Решения для судостроения и морской индустрии',
-      title: 'Услуги'
-    },
-    servicesCta: {
-      text: 'Нужна поддержка по судостроительному проекту или металлоконструкциям?',
-      linkLabel: 'Свяжитесь: projects@titanorgroup.fi'
-    },
-    services: [
-      {
-        number: '01',
-          title: 'Судостроение',
-        text: 'Строительство, сборка и участие в судостроительных проектах.',
-        image: serviceImages[0]
-      },
-      {
-        number: '02',
-          title: 'Металлоконструкции',
-        text: 'Изготовление и монтаж металлических конструкций для морской и промышленной отрасли.',
-        image: serviceImages[1]
-      },
-      {
-        number: '03',
-          title: 'Сварка и сборка',
-        text: 'Сварочные, монтажные и подготовительные работы.',
-        image: serviceImages[2]
-      },
-      {
-        number: '04',
-          title: 'Ремонт судов',
-        text: 'Ремонт, обслуживание и восстановление судовых элементов.',
-        image: serviceImages[3]
-      },
-      {
-        number: '05',
-          title: 'Техническая поддержка',
-        text: 'Помощь в реализации проектов, документации и технической координации.',
-        image: serviceImages[4]
-      }
-    ],
-    contactHeading: {
-      kicker: 'TITANORGROUP',
-      title: 'Контакты'
-    },
-    contacts: [
-      { label: 'Эл. почта', value: 'info@titanorgroup.fi', href: 'mailto:info@titanorgroup.fi' },
-      {
-        label: 'Проекты',
-        value: 'projects@titanorgroup.fi',
-        href: 'mailto:projects@titanorgroup.fi'
-      },
-      {
-        label: 'Офис',
-        value: 'office@titanorgroup.fi',
-        href: 'mailto:office@titanorgroup.fi'
-      },
-      { label: 'Телефон', value: '+358 46 943 1354', href: 'tel:+358469431354' },
-      { label: 'Локация', value: 'Финляндия / Европа', href: '#' }
-    ],
-    form: {
-      title: 'Отправьте нам проектный запрос',
-      subtitle: 'Расскажите о проекте, локации, сроках и нужной услуге.',
-      checklistTitle: 'При обращении укажите:',
-      checklist: ['Тип проекта', 'Локация', 'Нужная услуга', 'Желаемые сроки'],
-      name: 'Имя',
-      company: 'Компания',
-      email: 'Email',
-      message: 'Сообщение',
-      submit: 'Отправить проектный запрос',
-      note: 'Для проектных запросов укажите тип судна, локацию, ожидаемые сроки и объем работ.'
-    },
-    business: {
-      company: 'Titanor Group Oy',
-      country: 'Финляндия',
       id: 'Y-tunnus: 3541307-5'
     }
   }
