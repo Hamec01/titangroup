@@ -44,6 +44,10 @@ type Dictionary = {
     kicker: string;
     title: string;
   };
+  servicesCta: {
+    text: string;
+    linkLabel: string;
+  };
   services: Array<{
     number: string;
     title: string;
@@ -60,11 +64,21 @@ type Dictionary = {
     href: string;
   }>;
   form: {
+    title: string;
+    subtitle: string;
+    checklistTitle: string;
+    checklist: string[];
     name: string;
     company: string;
     email: string;
     message: string;
     submit: string;
+    note: string;
+  };
+  business: {
+    company: string;
+    country: string;
+    id: string;
   };
 };
 
@@ -128,6 +142,10 @@ export const dictionary: Record<Locale, Dictionary> = {
       kicker: 'Shipbuilding & marine industry solutions',
       title: 'Services'
     },
+    servicesCta: {
+      text: 'Need support for a shipbuilding or steel structure project?',
+      linkLabel: 'Contact us at projects@titanorgroup.fi'
+    },
     services: [
       {
         number: '01',
@@ -176,15 +194,25 @@ export const dictionary: Record<Locale, Dictionary> = {
         value: 'office@titanorgroup.fi',
         href: 'mailto:office@titanorgroup.fi'
       },
-      { label: 'Phone', value: '+358469431354', href: 'tel:+358469431354' },
+      { label: 'Phone', value: '+358 46 943 1354', href: 'tel:+358469431354' },
       { label: 'Location', value: 'Finland / Europe', href: '#' }
     ],
     form: {
+      title: 'Send us a project inquiry',
+      subtitle: 'Tell us about your project, location, schedule and required service.',
+      checklistTitle: 'When contacting us, please include:',
+      checklist: ['Project type', 'Location', 'Required service', 'Preferred schedule'],
       name: 'Name',
       company: 'Company',
       email: 'Email',
       message: 'Message',
-      submit: 'Send message'
+      submit: 'Send project inquiry',
+      note: 'For project requests, please include vessel type, location, expected schedule and scope of work.'
+    },
+    business: {
+      company: 'Titanor Group Oy',
+      country: 'Finland',
+      id: 'Y-tunnus: 3541307-5'
     }
   },
   fi: {
@@ -238,6 +266,10 @@ export const dictionary: Record<Locale, Dictionary> = {
       kicker: 'Laivanrakennuksen ja meriteollisuuden ratkaisut',
       title: 'Palvelut'
     },
+    servicesCta: {
+      text: 'Tarvitsetko tukea laivanrakennus- tai terasrakenneprojektiin?',
+      linkLabel: 'Ota yhteytta: projects@titanorgroup.fi'
+    },
     services: [
       {
         number: '01',
@@ -286,15 +318,25 @@ export const dictionary: Record<Locale, Dictionary> = {
         value: 'office@titanorgroup.fi',
         href: 'mailto:office@titanorgroup.fi'
       },
-      { label: 'Puhelin', value: '+358469431354', href: 'tel:+358469431354' },
+      { label: 'Puhelin', value: '+358 46 943 1354', href: 'tel:+358469431354' },
       { label: 'Sijainti', value: 'Suomi / Eurooppa', href: '#' }
     ],
     form: {
+      title: 'Laheta meille projektikysely',
+      subtitle: 'Kuvaile projekti, sijainti, aikataulu ja tarvittava palvelu.',
+      checklistTitle: 'Yhteydenotossa kerro mielellaan:',
+      checklist: ['Projektin tyyppi', 'Sijainti', 'Tarvittava palvelu', 'Toivottu aikataulu'],
       name: 'Nimi',
       company: 'Yritys',
       email: 'Sahkoposti',
       message: 'Viesti',
-      submit: 'Laheta viesti'
+      submit: 'Laheta projektikysely',
+      note: 'Projektipyynnoissa mainitse aluksen tyyppi, sijainti, tavoiteaikataulu ja tyon laajuus.'
+    },
+    business: {
+      company: 'Titanor Group Oy',
+      country: 'Suomi',
+      id: 'Y-tunnus: 3541307-5'
     }
   },
   ru: {
@@ -348,6 +390,10 @@ export const dictionary: Record<Locale, Dictionary> = {
       kicker: 'Решения для судостроения и морской индустрии',
       title: 'Услуги'
     },
+    servicesCta: {
+      text: 'Нужна поддержка по судостроительному проекту или металлоконструкциям?',
+      linkLabel: 'Свяжитесь: projects@titanorgroup.fi'
+    },
     services: [
       {
         number: '01',
@@ -396,15 +442,25 @@ export const dictionary: Record<Locale, Dictionary> = {
         value: 'office@titanorgroup.fi',
         href: 'mailto:office@titanorgroup.fi'
       },
-      { label: 'Телефон', value: '+358469431354', href: 'tel:+358469431354' },
+      { label: 'Телефон', value: '+358 46 943 1354', href: 'tel:+358469431354' },
       { label: 'Локация', value: 'Финляндия / Европа', href: '#' }
     ],
     form: {
+      title: 'Отправьте нам проектный запрос',
+      subtitle: 'Расскажите о проекте, локации, сроках и нужной услуге.',
+      checklistTitle: 'При обращении укажите:',
+      checklist: ['Тип проекта', 'Локация', 'Нужная услуга', 'Желаемые сроки'],
       name: 'Имя',
       company: 'Компания',
       email: 'Email',
       message: 'Сообщение',
-      submit: 'Отправить сообщение'
+      submit: 'Отправить проектный запрос',
+      note: 'Для проектных запросов укажите тип судна, локацию, ожидаемые сроки и объем работ.'
+    },
+    business: {
+      company: 'Titanor Group Oy',
+      country: 'Финляндия',
+      id: 'Y-tunnus: 3541307-5'
     }
   }
 };

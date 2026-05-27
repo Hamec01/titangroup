@@ -44,6 +44,11 @@ export default async function ServicesPage({ params }: ServicesPageProps) {
               </article>
             ))}
           </div>
+
+          <p className="services-cta-text">
+            {content.servicesCta.text}{' '}
+            <a href="mailto:projects@titanorgroup.fi">{content.servicesCta.linkLabel}</a>
+          </p>
         </div>
       </section>
     </main>

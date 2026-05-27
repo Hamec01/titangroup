@@ -15,6 +15,7 @@ type SiteHeaderProps = {
 
 export function SiteHeader({ active, locale, labels }: SiteHeaderProps) {
   const pagePath = active === 'home' ? '' : `/${active}`;
+  const ctaHref = active === 'home' ? `/${locale}#contact` : `/${locale}/contact`;
 
   return (
     <header className="site-header">
@@ -56,7 +57,7 @@ export function SiteHeader({ active, locale, labels }: SiteHeaderProps) {
         ))}
       </div>
 
-      <Link className="header-cta" href={`/${locale}/contact`}>
+      <Link className="header-cta" href={ctaHref}>
         {labels.cta}
       </Link>
 
@@ -70,7 +71,7 @@ export function SiteHeader({ active, locale, labels }: SiteHeaderProps) {
           <Link href={`/${locale}`}>{labels.home}</Link>
           <Link href={`/${locale}/services`}>{labels.services}</Link>
           <Link href={`/${locale}/contact`}>{labels.contact}</Link>
-          <Link href={`/${locale}/contact`}>{labels.cta}</Link>
+          <Link href={ctaHref}>{labels.cta}</Link>
           <div className="mobile-lang">
             {locales.map((lang) => (
               <Link

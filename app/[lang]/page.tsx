@@ -30,7 +30,7 @@ export default async function HomePage({ params }: HomePageProps) {
             </h1>
             <p className="hero-text">{content.hero.description}</p>
             <div className="hero-actions">
-              <Link className="button-primary" href={`/${locale}/contact`}>
+              <Link className="button-primary" href={`/${locale}#contact`}>
                 {content.hero.primary}
               </Link>
               <Link className="button-secondary" href={`/${locale}/services`}>
@@ -93,6 +93,11 @@ export default async function HomePage({ params }: HomePageProps) {
               </article>
             ))}
           </div>
+
+          <p className="services-cta-text">
+            {content.servicesCta.text}{' '}
+            <a href="mailto:projects@titanorgroup.fi">{content.servicesCta.linkLabel}</a>
+          </p>
         </div>
       </section>
 
@@ -112,9 +117,29 @@ export default async function HomePage({ params }: HomePageProps) {
                 </a>
               ))}
             </div>
+
+            <div className="business-card">
+              <strong>{content.business.company}</strong>
+              <span>{content.business.country}</span>
+              <span>{content.business.id}</span>
+            </div>
           </div>
 
-          <div className="contact-form">
+          <form
+            className="contact-form"
+            action="mailto:projects@titanorgroup.fi"
+            method="post"
+            encType="text/plain"
+          >
+            <h3 className="form-title">{content.form.title}</h3>
+            <p className="form-subtitle">{content.form.subtitle}</p>
+            <p className="form-checklist-title">{content.form.checklistTitle}</p>
+            <ul className="form-checklist">
+              {content.form.checklist.map((item) => (
+                <li key={item}>{item}</li>
+              ))}
+            </ul>
+
             <label>
               <span>{content.form.name}</span>
               <input name="name" type="text" placeholder={content.form.name} />
@@ -131,10 +156,11 @@ export default async function HomePage({ params }: HomePageProps) {
               <span>{content.form.message}</span>
               <textarea name="message" placeholder={content.form.message} />
             </label>
-            <button className="button-primary form-button" type="button">
+            <button className="button-primary form-button" type="submit">
               {content.form.submit}
             </button>
-          </div>
+            <p className="form-note">{content.form.note}</p>
+          </form>
         </div>
       </section>
     </main>
