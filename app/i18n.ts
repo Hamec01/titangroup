@@ -165,7 +165,7 @@ export const dictionary: Record<Locale, Dictionary> = {
       title: 'Contact'
     },
     contacts: [
-      { label: 'Эл. почта', value: 'info@titanorgroup.fi', href: 'mailto:info@titanorgroup.fi' },
+      { label: 'Email', value: 'info@titanorgroup.fi', href: 'mailto:info@titanorgroup.fi' },
       {
         label: 'Projects',
         value: 'projects@titanorgroup.fi',
@@ -176,7 +176,7 @@ export const dictionary: Record<Locale, Dictionary> = {
         value: 'office@titanorgroup.fi',
         href: 'mailto:office@titanorgroup.fi'
       },
-      { label: 'Phone', value: '+358 XX XXX XXXX', href: 'tel:+358000000000' },
+      { label: 'Phone', value: '+358469431354', href: 'tel:+358469431354' },
       { label: 'Location', value: 'Finland / Europe', href: '#' }
     ],
     form: {
@@ -286,8 +286,8 @@ export const dictionary: Record<Locale, Dictionary> = {
         value: 'office@titanorgroup.fi',
         href: 'mailto:office@titanorgroup.fi'
       },
-      { label: 'Puhelin', value: '+358 XX XXX XXXX', href: 'tel:+358000000000' },
-        { label: 'Sijainti', value: 'Suomi / Eurooppa', href: '#' }
+      { label: 'Puhelin', value: '+358469431354', href: 'tel:+358469431354' },
+      { label: 'Sijainti', value: 'Suomi / Eurooppa', href: '#' }
     ],
     form: {
       name: 'Nimi',
@@ -385,7 +385,7 @@ export const dictionary: Record<Locale, Dictionary> = {
       title: 'Контакты'
     },
     contacts: [
-      { label: 'Email', value: 'info@titanorgroup.fi', href: 'mailto:info@titanorgroup.fi' },
+      { label: 'Эл. почта', value: 'info@titanorgroup.fi', href: 'mailto:info@titanorgroup.fi' },
       {
         label: 'Проекты',
         value: 'projects@titanorgroup.fi',
@@ -396,8 +396,8 @@ export const dictionary: Record<Locale, Dictionary> = {
         value: 'office@titanorgroup.fi',
         href: 'mailto:office@titanorgroup.fi'
       },
-      { label: 'Телефон', value: '+358 XX XXX XXXX', href: 'tel:+358000000000' },
-        { label: 'Локация', value: 'Финляндия / Европа', href: '#' }
+      { label: 'Телефон', value: '+358469431354', href: 'tel:+358469431354' },
+      { label: 'Локация', value: 'Финляндия / Европа', href: '#' }
     ],
     form: {
       name: 'Имя',
