@@ -2,6 +2,7 @@ import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import type { ServiceSection } from './service-sections';
 import type { Locale } from '../app/i18n';
+import { hasSupabaseConfig, supabaseRequest } from './supabase-rest';
 
 export type ServiceContentByLocale = Record<Locale, Record<ServiceSection, string>>;
 
@@ -56,6 +57,27 @@ function normalize(raw: unknown): ServiceContentByLocale {
 }
 
 export async function getServiceContent(): Promise<ServiceContentByLocale> {
+  if (hasSupabaseConfig()) {
+    const response = await supabaseRequest('/service_content?select=locale,section,content');
+
+    if (response.ok) {
+      const rows = (await response.json()) as Array<{
+        locale: Locale;
+        section: ServiceSection;
+        content: string;
+      }>;
+
+      const content = normalize(null);
+      for (const row of rows) {
+        if (row.locale in content && row.section in content[row.locale]) {
+          content[row.locale][row.section] = row.content;
+        }
+      }
+
+      return content;
+    }
+  }
+
   try {
     const raw = await readFile(dataFilePath, 'utf8');
     return normalize(JSON.parse(raw));
@@ -65,6 +87,31 @@ export async function getServiceContent(): Promise<ServiceContentByLocale> {
 }
 
 export async function saveServiceContent(content: ServiceContentByLocale): Promise<void> {
+  if (hasSupabaseConfig()) {
+    const rows = (['en', 'fi'] as const).flatMap((locale) =>
+      (Object.keys(defaultServiceContent.en) as ServiceSection[]).map((section) => ({
+        locale,
+        section,
+        content: content[locale][section]
+      }))
+    );
+
+    const response = await supabaseRequest('/service_content?on_conflict=locale,section', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Prefer: 'resolution=merge-duplicates,return=minimal'
+      },
+      body: JSON.stringify(rows)
+    });
+
+    if (!response.ok) {
+      throw new Error(`Supabase content save failed with status ${response.status}`);
+    }
+
+    return;
+  }
+
   await mkdir(dirname(dataFilePath), { recursive: true });
   await writeFile(dataFilePath, `${JSON.stringify(content, null, 2)}\n`, 'utf8');
 }

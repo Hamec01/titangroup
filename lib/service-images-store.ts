@@ -1,6 +1,7 @@
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { serviceSections, type ServiceSection } from './service-sections';
+import { hasSupabaseConfig, supabaseRequest } from './supabase-rest';
 
 export type StoredServiceImage = {
   url: string;
@@ -105,6 +106,41 @@ function normalizeStoredImages(raw: unknown): StoredServiceImages {
 }
 
 export async function getStoredServiceImages(): Promise<StoredServiceImages> {
+  if (hasSupabaseConfig()) {
+    const response = await supabaseRequest('/service_images?select=section,url,public_id,sort_order');
+
+    if (response.ok) {
+      const rows = (await response.json()) as Array<{
+        section: ServiceSection;
+        url: string;
+        public_id: string | null;
+        sort_order: number;
+      }>;
+
+      const normalized: StoredServiceImages = {
+        shipbuilding: [],
+        steelStructures: [],
+        welding: [],
+        repair: [],
+        interior: []
+      };
+
+      for (const row of rows.sort((left, right) => left.sort_order - right.sort_order)) {
+        if (row.section in normalized) {
+          normalized[row.section].push({ url: row.url, publicId: row.public_id });
+        }
+      }
+
+      for (const section of serviceSections) {
+        if (normalized[section].length === 0) {
+          normalized[section] = [...defaultStoredServiceImages[section]];
+        }
+      }
+
+      return normalized;
+    }
+  }
+
   try {
     const raw = await readFile(dataFilePath, 'utf8');
     return normalizeStoredImages(JSON.parse(raw));
@@ -114,6 +150,42 @@ export async function getStoredServiceImages(): Promise<StoredServiceImages> {
 }
 
 export async function saveStoredServiceImages(images: StoredServiceImages): Promise<void> {
+  if (hasSupabaseConfig()) {
+    const deleteResponse = await supabaseRequest('/service_images?section=in.(shipbuilding,steelStructures,welding,repair,interior)', {
+      method: 'DELETE'
+    });
+
+    if (!deleteResponse.ok) {
+      throw new Error(`Supabase image reset failed with status ${deleteResponse.status}`);
+    }
+
+    const rows = serviceSections.flatMap((section) =>
+      images[section].map((image, index) => ({
+        section,
+        url: image.url,
+        public_id: image.publicId,
+        sort_order: index
+      }))
+    );
+
+    if (rows.length > 0) {
+      const insertResponse = await supabaseRequest('/service_images', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Prefer: 'return=minimal'
+        },
+        body: JSON.stringify(rows)
+      });
+
+      if (!insertResponse.ok) {
+        throw new Error(`Supabase image save failed with status ${insertResponse.status}`);
+      }
+    }
+
+    return;
+  }
+
   await mkdir(dirname(dataFilePath), { recursive: true });
   await writeFile(dataFilePath, `${JSON.stringify(images, null, 2)}\n`, 'utf8');
 }
