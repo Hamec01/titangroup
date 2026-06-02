@@ -731,6 +731,109 @@ button {
   font-size: 0.94rem;
 }
 
+.career-layout {
+  display: grid;
+  grid-template-columns: 1.15fr 0.85fr;
+  gap: 28px;
+}
+
+.career-panel,
+.career-form {
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: linear-gradient(180deg, rgba(14, 20, 30, 0.92), rgba(8, 12, 18, 0.92));
+  padding: 28px;
+}
+
+.career-panel {
+  display: grid;
+  gap: 14px;
+}
+
+.career-intro,
+.career-mail-line,
+.career-vacancies p {
+  margin: 0;
+  color: var(--text-soft);
+  line-height: 1.75;
+}
+
+.career-mail-line a {
+  color: var(--accent-light);
+}
+
+.career-vacancies {
+  display: grid;
+  gap: 12px;
+}
+
+.career-vacancies h3,
+.career-form h3,
+.career-vacancy-card h4 {
+  margin: 0;
+}
+
+.career-vacancy-grid {
+  display: grid;
+  gap: 12px;
+}
+
+.career-vacancy-card {
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(7, 11, 17, 0.74);
+  padding: 14px 16px;
+  display: grid;
+  gap: 10px;
+}
+
+.career-vacancy-card p {
+  margin: 0;
+}
+
+.career-vacancy-card ul {
+  margin: 0;
+  padding-left: 18px;
+  display: grid;
+  gap: 4px;
+  color: var(--text-soft);
+  font-size: 0.92rem;
+}
+
+.career-form {
+  display: grid;
+  gap: 12px;
+}
+
+.career-form label {
+  display: grid;
+  gap: 6px;
+}
+
+.career-form label span {
+  color: var(--accent-light);
+  font-size: 0.78rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.career-form input,
+.career-form textarea {
+  width: 100%;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  background: rgba(7, 11, 17, 0.88);
+  color: var(--text);
+  padding: 0 14px;
+}
+
+.career-form input {
+  height: 52px;
+}
+
+.career-form textarea {
+  min-height: 120px;
+  padding-top: 12px;
+  resize: vertical;
+}
+
 .admin-shell {
   min-height: calc(100vh - 24px);
 }
@@ -787,6 +890,21 @@ button {
   padding: 0 14px;
 }
 
+.admin-panel label input,
+.admin-panel label textarea {
+  width: 100%;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  background: rgba(7, 11, 17, 0.88);
+  color: var(--text);
+  padding: 0 14px;
+}
+
+.admin-panel label textarea {
+  min-height: 120px;
+  padding-top: 10px;
+  resize: vertical;
+}
+
 .admin-panel {
   display: grid;
   gap: 22px;
@@ -821,6 +939,46 @@ button {
   align-items: center;
   gap: 10px;
   flex-wrap: wrap;
+}
+
+.admin-upload-button {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 48px;
+  padding: 0 18px;
+  border: 1px solid rgba(76, 123, 192, 0.45);
+  background: linear-gradient(135deg, rgba(82, 130, 168, 0.92), rgba(123, 153, 170, 0.88));
+  color: var(--white);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-size: 0.82rem;
+  font-weight: 700;
+  cursor: pointer;
+  box-shadow: 0 12px 24px rgba(47, 94, 157, 0.22);
+  transition:
+    transform 180ms ease,
+    box-shadow 180ms ease,
+    border-color 180ms ease;
+}
+
+.admin-upload-button:hover {
+  transform: translateY(-1px);
+  border-color: rgba(123, 153, 170, 0.8);
+  box-shadow: 0 16px 30px rgba(47, 94, 157, 0.28);
+}
+
+.admin-upload-button input {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  cursor: pointer;
+}
+
+.admin-upload-filename {
+  color: var(--text-soft);
+  font-size: 0.9rem;
 }
 
 .admin-description-grid {
@@ -870,10 +1028,82 @@ button {
   gap: 10px;
 }
 
+.admin-image-card.is-pending-delete {
+  border-color: rgba(239, 68, 68, 0.35);
+  background: rgba(127, 29, 29, 0.12);
+}
+
 .admin-image-card img {
   width: 100%;
   aspect-ratio: 16 / 9;
   object-fit: cover;
+}
+
+.admin-delete-button {
+  justify-self: start;
+}
+
+.admin-pending-delete-note {
+  color: #fca5a5;
+  font-size: 0.82rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.admin-vacancy-form-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(240px, 1fr));
+  gap: 12px;
+}
+
+.admin-vacancy-form-grid label {
+  display: grid;
+  gap: 6px;
+}
+
+.admin-vacancy-form-grid label span {
+  color: var(--accent-light);
+  font-size: 0.78rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.admin-vacancy-form-grid input {
+  height: 52px;
+}
+
+.admin-vacancy-description-field {
+  grid-column: 1 / -1;
+}
+
+.admin-vacancy-list {
+  display: grid;
+  gap: 10px;
+}
+
+.admin-vacancy-card {
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(7, 11, 17, 0.68);
+  padding: 12px 14px;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.admin-vacancy-card h3,
+.admin-vacancy-card p {
+  margin: 0;
+}
+
+.admin-vacancy-card h3 {
+  margin-bottom: 6px;
+}
+
+.admin-vacancy-meta {
+  margin-top: 8px !important;
+  font-size: 0.9rem;
+  color: var(--text-soft);
 }
 
 @keyframes fade-up {
@@ -896,7 +1126,8 @@ button {
 
 @media (max-width: 1200px) {
   .hero-grid,
-  .contact-layout {
+  .contact-layout,
+  .career-layout {
     grid-template-columns: 1fr;
   }
 
@@ -1001,6 +1232,15 @@ button {
 
   .admin-description-grid {
     grid-template-columns: 1fr;
+  }
+
+  .admin-vacancy-form-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .admin-vacancy-card {
+    flex-direction: column;
+    align-items: stretch;
   }
 
   .contact-panel,

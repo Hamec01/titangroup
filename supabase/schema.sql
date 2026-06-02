@@ -14,5 +14,43 @@ create table if not exists public.service_images (
   created_at timestamptz not null default now()
 );
 
+create table if not exists public.job_vacancies (
+  id text primary key,
+  role text not null,
+  location text not null,
+  duration text not null,
+  description text not null,
+  posted_at date not null,
+  created_at timestamptz not null default now()
+);
+
 create index if not exists service_images_section_sort_order_idx
   on public.service_images (section, sort_order, created_at);
+
+create index if not exists job_vacancies_posted_at_idx
+  on public.job_vacancies (posted_at desc, created_at desc);
+
+alter table public.service_content enable row level security;
+alter table public.service_images enable row level security;
+alter table public.job_vacancies enable row level security;
+
+drop policy if exists service_content_deny_all on public.service_content;
+create policy service_content_deny_all
+  on public.service_content
+  for all
+  using (false)
+  with check (false);
+
+drop policy if exists service_images_deny_all on public.service_images;
+create policy service_images_deny_all
+  on public.service_images
+  for all
+  using (false)
+  with check (false);
+
+drop policy if exists job_vacancies_deny_all on public.job_vacancies;
+create policy job_vacancies_deny_all
+  on public.job_vacancies
+  for all
+  using (false)
+  with check (false);

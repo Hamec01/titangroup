@@ -1,6 +1,6 @@
 # titangroup
 
-## Admin image portal
+## Admin portal
 
 - Hidden URL: `/ship-admin-portal`
 - Not linked in navigation or sitemap
@@ -19,10 +19,16 @@
 - Upload service images to Cloudinary
 - Remove images from service sections
 - Edit service descriptions in EN and FI
+- Add and remove open vacancies (role, location, duration, description, posted date)
 - Changes are reflected on public service cards without redeploy
+
+## Career section
+
+- Public `Career` section is available on the main page after `Contact`
+- Includes application form and live `Open vacancies` list from `/api/vacancies`
 
 ### Production storage
 
 - Cloudinary stores the files
-- Supabase stores the editable service descriptions and image lists
+- Supabase stores editable service descriptions, image lists, and vacancies
 - If Supabase env vars are not set, the app falls back to local JSON files for development only

@@ -9,6 +9,7 @@ type SiteHeaderProps = {
     home: string;
     services: string;
     contact: string;
+    career: string;
     cta: string;
   };
 };
@@ -43,6 +44,7 @@ export function SiteHeader({ active, locale, labels }: SiteHeaderProps) {
         <Link className={active === 'contact' ? 'is-active' : undefined} href={`/${locale}/contact`}>
           {labels.contact}
         </Link>
+        <Link href={`/${locale}#career`}>{labels.career}</Link>
       </nav>
 
       <div className="header-lang" aria-label="Language switcher">
@@ -71,6 +73,7 @@ export function SiteHeader({ active, locale, labels }: SiteHeaderProps) {
           <Link href={`/${locale}`}>{labels.home}</Link>
           <Link href={`/${locale}/services`}>{labels.services}</Link>
           <Link href={`/${locale}/contact`}>{labels.contact}</Link>
+          <Link href={`/${locale}#career`}>{labels.career}</Link>
           <Link href={ctaHref}>{labels.cta}</Link>
           <div className="mobile-lang">
             {locales.map((lang) => (

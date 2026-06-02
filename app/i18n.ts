@@ -25,6 +25,7 @@ type Dictionary = {
     home: string;
     services: string;
     contact: string;
+    career: string;
     cta: string;
   };
   hero: {
@@ -93,6 +94,7 @@ export const dictionary: Record<Locale, Dictionary> = {
       home: 'Home',
       services: 'Services',
       contact: 'Contact',
+      career: 'Career',
       cta: 'Contact us'
     },
     hero: {
@@ -222,6 +224,7 @@ export const dictionary: Record<Locale, Dictionary> = {
       home: 'Etusivu',
       services: 'Palvelut',
       contact: 'Yhteystiedot',
+      career: 'Ura',
       cta: 'Ota yhteyttä'
     },
     hero: {
