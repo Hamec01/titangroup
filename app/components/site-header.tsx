@@ -3,7 +3,7 @@ import Link from 'next/link';
 import { Locale, locales } from '../i18n';
 
 type SiteHeaderProps = {
-  active: 'home' | 'services' | 'contact';
+  active: 'home' | 'services' | 'contact' | 'career';
   locale: Locale;
   labels: {
     home: string;
@@ -44,7 +44,9 @@ export function SiteHeader({ active, locale, labels }: SiteHeaderProps) {
         <Link className={active === 'contact' ? 'is-active' : undefined} href={`/${locale}/contact`}>
           {labels.contact}
         </Link>
-        <Link href={`/${locale}#career`}>{labels.career}</Link>
+        <Link className={active === 'career' ? 'is-active' : undefined} href={`/${locale}/career`}>
+          {labels.career}
+        </Link>
       </nav>
 
       <div className="header-lang" aria-label="Language switcher">
@@ -73,7 +75,7 @@ export function SiteHeader({ active, locale, labels }: SiteHeaderProps) {
           <Link href={`/${locale}`}>{labels.home}</Link>
           <Link href={`/${locale}/services`}>{labels.services}</Link>
           <Link href={`/${locale}/contact`}>{labels.contact}</Link>
-          <Link href={`/${locale}#career`}>{labels.career}</Link>
+          <Link href={`/${locale}/career`}>{labels.career}</Link>
           <Link href={ctaHref}>{labels.cta}</Link>
           <div className="mobile-lang">
             {locales.map((lang) => (

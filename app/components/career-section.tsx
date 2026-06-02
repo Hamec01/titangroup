@@ -6,6 +6,7 @@ import type { Vacancy } from '../../lib/vacancy-types';
 
 type CareerSectionProps = {
   locale: Locale;
+  standalone?: boolean;
 };
 
 const contentByLocale: Record<Locale, {
@@ -63,7 +64,7 @@ const contentByLocale: Record<Locale, {
   }
 };
 
-export function CareerSection({ locale }: CareerSectionProps) {
+export function CareerSection({ locale, standalone = false }: CareerSectionProps) {
   const [vacancies, setVacancies] = useState<Vacancy[]>([]);
   const [loaded, setLoaded] = useState(false);
 
@@ -102,8 +103,10 @@ export function CareerSection({ locale }: CareerSectionProps) {
     };
   }, []);
 
+  const sectionClassName = standalone ? 'career-standalone' : 'content-section';
+
   return (
-    <section className="content-section" id="career">
+    <section className={sectionClassName} id="career">
       <div className="section-inner career-layout">
         <div className="career-panel">
           <div className="section-heading left">

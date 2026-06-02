@@ -1,7 +1,6 @@
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { SiteHeader } from '../components/site-header';
-import { CareerSection } from '../components/career-section';
 import { ServicesGrid } from '../components/services-grid';
 import { assertLocale, dictionary, isLocale } from '../i18n';
 
@@ -150,7 +149,6 @@ export default async function HomePage({ params }: HomePageProps) {
         </div>
       </section>
 
-      <CareerSection locale={locale} />
     </main>
   );
 }

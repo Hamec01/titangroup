@@ -737,6 +737,10 @@ button {
   gap: 28px;
 }
 
+.career-standalone {
+  padding: 34px 0 120px;
+}
+
 .career-panel,
 .career-form {
   border: 1px solid rgba(255, 255, 255, 0.1);
