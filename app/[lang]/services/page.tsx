@@ -1,4 +1,5 @@
 import { SiteHeader } from '../../components/site-header';
+import { ServicesGrid } from '../../components/services-grid';
 import { notFound } from 'next/navigation';
 import { assertLocale, dictionary, isLocale } from '../../i18n';
 
@@ -27,23 +28,7 @@ export default async function ServicesPage({ params }: ServicesPageProps) {
             <h1 className="static-page-title">{content.servicesHeading.title}</h1>
           </div>
 
-          <div className="services-grid">
-            {content.services.map((service) => (
-              <article className="service-card" key={service.title}>
-                <div
-                  className="service-image"
-                  style={{
-                    backgroundImage: `linear-gradient(180deg, rgba(5, 7, 11, 0.06), rgba(5, 7, 11, 0.5)), url(${service.image})`
-                  }}
-                />
-                <div className="service-content">
-                  <span className="service-number">{service.number}</span>
-                  <h2>{service.title}</h2>
-                  <p>{service.text}</p>
-                </div>
-              </article>
-            ))}
-          </div>
+          <ServicesGrid services={content.services} locale={locale} titleTag="h2" />
 
           <p className="services-cta-text">
             {content.servicesCta.text}{' '}

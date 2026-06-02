@@ -1,6 +1,7 @@
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { SiteHeader } from '../components/site-header';
+import { ServicesGrid } from '../components/services-grid';
 import { assertLocale, dictionary, isLocale } from '../i18n';
 
 type HomePageProps = {
@@ -76,23 +77,7 @@ export default async function HomePage({ params }: HomePageProps) {
             <h2>{content.servicesHeading.title}</h2>
           </div>
 
-          <div className="services-grid">
-            {content.services.map((service) => (
-              <article className="service-card" key={service.title}>
-                <div
-                  className="service-image"
-                  style={{
-                    backgroundImage: `linear-gradient(180deg, rgba(5, 7, 11, 0.06), rgba(5, 7, 11, 0.5)), url(${service.image})`
-                  }}
-                />
-                <div className="service-content">
-                  <span className="service-number">{service.number}</span>
-                  <h3>{service.title}</h3>
-                  <p>{service.text}</p>
-                </div>
-              </article>
-            ))}
-          </div>
+          <ServicesGrid services={content.services} locale={locale} />
 
           <p className="services-cta-text">
             {content.servicesCta.text}{' '}

@@ -1,0 +1,16 @@
+{
+  "en": {
+    "shipbuilding": "Construction, assembly and participation in shipbuilding projects.",
+    "steelStructures": "Manufacturing and installation of metal structures for marine and industrial sectors.",
+    "welding": "Welding, assembly and preparatory works.",
+    "repair": "Repair, maintenance and restoration of vessel elements.",
+    "interior": "Marine interiors for cabins, public and crew areas: furniture installation, restaurant and bar refurbishment or new construction, ADA modifications, and floor finishing such as parquet, stone, tile, marble, vinyl and granite."
+  },
+  "fi": {
+    "shipbuilding": "Rakentaminen, kokoonpano ja osallistuminen laivanrakennusprojekteihin.",
+    "steelStructures": "Metallirakenteiden valmistus ja asennus meri- ja teollisuusalalle.",
+    "welding": "Hitsaus-, asennus- ja esivalmistelutyöt.",
+    "repair": "Aluksen osien korjaus, huolto ja kunnostus.",
+    "interior": "Laivojen sisätilojen kokonaistoteutukset hytteihin, yleisiin tiloihin ja miehistötiloihin: kalusteasennukset, ravintoloiden ja baarien saneeraus tai uudisrakentaminen, esteettömyysmuutokset sekä lattiafinissit kuten parketti, kivi, laatta, marmori, vinyyli ja graniitti."
+  }
+}

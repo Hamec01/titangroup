@@ -1,3 +1,6 @@
+import type { ServiceSection } from '../lib/service-sections';
+import { defaultServiceImageUrls } from '../lib/service-images-store';
+
 export const locales = ['fi', 'en'] as const;
 
 export type Locale = (typeof locales)[number];
@@ -49,10 +52,11 @@ type Dictionary = {
     linkLabel: string;
   };
   services: Array<{
+    key: ServiceSection;
     number: string;
     title: string;
     text: string;
-    image: string;
+    images: string[];
   }>;
   contactHeading: {
     kicker: string;
@@ -81,14 +85,6 @@ type Dictionary = {
     id: string;
   };
 };
-
-const serviceImages = [
-  '/assets/industry/service-shipbuilding.jpg',
-  'https://images.unsplash.com/photo-1504307651254-35680f356dfd?auto=format&fit=crop&w=900&q=80',
-  '/assets/industry/service-welding.jpg',
-  '/assets/industry/service-repair.jpg',
-  'https://images.unsplash.com/photo-1517048676732-d65bc937f952?auto=format&fit=crop&w=900&q=80'
-];
 
 export const dictionary: Record<Locale, Dictionary> = {
   en: {
@@ -148,34 +144,39 @@ export const dictionary: Record<Locale, Dictionary> = {
     },
     services: [
       {
+        key: 'shipbuilding',
         number: '01',
         title: 'Shipbuilding',
         text: 'Construction, assembly and participation in shipbuilding projects.',
-        image: serviceImages[0]
+        images: defaultServiceImageUrls.shipbuilding
       },
       {
+        key: 'steelStructures',
         number: '02',
         title: 'Steel Structures',
         text: 'Manufacturing and installation of metal structures for marine and industrial sectors.',
-        image: serviceImages[1]
+        images: defaultServiceImageUrls.steelStructures
       },
       {
+        key: 'welding',
         number: '03',
         title: 'Welding & Assembly',
         text: 'Welding, assembly and preparatory works.',
-        image: serviceImages[2]
+        images: defaultServiceImageUrls.welding
       },
       {
+        key: 'repair',
         number: '04',
         title: 'Ship Repair',
         text: 'Repair, maintenance and restoration of vessel elements.',
-        image: serviceImages[3]
+        images: defaultServiceImageUrls.repair
       },
       {
+        key: 'interior',
         number: '05',
-        title: 'Technical Support',
-        text: 'Support in project delivery, documentation and technical coordination.',
-        image: serviceImages[4]
+        title: 'Interior',
+        text: 'Marine interiors for cabins, public and crew areas: furniture installation, restaurant and bar refurbishment or new construction, ADA modifications, and floor finishing such as parquet, stone, tile, marble, vinyl and granite.',
+        images: defaultServiceImageUrls.interior
       }
     ],
     contactHeading: {
@@ -272,34 +273,39 @@ export const dictionary: Record<Locale, Dictionary> = {
     },
     services: [
       {
+        key: 'shipbuilding',
         number: '01',
         title: 'Laivanrakennus',
         text: 'Rakentaminen, kokoonpano ja osallistuminen laivanrakennusprojekteihin.',
-        image: serviceImages[0]
+        images: defaultServiceImageUrls.shipbuilding
       },
       {
+        key: 'steelStructures',
         number: '02',
         title: 'Teräsrakenteet',
         text: 'Metallirakenteiden valmistus ja asennus meri- ja teollisuusalalle.',
-        image: serviceImages[1]
+        images: defaultServiceImageUrls.steelStructures
       },
       {
+        key: 'welding',
         number: '03',
         title: 'Hitsaus ja kokoonpano',
         text: 'Hitsaus-, asennus- ja esivalmistelutyöt.',
-        image: serviceImages[2]
+        images: defaultServiceImageUrls.welding
       },
       {
+        key: 'repair',
         number: '04',
         title: 'Aluskorjaus',
         text: 'Aluksen osien korjaus, huolto ja kunnostus.',
-        image: serviceImages[3]
+        images: defaultServiceImageUrls.repair
       },
       {
+        key: 'interior',
         number: '05',
-        title: 'Tekninen tuki',
-        text: 'Tukea projektien toteutukseen, dokumentointiin ja tekniseen koordinointiin.',
-        image: serviceImages[4]
+        title: 'Sisätilat',
+        text: 'Laivojen sisätilojen kokonaistoteutukset hytteihin, yleisiin tiloihin ja miehistötiloihin: kalusteasennukset, ravintoloiden ja baarien saneeraus tai uudisrakentaminen, esteettömyysmuutokset sekä lattiafinissit kuten parketti, kivi, laatta, marmori, vinyyli ja graniitti.',
+        images: defaultServiceImageUrls.interior
       }
     ],
     contactHeading: {
