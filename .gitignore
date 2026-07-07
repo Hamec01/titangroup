@@ -9,3 +9,7 @@ pnpm-debug.log*
 .env.local
 
 *.tsbuildinfo
+
+.env
+.env.*
+!.env.example
