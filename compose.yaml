@@ -8,6 +8,9 @@ services:
     restart: unless-stopped
     init: true
 
+    env_file:
+      - .env.production
+
     environment:
       NODE_ENV: production
       NEXT_TELEMETRY_DISABLED: "1"
