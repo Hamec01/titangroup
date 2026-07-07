@@ -1,7 +1,8 @@
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
-import { dirname, join } from 'node:path';
+import { readFile } from 'node:fs/promises';
+import { join } from 'node:path';
 import { serviceSections, type ServiceSection } from './service-sections';
 import { hasSupabaseConfig, supabaseRequest } from './supabase-rest';
+import { writeJsonFileAtomic } from './json-file-store';
 
 export type StoredServiceImage = {
   url: string;
@@ -186,8 +187,7 @@ export async function saveStoredServiceImages(images: StoredServiceImages): Prom
     return;
   }
 
-  await mkdir(dirname(dataFilePath), { recursive: true });
-  await writeFile(dataFilePath, `${JSON.stringify(images, null, 2)}\n`, 'utf8');
+  await writeJsonFileAtomic(dataFilePath, images);
 }
 
 export async function getServiceImageUrls(): Promise<Record<ServiceSection, string[]>> {

@@ -1,8 +1,9 @@
 import { randomUUID } from 'node:crypto';
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
-import { dirname, join } from 'node:path';
+import { readFile } from 'node:fs/promises';
+import { join } from 'node:path';
 import type { CreateVacancyInput, Vacancy } from './vacancy-types';
 import { hasSupabaseConfig, supabaseRequest } from './supabase-rest';
+import { writeJsonFileAtomic } from './json-file-store';
 
 const dataFilePath = join(process.cwd(), 'data', 'vacancies.json');
 
@@ -133,8 +134,7 @@ async function saveVacancies(vacancies: Vacancy[]): Promise<void> {
     return;
   }
 
-  await mkdir(dirname(dataFilePath), { recursive: true });
-  await writeFile(dataFilePath, `${JSON.stringify(vacancies, null, 2)}\n`, 'utf8');
+  await writeJsonFileAtomic(dataFilePath, vacancies);
 }
 
 export async function addVacancy(input: CreateVacancyInput): Promise<Vacancy[]> {

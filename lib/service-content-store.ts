@@ -1,8 +1,9 @@
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
-import { dirname, join } from 'node:path';
+import { readFile } from 'node:fs/promises';
+import { join } from 'node:path';
 import type { ServiceSection } from './service-sections';
 import type { Locale } from '../app/i18n';
 import { hasSupabaseConfig, supabaseRequest } from './supabase-rest';
+import { writeJsonFileAtomic } from './json-file-store';
 
 export type ServiceContentByLocale = Record<Locale, Record<ServiceSection, string>>;
 
@@ -112,6 +113,5 @@ export async function saveServiceContent(content: ServiceContentByLocale): Promi
     return;
   }
 
-  await mkdir(dirname(dataFilePath), { recursive: true });
-  await writeFile(dataFilePath, `${JSON.stringify(content, null, 2)}\n`, 'utf8');
+  await writeJsonFileAtomic(dataFilePath, content);
 }
