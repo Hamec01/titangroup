@@ -1,6 +1,7 @@
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { SiteHeader } from '../components/site-header';
+import { ContactForm } from '../components/contact-form';
 import { ServicesGrid } from '../components/services-grid';
 import { assertLocale, dictionary, isLocale } from '../i18n';
 
@@ -110,42 +111,7 @@ export default async function HomePage({ params }: HomePageProps) {
             </div>
           </div>
 
-          <form
-            className="contact-form"
-            action="mailto:projects@titanorgroup.fi"
-            method="post"
-            encType="text/plain"
-          >
-            <h3 className="form-title">{content.form.title}</h3>
-            <p className="form-subtitle">{content.form.subtitle}</p>
-            <p className="form-checklist-title">{content.form.checklistTitle}</p>
-            <ul className="form-checklist">
-              {content.form.checklist.map((item) => (
-                <li key={item}>{item}</li>
-              ))}
-            </ul>
-
-            <label>
-              <span>{content.form.name}</span>
-              <input name="name" type="text" placeholder={content.form.name} />
-            </label>
-            <label>
-              <span>{content.form.company}</span>
-              <input name="company" type="text" placeholder={content.form.company} />
-            </label>
-            <label>
-              <span>{content.form.email}</span>
-              <input name="email" type="email" placeholder={content.form.email} />
-            </label>
-            <label>
-              <span>{content.form.message}</span>
-              <textarea name="message" placeholder={content.form.message} />
-            </label>
-            <button className="button-primary form-button" type="submit">
-              {content.form.submit}
-            </button>
-            <p className="form-note">{content.form.note}</p>
-          </form>
+          <ContactForm form={content.form} locale={locale} titleLevel="h3" />
         </div>
       </section>
 

@@ -9,11 +9,13 @@
   },
   "dependencies": {
     "next": "^16.2.6",
+    "nodemailer": "^9.0.3",
     "react": "^19.2.0",
     "react-dom": "^19.2.0"
   },
   "devDependencies": {
     "@types/node": "22.15.30",
+    "@types/nodemailer": "^8.0.1",
     "@types/react": "^19.2.4",
     "@types/react-dom": "^19.2.3",
     "typescript": "5.8.3"
