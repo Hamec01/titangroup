@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { isAdminRequestAuthenticated } from '../../../../lib/admin-auth';
-import { deleteImageFromCloudinary, uploadImageToCloudinary } from '../../../../lib/cloudinary';
+import { deleteLocalServiceImage, saveLocalServiceImage } from '../../../../lib/local-image-storage';
 import {
   addServiceImage,
   getStoredServiceImages,
@@ -42,7 +42,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'File is required' }, { status: 400 });
     }
 
-    const uploaded = await uploadImageToCloudinary(fileRaw);
+    const uploaded = await saveLocalServiceImage(sectionRaw, fileRaw);
     const images = await addServiceImage(sectionRaw, {
       url: uploaded.url,
       publicId: uploaded.publicId
@@ -85,7 +85,7 @@ export async function DELETE(request: NextRequest) {
     }
 
     if (publicId) {
-      await deleteImageFromCloudinary(publicId);
+      await deleteLocalServiceImage(publicId);
     }
 
     const images = await removeServiceImage(body.section, { publicId, url });

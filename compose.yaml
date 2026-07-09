@@ -16,12 +16,15 @@ services:
       NEXT_TELEMETRY_DISABLED: "1"
       PORT: "3000"
       HOSTNAME: "0.0.0.0"
+      UPLOAD_DIR: /app/public/uploads
+      IMAGE_UPLOAD_MAX_BYTES: "8388608"
 
     ports:
       - "127.0.0.1:3100:3000"
 
     volumes:
       - titanorgroup_data:/app/data
+      - titanorgroup_uploads:/app/public/uploads
 
     healthcheck:
       test:
@@ -36,3 +39,4 @@ services:
 
 volumes:
   titanorgroup_data:
+  titanorgroup_uploads:
