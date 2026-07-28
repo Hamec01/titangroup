@@ -1,10 +1,11 @@
 # Titanor Time — Implementation Status
 
-Обновлено: 2026-07-28 16:44 Europe/Helsinki
+Обновлено: 2026-07-28 17:36 Europe/Helsinki
 Ветка: feature/titanor-time-foundation
 Isolated PostgreSQL config commit: `c28af00521ffef322211e2cfae840a5568dc8c03`
 Next.js app scaffold commit: `e15b203fe334fa4e2c68335f1169f78ed9c18ec9`
 Real (persistent, non-disposable) `db` service started + migration applied: см. §5, HEAD `e15b203`
+ORM integration + first `app` launch (Prisma Client, `/api/ready`): см. §5, этот commit
 Runtime-tested HEAD (полная повторная verification, full green): `991b8fb8381bff11accd09e2c1c3a3f7748d0832`
 Source fix commit (CK-08/CK-13 rename): `991b8fb8381bff11accd09e2c1c3a3f7748d0832`
 HEAD на момент первого runtime-теста, обнаружившего дефект: bebd6aab5f7a041e6272f24fe32db105ca04f92b
@@ -55,12 +56,20 @@ production deployment.
 network). Каркас типизируется и собирается без ошибок, но `app` ни разу не запускался — нет login,
 нет данных, нет реальных страниц/API кроме `/api/health`.
 
-После checkpoint владельца (см. §11 предыдущей версии) сервис `db` был реально запущен и existing
-migration реально применена к этой (теперь постоянной, не одноразовой) базе — см. §5. Это по-прежнему
-не production: `titanor-time-db-1` изолирован (отдельные network/volume, без published port, без
-CollabStudio), не обслуживает `app.titanorgroup.fi`, не содержит seed-данных, и `app` к нему пока не
-подключён (Prisma Client в `titanor-time-app` ещё не подключён — вне scope этой задачи).
-Production-код (seed, аутентификация, реальный API, UI) по-прежнему не начат.
+После checkpoint владельца сервис `db` был реально запущен и existing migration реально применена к
+этой (теперь постоянной, не одноразовой) базе — см. §5. Это по-прежнему не production:
+`titanor-time-db-1` изолирован (отдельные network/volume, без published port, без CollabStudio), не
+обслуживает `app.titanorgroup.fi`, не содержит seed-данных.
+
+После отдельного owner checkpoint `titanor-time-app` впервые подключён к `db` через Prisma Client и
+впервые запущен как service `app` — см. §5. Общая `prisma/schema.prisma` и existing migration не
+менялись; `app` использует уже сгенерированный из неё Prisma Client, полученный при сборке Docker
+image (без копирования schema/migrations в приложение). Добавлен readiness endpoint
+`GET /api/ready`, выполняющий `SELECT 1` через Prisma. `app` реально запущен, healthy, отвечает на
+`/api/health`, `/api/ready` (`database: connected`) и `/`; опубликован только на `127.0.0.1:3200`.
+`db` по-прежнему без published port. В базе по-прежнему 0 business rows — только применённая схема,
+без seed. Production-код (seed, первый `SUPER_ADMIN`, аутентификация, `Session`, role guard, реальный
+UI) по-прежнему не начат.
 
 ## 3. Источники истины
 
@@ -77,7 +86,7 @@ Production-код (seed, аутентификация, реальный API, UI)
 | Prisma schema | `prisma/schema.prisma` | зафиксирована, commit `9b2cbab` |
 | Initial migration | `prisma/migrations/20260728012114_init_titanor_time_foundation/migration.sql` | создана, статически проверена (commit `30d2364`), CK-08/CK-13 переименованы (commit `991b8fb`); полностью runtime-верифицирована на одноразовом PostgreSQL 16 — catalog identity + поведенческие тесты 21 CHECK/6 EXCLUDE/13 триггеров, full green (см. §8) |
 | PostgreSQL infra | `compose.titanor-time.yaml`, `docs/titanor-time/06_DATABASE_INFRASTRUCTURE.md` | подготовлено (commit `c28af00`); `db` реально запущен и migration применена после owner checkpoint (HEAD `e15b203`) |
-| Next.js app scaffold | `titanor-time-app/` | bare scaffold, commit `e15b203`; типизируется/собирается, `app` ещё не запускался |
+| Next.js app scaffold | `titanor-time-app/` | commit `e15b203` (scaffold) + этот commit (Prisma Client, `/api/ready`); `app` реально запущен, healthy, подключён к `db` |
 
 ## 4. Git checkpoint
 
@@ -169,9 +178,57 @@ Time (production или dev), concurrency/многосессионное пов�
 - Единственная функциональность: `GET /api/health` → `{"status":"ok","service":"titanor-time"}` и
   placeholder-страница `/`. Нет auth, нет БД-кода, нет реального API/UI.
 - `npx tsc --noEmit` — exit 0; `npm run build` (standalone output) — success; `docker compose build
-  app` — success. Ни разу не запускался (`docker compose up` не выполнялся).
-- Service `app` в compose: `127.0.0.1:3200` (host), только `internal` network (нет outbound-доступа
-  из контейнера — при необходимости внешних вызовов в будущем нужно будет добавить вторую network).
+  app` — success. На момент этого commit ни разу не запускался.
+
+**ORM-интеграция + первый запуск `app`** (`titanor-time-app/lib/prisma.ts`,
+`titanor-time-app/app/api/ready/route.ts`, `titanor-time-app/Dockerfile`, `compose.titanor-time.yaml`,
+после отдельного owner checkpoint, этот commit):
+- `@prisma/client` 6.19.0 (dependency) и `prisma` 6.19.0 (devDependency) — exact, совпадают с общей
+  `prisma/schema.prisma` и версией, использованной для существующей migration. `npm update` не
+  выполнялся; Next.js/React/прочие зависимости не менялись.
+- Единственный источник Prisma-схемы остаётся `prisma/schema.prisma` — не скопирована и не
+  продублирована в `titanor-time-app`. Docker build получает её из repository root через build
+  context `.` (repo root) + `titanor-time-app/Dockerfile` (ранее было `./titanor-time-app`) — с
+  отдельным `titanor-time-app/Dockerfile.dockerignore`, не затрагивающим корневой `.dockerignore`
+  публичного сайта. `prisma generate` выполняется во время build; `prisma migrate` во время build не
+  выполняется.
+- `titanor-time-app/lib/prisma.ts` — один `PrismaClient` на process, singleton через `globalThis` для
+  hot-reload в dev, без запросов к БД при импорте модуля, без credentials в исходном коде.
+- `GET /api/ready` — выполняет `SELECT 1` через Prisma; `200 {"status":"ready","service":"titanor-time","database":"connected"}`
+  при успехе, `503 {"status":"not_ready","service":"titanor-time","database":"unavailable"}` при
+  ошибке; ответ и server-лог не содержат DATABASE_URL/host/user/password/stack trace — лог пишет
+  только фиксированную credential-free строку.
+- `GET /api/health` не изменён — остаётся liveness-эндпоинтом, не зависящим от БД.
+- Dockerfile: `node:22-bookworm-slim` (не alpine — glibc, совместим с Prisma query engine), три
+  стадии (dependencies/builder/runner), `prisma generate` только в builder, non-root (`USER node`),
+  standalone output, слушает `0.0.0.0:3000` внутри контейнера.
+- **Исправлена архитектурная ошибка, найденная в этой же задаче**: сеть с `internal: true` блокирует
+  не только outbound-трафик контейнера, но и весь host→container port-publishing путь — с `app`
+  только на `internal` `127.0.0.1:3200` физически не слушал ни разу, несмотря на healthy-статус
+  контейнера. Исправлено добавлением второй, обычной (не `internal`) network `lan` только для `app`;
+  `db` остаётся исключительно на `internal` и по-прежнему полностью недоступен снаружи Docker.
+- `.env.titanor-time` (локальный, не закоммичен) дополнен `DATABASE_URL` на основе уже существующих
+  `POSTGRES_*` значений; `.env.titanor-time.example` дополнен пустым placeholder `DATABASE_URL=`.
+  `chmod 600` сохранён; `git check-ignore -v` подтверждён.
+- **Инцидент и устранение**: в ходе проверки один раз был выполнен полный (без `--quiet`)
+  `docker compose config`, который вывел реальный `POSTGRES_PASSWORD`/`DATABASE_URL` в открытом виде.
+  Пароль немедленно ротирован через `ALTER USER ... WITH PASSWORD` (без потери данных — миграция и
+  таблицы сохранены), `.env.titanor-time` обновлён новым значением; старый (утёкший) пароль более не
+  действителен. Далее использовался только `docker compose config --quiet` либо вывод с ручной
+  редакцией строк `PASSWORD`/`DATABASE_URL`.
+- Первый реальный запуск: `docker compose -f compose.titanor-time.yaml up -d --build app` — образ
+  собран, `app` healthy (healthcheck на `http://127.0.0.1:3000/api/ready`), `depends_on: db:
+  condition: service_healthy` сохранён.
+- Подтверждено: `GET http://127.0.0.1:3200/api/health` → `200`; `GET .../api/ready` → `200,
+  database: connected`; `GET .../` → `200`. `db` port по-прежнему не опубликован. Во всех 24
+  application tables суммарно 0 строк; `_prisma_migrations` — 1 запись, `finished_at` заполнен,
+  `rolled_back_at` пуст (без изменений). `titanorgroup-web-1`, `collab-studio-app-1`,
+  `collab-studio-postgres-1` — те же `StartedAt`/`RestartCount`, не перезапускались;
+  `titanorgroup.fi`/`collabstudio.run` — `200` до и после.
+- Примечание о ходе задачи: `db` был один раз пересоздан (`Recreate`, не просто restart) как побочный
+  эффект смены содержимого `.env.titanor-time` при ротации пароля (Compose учитывает содержимое
+  `env_file` в конфигурационном хэше сервиса) — тот же named volume, данные и миграция не пострадали;
+  это не было намеренным/лишним перезапуском `db`.
 
 ## 6. Статический аудит initial migration
 
@@ -413,9 +470,7 @@ subtransaction (`SAVEPOINT`/`ROLLBACK TO SAVEPOINT`), вся сессия зав
 
 ## 9. Не начато
 
-- Фактический запуск Titanor Time Next.js app (`titanor-time-app/` собирается, но не запускался;
-  `db` уже запущен и existing migration к нему уже применена — см. §5).
-- Подключение `titanor-time-app` к `db` через Prisma Client (ORM-интеграция, T5.2).
+- Backup постоянной Titanor Time database (нужно выполнить и проверить до первого seed/SUPER_ADMIN).
 - Seed.
 - Первый `SUPER_ADMIN`.
 - Password delivery (доставка первого пароля/кода активации).
@@ -482,16 +537,16 @@ subtransaction (`SAVEPOINT`/`ROLLBACK TO SAVEPOINT`), вся сессия зав
 
 ## 11. Следующий рекомендуемый шаг
 
-`db` реально запущен (healthy) и existing migration реально применена к нему — см. §5. `app`
-(`titanor-time-app`) собирается, но ещё не запущен и не подключён к `db`. Следующей отдельной задачей,
-после checkpoint владельца:
-1. ORM-интеграция (T5.2 по `docs/PROJECT_ROADMAP.md`): подключить `@prisma/client` в
-   `titanor-time-app`, сгенерировать client от общей `prisma/schema.prisma`, только `User`+`Session`
-   на первом срезе.
-2. Только затем: первый `SUPER_ADMIN` (T5.4, безопасный seed/CLI, без пароля в коде), login (T5.5),
-   role guard (T5.6).
-3. Не запускать `app` в production и не менять CollabStudio без отдельного checkpoint владельца. Не
-   выполнять реальный seed/login/role guard раньше явного подтверждения.
+`db` и `app` реально запущены, healthy, `app` подключён к `db` через Prisma Client — см. §5. База
+по-прежнему пустая (0 business rows), seed не выполнялся. Следующей отдельной задачей, после
+checkpoint владельца:
+1. Сначала выполнить и проверить backup постоянной Titanor Time database (см.
+   `docs/titanor-time/06_DATABASE_INFRASTRUCTURE.md` §6-7) — до записи первого пользователя.
+2. Только после проверенного backup: безопасный CLI для первого `SUPER_ADMIN` (T5.4 — не хранить
+   пароль в коде).
+3. Не начинать login (T5.5), role guard (T5.6), Session, admin API или реальный UI раньше отдельного
+   явного подтверждения владельца. Не запускать `app` в production и не менять CollabStudio без
+   отдельного checkpoint владельца.
 
 ## 12. Правило обновления
 

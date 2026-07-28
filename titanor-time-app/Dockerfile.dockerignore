@@ -1,0 +1,52 @@
+# Ignore file specific to titanor-time-app/Dockerfile when built with the
+# repository root as context (see compose.titanor-time.yaml). Docker picks
+# this up automatically because its name matches "<dockerfile>.dockerignore"
+# at the context root — it does not affect the public site's own build
+# (root Dockerfile / root .dockerignore), which is untouched.
+#
+# Patterns are anchored to the context (repo) root with a leading "/" so
+# they never accidentally match the same-named nested paths this build
+# actually needs (titanor-time-app/app, titanor-time-app/public, ...).
+
+/.git
+/.github
+/.vscode
+
+# Never send secrets or local env files into the build context.
+/.env
+/.env.*
+!/.env.example
+!/.env.titanor-time.example
+
+# Public-site-only application and its data — irrelevant to this build.
+/app
+/public
+/data
+/lib
+/next.config.mjs
+/next-env.d.ts
+/tsconfig.json
+/package.json
+/package-lock.json
+/Dockerfile
+/compose.yaml
+/compose.titanor-time.yaml
+/.env.production
+/.env.production.backup-*
+
+# Build artifacts / dependency caches (regenerated inside the build).
+/node_modules
+/.next
+/*.tsbuildinfo
+titanor-time-app/node_modules
+titanor-time-app/.next
+titanor-time-app/*.tsbuildinfo
+
+# Docs, backups, uploads, review artifacts — not needed inside any image.
+/docs
+/backups
+/BLACK-titanor_1.pdf
+/*.tar.gz
+/*.md
+
+npm-debug.log*

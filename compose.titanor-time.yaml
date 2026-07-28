@@ -8,16 +8,27 @@ name: titanor-time
 # This file only defines infrastructure. It is not started as part of this task.
 # See docs/titanor-time/06_DATABASE_INFRASTRUCTURE.md for how to use it.
 #
-# `app` is a bare scaffold only (no login, no data, no features) — see
-# titanor-time-app/. It is only attached to the internal network for now, so it
-# can reach `db` but has no outbound internet access; add a second, non-internal
-# network later if a feature needs to call out (e.g. SMTP).
+# `app` is a bare scaffold (no login, no real UI/API yet) now connected to `db`
+# via Prisma Client — see titanor-time-app/. Build context is the repository
+# root so the image build can reach the single shared ../prisma/schema.prisma
+# without copying/duplicating it (see titanor-time-app/Dockerfile and its
+# paired titanor-time-app/Dockerfile.dockerignore).
+#
+# `app` is attached to two networks: `internal` (shared with `db`, so it can
+# reach it by service name — this network has no gateway/outbound routing at
+# all) and `lan` (a plain, non-internal bridge network). `lan` is required
+# because a Docker network with `internal: true` also blocks the
+# host-to-container port-publishing path, not just outbound container
+# traffic — `app`'s 127.0.0.1:3200 mapping does not work on `internal` alone.
+# As a side effect `lan` does give `app` normal outbound internet access
+# (that is what "non-internal" means); `db` is not on `lan` and stays fully
+# unreachable from outside Docker on `internal` only.
 
 services:
   app:
     build:
-      context: ./titanor-time-app
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: titanor-time-app/Dockerfile
     restart: unless-stopped
     init: true
 
@@ -40,13 +51,14 @@ services:
 
     networks:
       - internal
+      - lan
 
     healthcheck:
       test:
         - CMD
         - node
         - -e
-        - "fetch('http://127.0.0.1:3000/api/health').then(response => { if (!response.ok) process.exit(1) }).catch(() => process.exit(1))"
+        - "fetch('http://127.0.0.1:3000/api/ready').then(response => { if (!response.ok) process.exit(1) }).catch(() => process.exit(1))"
       interval: 10s
       timeout: 3s
       retries: 5
@@ -76,6 +88,7 @@ services:
 networks:
   internal:
     internal: true
+  lan: {}
 
 volumes:
   db_data:
