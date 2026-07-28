@@ -14,3 +14,6 @@ pnpm-debug.log*
 .env.*
 !.env.example
 !.env.titanor-time.example
+
+# Database dumps (real data, never committed)
+/backups

@@ -1,11 +1,14 @@
 # Titanor Time — Implementation Status
 
-Обновлено: 2026-07-28 17:36 Europe/Helsinki
+Обновлено: 2026-07-28 19:20 Europe/Helsinki
 Ветка: feature/titanor-time-foundation
 Isolated PostgreSQL config commit: `c28af00521ffef322211e2cfae840a5568dc8c03`
 Next.js app scaffold commit: `e15b203fe334fa4e2c68335f1169f78ed9c18ec9`
 Real (persistent, non-disposable) `db` service started + migration applied: см. §5, HEAD `e15b203`
-ORM integration + first `app` launch (Prisma Client, `/api/ready`): см. §5, этот commit
+ORM integration + first `app` launch (Prisma Client, `/api/ready`): см. §5, commit `7a854ac`
+Backup + verified restore (throwaway db, not the real one): см. §5, этот commit
+Second migration (Role/Permission/RolePermission/UserRole): см. §5, этот commit (schema.prisma
+changed for the first time since commit `9b2cbab`; first initial migration remains frozen/untouched)
 Runtime-tested HEAD (полная повторная verification, full green): `991b8fb8381bff11accd09e2c1c3a3f7748d0832`
 Source fix commit (CK-08/CK-13 rename): `991b8fb8381bff11accd09e2c1c3a3f7748d0832`
 HEAD на момент первого runtime-теста, обнаружившего дефект: bebd6aab5f7a041e6272f24fe32db105ca04f92b
@@ -68,8 +71,27 @@ image (без копирования schema/migrations в приложение).
 `GET /api/ready`, выполняющий `SELECT 1` через Prisma. `app` реально запущен, healthy, отвечает на
 `/api/health`, `/api/ready` (`database: connected`) и `/`; опубликован только на `127.0.0.1:3200`.
 `db` по-прежнему без published port. В базе по-прежнему 0 business rows — только применённая схема,
-без seed. Production-код (seed, первый `SUPER_ADMIN`, аутентификация, `Session`, role guard, реальный
-UI) по-прежнему не начат.
+без seed.
+
+Перед первым `SUPER_ADMIN` выполнен и **проверен restore-ом в отдельную одноразовую тестовую базу**
+backup постоянной database (`pg_dump` → `pg_restore` на throwaway PostgreSQL 16, не на реальном `db`)
+— каталог полностью совпал (24+4 таблицы, 8 enum, 21 CHECK, 6 EXCLUDE, 55 FK, 11 функций,
+13 триггеров, `_prisma_migrations`). Backup-файл не закоммичен (`backups/`, добавлено в
+`.gitignore`).
+
+Далее обнаружено и устранено архитектурное ограничение: у схемы не было способа хранить роль
+пользователя вообще (`Role`/`Permission`/`UserRole` были только в `03_DATA_MODEL_ERD.md`, не в
+foundation-схеме). После явного подтверждения владельца добавлена **вторая migration**
+(`20260728161708_add_role_permission_user_role`) — `Role`, `Permission`, `RolePermission`, `UserRole`,
+плюс частичный unique index (`ex_user_role_active_unique`, раз в raw SQL — не выразим через
+`@@unique`) и 4 фиксированные seed-строки `Role` (`SUPER_ADMIN`/`ADMIN`/`FOREMAN`/`WORKER`) из
+`02_ROLE_PERMISSION_MATRIX.md` §1. Первая initial migration и frozen register не изменялись.
+`Permission`/`RolePermission` намеренно оставлены пустыми (заполнение ~50+ permission-строк отложено
+до реализации соответствующих endpoint'ов). Применена сначала к одноразовому PostgreSQL 16 (с нуля,
+обе migrations вместе, плюс идемпотентный повтор, плюс позитивный/негативный поведенческий тест
+partial unique index), затем к реальной постоянной `titanor-time-db-1`. Первый `SUPER_ADMIN`
+(seed/CLI) по-прежнему не создан — это следующий шаг (см. §11). Production-код (seed, первый
+`SUPER_ADMIN`, аутентификация, `Session`, role guard, реальный UI) по-прежнему не начат.
 
 ## 3. Источники истины
 
@@ -83,10 +105,11 @@ UI) по-прежнему не начат.
 | Raw SQL | `docs/titanor-time/05_RAW_SQL_REGISTER.md` | завершено, FROZEN, current-scope |
 | Исходное ТЗ | `docs/titanor-time/TITANOR_TIME_DEVELOPMENT_ROADMAP.md` | provenance-копия ТЗ владельца; детализирована и заменена пятью документами выше для целей проектирования |
 | Общий roadmap проекта | `docs/PROJECT_ROADMAP.md` (ЭТАП 4 T4.1–T4.5, ЭТАП 5 T5.1–T5.4) | набросок ЭТАПА 4 заменён комплектом `docs/titanor-time/`; ЭТАП 5 (T5.2 Prisma schema, T5.3 первая migration) — этап, в котором сейчас находится проект |
-| Prisma schema | `prisma/schema.prisma` | зафиксирована, commit `9b2cbab` |
-| Initial migration | `prisma/migrations/20260728012114_init_titanor_time_foundation/migration.sql` | создана, статически проверена (commit `30d2364`), CK-08/CK-13 переименованы (commit `991b8fb`); полностью runtime-верифицирована на одноразовом PostgreSQL 16 — catalog identity + поведенческие тесты 21 CHECK/6 EXCLUDE/13 триггеров, full green (см. §8) |
-| PostgreSQL infra | `compose.titanor-time.yaml`, `docs/titanor-time/06_DATABASE_INFRASTRUCTURE.md` | подготовлено (commit `c28af00`); `db` реально запущен и migration применена после owner checkpoint (HEAD `e15b203`) |
-| Next.js app scaffold | `titanor-time-app/` | commit `e15b203` (scaffold) + этот commit (Prisma Client, `/api/ready`); `app` реально запущен, healthy, подключён к `db` |
+| Prisma schema | `prisma/schema.prisma` | зафиксирована, commit `9b2cbab`; расширена (Role/Permission/RolePermission/UserRole) этим commit — первое изменение с `9b2cbab` |
+| Initial migration | `prisma/migrations/20260728012114_init_titanor_time_foundation/migration.sql` | создана, статически проверена (commit `30d2364`), CK-08/CK-13 переименованы (commit `991b8fb`); полностью runtime-верифицирована на одноразовом PostgreSQL 16 — catalog identity + поведенческие тесты 21 CHECK/6 EXCLUDE/13 триггеров, full green (см. §8); frozen/unchanged с тех пор |
+| Second migration | `prisma/migrations/20260728161708_add_role_permission_user_role/migration.sql` | создана и применена этим commit — Role/Permission/RolePermission/UserRole, протестирована на одноразовом PostgreSQL 16 (с нуля + идемпотентность + partial unique index behavioral test), затем применена к реальной `titanor-time-db-1` |
+| PostgreSQL infra | `compose.titanor-time.yaml`, `docs/titanor-time/06_DATABASE_INFRASTRUCTURE.md` | подготовлено (commit `c28af00`); `db` реально запущен и обе migrations применены |
+| Next.js app scaffold | `titanor-time-app/` | commit `e15b203` (scaffold) + `7a854ac` (Prisma Client, `/api/ready`); `app` реально запущен, healthy, подключён к `db` |
 
 ## 4. Git checkpoint
 
@@ -229,6 +252,49 @@ Time (production или dev), concurrency/многосессионное пов�
   эффект смены содержимого `.env.titanor-time` при ротации пароля (Compose учитывает содержимое
   `env_file` в конфигурационном хэше сервиса) — тот же named volume, данные и миграция не пострадали;
   это не было намеренным/лишним перезапуском `db`.
+
+**Backup + verified restore постоянной database** (`backups/` — не закоммичен, добавлен в
+`.gitignore`, этот commit):
+- `pg_dump -F c` из `titanor-time-db-1` в локальный файл `backups/titanor-time-<timestamp>.dump`.
+- Восстановление (`pg_restore`) выполнено **только** в отдельный одноразовый throwaway PostgreSQL 16
+  (`--rm`, tmpfs, случайные credentials, `127.0.0.1`-only dynamic port, удалён сразу после проверки)
+  — реальный `db` не трогался операцией restore.
+- Восстановленный каталог полностью совпал с оригиналом: 24 application-таблицы, 8 enum, 21 CHECK,
+  6 EXCLUDE, 55 FK, 11 функций, 13 триггеров, `btree_gist`, точные имена `CK-08`/`CK-13`,
+  `_prisma_migrations` — 1 запись (на момент backup, до второй migration).
+- Throwaway restore-контейнер удалён; реальный `db`/`app` не перезапускались этой операцией.
+
+**Вторая migration: Role/Permission/RolePermission/UserRole** (`prisma/schema.prisma`,
+`prisma/migrations/20260728161708_add_role_permission_user_role/migration.sql`, этот commit, после
+отдельного owner checkpoint):
+- Причина: у foundation-схемы не было ни единого поля/таблицы для хранения роли пользователя —
+  `Role`/`Permission`/`UserRole` описаны в `03_DATA_MODEL_ERD.md`, но сознательно не входили в первую
+  migration (см. §5 выше, `IMPLEMENTATION_STATUS.md` истории). Без этого «первый SUPER_ADMIN» не мог
+  быть технически отмечен как SUPER_ADMIN нигде в БД.
+- Схема дизайна показана и утверждена владельцем до создания migration (сущности/поля/связи/
+  ограничения/индексы/правила удаления), в соответствии с `AGENT_RULES.md` §11.
+- Добавлены таблицы `Role`, `Permission`, `RolePermission`, `UserRole` (все FK `onDelete: Restrict`).
+  `UserRole` включает частичный unique index `ex_user_role_active_unique` на `("userId","roleId")
+  WHERE "validTo" IS NULL` — не выразим через Prisma `@@unique`, добавлен как raw SQL прямо в эту
+  migration (frozen register `05_RAW_SQL_REGISTER.md`, scoped только к первой migration, не менялся).
+  4 фиксированные строки `Role` (`SUPER_ADMIN`/`ADMIN`/`FOREMAN`/`WORKER`, тексты из
+  `02_ROLE_PERMISSION_MATRIX.md` §1) засеяны прямо в migration. `Permission`/`RolePermission` оставлены
+  пустыми намеренно.
+- Migration сгенерирована offline (`prisma migrate diff --from-schema-datamodel <снимок схемы до
+  правки> --to-schema-datamodel prisma/schema.prisma --script`), затем протестирована с нуля (обе
+  migrations вместе) на одноразовом PostgreSQL 16: `prisma migrate deploy` — exit 0, идемпотентный
+  повтор — «No pending migrations to apply», `_prisma_migrations` — 2 записи, обе `finished`. Позитивный
+  и негативный поведенческий тест `ex_user_role_active_unique` (дубликат активной роли отклонён;
+  истёкшая + новая активная роль одного пользователя/роли — разрешены) прошёл на этой одноразовой
+  базе. Только после этого применена к реальной `titanor-time-db-1` (тем же throwaway-node-container
+  паттерном, что и первая migration) — exit 0, идемпотентность подтверждена повторно.
+- После применения к реальной базе: 28 таблиц (24+4), `Role` содержит ровно 4 строки с ожидаемыми
+  именами, `User`/`UserRole`/`RolePermission`/`Permission` — 0 строк (никакого seed пользователей).
+  `app`/`db` не перезапускались этой операцией; `titanorgroup-web-1`/CollabStudio — те же
+  `StartedAt`/`RestartCount`; `titanorgroup.fi`/`collabstudio.run` — `200`.
+- Первая initial migration (hash `a0d2059582079846a0c70658b24c6162830ae5b8e3e9ffcffe077ded4c862d7b`)
+  и `05_RAW_SQL_REGISTER.md` (hash `8c014d664319c74ee17c3aff9c42d023a86f8456c2cf6fdd0dce591b5bdcd9c2`)
+  — не изменены, подтверждено повторной проверкой hash.
 
 ## 6. Статический аудит initial migration
 
@@ -470,13 +536,12 @@ subtransaction (`SAVEPOINT`/`ROLLBACK TO SAVEPOINT`), вся сессия зав
 
 ## 9. Не начато
 
-- Backup постоянной Titanor Time database (нужно выполнить и проверить до первого seed/SUPER_ADMIN).
-- Seed.
-- Первый `SUPER_ADMIN`.
+- Seed (заполнение `Permission`/`RolePermission` — таблицы созданы, но пусты).
+- Первый `SUPER_ADMIN` (безопасный CLI/seed; backup уже выполнен и проверен — см. §5).
 - Password delivery (доставка первого пароля/кода активации).
 - MFA production gate (`REQUIRE_MFA_FOR_ADMIN=true`).
 - Login.
-- `UserSession`.
+- `UserSession` (модель ещё не добавлена).
 - Role guard / permission enforcement.
 - Admin-first API (`04_ADMIN_FIRST_API_CONTRACTS.md`).
 - `/admin/setup`.
@@ -537,16 +602,18 @@ subtransaction (`SAVEPOINT`/`ROLLBACK TO SAVEPOINT`), вся сессия зав
 
 ## 11. Следующий рекомендуемый шаг
 
-`db` и `app` реально запущены, healthy, `app` подключён к `db` через Prisma Client — см. §5. База
-по-прежнему пустая (0 business rows), seed не выполнялся. Следующей отдельной задачей, после
-checkpoint владельца:
-1. Сначала выполнить и проверить backup постоянной Titanor Time database (см.
-   `docs/titanor-time/06_DATABASE_INFRASTRUCTURE.md` §6-7) — до записи первого пользователя.
-2. Только после проверенного backup: безопасный CLI для первого `SUPER_ADMIN` (T5.4 — не хранить
-   пароль в коде).
-3. Не начинать login (T5.5), role guard (T5.6), Session, admin API или реальный UI раньше отдельного
-   явного подтверждения владельца. Не запускать `app` в production и не менять CollabStudio без
-   отдельного checkpoint владельца.
+`db` и `app` реально запущены, healthy, `app` подключён к `db` через Prisma Client — см. §5. Backup
+постоянной database уже выполнен и проверен restore-ом в отдельную одноразовую базу. Схема теперь
+умеет хранить роль (`Role`/`Permission`/`RolePermission`/`UserRole`, вторая migration применена).
+База по-прежнему пустая (0 business rows) — ни одного `User`, ни одного `UserRole`. Следующей
+отдельной задачей, после checkpoint владельца:
+1. Безопасный CLI/seed-скрипт для первого `SUPER_ADMIN` (T5.4): создать `User` + `UserRole` (роль
+   `SUPER_ADMIN`, уже существует в `Role`), пароль не хранить в коде, безопасная доставка.
+2. Взять свежий backup (см. §5, `06_DATABASE_INFRASTRUCTURE.md`) непосредственно перед записью
+   первого пользователя, даже если предыдущий backup уже проверен.
+3. Не начинать login (T5.5), role guard (T5.6), `UserSession`, admin API или реальный UI раньше
+   отдельного явного подтверждения владельца. Не запускать `app` в production и не менять
+   CollabStudio без отдельного checkpoint владельца.
 
 ## 12. Правило обновления
 

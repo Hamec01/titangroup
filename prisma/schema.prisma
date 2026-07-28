@@ -84,6 +84,49 @@ model User {
   excludedParticipants     PayrollPeriodParticipant[]    @relation("PayrollPeriodParticipantExcludedBy")
   createdTemplateVersions  WorkScheduleTemplateVersion[] @relation("TemplateVersionCreatedBy")
   createdTimesheetVersions TimesheetVersion[]            @relation("TimesheetVersionCreatedBy")
+  userRoles                UserRole[]
+}
+
+model Role {
+  id              String           @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  name            String           @unique @db.VarChar(32)
+  description     String?          @db.Text
+  createdAt       DateTime         @default(now()) @db.Timestamptz(6)
+  rolePermissions RolePermission[]
+  userRoles       UserRole[]
+}
+
+model Permission {
+  id              String           @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  code            String           @unique @db.VarChar(128)
+  description     String?          @db.Text
+  createdAt       DateTime         @default(now()) @db.Timestamptz(6)
+  rolePermissions RolePermission[]
+}
+
+model RolePermission {
+  id           String     @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  roleId       String     @db.Uuid
+  permissionId String     @db.Uuid
+  createdAt    DateTime   @default(now()) @db.Timestamptz(6)
+  role         Role       @relation(fields: [roleId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  permission   Permission @relation(fields: [permissionId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+
+  @@unique([roleId, permissionId])
+}
+
+model UserRole {
+  id        String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId    String    @db.Uuid
+  roleId    String    @db.Uuid
+  validFrom DateTime  @default(now()) @db.Timestamptz(6)
+  validTo   DateTime? @db.Timestamptz(6)
+  createdAt DateTime  @default(now()) @db.Timestamptz(6)
+  user      User      @relation(fields: [userId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  role      Role      @relation(fields: [roleId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+
+  @@index([userId])
+  @@index([roleId])
 }
 
 model Employee {
