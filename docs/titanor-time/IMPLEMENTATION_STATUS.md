@@ -1,8 +1,9 @@
 # Titanor Time — Implementation Status
 
-Обновлено: 2026-07-28 04:52 Europe/Helsinki
+Обновлено: 2026-07-28 09:49 Europe/Helsinki
 Ветка: feature/titanor-time-foundation
-HEAD на момент аудита: 30d2364ffe58679856d6a29d91c9992a941c2b65
+HEAD на момент этого аудита (runtime-тест): bebd6aab5f7a041e6272f24fe32db105ca04f92b
+HEAD на момент предыдущего (статического) аудита: 30d2364ffe58679856d6a29d91c9992a941c2b65
 Статус документа: living implementation record
 
 ## 1. Назначение документа
@@ -20,10 +21,21 @@ HEAD на момент аудита: 30d2364ffe58679856d6a29d91c9992a941c2b65
 модели, 8 enum) завершены и зафиксированы в Git. Frozen raw-SQL register (21 CHECK, 6 EXCLUDE, 11
 функций, 13 триггеров, 1 extension) зафиксирован отдельным документом. На его основе создана и
 статически проверена одна initial migration, объединяющая Prisma-generated структуру и raw-SQL
-объекты register — она закоммичена, но ни разу не применялась к какому-либо PostgreSQL (ни production,
-ни временному). Production-код (seed, аутентификация, API, UI) не начат. Перед продолжением
-разработки необходим отдельный runtime-тест миграции на чистом временном PostgreSQL 16 — статическая
-проверка не заменяет фактическое применение SQL.
+объекты register.
+
+Existing initial migration была применена к чистому одноразовому PostgreSQL 16 (изолированный
+Docker-контейнер, полностью удалён после проверки). Это не означает создание production/dev базы
+Titanor Time и не означает production deployment. Applying the migration succeeded structurally
+(`prisma migrate deploy` — exit 0, идемпотентный повтор подтверждён), и catalog-аудит подтвердил 8
+enum, 24 таблицы, 55 foreign keys, 6 EXCLUDE, 11 функций, 13 триггеров, 1 extension `btree_gist`, 0
+future-объектов. Однако тот же catalog-аудит выявил **подтверждённый дефект**: два из 21 CHECK
+constraint (`CK-08`, `CK-13`) имеют имена длиннее 63 байт и PostgreSQL молча обрезает их при
+применении миграции — фактическое имя ограничения в каталоге не совпадает с exact frozen identifier
+из `05_RAW_SQL_REGISTER.md`. Это ломает документированный контракт «service identity: exact
+constraint name» (register §7) для этих двух constraint. Поведенческие runtime-тесты (21 CHECK / 6
+EXCLUDE / 13 триггеров) не выполнялись после обнаружения этого дефекта — задача была остановлена по
+правилу «подтверждённый дефект → зафиксировать, не исправлять, не расширять проверку» (см. §8).
+Production-код (seed, аутентификация, API, UI) по-прежнему не начат.
 
 ## 3. Источники истины
 
@@ -38,7 +50,7 @@ HEAD на момент аудита: 30d2364ffe58679856d6a29d91c9992a941c2b65
 | Исходное ТЗ | `docs/titanor-time/TITANOR_TIME_DEVELOPMENT_ROADMAP.md` | provenance-копия ТЗ владельца; детализирована и заменена пятью документами выше для целей проектирования |
 | Общий roadmap проекта | `docs/PROJECT_ROADMAP.md` (ЭТАП 4 T4.1–T4.5, ЭТАП 5 T5.1–T5.4) | набросок ЭТАПА 4 заменён комплектом `docs/titanor-time/`; ЭТАП 5 (T5.2 Prisma schema, T5.3 первая migration) — этап, в котором сейчас находится проект |
 | Prisma schema | `prisma/schema.prisma` | зафиксирована, commit `9b2cbab` |
-| Initial migration | `prisma/migrations/20260728012114_init_titanor_time_foundation/migration.sql` | создана и статически проверена, commit `30d2364`; не применена ни к одной базе |
+| Initial migration | `prisma/migrations/20260728012114_init_titanor_time_foundation/migration.sql` | создана и статически проверена, commit `30d2364`; runtime-применена к одноразовому PostgreSQL 16 — структурно успешно, но с подтверждённым дефектом именования CK-08/CK-13 (см. §7) |
 
 ## 4. Git checkpoint
 
@@ -81,9 +93,12 @@ commit `30d2364`):
 - Raw-SQL часть — точное исполняемое соответствие всем 21 CHECK / 6 EXCLUDE / 1 extension / 11
   функциям / 13 триггерам register.
 - Статически проверена дважды (в предыдущем ходе и в этом аудите) — см. §6.
+- Runtime-применена к одноразовому PostgreSQL 16 — см. §7. Структурно успешна и идемпотентна; catalog
+  identity-аудит выявил подтверждённый дефект именования у 2 из 21 CHECK constraint (см. §7, §9).
+  Поведенческие runtime-тесты (позитив/негатив по каждому CHECK/EXCLUDE/триггеру) ещё не выполнены.
 
-**Не объявляются реализованными**: seed, аутентификация, API, UI, runtime-применение миграции к
-какой-либо базе.
+**Не объявляются реализованными**: seed, аутентификация, API, UI, отдельная постоянная база Titanor
+Time (production или dev), поведенческие runtime-тесты 21 CHECK / 6 EXCLUDE / 13 триггеров.
 
 ## 6. Статический аудит initial migration
 
@@ -106,13 +121,105 @@ commit `30d2364`):
 - exception contract: 22 `RAISE EXCEPTION`, все с `ERRCODE = 'P0001'`, ни одного другого кода; все используют один из 7 текущих frozen identifiers, `PROPOSAL_RESOLVED_IMMUTABLE` не используется нигде в этой миграции.
 - Известное стилевое отличие (не блокер): custom-исключения записаны как `RAISE EXCEPTION '<IDENTIFIER>' USING ERRCODE = 'P0001';`, а не как `RAISE EXCEPTION USING ERRCODE = 'P0001', MESSAGE = '<IDENTIFIER>';` — семантически идентично (первый аргумент `RAISE EXCEPTION` и есть `MESSAGE`), но иная допустимая форма записи того же PL/pgSQL-контракта.
 - schema/register contradictions: не обнаружено.
-- database connection: не выполнялось.
-- migration application: не выполнялось.
-- runtime test: `database application test intentionally not performed`.
+- database connection: на момент этого (static) аудита не выполнялось; выполнено отдельной
+  runtime-задачей позже — см. §7.
+- migration application: на момент этого (static) аудита не выполнялось; выполнено отдельной
+  runtime-задачей позже — см. §7.
+- runtime test: на момент этого (static) аудита `intentionally not performed`; выполнен отдельной
+  задачей позже — см. §7 (обнаружен подтверждённый дефект).
 
-## 7. Не начато
+## 7. Runtime-аудит initial migration (PostgreSQL 16)
 
-- Runtime migration test на чистом PostgreSQL 16.
+Дата: 2026-07-28. HEAD на момент этого runtime-аудита: `bebd6aab5f7a041e6272f24fe32db105ca04f92b`.
+
+**Временная среда:**
+- Exact migration path: `prisma/migrations/20260728012114_init_titanor_time_foundation/migration.sql`.
+- PostgreSQL exact version: `16.14 (Debian 16.14-1.pgdg13+1)`.
+- Docker image: `postgres:16`, image ID `sha256:33f923b05f64ca54ac4401c01126a6b92afe839a0aa0a52bc5aeb5cc958e5f20`.
+- База временная: одноразовый контейнер, `--rm`, `--restart=no`, случайные user/db/password (не
+  сохранены), данные на `tmpfs`, без named Docker volume.
+- Порт: опубликован только на `127.0.0.1`, случайный host-port; не порт и не база CollabStudio.
+
+**Применение migration (Prisma CLI 6.19.0, локальный):**
+- Первый `prisma migrate deploy --schema prisma/schema.prisma`: обнаружена ровно одна migration
+  (`20260728012114_init_titanor_time_foundation`), применена, exit code 0.
+- `_prisma_migrations`: ровно одна запись, `finished_at` заполнен, `rolled_back_at` пуст, без failed
+  migration artifacts.
+- `prisma migrate status`: «Database schema is up to date!», exit 0.
+- Повторный `prisma migrate deploy` на той же базе: «No pending migrations to apply.», exit 0,
+  `_prisma_migrations` по-прежнему содержит ровно одну запись — идемпотентность подтверждена.
+
+**Catalog-аудит структурного (Prisma) слоя:**
+- Enum types: 8/8 (exact names совпадают с `prisma/schema.prisma`).
+- Application tables: 24/24 (exact names совпадают), плюс отдельно существующая служебная
+  `_prisma_migrations`.
+- Индексы: 98 в `pg_indexes` = 68 explicit (29 unique + 39 plain, exact names из migration.sql) + 24
+  backing-индекса primary key + 6 backing-индекса EXCLUDE-ограничений — совпадает с ожиданием, без
+  unexpected записей.
+- Foreign keys: 55/55 (exact `conname` совпадают с `AddForeignKey`-секцией migration.sql).
+- Failed/partial migration artifacts: не обнаружено.
+
+**Catalog-аудит raw-SQL (frozen register) слоя:**
+- `btree_gist` extension: 1/1.
+- EXCLUDE constraints: 6/6, все exact names совпадают с register.
+- Trigger functions: 11/11, все exact names совпадают с register.
+- Trigger instances (table+name): 13/13, все exact пары совпадают с register; `tgenabled = 'O'` для
+  всех 13 (enabled).
+- Future objects: `PROPOSAL_RESOLVED_IMMUTABLE` — 0 совпадений в теле функций; `approvalOverride` /
+  `approval_override` CHECK — 0 совпадений; таблицы `CorrectionRequest` / `TimesheetReviewProposal` /
+  `CorrectionDraftSegment` — 0 совпадений. Future-объекты подтверждённо отсутствуют физически.
+- CHECK constraints: 21/21 по количеству, но **2 из 21 имеют неверное exact-имя в каталоге** — см.
+  ниже.
+
+**Подтверждённый дефект migration (не исправлен в рамках этой задачи):**
+
+PostgreSQL обрезает идентификаторы длиннее 63 байт (`NAMEDATALEN` limit) без ошибки. Два CHECK
+constraint из frozen register превышают этот лимит и после `prisma migrate deploy` физически
+существуют в каталоге под усечённым, а не frozen-именем:
+
+| ID | Table | Frozen name (register) | Длина | Фактическое имя в `pg_constraint.conname` | Длина |
+|---|---|---|---|---|---|
+| CK-08 | `WorkScheduleTemplateVersionDay` | `ck_work_schedule_template_version_day_planned_break_minutes_nonnegative` | 71 | `ck_work_schedule_template_version_day_planned_break_minutes_non` | 63 |
+| CK-13 | `TimesheetDraftPlannedShift` | `ck_timesheet_draft_planned_shift_planned_break_minutes_nonnegative` | 66 | `ck_timesheet_draft_planned_shift_planned_break_minutes_nonnegat` | 63 |
+
+- SQLSTATE: не применимо — это не runtime-ошибка приложения, migration применяется без ошибки
+  (exit 0); это несовпадение физического имени объекта с frozen-спецификацией, обнаруженное catalog
+  identity-аудитом.
+- Проверено на коллизии: два разных CHECK на одной таблице не сливаются под одним усечённым именем
+  (`having count(*) > 1` по `(conrelid, conname)` — 0 строк).
+- Нарушенный контракт: `05_RAW_SQL_REGISTER.md` §7 — «service identity: exact constraint name from
+  the PostgreSQL constraint field» для CHECK-нарушений. Сервис, сопоставляющий ошибки по
+  frozen-имени `ck_..._nonnegative`, не распознает нарушение этих двух constraint, так как реальное
+  имя в PostgreSQL другое.
+- Предикат/поведение самого ограничения (`"plannedBreakMinutes" >= 0`) не пострадали — это
+  исключительно проблема именования/service-mapping контракта, не проблема бизнес-логики.
+- Ожидаемый результат: exact match с register-именем для всех 21 CHECK. Фактический результат: 19/21
+  совпали exact, 2/21 (CK-08, CK-13) усечены PostgreSQL.
+
+**Поведенческие runtime-тесты (21 CHECK / 6 EXCLUDE / 13 триггеров / 11 функций / 7 frozen
+identifiers): не выполнялись.** Задача была остановлена сразу после обнаружения подтверждённого
+дефекта каталога, по явному правилу задачи «подтверждённый дефект → зафиксировать, не исправлять, не
+расширять проверку дальше». Concurrency runtime test: намеренно не выполнялся (вне scope этой задачи
+независимо от исхода).
+
+**Очистка временной среды:**
+- Временный контейнер удалён (`docker rm -f` по точному имени + label
+  `titanor-time.runtime-test=true`); `docker ps -a --filter label=titanor-time.runtime-test=true`
+  после очистки — пусто.
+- Временный каталог тестов (`mktemp -d` под `/tmp`, вне репозитория) удалён.
+- Named Docker volume не создавался; `docker volume ls` до и после — идентичны.
+- Отдельная постоянная Docker network не создавалась; `docker network ls` до и после — идентичны.
+- Все 3 ранее существовавших контейнера (`collab-studio-app-1`, `titanorgroup-web-1`,
+  `collab-studio-postgres-1`) продолжают работать без перезапуска.
+- Public site healthcheck (`https://titanorgroup.fi/api/health`) — до и после: `200 OK`.
+- CollabStudio (`https://collabstudio.run`) — до и после: `200 OK`.
+- Секреты временной базы (пароль, полный `DATABASE_URL`) нигде не сохранены и не выведены.
+
+**Не затронуто этой задачей:** production база, CollabStudio база/контейнеры/сеть/secrets, вторая
+migration, `prisma/schema.prisma`, существующая migration.sql, `05_RAW_SQL_REGISTER.md`.
+
+## 8. Не начато
+
 - Отдельный PostgreSQL-контейнер/volume для Titanor Time (production или dev).
 - Seed.
 - Первый `SUPER_ADMIN`.
@@ -127,13 +234,26 @@ commit `30d2364`):
 - Foreman flow.
 - Production deployment Titanor Time (`app.titanorgroup.fi`).
 
-## 8. Blockers и открытые решения
+## 9. Blockers и открытые решения
 
 ### Технические blockers
 
-Нет. Статический аудит existing initial migration (§6) не выявил ни одного содержательного дефекта.
-Единственное отмеченное расхождение — стилевая форма `RAISE EXCEPTION` (см. §6) — не является
-функциональной ошибкой и не блокирует runtime-тест.
+Есть один подтверждённый runtime-blocker (обнаружен catalog identity-аудитом §7, не статическим
+текстовым аудитом §6 — статический аудит его пропустил, так как не проверял фактическую длину
+идентификатора против лимита PostgreSQL):
+
+- **CK-08 / CK-13 constraint name truncation.** Два CHECK constraint из frozen register
+  (`ck_work_schedule_template_version_day_planned_break_minutes_nonnegative`, 71 байт;
+  `ck_timesheet_draft_planned_shift_planned_break_minutes_nonnegative`, 66 байт) превышают лимит
+  PostgreSQL в 63 байта на длину идентификатора и после применения migration физически существуют в
+  каталоге под другим, усечённым именем (см. точные значения в §7). Это ломает документированный
+  service-mapping контракт `05_RAW_SQL_REGISTER.md` §7 («service identity: exact constraint name»)
+  для этих двух constraint. Сам предикат ограничения (`>= 0`) работает корректно — проблема только в
+  имени. Не исправлено в рамках этой задачи (задача — только runtime-проверка, не правка migration).
+  Минимальное исправление: сократить имя constraint (и, при необходимости, синхронизировать
+  `05_RAW_SQL_REGISTER.md`) до ≤63 байт отдельной задачей владельца.
+
+Стилевая форма `RAISE EXCEPTION` (см. §6) остаётся отмеченным, но не блокирующим расхождением.
 
 ### Owner decisions
 
@@ -152,13 +272,16 @@ commit `30d2364`):
 - Известен ли первый `SUPER_ADMIN` и способ передачи первого пароля — явно указано в `README.md`
   §11 как критерий, предшествующий production-коду, и пока не закрыто.
 
-## 9. Следующий рекомендуемый шаг
+## 10. Следующий рекомендуемый шаг
 
-Отдельной задачей провести runtime-применение единственной existing initial migration к чистому
-временному PostgreSQL 16, проверить все ограничения, функции и триггеры, не затрагивая
-production-базу и CollabStudio.
+Отдельной минимальной задачей исправить только имена constraint CK-08 и CK-13 (сократить до ≤63
+байт, сохранив предикат/семантику), синхронизировать `05_RAW_SQL_REGISTER.md`, и затем повторить
+полный runtime-тест (structural + catalog identity + все 21 CHECK / 6 EXCLUDE / 13 триггеров
+поведенчески) на новом чистом одноразовом PostgreSQL 16 — до сих пор не выполненные поведенческие
+тесты остаются обязательными перед тем, как считать миграцию runtime-подтверждённой полностью. Не
+затрагивать production и CollabStudio.
 
-## 10. Правило обновления
+## 11. Правило обновления
 
 1. Каждая следующая задача сначала читает этот файл.
 2. После успешного commit агент обновляет статус отдельной минимальной задачей либо включает
