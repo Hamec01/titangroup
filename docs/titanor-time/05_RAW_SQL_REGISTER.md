@@ -17,6 +17,13 @@ Changing object identity, predicates, timing, lock behavior, SQLSTATE, or stable
 зафиксировано как `Documentation synchronization: MISSING` или `PARTIAL` в соответствующей строке —
 это состояние документации, а не отмена решения владельца.
 
+**Errata (identifier length):** runtime-аудит на одноразовом PostgreSQL 16 (HEAD `bebd6aa`) показал,
+что имена CK-08 и CK-13 превышали лимит PostgreSQL в 63 bytes и были молча обрезаны движком при
+применении migration. Оба имени сокращены до ≤63 bytes до первого permanent deployment — см. записи
+CK-08 и CK-13 ниже. Бизнес-предикаты этих CHECK не изменялись. Architecture version 5.4.1 не
+повышается из-за этого исправления физического identifier; остальные current-объекты register не
+затронуты.
+
 ---
 
 ## 1. Current CHECK constraint register
@@ -30,12 +37,12 @@ Changing object identity, predicates, timing, lock behavior, SQLSTATE, or stable
 | CK-05 | `ck_site_assignment_date_range` | `SiteAssignment` | current |
 | CK-06 | `ck_work_schedule_template_version_day_weekday_range` | `WorkScheduleTemplateVersionDay` | current |
 | CK-07 | `ck_work_schedule_template_version_day_shape` | `WorkScheduleTemplateVersionDay` | current |
-| CK-08 | `ck_work_schedule_template_version_day_planned_break_minutes_nonnegative` | `WorkScheduleTemplateVersionDay` | current |
+| CK-08 | `ck_schedule_template_version_day_break_minutes_nonnegative` | `WorkScheduleTemplateVersionDay` | current |
 | CK-09 | `ck_payroll_period_date_range` | `PayrollPeriod` | current |
 | CK-10 | `ck_payroll_period_status_metadata_shape` | `PayrollPeriod` | current |
 | CK-11 | `ck_payroll_period_participant_exclusion_metadata_shape` | `PayrollPeriodParticipant` | current |
 | CK-12 | `ck_timesheet_draft_planned_shift_shape` | `TimesheetDraftPlannedShift` | current |
-| CK-13 | `ck_timesheet_draft_planned_shift_planned_break_minutes_nonnegative` | `TimesheetDraftPlannedShift` | current |
+| CK-13 | `ck_timesheet_draft_shift_break_minutes_nonnegative` | `TimesheetDraftPlannedShift` | current |
 | CK-14 | `ck_timesheet_draft_segment_interval` | `TimesheetDraftSegment` | current |
 | CK-15 | `ck_timesheet_draft_segment_local_date` | `TimesheetDraftSegment` | current |
 | CK-16 | `ck_timesheet_draft_break_segment_interval` | `TimesheetDraftBreakSegment` | current |
@@ -166,7 +173,7 @@ Changing object identity, predicates, timing, lock behavior, SQLSTATE, or stable
 - Minimum negative test 1: `INSERT WorkScheduleTemplateVersionDay` с `isWorkingDay=true` и `plannedStartTime IS NULL` — ожидается отказ, SQLSTATE `23514` (`check_violation`).
 - Minimum negative test 2: `INSERT WorkScheduleTemplateVersionDay` с `isWorkingDay=false`, `plannedStartTime=NULL`, `plannedEndTime=NULL`, `plannedBreakMinutes=1` — ожидается отказ, SQLSTATE `23514` (`check_violation`).
 
-### CK-08 `ck_work_schedule_template_version_day_planned_break_minutes_nonnegative`
+### CK-08 `ck_schedule_template_version_day_break_minutes_nonnegative`
 
 - Table: `WorkScheduleTemplateVersionDay`
 - Predicate:
@@ -176,6 +183,11 @@ Changing object identity, predicates, timing, lock behavior, SQLSTATE, or stable
 - Structural readiness: `prisma/schema.prisma:227` — `plannedBreakMinutes Int`.
 - Source: DEC-05 (owner-approved).
 - Documentation synchronization: MISSING — `03_DATA_MODEL_ERD.md` не содержит явного `>= 0` требования для этого поля.
+- Name revision: исходное имя `ck_work_schedule_template_version_day_planned_break_minutes_nonnegative`
+  (71 bytes) превышало лимит PostgreSQL в 63 bytes и было молча обрезано движком при runtime-проверке
+  (см. `IMPLEMENTATION_STATUS.md`, runtime-аудит на HEAD `bebd6aa`). Имя сокращено до
+  `ck_schedule_template_version_day_break_minutes_nonnegative` (58 bytes) до первого permanent
+  deployment. Предикат и семантика не изменились.
 - Minimum negative test: `INSERT WorkScheduleTemplateVersionDay` с `plannedBreakMinutes=-1` — ожидается отказ, SQLSTATE `23514` (`check_violation`).
 
 ### CK-09 `ck_payroll_period_date_range`
@@ -233,7 +245,7 @@ Changing object identity, predicates, timing, lock behavior, SQLSTATE, or stable
 - Documentation synchronization: PARTIAL — non-working-снимок описан прозой, working-снимок и точный CHECK-предикат не приведены явно.
 - Minimum negative test: `INSERT TimesheetDraftPlannedShift` с `plannedStartAt` заполнен и `plannedEndAt IS NULL` — ожидается отказ, SQLSTATE `23514` (`check_violation`).
 
-### CK-13 `ck_timesheet_draft_planned_shift_planned_break_minutes_nonnegative`
+### CK-13 `ck_timesheet_draft_shift_break_minutes_nonnegative`
 
 - Table: `TimesheetDraftPlannedShift`
 - Predicate:
@@ -243,6 +255,11 @@ Changing object identity, predicates, timing, lock behavior, SQLSTATE, or stable
 - Structural readiness: `prisma/schema.prisma:378`.
 - Source: DEC-05 (owner-approved).
 - Documentation synchronization: MISSING.
+- Name revision: исходное имя `ck_timesheet_draft_planned_shift_planned_break_minutes_nonnegative`
+  (66 bytes) превышало лимит PostgreSQL в 63 bytes и было молча обрезано движком при runtime-проверке
+  (см. `IMPLEMENTATION_STATUS.md`, runtime-аудит на HEAD `bebd6aa`). Имя сокращено до
+  `ck_timesheet_draft_shift_break_minutes_nonnegative` (50 bytes) до первого permanent deployment.
+  Предикат и семантика не изменились.
 - Minimum negative test: `INSERT TimesheetDraftPlannedShift` с `plannedBreakMinutes=-1` — ожидается отказ, SQLSTATE `23514` (`check_violation`).
 
 ### CK-14 `ck_timesheet_draft_segment_interval`

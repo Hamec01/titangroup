@@ -1,8 +1,9 @@
 # Titanor Time — Implementation Status
 
-Обновлено: 2026-07-28 09:49 Europe/Helsinki
+Обновлено: 2026-07-28 14:35 Europe/Helsinki
 Ветка: feature/titanor-time-foundation
-HEAD на момент этого аудита (runtime-тест): bebd6aab5f7a041e6272f24fe32db105ca04f92b
+HEAD на момент source-level фикса имён CK-08/CK-13 (этот аудит): применяется поверх commit `efdac26280b9b168a024d068429ef56b6b0cda3f`
+HEAD на момент runtime-теста, обнаружившего дефект: bebd6aab5f7a041e6272f24fe32db105ca04f92b
 HEAD на момент предыдущего (статического) аудита: 30d2364ffe58679856d6a29d91c9992a941c2b65
 Статус документа: living implementation record
 
@@ -29,13 +30,20 @@ Titanor Time и не означает production deployment. Applying the migrat
 (`prisma migrate deploy` — exit 0, идемпотентный повтор подтверждён), и catalog-аудит подтвердил 8
 enum, 24 таблицы, 55 foreign keys, 6 EXCLUDE, 11 функций, 13 триггеров, 1 extension `btree_gist`, 0
 future-объектов. Однако тот же catalog-аудит выявил **подтверждённый дефект**: два из 21 CHECK
-constraint (`CK-08`, `CK-13`) имеют имена длиннее 63 байт и PostgreSQL молча обрезает их при
-применении миграции — фактическое имя ограничения в каталоге не совпадает с exact frozen identifier
-из `05_RAW_SQL_REGISTER.md`. Это ломает документированный контракт «service identity: exact
-constraint name» (register §7) для этих двух constraint. Поведенческие runtime-тесты (21 CHECK / 6
-EXCLUDE / 13 триггеров) не выполнялись после обнаружения этого дефекта — задача была остановлена по
-правилу «подтверждённый дефект → зафиксировать, не исправлять, не расширять проверку» (см. §8).
-Production-код (seed, аутентификация, API, UI) по-прежнему не начат.
+constraint (`CK-08`, `CK-13`) имели имена длиннее 63 байт, и PostgreSQL молча обрезал их при
+применении миграции — фактическое имя ограничения в каталоге не совпадало с exact frozen identifier
+из `05_RAW_SQL_REGISTER.md`. Это ломало документированный контракт «service identity: exact
+constraint name» (register §7) для этих двух constraint.
+
+**Source-level исправление имён выполнено** отдельной минимальной задачей (эта задача, поверх commit
+`efdac26`): оба имени сокращены до ≤63 байт синхронно в `05_RAW_SQL_REGISTER.md` и в единственной
+existing migration — см. §7 и §9. **Повторное runtime-применение исправленной migration ещё не
+проводилось** — ни `docker`, ни `psql`, ни `prisma migrate deploy/dev` в рамках этой задачи не
+запускались. Поведенческие runtime-тесты (21 CHECK / 6 EXCLUDE / 13 триггеров) по-прежнему не
+выполнялись ни разу. Blocker переведён из состояния «не исправлен» в состояние «исправлен в source,
+ожидает повторной runtime-верификации» (см. §9). Миграция не может считаться runtime-подтверждённой
+полностью, пока повторный runtime-тест не пройден. Production-код (seed, аутентификация, API, UI)
+по-прежнему не начат.
 
 ## 3. Источники истины
 
@@ -196,6 +204,14 @@ constraint из frozen register превышают этот лимит и пос
 - Ожидаемый результат: exact match с register-именем для всех 21 CHECK. Фактический результат: 19/21
   совпали exact, 2/21 (CK-08, CK-13) усечены PostgreSQL.
 
+**Update (source-level fix, отдельная задача поверх commit `efdac26`):** имена CK-08 и CK-13
+сокращены синхронно в `05_RAW_SQL_REGISTER.md` и в этой existing migration до:
+`ck_schedule_template_version_day_break_minutes_nonnegative` (58 bytes, CK-08) и
+`ck_timesheet_draft_shift_break_minutes_nonnegative` (50 bytes, CK-13). Таблица выше оставлена
+как есть — это исторический снимок первого runtime-аудита (HEAD `bebd6aa`), доказывающий факт
+обнаруженного дефекта; текущие имена в репозитории уже другие (см. §9). Исправление не
+верифицировано повторным runtime-применением — см. §9, §10.
+
 **Поведенческие runtime-тесты (21 CHECK / 6 EXCLUDE / 13 триггеров / 11 функций / 7 frozen
 identifiers): не выполнялись.** Задача была остановлена сразу после обнаружения подтверждённого
 дефекта каталога, по явному правилу задачи «подтверждённый дефект → зафиксировать, не исправлять, не
@@ -238,20 +254,37 @@ migration, `prisma/schema.prisma`, существующая migration.sql, `05_R
 
 ### Технические blockers
 
-Есть один подтверждённый runtime-blocker (обнаружен catalog identity-аудитом §7, не статическим
-текстовым аудитом §6 — статический аудит его пропустил, так как не проверял фактическую длину
+Один blocker, статус **«исправлен в source, ожидает повторной runtime-верификации»** (был
+«подтверждённый runtime-blocker, не исправлен» — обнаружен catalog identity-аудитом §7 на HEAD
+`bebd6aa`, не статическим текстовым аудитом §6, так как тот не проверял фактическую длину
 идентификатора против лимита PostgreSQL):
 
-- **CK-08 / CK-13 constraint name truncation.** Два CHECK constraint из frozen register
-  (`ck_work_schedule_template_version_day_planned_break_minutes_nonnegative`, 71 байт;
-  `ck_timesheet_draft_planned_shift_planned_break_minutes_nonnegative`, 66 байт) превышают лимит
-  PostgreSQL в 63 байта на длину идентификатора и после применения migration физически существуют в
-  каталоге под другим, усечённым именем (см. точные значения в §7). Это ломает документированный
-  service-mapping контракт `05_RAW_SQL_REGISTER.md` §7 («service identity: exact constraint name»)
-  для этих двух constraint. Сам предикат ограничения (`>= 0`) работает корректно — проблема только в
-  имени. Не исправлено в рамках этой задачи (задача — только runtime-проверка, не правка migration).
-  Минимальное исправление: сократить имя constraint (и, при необходимости, синхронизировать
-  `05_RAW_SQL_REGISTER.md`) до ≤63 байт отдельной задачей владельца.
+- **CK-08 / CK-13 constraint name truncation.** Два CHECK constraint из frozen register имели имена
+  длиннее лимита PostgreSQL в 63 байта на идентификатор и после применения migration физически
+  существовали в каталоге под другим, усечённым именем (историческая таблица — §7). Это ломало
+  документированный service-mapping контракт `05_RAW_SQL_REGISTER.md` §7 («service identity: exact
+  constraint name») для этих двух constraint. Сам предикат ограничения (`>= 0`) работал корректно —
+  проблема была только в имени.
+
+  **Source-level исправление (эта задача, поверх commit `efdac26`):**
+
+  | ID | Table | Старое имя (историческое, HEAD `bebd6aa`) | Старая длина | Новое имя (текущее) | Новая длина |
+  |---|---|---|---|---|---|
+  | CK-08 | `WorkScheduleTemplateVersionDay` | `ck_work_schedule_template_version_day_planned_break_minutes_nonnegative` | 71 bytes | `ck_schedule_template_version_day_break_minutes_nonnegative` | 58 bytes |
+  | CK-13 | `TimesheetDraftPlannedShift` | `ck_timesheet_draft_planned_shift_planned_break_minutes_nonnegative` | 66 bytes | `ck_timesheet_draft_shift_break_minutes_nonnegative` | 50 bytes |
+
+  Изменены синхронно `05_RAW_SQL_REGISTER.md` (exact constraint name + errata) и единственная existing
+  migration (`ADD CONSTRAINT` identifier + предшествующий комментарий). CHECK predicate
+  (`"plannedBreakMinutes" >= 0`), таблица, колонка, SQLSTATE и минимальный тест — без изменений.
+  `prisma/schema.prisma` не менялась. Вторая migration не создавалась.
+
+  **Не выполнено в рамках этой fix-задачи:** повторное `prisma migrate deploy` исправленной migration
+  на новом чистом одноразовом PostgreSQL 16; поведенческие runtime-тесты для CK-08/CK-13 (позитив +
+  негатив, SQLSTATE `23514`, exact новое имя); полный набор поведенческих runtime-тестов для остальных
+  19 CHECK / 6 EXCLUDE / 13 триггеров (они и раньше не были выполнены — см. §7). Ни `docker`, ни
+  `psql`, ни `prisma migrate deploy/dev` не запускались в рамках этой fix-задачи. Blocker остаётся
+  открытым до тех пор, пока эти шаги не будут выполнены и не подтвердят исправленные имена в реальном
+  PostgreSQL-каталоге.
 
 Стилевая форма `RAISE EXCEPTION` (см. §6) остаётся отмеченным, но не блокирующим расхождением.
 
@@ -274,12 +307,13 @@ migration, `prisma/schema.prisma`, существующая migration.sql, `05_R
 
 ## 10. Следующий рекомендуемый шаг
 
-Отдельной минимальной задачей исправить только имена constraint CK-08 и CK-13 (сократить до ≤63
-байт, сохранив предикат/семантику), синхронизировать `05_RAW_SQL_REGISTER.md`, и затем повторить
-полный runtime-тест (structural + catalog identity + все 21 CHECK / 6 EXCLUDE / 13 триггеров
-поведенчески) на новом чистом одноразовом PostgreSQL 16 — до сих пор не выполненные поведенческие
-тесты остаются обязательными перед тем, как считать миграцию runtime-подтверждённой полностью. Не
-затрагивать production и CollabStudio.
+Имена CK-08 и CK-13 уже сокращены до ≤63 байт и синхронизированы в `05_RAW_SQL_REGISTER.md` и в
+existing migration (см. §9). Отдельной задачей провести полный runtime-тест исправленной migration на
+новом чистом одноразовом PostgreSQL 16: structural + catalog identity аудит (включая проверку, что
+`pg_constraint.conname` для CK-08/CK-13 теперь точно совпадает с новыми именами), плюс все ещё не
+выполненные поведенческие тесты — 21 CHECK (включая CK-08/CK-13 под новыми именами) / 6 EXCLUDE / 13
+триггеров / 11 функций / 7 frozen identifiers. Только после этого миграцию можно считать
+runtime-подтверждённой полностью. Не затрагивать production и CollabStudio.
 
 ## 11. Правило обновления
 

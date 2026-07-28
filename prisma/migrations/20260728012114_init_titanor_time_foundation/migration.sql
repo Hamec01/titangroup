@@ -861,9 +861,9 @@ ALTER TABLE "WorkScheduleTemplateVersionDay"
     )
   );
 
--- CK-08 ck_work_schedule_template_version_day_planned_break_minutes_nonnegative
+-- CK-08 ck_schedule_template_version_day_break_minutes_nonnegative
 ALTER TABLE "WorkScheduleTemplateVersionDay"
-  ADD CONSTRAINT "ck_work_schedule_template_version_day_planned_break_minutes_nonnegative"
+  ADD CONSTRAINT "ck_schedule_template_version_day_break_minutes_nonnegative"
   CHECK ("plannedBreakMinutes" >= 0);
 
 -- CK-09 ck_payroll_period_date_range
@@ -929,9 +929,9 @@ ALTER TABLE "TimesheetDraftPlannedShift"
     )
   );
 
--- CK-13 ck_timesheet_draft_planned_shift_planned_break_minutes_nonnegative
+-- CK-13 ck_timesheet_draft_shift_break_minutes_nonnegative
 ALTER TABLE "TimesheetDraftPlannedShift"
-  ADD CONSTRAINT "ck_timesheet_draft_planned_shift_planned_break_minutes_nonnegative"
+  ADD CONSTRAINT "ck_timesheet_draft_shift_break_minutes_nonnegative"
   CHECK ("plannedBreakMinutes" >= 0);
 
 -- CK-14 ck_timesheet_draft_segment_interval
