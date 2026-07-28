@@ -1,14 +1,57 @@
 name: titanor-time
 
-# Isolated PostgreSQL 16 for Titanor Time.
+# Isolated stack for Titanor Time (PostgreSQL 16 + Next.js app scaffold).
 # Fully separate Compose project from `titanorgroup` (public site, compose.yaml)
 # and from CollabStudio (separate project entirely) — no shared network, volume,
 # image, or secrets with either.
 #
 # This file only defines infrastructure. It is not started as part of this task.
 # See docs/titanor-time/06_DATABASE_INFRASTRUCTURE.md for how to use it.
+#
+# `app` is a bare scaffold only (no login, no data, no features) — see
+# titanor-time-app/. It is only attached to the internal network for now, so it
+# can reach `db` but has no outbound internet access; add a second, non-internal
+# network later if a feature needs to call out (e.g. SMTP).
 
 services:
+  app:
+    build:
+      context: ./titanor-time-app
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    init: true
+
+    depends_on:
+      db:
+        condition: service_healthy
+
+    env_file:
+      - path: .env.titanor-time
+        required: false
+
+    environment:
+      NODE_ENV: production
+      NEXT_TELEMETRY_DISABLED: "1"
+      PORT: "3000"
+      HOSTNAME: "0.0.0.0"
+
+    ports:
+      - "127.0.0.1:3200:3000"
+
+    networks:
+      - internal
+
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - "fetch('http://127.0.0.1:3000/api/health').then(response => { if (!response.ok) process.exit(1) }).catch(() => process.exit(1))"
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 20s
+
   db:
     image: postgres:16
     restart: unless-stopped

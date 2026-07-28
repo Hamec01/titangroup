@@ -1,7 +1,9 @@
 # Titanor Time — Implementation Status
 
-Обновлено: 2026-07-28 15:15 Europe/Helsinki
+Обновлено: 2026-07-28 16:34 Europe/Helsinki
 Ветка: feature/titanor-time-foundation
+Isolated PostgreSQL config commit: `c28af00521ffef322211e2cfae840a5568dc8c03`
+Next.js app scaffold commit: этот commit (см. Git checkpoint)
 Runtime-tested HEAD (полная повторная verification, full green): `991b8fb8381bff11accd09e2c1c3a3f7748d0832`
 Source fix commit (CK-08/CK-13 rename): `991b8fb8381bff11accd09e2c1c3a3f7748d0832`
 HEAD на момент первого runtime-теста, обнаружившего дефект: bebd6aab5f7a041e6272f24fe32db105ca04f92b
@@ -40,8 +42,19 @@ production deployment.
 аудит подтвердил exact новые имена CK-08/CK-13 в `pg_constraint.conname`, отсутствие старых
 (усечённых) имён, и все 21 CHECK / 6 EXCLUDE / 13 триггеров / 11 функций / 7 frozen identifiers прошли
 позитивные и негативные поведенческие сценарии. Blocker CK-08/CK-13 закрыт: **resolved by source fix
-`991b8fb` and confirmed by clean PostgreSQL 16 runtime verification** (см. §10). Production-код (seed,
-аутентификация, API, UI) по-прежнему не начат.
+`991b8fb` and confirmed by clean PostgreSQL 16 runtime verification** (см. §10).
+
+После этого подготовлена (но не запущена) изолированная постоянная конфигурация PostgreSQL 16
+(commit `c28af00`, `compose.titanor-time.yaml`) — отдельный Compose-проект `titanor-time`, отдельная
+internal-network, отдельный named volume, без публикации database-порта, без CollabStudio. Никакая
+постоянная база фактически не создана и не запущена; migration к ней не применялась.
+
+Следующим шагом добавлен bare-каркас Titanor Time Next.js-приложения (`titanor-time-app/`) — App
+Router, TypeScript, health endpoint, multi-stage Dockerfile (standalone output), подключён как
+service `app` в `compose.titanor-time.yaml` (`127.0.0.1:3200`, только internal network). Каркас
+типизируется (`tsc --noEmit`) и собирается (`next build`, `docker compose build`) без ошибок, но не
+запускался ни разу — нет login, нет данных, нет реальных страниц/API кроме `/api/health`.
+Production-код (seed, аутентификация, реальный API, UI) по-прежнему не начат.
 
 ## 3. Источники истины
 
@@ -57,6 +70,8 @@ production deployment.
 | Общий roadmap проекта | `docs/PROJECT_ROADMAP.md` (ЭТАП 4 T4.1–T4.5, ЭТАП 5 T5.1–T5.4) | набросок ЭТАПА 4 заменён комплектом `docs/titanor-time/`; ЭТАП 5 (T5.2 Prisma schema, T5.3 первая migration) — этап, в котором сейчас находится проект |
 | Prisma schema | `prisma/schema.prisma` | зафиксирована, commit `9b2cbab` |
 | Initial migration | `prisma/migrations/20260728012114_init_titanor_time_foundation/migration.sql` | создана, статически проверена (commit `30d2364`), CK-08/CK-13 переименованы (commit `991b8fb`); полностью runtime-верифицирована на одноразовом PostgreSQL 16 — catalog identity + поведенческие тесты 21 CHECK/6 EXCLUDE/13 триггеров, full green (см. §8) |
+| PostgreSQL infra | `compose.titanor-time.yaml`, `docs/titanor-time/06_DATABASE_INFRASTRUCTURE.md` | подготовлено, commit `c28af00`; не запущено |
+| Next.js app scaffold | `titanor-time-app/` | bare scaffold, этот commit; типизируется/собирается, не запускался |
 
 ## 4. Git checkpoint
 
@@ -112,6 +127,25 @@ commit `30d2364`):
 **Не объявляются реализованными**: seed, аутентификация, API, UI, отдельная постоянная база Titanor
 Time (production или dev), concurrency/многосессионное поведение constraints и triggers (намеренно
 вне scope).
+
+**Изолированная PostgreSQL 16 конфигурация** (`compose.titanor-time.yaml`, `.env.titanor-time.example`,
+`docs/titanor-time/06_DATABASE_INFRASTRUCTURE.md`, commit `c28af00`):
+- Отдельный Compose-проект `titanor-time`, отдельная `internal`-network (`titanor-time_internal`),
+  отдельный named volume (`titanor-time_db_data`), без публикации database-порта, без CollabStudio.
+- `docker compose config --quiet` — exit 0. Ничего не запущено: контейнер, network и volume фактически
+  не созданы.
+
+**Titanor Time Next.js app — bare scaffold** (`titanor-time-app/`, добавлен service `app` в
+`compose.titanor-time.yaml`, этот commit):
+- Next.js App Router + TypeScript, свой `package.json`/`Dockerfile`/`tsconfig.json` (изолированные
+  зависимости), `prisma/schema.prisma` и migration остаются общими на уровне репозитория и не
+  скопированы/не перемещены.
+- Единственная функциональность: `GET /api/health` → `{"status":"ok","service":"titanor-time"}` и
+  placeholder-страница `/`. Нет auth, нет БД-кода, нет реального API/UI.
+- `npx tsc --noEmit` — exit 0; `npm run build` (standalone output) — success; `docker compose build
+  app` — success. Ни разу не запускался (`docker compose up` не выполнялся).
+- Service `app` в compose: `127.0.0.1:3200` (host), только `internal` network (нет outbound-доступа
+  из контейнера — при необходимости внешних вызовов в будущем нужно будет добавить вторую network).
 
 ## 6. Статический аудит initial migration
 
@@ -353,7 +387,10 @@ subtransaction (`SAVEPOINT`/`ROLLBACK TO SAVEPOINT`), вся сессия зав
 
 ## 9. Не начато
 
-- Отдельный PostgreSQL-контейнер/volume для Titanor Time (production или dev).
+- Фактический запуск изолированного PostgreSQL 16 (`compose.titanor-time.yaml` подготовлен, но
+  `docker compose up` не выполнялся; контейнер/network/volume не существуют).
+- Фактический запуск Titanor Time Next.js app (`titanor-time-app/` собирается, но не запускался).
+- Применение existing migration к постоянной (не одноразовой тестовой) базе.
 - Seed.
 - Первый `SUPER_ADMIN`.
 - Password delivery (доставка первого пароля/кода активации).
@@ -420,9 +457,14 @@ subtransaction (`SAVEPOINT`/`ROLLBACK TO SAVEPOINT`), вся сессия зав
 
 ## 11. Следующий рекомендуемый шаг
 
-Отдельной задачей подготовить изолированную постоянную конфигурацию PostgreSQL 16 для Titanor Time:
-отдельные service, network, volume и environment-контракт, с backup/restore/rollback-планом, без
-запуска в production и без изменений CollabStudio до отдельного checkpoint владельца.
+Изолированная PostgreSQL 16 конфигурация и bare-каркас Next.js-приложения подготовлены, но ни разу не
+запускались (см. §5). Следующей отдельной задачей, после checkpoint владельца:
+1. Реально поднять `db` (`docker compose -f compose.titanor-time.yaml up -d db`), проверить health.
+2. Применить existing migration к этой (теперь реальной, но ещё не production) базе.
+3. Только затем начинать T5.2/T5.4-T5.6 по `docs/PROJECT_ROADMAP.md` (ORM-интеграция в
+   `titanor-time-app`, первый `SUPER_ADMIN`, login, role guard) — не начинать раньше проверки health
+   и migration. Не запускать в production и не менять CollabStudio без отдельного checkpoint
+   владельца.
 
 ## 12. Правило обновления
 
