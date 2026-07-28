@@ -46,9 +46,23 @@ ENV HOSTNAME=0.0.0.0
 RUN apt-get update && apt-get install -y --no-install-recommends openssl \
     && rm -rf /var/lib/apt/lists/*
 
+# Full node_modules first (includes tsx, argon2, and the already-generated
+# Prisma client — none of which Next.js's own file-tracing includes, since it
+# only traces what the Next.js server itself imports, not scripts/). The
+# standalone copy below overlays its own traced subset on top for anything
+# Next-specific; shared packages already present are untouched.
+COPY --from=builder --chown=node:node /app/node_modules ./node_modules
+
 COPY --from=builder --chown=node:node /app/public ./public
 COPY --from=builder --chown=node:node /app/.next/standalone ./
 COPY --from=builder --chown=node:node /app/.next/static ./.next/static
+
+# The bootstrap CLI and its real package.json (Next's own standalone
+# package.json only lists dev/build/start — not bootstrap:super-admin).
+COPY --from=builder --chown=node:node /app/scripts ./scripts
+COPY --from=builder --chown=node:node /app/lib ./lib
+COPY --from=builder --chown=node:node /app/package.json ./package.json
+COPY --from=builder --chown=node:node /app/tsconfig.json ./tsconfig.json
 
 USER node
 

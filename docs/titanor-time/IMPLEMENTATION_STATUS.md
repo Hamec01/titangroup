@@ -12,7 +12,9 @@ Second migration (Role/Permission/RolePermission/UserRole): см. §5, commit `c
 changed for the first time since commit `9b2cbab`; first initial migration remains frozen/untouched)
 Fresh backup + verified restore after second migration (28 tables, 59 FK, 2 migrations), Prisma
 Client regenerated + `app` rebuilt, bootstrap SUPER_ADMIN CLI implemented + tested on disposable
-PostgreSQL 16 only: см. §5, этот commit
+PostgreSQL 16 only: см. §5, commit `9fbcd1a`
+Docker image gap fix (bootstrap CLI missing from `output: 'standalone'` runner stage) — `app` rebuilt,
+CLI confirmed runnable inside the real image; real SUPER_ADMIN still not created: см. §5, этот commit
 Runtime-tested HEAD (полная повторная verification, full green): `991b8fb8381bff11accd09e2c1c3a3f7748d0832`
 Source fix commit (CK-08/CK-13 rename): `991b8fb8381bff11accd09e2c1c3a3f7748d0832`
 HEAD на момент первого runtime-теста, обнаружившего дефект: bebd6aab5f7a041e6272f24fe32db105ca04f92b
@@ -124,6 +126,25 @@ Argon2id, пароль только через скрытый интеракти
 запуске (добавлена проверка `require.main === module`). Обе найдены и исправлены тестами на
 одноразовой базе, до применения к реальной.
 
+Далее, после получения от владельца подтверждения username (`andrei.sakki`) для реального первого
+`SUPER_ADMIN`, владелец сам запустил предоставленную команду в своём терминале и получил `npm error
+Missing script: "bootstrap:super-admin"`. Диагностика (`docker exec titanor-time-app-1 ...`)
+подтвердила реальный дефект образа, а не ошибку ввода: Next.js `output: 'standalone'` трассирует и
+копирует в `runner`-стадию только то, что достижимо из самих app-роутов — `scripts/`, `lib/`,
+CLI-зависимости (`tsx`, `argon2`) и реальный `package.json` со скриптом `bootstrap:super-admin` в
+собранный образ не попадали; вместо него в `/app/package.json` лежал собственный минимальный
+package.json Next.js (только `dev`/`build`/`start`). Исправлено в `titanor-time-app/Dockerfile`
+(`runner`-стадия): полный `node_modules` из `builder` копируется до наложения standalone-поддерева,
+затем явно добавлены `scripts/`, `lib/`, `package.json`, `tsconfig.json` из `builder`. `app`
+пересобран и пересоздан (`--no-deps`, `db` не перезапускался). Проверено внутри контейнера
+`titanor-time-app-1`: `npm run` показывает `bootstrap:super-admin`; `node_modules` содержит `tsx` и
+`argon2`; `node_modules/.prisma/client` сгенерирован; `docker exec ... npm run bootstrap:super-admin
+-- --username=sanitycheck --dry-run` без `-it` корректно завершается `UsageError` про обязательный
+реальный TTY (exit 1) — то есть CLI действительно исполняется внутри образа и его защита от
+non-TTY запуска работает; `/api/ready` по-прежнему `{"status":"ready",...,"database":"connected"}`.
+Реальный `SUPER_ADMIN` в постоянной базе всё ещё **не создан** — владельцу нужно повторить команду
+самому, уже с `-it`, из своего терминала.
+
 ## 3. Источники истины
 
 | Область | Источник | Статус |
@@ -141,7 +162,7 @@ Argon2id, пароль только через скрытый интеракти
 | Second migration | `prisma/migrations/20260728161708_add_role_permission_user_role/migration.sql` | создана и применена commit `c0f5425` — Role/Permission/RolePermission/UserRole; не менялась этой задачей |
 | PostgreSQL infra | `compose.titanor-time.yaml`, `docs/titanor-time/06_DATABASE_INFRASTRUCTURE.md` | подготовлено (commit `c28af00`); `db` реально запущен, обе migrations применены; свежий backup после второй migration проверен restore-ом (этот commit) |
 | Next.js app scaffold | `titanor-time-app/` | commit `e15b203` (scaffold) + `7a854ac` (Prisma Client, `/api/ready`) + этот commit (Prisma Client регенерирован под RBAC-схему, `app` пересобран) |
-| Bootstrap SUPER_ADMIN CLI | `titanor-time-app/scripts/bootstrap-super-admin.ts` | реализован и проверен этим commit только на одноразовом PostgreSQL 16; реальный SUPER_ADMIN в постоянной базе не создан |
+| Bootstrap SUPER_ADMIN CLI | `titanor-time-app/scripts/bootstrap-super-admin.ts` | реализован и проверен на одноразовом PostgreSQL 16 (commit `9fbcd1a`); Docker-образ `app` не содержал CLI/зависимости (standalone-трассировка), исправлено в `titanor-time-app/Dockerfile` этим commit — CLI подтверждён исполняемым внутри реального образа; реальный SUPER_ADMIN в постоянной базе не создан |
 
 ## 4. Git checkpoint
 
@@ -712,15 +733,15 @@ subtransaction (`SAVEPOINT`/`ROLLBACK TO SAVEPOINT`), вся сессия зав
 
 `db` и `app` реально запущены, healthy, Prisma Client регенерирован под текущую (RBAC-расширенную)
 схему. Свежий backup после второй migration выполнен и проверен restore-ом. Bootstrap CLI первого
-`SUPER_ADMIN` реализован и полностью проверен — но **только на одноразовом PostgreSQL 16**. Постоянная
-база по-прежнему пустая (0 `User`, 0 `UserRole`). Следующей отдельной задачей, после явного
-подтверждения владельца (конкретные username/email и согласованный способ ввода пароля):
-1. Взять ещё один свежий backup постоянной database непосредственно перед первой записью, даже если
-   backup из этой задачи уже проверен restore-ом.
-2. Реально запустить `npm run bootstrap:super-admin -- --username=<...> [--email=<...>]` через
-   `docker compose -f compose.titanor-time.yaml exec -it app ...` (реальный TTY) против постоянной
-   `titanor-time-db-1` — создаст ровно одного `User`+`UserRole(SUPER_ADMIN)`.
-3. Только после этого: seed permission-матрицы (`Permission`/`RolePermission`), затем login (T5.5),
+`SUPER_ADMIN` реализован, полностью проверен на одноразовом PostgreSQL 16, и теперь подтверждён
+исполняемым внутри реального образа `app` (Docker-дефект standalone-трассировки исправлен этим
+commit). Владелец уже подтвердил username (`andrei.sakki`) для реального первого `SUPER_ADMIN`.
+Постоянная база по-прежнему пустая (0 `User`, 0 `UserRole`). Следующей отдельной задачей:
+1. Владелец сам повторяет `docker compose -f compose.titanor-time.yaml exec -it app npm run
+   bootstrap:super-admin -- --username=andrei.sakki` из своего терминала (реальный `-it` TTY,
+   пароль ≥16 символов вводится только туда, никогда в чат) — создаст ровно одного
+   `User`+`UserRole(SUPER_ADMIN)`.
+2. Только после этого: seed permission-матрицы (`Permission`/`RolePermission`), затем login (T5.5),
    role guard (T5.6), `UserSession`. Не начинать реальный admin API или UI раньше отдельного
    подтверждения. Не запускать `app` в production и не менять CollabStudio без отдельного checkpoint
    владельца.
