@@ -13,3 +13,4 @@ pnpm-debug.log*
 .env
 .env.*
 !.env.example
+!.env.titanor-time.example

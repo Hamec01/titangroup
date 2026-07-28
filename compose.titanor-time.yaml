@@ -1,0 +1,38 @@
+name: titanor-time
+
+# Isolated PostgreSQL 16 for Titanor Time.
+# Fully separate Compose project from `titanorgroup` (public site, compose.yaml)
+# and from CollabStudio (separate project entirely) — no shared network, volume,
+# image, or secrets with either.
+#
+# This file only defines infrastructure. It is not started as part of this task.
+# See docs/titanor-time/06_DATABASE_INFRASTRUCTURE.md for how to use it.
+
+services:
+  db:
+    image: postgres:16
+    restart: unless-stopped
+
+    env_file:
+      - path: .env.titanor-time
+        required: false
+
+    volumes:
+      - db_data:/var/lib/postgresql/data
+
+    networks:
+      - internal
+
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U \"$$POSTGRES_USER\" -d \"$$POSTGRES_DB\""]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+networks:
+  internal:
+    internal: true
+
+volumes:
+  db_data:
