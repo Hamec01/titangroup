@@ -1,6 +1,6 @@
 # Titanor Time — Implementation Status
 
-Обновлено: 2026-07-28 21:56 Europe/Helsinki
+Обновлено: 2026-07-30 00:18 Europe/Helsinki
 Ветка: feature/titanor-time-foundation
 Isolated PostgreSQL config commit: `c28af00521ffef322211e2cfae840a5568dc8c03`
 Next.js app scaffold commit: `e15b203fe334fa4e2c68335f1169f78ed9c18ec9`
@@ -14,7 +14,10 @@ Fresh backup + verified restore after second migration (28 tables, 59 FK, 2 migr
 Client regenerated + `app` rebuilt, bootstrap SUPER_ADMIN CLI implemented + tested on disposable
 PostgreSQL 16 only: см. §5, commit `9fbcd1a`
 Docker image gap fix (bootstrap CLI missing from `output: 'standalone'` runner stage) — `app` rebuilt,
-CLI confirmed runnable inside the real image; real SUPER_ADMIN still not created: см. §5, этот commit
+CLI confirmed runnable inside the real image; real SUPER_ADMIN still not created: см. §5, commit
+`122c884`
+First production SUPER_ADMIN created in persistent `titanor-time-db-1` (`andrei.sakki`, owner-run,
+owner-confirmed state — see caveat in §5): см. §5, этот commit
 Runtime-tested HEAD (полная повторная verification, full green): `991b8fb8381bff11accd09e2c1c3a3f7748d0832`
 Source fix commit (CK-08/CK-13 rename): `991b8fb8381bff11accd09e2c1c3a3f7748d0832`
 HEAD на момент первого runtime-теста, обнаружившего дефект: bebd6aab5f7a041e6272f24fe32db105ca04f92b
@@ -144,6 +147,19 @@ package.json Next.js (только `dev`/`build`/`start`). Исправлено 
 non-TTY запуска работает; `/api/ready` по-прежнему `{"status":"ready",...,"database":"connected"}`.
 Реальный `SUPER_ADMIN` в постоянной базе всё ещё **не создан** — владельцу нужно повторить команду
 самому, уже с `-it`, из своего терминала.
+
+После этого владелец сам выполнил `docker compose -f compose.titanor-time.yaml exec -it app npm run
+bootstrap:super-admin -- --username=andrei.sakki` из своего терминала (реальный `-it` TTY, пароль
+введён только туда) и сообщил результат: первый production `SUPER_ADMIN` создан и подтверждён.
+Эта задача (этот commit) обновляет только документацию на основе состояния, сообщённого владельцем
+напрямую в чате, — независимый read-only SQL-запрос к `titanor-time-db-1` для перепроверки этой же
+информации агентом был заблокирован политикой инструментов (tool policy) до выполнения и не
+повторялся; `db`/`app`/bootstrap CLI этой задачей не запускались и не перезапускались. Сообщённое
+состояние: `username=andrei.sakki`, `status=ACTIVE`, `locale=FI`, `role=SUPER_ADMIN`,
+`passwordSet=true`, `passwordHash` — Argon2id (сам хеш не выводился и не проверялся этой задачей),
+`User=1`, `UserRole=1`, `Role=4`, `activeSuperAdmins=1`. Повторный запуск bootstrap CLI (проверка
+идемпотентности) корректно завершился без изменений: `No changes made: An active SUPER_ADMIN already
+exists.` — согласуется с проверенным ранее (§5, commit `9fbcd1a`) поведением guard на одноразовой базе.
 
 ## 3. Источники истины
 
@@ -422,6 +438,34 @@ Time (production или dev), concurrency/многосессионное пов�
   реальным permission-guard понадобится отдельная задача — seed полной permission-матрицы из
   `02_ROLE_PERMISSION_MATRIX.md`.
 
+**Первый production SUPER_ADMIN создан** (`titanor-time-db-1`, владелец лично запустил bootstrap CLI
+из своего терминала с `-it`, этот commit — документация only, код/схема/данные этой задачей не
+менялись):
+- Источник состояния: сообщено владельцем напрямую в чате после реального запуска. Независимая
+  read-only проверка агентом (`docker exec` в `titanor-time-db-1` с `SELECT count(*)`-запросами, без
+  записи) была заблокирована политикой инструментов до выполнения — попытка не повторялась, other
+  db/bootstrap actions этой задачей не выполнялись. Ниже — сообщённое, не самостоятельно
+  верифицированное агентом, состояние.
+- `username=andrei.sakki`, `status=ACTIVE`, `locale=FI`, ровно одна активная роль `SUPER_ADMIN`
+  (`UserRole.validTo IS NULL`).
+- `passwordSet=true`, hash-алгоритм Argon2id (`$argon2id$...`) — сам хеш не выводился в чат и не
+  записан в этот документ, согласуется с CLI-контрактом (§5 выше, «Bootstrap CLI первого
+  SUPER_ADMIN»).
+- Каталог: `User=1`, `UserRole=1` (активная), `Role=4` (без изменений — `SUPER_ADMIN`/`ADMIN`/
+  `FOREMAN`/`WORKER`), `activeSuperAdmins=1`. `Permission`/`RolePermission` по-прежнему пусты (без
+  изменений).
+- Idempotency-guard подтверждён на реальной базе: повторный запуск того же bootstrap-скрипта завершился
+  без изменений — `No changes made: An active SUPER_ADMIN already exists.` Эта задача **не** запускала
+  bootstrap повторно — сообщённый результат относится к попытке владельца, предшествовавшей этой
+  документационной задаче.
+- `db`/`app` этой задачей не перезапускались и не пересоздавались; migrations и `prisma/schema.prisma`
+  не менялись; `passwordHash` не читался и не изменялся этой задачей.
+- Governance-ограничения для `SUPER_ADMIN` (последний активный не удаляется/не блокируется/не
+  понижается, второй `SUPER_ADMIN` — только через аутентифицированный admin API, не через bootstrap
+  CLI, role-изменения — в audit trail после появления модели `AuditEvent`) зафиксированы отдельно и
+  остаются в силе для последующих задач (login/role guard/admin API) — сам bootstrap CLI и так уже
+  отказывается создавать второго `SUPER_ADMIN` (см. §5 выше).
+
 ## 6. Статический аудит initial migration
 
 - Exact migration path: `prisma/migrations/20260728012114_init_titanor_time_foundation/migration.sql`.
@@ -664,10 +708,9 @@ subtransaction (`SAVEPOINT`/`ROLLBACK TO SAVEPOINT`), вся сессия зав
 
 - Seed permission-матрицы (заполнение `Permission`/`RolePermission` из
   `02_ROLE_PERMISSION_MATRIX.md` — таблицы созданы, но пусты; нужно перед реальным permission guard).
-- Реальное создание первого `SUPER_ADMIN` в постоянной базе (CLI реализован и проверен только на
-  disposable database — см. §5; фактический запуск требует отдельного подтверждения владельца с
-  выбранными username/email и способом ввода пароля).
-- Password delivery (доставка первого пароля/кода активации).
+- Password delivery как общий процесс для будущих (не первого) аккаунтов (доставка пароля/кода
+  активации при создании новых пользователей через admin API — для первого `SUPER_ADMIN` уже закрыто:
+  владелец ввёл собственный пароль напрямую в TTY, см. §5).
 - MFA production gate (`REQUIRE_MFA_FOR_ADMIN=true`).
 - Login.
 - `UserSession` (модель ещё не добавлена).
@@ -726,24 +769,25 @@ subtransaction (`SAVEPOINT`/`ROLLBACK TO SAVEPOINT`), вся сессия зав
   `02_...` §6).
 - Partial-day отсутствия — нужна ли отдельная будущая модель (`README.md` §8.6).
 - Когда именно строится route/API для `absence.*` (`README.md` §8.7, `04_...` §12).
-- Известен ли первый `SUPER_ADMIN` и способ передачи первого пароля — явно указано в `README.md`
-  §11 как критерий, предшествующий production-коду, и пока не закрыто.
+- ~~Известен ли первый `SUPER_ADMIN` и способ передачи первого пароля~~ — **закрыто этим commit**:
+  первый `SUPER_ADMIN` (`andrei.sakki`) создан в постоянной базе, пароль введён владельцем лично через
+  интерактивный TTY bootstrap CLI, нигде не передавался и не проходил через чат (см. §5).
 
 ## 11. Следующий рекомендуемый шаг
 
-`db` и `app` реально запущены, healthy, Prisma Client регенерирован под текущую (RBAC-расширенную)
-схему. Свежий backup после второй migration выполнен и проверен restore-ом. Bootstrap CLI первого
-`SUPER_ADMIN` реализован, полностью проверен на одноразовом PostgreSQL 16, и теперь подтверждён
-исполняемым внутри реального образа `app` (Docker-дефект standalone-трассировки исправлен этим
-commit). Владелец уже подтвердил username (`andrei.sakki`) для реального первого `SUPER_ADMIN`.
-Постоянная база по-прежнему пустая (0 `User`, 0 `UserRole`). Следующей отдельной задачей:
-1. Владелец сам повторяет `docker compose -f compose.titanor-time.yaml exec -it app npm run
-   bootstrap:super-admin -- --username=andrei.sakki` из своего терминала (реальный `-it` TTY,
-   пароль ≥16 символов вводится только туда, никогда в чат) — создаст ровно одного
-   `User`+`UserRole(SUPER_ADMIN)`.
-2. Только после этого: seed permission-матрицы (`Permission`/`RolePermission`), затем login (T5.5),
-   role guard (T5.6), `UserSession`. Не начинать реальный admin API или UI раньше отдельного
-   подтверждения. Не запускать `app` в production и не менять CollabStudio без отдельного checkpoint
+Первый production `SUPER_ADMIN` (`andrei.sakki`) создан в постоянной `titanor-time-db-1` и
+idempotency-guard bootstrap CLI подтверждён на реальной базе (см. §5, §2). `db` и `app` не
+перезапускались этой задачей. Bootstrap CLI свою единственную задачу выполнил и не должен запускаться
+повторно для создания второго `SUPER_ADMIN` (см. governance-правила в §5 выше). Следующей отдельной
+задачей:
+1. Seed полной permission-матрицы (`Permission`/`RolePermission`) из
+   `02_ROLE_PERMISSION_MATRIX.md` — предпосылка для реального permission guard.
+2. Только после этого: login (T5.5), role guard (T5.6), `UserSession`. Role guard и любой будущий
+   role-management endpoint обязаны на сервере запрещать удаление/блокировку/понижение последнего
+   активного `SUPER_ADMIN` и писать grant/revoke роли в audit trail (требует модели `AuditEvent`,
+   которой пока нет — см. §9). Второй `SUPER_ADMIN` создаётся только через аутентифицированный admin
+   API, не через bootstrap CLI. Не начинать реальный admin API или UI раньше отдельного подтверждения
+   владельца. Не запускать `app` в production и не менять CollabStudio без отдельного checkpoint
    владельца.
 
 ## 12. Правило обновления
