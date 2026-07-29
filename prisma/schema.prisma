@@ -20,6 +20,11 @@ enum UserStatus {
   DEACTIVATED
 }
 
+enum AuthLevel {
+  PASSWORD
+  MFA_VERIFIED
+}
+
 enum AbsenceType {
   SICK_LEAVE
   VACATION
@@ -85,6 +90,7 @@ model User {
   createdTemplateVersions  WorkScheduleTemplateVersion[] @relation("TemplateVersionCreatedBy")
   createdTimesheetVersions TimesheetVersion[]            @relation("TimesheetVersionCreatedBy")
   userRoles                UserRole[]
+  userSessions             UserSession[]
 }
 
 model Role {
@@ -127,6 +133,24 @@ model UserRole {
 
   @@index([userId])
   @@index([roleId])
+}
+
+model UserSession {
+  id            String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId        String    @db.Uuid
+  tokenHash     String    @unique @db.VarChar(64)
+  authLevel     AuthLevel @default(PASSWORD)
+  mfaVerifiedAt DateTime? @db.Timestamptz(6)
+  expiresAt     DateTime  @db.Timestamptz(6)
+  lastSeenAt    DateTime  @default(now()) @db.Timestamptz(6)
+  ipAddress     String?   @db.VarChar(45)
+  userAgent     String?   @db.Text
+  revokedAt     DateTime? @db.Timestamptz(6)
+  createdAt     DateTime  @default(now()) @db.Timestamptz(6)
+  user          User      @relation(fields: [userId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+
+  @@index([userId])
+  @@index([expiresAt])
 }
 
 model Employee {
