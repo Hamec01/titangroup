@@ -18,6 +18,7 @@
  */
 
 import { prisma } from '../lib/prisma';
+import { hasRealTty, promptHidden } from '../lib/tty-prompt';
 
 const SUPER_ADMIN_ROLE_NAME = 'SUPER_ADMIN';
 const MIN_PASSWORD_LENGTH = 16;
@@ -109,59 +110,11 @@ function parseArgs(argv: string[]): ParsedArgs {
 }
 
 function requireRealTty(): void {
-  if (!process.stdin.isTTY || !process.stdout.isTTY) {
+  if (!hasRealTty()) {
     throw new UsageError(
       'A real interactive terminal (TTY) is required for the password prompt — refusing to run under a pipe/redirect.'
     );
   }
-}
-
-function promptHidden(promptText: string): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const stdin = process.stdin;
-    process.stdout.write(promptText);
-
-    const wasRaw = stdin.isRaw ?? false;
-    stdin.setRawMode(true);
-    stdin.resume();
-    stdin.setEncoding('utf8');
-
-    let input = '';
-
-    const cleanup = () => {
-      stdin.removeListener('data', onData);
-      stdin.setRawMode(wasRaw);
-      stdin.pause();
-    };
-
-    const onData = (chunk: string) => {
-      const char = chunk.toString();
-      switch (char) {
-        case '\n':
-        case '\r':
-          cleanup();
-          process.stdout.write('\n');
-          resolve(input);
-          break;
-        case '\u0003': // Ctrl-C
-          cleanup();
-          process.stdout.write('\n');
-          reject(new Error('Aborted by user.'));
-          break;
-        case '\u007f': // Backspace
-        case '\b':
-          if (input.length > 0) {
-            input = input.slice(0, -1);
-          }
-          break;
-        default:
-          input += char;
-          break;
-      }
-    };
-
-    stdin.on('data', onData);
-  });
 }
 
 async function promptForPassword(): Promise<string> {
