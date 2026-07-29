@@ -1,6 +1,6 @@
 # Titanor Time — Implementation Status
 
-Обновлено: 2026-07-30 02:04 Europe/Helsinki
+Обновлено: 2026-07-30 02:44 Europe/Helsinki
 Ветка: feature/titanor-time-foundation
 Isolated PostgreSQL config commit: `c28af00521ffef322211e2cfae840a5568dc8c03`
 Next.js app scaffold commit: `e15b203fe334fa4e2c68335f1169f78ed9c18ec9`
@@ -24,8 +24,11 @@ Prisma Client regenerated: см. §5, commit `7795d3e`
 tsconfig fix (root project no longer type-checks the isolated `titanor-time-app` subproject): commit
 `3c39d84`
 `POST /api/auth/login` (T5.5 core) implemented per `04_ADMIN_FIRST_API_CONTRACTS.md` §0/§1 — tested
-on disposable PostgreSQL 16 only, **not yet exercised against `titanor-time-db-1`**: см. §5, этот
-commit
+on disposable PostgreSQL 16, commit `ecb37b2`
+`reset-password` CLI added (owner forgot the bootstrap-set password) + deployed to real `app`: commit
+`be598f8`
+Real `SUPER_ADMIN` password reset by owner + real login against `titanor-time-db-1` confirmed —
+`200`, correct `id`/`username`/`roles: ["SUPER_ADMIN"]`: см. §5, этот commit
 Runtime-tested HEAD (полная повторная verification, full green): `991b8fb8381bff11accd09e2c1c3a3f7748d0832`
 Source fix commit (CK-08/CK-13 rename): `991b8fb8381bff11accd09e2c1c3a3f7748d0832`
 HEAD на момент первого runtime-теста, обнаружившего дефект: bebd6aab5f7a041e6272f24fe32db105ca04f92b
@@ -616,6 +619,50 @@ login-эндпоинта): корневой `tsconfig.json` через `**/*.ts`
   типизации/локального теста; Docker-образ `app` эту копию не использует (пересобирает свою во время
   build).
 
+**Login задеплоен на реальный `app` + структурная проверка на реальной базе** (тот же commit `ecb37b2`
+как код, деплой отдельным шагом сразу после): `docker compose build app` + `up -d --no-deps app` —
+`db` не пересоздавался (`Running`, то же время), `app` пересоздан, healthy. Проверено без знания
+реального пароля (агенту он не известен и не должен быть): отсутствие `X-Requested-With` → `403`;
+пустое тело → `400`; неизвестный `identifier` → `401`; **`andrei.sakki` + заведомо неверный пароль →
+`401`** — последнее прямо подтверждает, что реальный пользователь найден в `titanor-time-db-1`, его
+`status` дошёл до проверки пароля (не `PENDING_ACTIVATION`/`DEACTIVATED`), и сама проверка пароля
+физически выполняется против реальной строки, а не заглушки.
+
+**`reset-password` CLI** (`titanor-time-app/scripts/reset-password.ts`,
+`titanor-time-app/lib/tty-prompt.ts`, commit `be598f8`) — владелец не мог вспомнить пароль,
+установленный во время bootstrap; самостоятельного «forgot password» flow ещё нет
+(`PasswordResetToken`/доставка — более поздняя, ещё не начатая фича), а bootstrap CLI намеренно
+одноразовый и второй раз не запускается:
+- Тот же security-паттерн, что bootstrap: новый пароль только через скрытый real-TTY double-prompt,
+  никогда не CLI-аргументом/env var; минимум 16 символов — **не понижен**, несмотря на более ранний
+  вопрос владельца про более короткий пароль (см. обсуждение в чате) — это сброс credentials
+  потенциально для `SUPER_ADMIN`, самого чувствительного аккаунта.
+- Общий TTY-код (`promptHidden`) вынесен в `lib/tty-prompt.ts`, чтобы не дублироваться между
+  скриптами; `bootstrap-super-admin.ts` отдельно перепроверен — неизменное поведение (non-TTY
+  отклонение даёт тот же `Usage error`, exit 1).
+- Сброс пароля в той же транзакции отзывает все активные `UserSession` этого пользователя —
+  забытый/потенциально скомпрометированный пароль означает, что и старые сессии доверять не стоит.
+- Проверено на одноразовом PostgreSQL 16: non-TTY, `--password`-аргумент отклонён, отсутствующий
+  `--username`, dry-run (ничего не пишет — старый пароль и сессия по-прежнему валидны после),
+  несуществующий username, реальный сброс (прямой `argon2.verify()`: старый пароль перестал работать,
+  новый заработал; единственная активная сессия отозвана), и сквозной сценарий через настоящий
+  login-эндпоинт (старый пароль → `401`, новый → `200`). Одноразовый контейнер и все временные
+  seed/invoke-скрипты удалены.
+- Задеплоен на реальный `app` тем же паттерном (`build` + `up -d --no-deps`) — `db` не пересоздавался;
+  `docker exec ... npm run` внутри реального образа подтвердил наличие обеих команд
+  (`bootstrap:super-admin`, `reset-password`).
+
+**Реальный пароль `SUPER_ADMIN` сброшен владельцем + реальный login подтверждён** (этот commit):
+владелец лично выполнил `docker compose exec -it app npm run reset-password -- --username=andrei.sakki`
+на VPS (реальный `-it` TTY), затем вошёл через `POST /api/auth/login` против реальной
+`titanor-time-db-1`. Точный ответ (не пересказ): `200`, `{"user":{"id":"f227b077-a84d-4f4c-8acc-c13b38728e1a","username":"andrei.sakki","roles":["SUPER_ADMIN"],"locale":"FI"}}`.
+Как и раньше, это владелец-сообщённый факт, не независимо перепроверенный агентом запросом к базе —
+`docker exec`/network-based доступ к `titanor-time-db-1` заблокирован агенту политикой инструментов
+(см. §2/§5 выше). Прямой HTTP-ответ с реальным (не тестовым) `id` и точной ролью — сильное прямое
+доказательство сам по себе, не только словесное подтверждение. Второй вызов той же командой сразу
+после вернул `401 INVALID_CREDENTIALS` — ожидаемо, скорее всего опечатка при повторном скрытом вводе
+пароля, не проблема системы (неверный пароль корректно отклонён, не пропущен).
+
 ## 6. Статический аудит initial migration
 
 - Exact migration path: `prisma/migrations/20260728012114_init_titanor_time_foundation/migration.sql`.
@@ -862,10 +909,9 @@ subtransaction (`SAVEPOINT`/`ROLLBACK TO SAVEPOINT`), вся сессия зав
   активации при создании новых пользователей через admin API — для первого `SUPER_ADMIN` уже закрыто:
   владелец ввёл собственный пароль напрямую в TTY, см. §5).
 - MFA production gate (`REQUIRE_MFA_FOR_ADMIN=true`).
-- `POST /api/auth/login` реализован и проверен только на одноразовом PostgreSQL 16 (см. §5) — ещё не
-  проверен против реальной `titanor-time-db-1`, не задеплоен в реальный `app`. `GET /api/auth/session`,
-  `POST /api/auth/logout`/`logout-all`, и middleware чтения `UserSession` на защищённых роутах — не
-  начаты (login пока только выдаёт сессию, никто её не проверяет).
+- `GET /api/auth/session`, `POST /api/auth/logout`/`logout-all`, и middleware чтения `UserSession` на
+  защищённых роутах — не начаты (login задеплоен и подтверждён реальным входом `SUPER_ADMIN`, см. §5,
+  но пока ничего не проверяет выданную им сессию на других роутах).
 - Role guard / permission enforcement.
 - Admin-first API (`04_ADMIN_FIRST_API_CONTRACTS.md`).
 - `/admin/setup`.
@@ -928,25 +974,21 @@ subtransaction (`SAVEPOINT`/`ROLLBACK TO SAVEPOINT`), вся сессия зав
 ## 11. Следующий рекомендуемый шаг
 
 Первый production `SUPER_ADMIN` (`andrei.sakki`) создан в постоянной `titanor-time-db-1` (см. §5, §2).
-`UserSession` применена к реальной базе, `app` пересобран, healthy (commit `7795d3e`). Root tsconfig
-исправлен (commit `3c39d84`). `POST /api/auth/login` (T5.5 core) реализован и полностью проверен —
-**только на одноразовом PostgreSQL 16**, локальным `next dev`, не на реальном `app`/`db` (см. §5, этот
-commit).
+`UserSession` применена к реальной базе (commit `7795d3e`). Root tsconfig исправлен (commit `3c39d84`).
+`POST /api/auth/login` (T5.5 core, commit `ecb37b2`) задеплоен на реальный `app` и подтверждён —
+владелец сбросил забытый пароль через новый `reset-password` CLI (commit `be598f8`) и реально вошёл:
+`200`, корректные `id`/`username`/`roles: ["SUPER_ADMIN"]` (см. §5, этот commit). `db` ни разу не
+пересоздавался за все эти шаги.
 
-**Открытый хвост от предыдущей задачи:** явный успешный `prisma migrate status` против самой
+**Открытый хвост от более ранней задачи:** явный успешный `prisma migrate status` против самой
 `titanor-time-db-1` всё ещё не зафиксирован (см. §5) — не блокирует, но стоит закрыть при случае.
 
 Следующей отдельной задачей:
-1. Задеплоить login на реальный `app`: пересобрать образ (`docker compose build app`), пересоздать
-   (`--no-deps`, `db` не трогать) — тот же паттерн, что применение migration в §5. Затем вручную
-   проверить `POST /api/auth/login` против реального `titanor-time-db-1` с реальным `SUPER_ADMIN`
-   (`andrei.sakki`) — это первый реальный вызов эндпоинта на production-данных, стоит сделать это
-   отдельно и осознанно, не молча внутри следующей задачи.
-2. `GET /api/auth/session` + `POST /api/auth/logout`/`logout-all` (§1 контракта) — без них
+1. `GET /api/auth/session` + `POST /api/auth/logout`/`logout-all` (§1 контракта) — без них
    выданная login'ом сессия ничем не проверяется и не отзывается.
-3. Route-protection middleware, читающая `UserSession` по cookie `tt_session` (`SHA-256` → поиск по
+2. Route-protection middleware, читающая `UserSession` по cookie `tt_session` (`SHA-256` → поиск по
    `tokenHash`, проверка `expiresAt`/`revokedAt`) — нужна любому будущему защищённому route.
-4. Только после этого: role guard (T5.6) — вместе с ним seed `Permission`/`RolePermission` по мере
+3. Только после этого: role guard (T5.6) — вместе с ним seed `Permission`/`RolePermission` по мере
    реализации каждого endpoint (не одним массовым шагом — см. обоснование в комментарии второй
    migration). Role guard и любой будущий role-management endpoint обязаны на сервере запрещать
    удаление/блокировку/понижение последнего активного `SUPER_ADMIN` и писать grant/revoke роли в audit
