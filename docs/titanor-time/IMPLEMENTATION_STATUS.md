@@ -1,6 +1,6 @@
 # Titanor Time — Implementation Status
 
-Обновлено: 2026-07-30 01:10 Europe/Helsinki
+Обновлено: 2026-07-30 01:46 Europe/Helsinki
 Ветка: feature/titanor-time-foundation
 Isolated PostgreSQL config commit: `c28af00521ffef322211e2cfae840a5568dc8c03`
 Next.js app scaffold commit: `e15b203fe334fa4e2c68335f1169f78ed9c18ec9`
@@ -18,8 +18,9 @@ CLI confirmed runnable inside the real image; real SUPER_ADMIN still not created
 `122c884`
 First production SUPER_ADMIN created in persistent `titanor-time-db-1` (`andrei.sakki`, owner-run,
 owner-confirmed state — see caveat in §5): см. §5, commit `836ef49`
-Third migration (`UserSession`, T5.5 first sub-step) — schema only, tested on disposable PostgreSQL
-16, **not applied** to `titanor-time-db-1`: см. §5, этот commit
+Third migration (`UserSession`, T5.5 first sub-step) — schema created + tested on disposable
+PostgreSQL 16, commit `e273490`; **owner-applied** to persistent `titanor-time-db-1`, `app` rebuilt +
+Prisma Client regenerated: см. §5, этот commit
 Runtime-tested HEAD (полная повторная verification, full green): `991b8fb8381bff11accd09e2c1c3a3f7748d0832`
 Source fix commit (CK-08/CK-13 rename): `991b8fb8381bff11accd09e2c1c3a3f7748d0832`
 HEAD на момент первого runtime-теста, обнаружившего дефект: bebd6aab5f7a041e6272f24fe32db105ca04f92b
@@ -178,7 +179,7 @@ exists.` — согласуется с проверенным ранее (§5, c
 | Prisma schema | `prisma/schema.prisma` | зафиксирована, commit `9b2cbab`; расширена (Role/Permission/RolePermission/UserRole) commit `c0f5425` — 28 моделей, 8 enum; расширена вторично (`UserSession`, `AuthLevel`) этим commit — 29 моделей, 9 enum |
 | Initial migration | `prisma/migrations/20260728012114_init_titanor_time_foundation/migration.sql` | создана, статически проверена (commit `30d2364`), CK-08/CK-13 переименованы (commit `991b8fb`); полностью runtime-верифицирована на одноразовом PostgreSQL 16 — catalog identity + поведенческие тесты 21 CHECK/6 EXCLUDE/13 триггеров, full green (см. §8); frozen/unchanged с тех пор, включая эту задачу |
 | Second migration | `prisma/migrations/20260728161708_add_role_permission_user_role/migration.sql` | создана и применена commit `c0f5425` — Role/Permission/RolePermission/UserRole; не менялась этой задачей |
-| Third migration | `prisma/migrations/20260729220524_add_user_session/migration.sql` | создана этим commit — `UserSession` (T5.5, первый под-шаг); протестирована на одноразовом PostgreSQL 16 (все три migrations с нуля, идемпотентность, catalog identity, поведенческие тесты); **не применена** к `titanor-time-db-1` — требует отдельного подтверждения владельца |
+| Third migration | `prisma/migrations/20260729220524_add_user_session/migration.sql` | создана commit `e273490` — `UserSession` (T5.5, первый под-шаг); протестирована на одноразовом PostgreSQL 16 (все три migrations с нуля, идемпотентность, catalog identity, поведенческие тесты); **применена владельцем** к `titanor-time-db-1` этим commit — `prisma migrate deploy` вернул «All migrations have been successfully applied» |
 | PostgreSQL infra | `compose.titanor-time.yaml`, `docs/titanor-time/06_DATABASE_INFRASTRUCTURE.md` | подготовлено (commit `c28af00`); `db` реально запущен, обе migrations применены; свежий backup после второй migration проверен restore-ом (этот commit) |
 | Next.js app scaffold | `titanor-time-app/` | commit `e15b203` (scaffold) + `7a854ac` (Prisma Client, `/api/ready`) + этот commit (Prisma Client регенерирован под RBAC-схему, `app` пересобран) |
 | Bootstrap SUPER_ADMIN CLI | `titanor-time-app/scripts/bootstrap-super-admin.ts` | реализован и проверен на одноразовом PostgreSQL 16 (commit `9fbcd1a`); Docker-образ `app` не содержал CLI/зависимости (standalone-трассировка), исправлено в `titanor-time-app/Dockerfile` этим commit — CLI подтверждён исполняемым внутри реального образа; реальный SUPER_ADMIN в постоянной базе не создан |
@@ -498,11 +499,45 @@ owner checkpoint на дизайн):
   на которого ссылается `UserSession`, отклонена (`foreign key constraint violation` —
   `onDelete: Restrict` работает); soft-revoke через `revokedAt` подтверждён. Одноразовый контейнер
   удалён, временные файлы удалены, `docker ps`/`docker volume ls` для реальных сервисов не менялись.
-- **Реальная `titanor-time-db-1` этой migration не тронута.** Prisma Client не регенерировался,
-  `titanor-time-app`/`app`-контейнер не пересобирался и не перезапускался. Применение к реальной базе
-  — отдельная задача, требующая отдельного подтверждения владельца (см. §11).
 - Login-эндпоинт (password-check, выдача сессии, `Set-Cookie`, rate limit, блокировка неактивных
-  пользователей) этой задачей **не** реализован — только схема хранения сессии.
+  пользователей) этой (тестовой) задачей **не** реализован — только схема хранения сессии.
+
+**Third migration применена владельцем к реальной `titanor-time-db-1`, `app` пересобран** (этот
+commit, после отдельного owner checkpoint):
+- Инструмент политики окружения заблокировал агенту прямое обращение к `titanor-time-db-1` — как
+  read-only `docker exec` (см. §2/§5 выше, история с bootstrap), так и network-based one-off
+  контейнер для применения migration. Поэтому команды выполнил лично владелец на VPS, тем же
+  паттерном, что первую и вторую migration (одноразовый `node:22`-контейнер, подключённый только к
+  `titanor-time_internal`, `DATABASE_URL` только in-memory через `.env.titanor-time`, без npm
+  install — bind-mount существующего `node_modules`).
+- `prisma migrate deploy --schema prisma/schema.prisma` (владелец): «Datasource "db": PostgreSQL
+  database "titanor_time" ... at "db:5432"» → «Applying migration `20260729220524_add_user_session`»
+  → «All migrations have been successfully applied.» — точный вывод, не пересказ.
+- Отдельная попытка `npx prisma migrate status` сразу после — выполнена владельцем **вне** обёртки
+  (без `source .env.titanor-time`/без docker-контейнера), поэтому закономерно упала с `P1012
+  Environment variable not found: DATABASE_URL` — это ошибка команды/окружения запуска, не признак
+  проблемы с самой migration. Отдельного успешного повторного `migrate status` с явным «Database
+  schema is up to date!» против реальной базы не зафиксировано.
+- `docker compose -f compose.titanor-time.yaml build app` + `up -d --no-deps app` (владелец) — образ
+  пересобран (`prisma generate` в builder-стадии против уже обновлённой `prisma/schema.prisma`),
+  `titanor-time-db-1` остался `Running` (не пересоздан — подтверждено выводом `up`: `Container
+  titanor-time-db-1 Running` без `Recreate`), `titanor-time-app-1` создан заново и стал `healthy`.
+- Проверено этим агентом (доступные, не заблокированные политикой действия — `docker compose ps`,
+  `curl` на `127.0.0.1:3200`, `docker exec` в **`app`**, не в `db`): `titanor-time-app-1` — `healthy`;
+  `GET /api/health` → `200 {"status":"ok",...}`; `GET /api/ready` → `200
+  {"status":"ready",...,"database":"connected"}`; сгенерированный внутри образа Prisma Client
+  (`node_modules/.prisma/client/index.d.ts` в контейнере `app`) содержит `UserSession` (прямой grep,
+  не предположение) — подтверждает, что клиент действительно регенерирован из схемы с новой моделью.
+  Прямой `prisma migrate status` внутри `app` не выполним — `runner`-стадия образа намеренно не
+  копирует `prisma/schema.prisma`/`migrations/` (не нужны в runtime, см. commit `122c884`
+  про standalone-трассировку) — попытка дала ожидаемую `schema.prisma not found`, не ошибку базы.
+  `titanor-time-db-1` — `Up 32 hours` (то же время работы, что до этой задачи, не пересоздан);
+  `collab-studio-app-1`/`titanorgroup-web-1`/`collab-studio-postgres-1` не менялись.
+- **Итог:** миграция подтверждена применённой к реальной базе прямым выводом `migrate deploy`
+  владельца + косвенно подтверждена рабочим `app` с регенерированным клиентом; отдельного успешного
+  `migrate status`/catalog-запроса против самой `titanor-time-db-1` в этой записи нет (агенту
+  заблокировано, владелец его не переповторил в рабочей обёртке). Если нужна полная уверенность —
+  повторить `migrate status` в той же обёртке, что и `migrate deploy` (см. §11).
 
 ## 6. Статический аудит initial migration
 
@@ -750,8 +785,8 @@ subtransaction (`SAVEPOINT`/`ROLLBACK TO SAVEPOINT`), вся сессия зав
   активации при создании новых пользователей через admin API — для первого `SUPER_ADMIN` уже закрыто:
   владелец ввёл собственный пароль напрямую в TTY, см. §5).
 - MFA production gate (`REQUIRE_MFA_FOR_ADMIN=true`).
-- Login (`UserSession` — схема добавлена этим commit, но применение к реальной базе, Prisma Client,
-  и сам login-эндпоинт — не начаты).
+- Login (`UserSession` — схема теперь и в реальной базе, Prisma Client регенерирован; сам
+  login-эндпоинт — password-check, выдача сессии, cookie, rate limit — не начат).
 - Role guard / permission enforcement.
 - Admin-first API (`04_ADMIN_FIRST_API_CONTRACTS.md`).
 - `/admin/setup`.
@@ -814,11 +849,20 @@ subtransaction (`SAVEPOINT`/`ROLLBACK TO SAVEPOINT`), вся сессия зав
 ## 11. Следующий рекомендуемый шаг
 
 Первый production `SUPER_ADMIN` (`andrei.sakki`) создан в постоянной `titanor-time-db-1` (см. §5, §2).
-Схема `UserSession` (T5.5, первый под-шаг) добавлена и полностью проверена на одноразовом PostgreSQL
-16, но **не применена** к реальной базе (см. §5). `db`/`app` не перезапускались ни одной из этих
-задач.
+Схема `UserSession` (T5.5, первый под-шаг) добавлена, полностью проверена на одноразовом PostgreSQL
+16 и теперь **применена владельцем** к реальной `titanor-time-db-1`; `app` пересобран с
+регенерированным Prisma Client, healthy, `/api/health`/`/api/ready` — оба `200` (см. §5, этот
+commit). `db` не пересоздавался.
 
-**Исправление предыдущей версии этого раздела:** ранее здесь был рекомендован массовый seed
+**Открытый хвост этой задачи:** явный успешный `prisma migrate status` («Database schema is up to
+date!») против самой `titanor-time-db-1` не зафиксирован — попытка владельца упала на окружении
+(`DATABASE_URL` не был установлен в той команде), не на самой базе. Уверенность в успехе опирается на
+точный вывод `migrate deploy` («All migrations have been successfully applied.») и на подтверждённый
+`UserSession` в Prisma Client пересобранного `app`. Если нужна дополнительная гарантия — повторить
+`migrate status` в той же обёртке (`source .env.titanor-time` + одноразовый `node:22`-контейнер на
+`titanor-time_internal`), что и `migrate deploy` в §5.
+
+**Исправление более ранней версии этого раздела:** ранее здесь был рекомендован массовый seed
 `Permission`/`RolePermission` перед login. Это противоречит явному решению, уже зафиксированному в
 самой второй migration (`20260728161708_add_role_permission_user_role/migration.sql`, комментарий):
 заполнение ~50+ permission-строк намеренно отложено до задач, реализующих соответствующие endpoint'ы
@@ -827,14 +871,10 @@ subtransaction (`SAVEPOINT`/`ROLLBACK TO SAVEPOINT`), вся сессия зав
 T5.6, не раньше.
 
 Следующей отдельной задачей:
-1. Применить third migration (`UserSession`) к реальной `titanor-time-db-1` — **требует отдельного
-   подтверждения владельца** перед выполнением (эта задача его не получала для реальной базы, только
-   для дизайна и тестирования на одноразовом PostgreSQL 16). После применения — регенерировать Prisma
-   Client, пересобрать `app` (`--no-deps`, `db` не пересоздавать).
-2. Реализовать сам login-эндпоинт (T5.5): server-side password check (Argon2id против
+1. Реализовать сам login-эндпоинт (T5.5): server-side password check (Argon2id против
    `User.passwordHash`), выдача `UserSession` (opaque token ≥32 байта в `httpOnly`/`Secure`/`SameSite`
    cookie, в базе только `tokenHash`), отказ для `status != ACTIVE`, rate limit.
-3. Только после этого: role guard (T5.6) — вместе с ним seed `Permission`/`RolePermission` по мере
+2. Только после этого: role guard (T5.6) — вместе с ним seed `Permission`/`RolePermission` по мере
    реализации каждого endpoint (не одним массовым шагом). Role guard и любой будущий role-management
    endpoint обязаны на сервере запрещать удаление/блокировку/понижение последнего активного
    `SUPER_ADMIN` и писать grant/revoke роли в audit trail (требует модели `AuditEvent`, которой пока
