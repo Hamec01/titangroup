@@ -1,6 +1,6 @@
 # Titanor Time — Implementation Status
 
-Обновлено: 2026-07-31 01:34 Europe/Helsinki
+Обновлено: 2026-07-31 01:55 Europe/Helsinki
 Ветка: feature/titanor-time-foundation
 Isolated PostgreSQL config commit: `c28af00521ffef322211e2cfae840a5568dc8c03`
 Next.js app scaffold commit: `e15b203fe334fa4e2c68335f1169f78ed9c18ec9`
@@ -48,8 +48,11 @@ tool policy as before), deployed to real `app`, structurally verified: см. §5
 migration command. Owner assessed risk as insignificant (own server, chat-only exposure, no external
 transmission) and explicitly declined rotation — see §10.
 `prisma migrate status` against real `titanor-time-db-1` now explicitly confirmed **"Database schema is
-up to date!"** — closes the long-open tail noted since §5/§11 history (owner ran it directly, this
-commit).
+up to date!"** — closes the long-open tail noted since §5/§11 history (owner ran it directly, commit
+`834e2dc`).
+`session.revoke_all.own` now enforced on `POST /api/auth/logout-all` (T5.6 third sub-step) — fifth
+migration (seed to all 4 roles), applied by owner to `titanor-time-db-1`, deployed to real `app`,
+structurally verified: см. §5, этот commit.
 Runtime-tested HEAD (полная повторная verification, full green): `991b8fb8381bff11accd09e2c1c3a3f7748d0832`
 Source fix commit (CK-08/CK-13 rename): `991b8fb8381bff11accd09e2c1c3a3f7748d0832`
 HEAD на момент первого runtime-теста, обнаружившего дефект: bebd6aab5f7a041e6272f24fe32db105ca04f92b
@@ -974,6 +977,51 @@ checkpoint to proceed; `prisma/migrations/20260730221710_seed_city_read_all_perm
   enforcement on `POST /api/auth/logout-all`, and a real-cookie end-to-end test of `city.read.all`
   against `titanor-time-db-1` (same open item as prior auth work, §9).
 
+**`session.revoke_all.own` enforced on `POST /api/auth/logout-all`** (T5.6 third sub-step — owner
+explicitly chose this as the next self-contained step, distinct from `AuditEvent` design, per "one task
+closed before the next starts"; `prisma/migrations/20260730224645_seed_session_revoke_all_own_permission/migration.sql`,
+`titanor-time-app/app/api/auth/logout-all/route.ts`, this commit):
+- Причина: this gap has existed since `logout-all` was first built (commit `690686d`) — the contract
+  permission was never actually checked, only "authenticated". Safe in the meantime (revoke query
+  hard-scoped to caller's own `userId`), but not contract-compliant. Chosen over continuing the
+  admin-first scenario because it needs neither a new endpoint nor `AuditEvent`/idempotency schema —
+  fully closeable in one task with what already exists (`hasPermission()`, commit `8fb72c2`).
+- **Fifth migration** — pure data (`INSERT`), no DDL: adds `session.revoke_all.own` and grants it via
+  `RolePermission` to **all four roles** (`SUPER_ADMIN`, `ADMIN`, `FOREMAN`, `WORKER`) — per
+  `02_ROLE_PERMISSION_MATRIX.md` §2.1, this permission's holders are "все аутентифицированные" (all
+  authenticated), unlike the admin-only `city.read.all` seeded previously. Not a hierarchy shortcut —
+  each of the four roles gets its own explicit `RolePermission` row, same pattern as before.
+- `logout-all/route.ts`: adds `hasPermission(authenticated.user.roles, 'session.revoke_all.own')` right
+  after the existing session check, `403 FORBIDDEN` on failure; removes the now-stale comment that
+  explained why the check was missing.
+- **Tested on disposable PostgreSQL 16**: all five migrations applied from scratch, idempotent repeat
+  confirmed. Direct query confirmed seeded `RolePermission` rows: exactly `session.revoke_all.own` ×
+  all 4 roles. Seeded **two** sessions each for one user per role, plus one user with **zero** roles
+  (deliberately, to prove the check is real and not a no-op) — all via `curl` against `next dev` on
+  `127.0.0.1:3991`: `SUPER_ADMIN`/`ADMIN`/`FOREMAN`/`WORKER` → `204`, and a direct query confirmed
+  **both** of that user's sessions revoked; the roleless user → `403 FORBIDDEN`, and a direct query
+  confirmed **neither** of their sessions was touched (`revokedAt` still `NULL` for both) — the request
+  was rejected before the revoke query ever ran. Regression-checked `POST /api/auth/logout` (single) and
+  `GET /api/health`. Disposable container removed, temporary seed script deleted, nothing else committed
+  from the test run.
+- **Applied to real `titanor-time-db-1` by the owner** (agent still blocked by tool policy, as every
+  time before) via the same one-off `node:22`-container pattern: exact output — "Applying migration
+  `20260730224645_seed_session_revoke_all_own_permission`" → "All migrations have been successfully
+  applied." This time the agent did **not** attempt to `cat`/`grep` `.env.titanor-time` itself before
+  handing the command to the owner, to avoid repeating the incident from the prior task (§10).
+- **`app` rebuilt + redeployed** (`docker compose build app` + `up -d --no-deps app`): `db` `StartedAt`
+  identical before/after (`2026-07-28T14:33:34Z`, not recreated); `app` recreated, `healthy`. Verified
+  against `titanor-time-db-1`: `POST /api/auth/logout-all` without CSRF → still `403`; with CSRF but no
+  cookie → still `401` (permission check is unreachable before authentication, as designed).
+  Regression: `GET /api/health`/`GET /api/ready` (`database: connected`), `GET /api/admin/cities`
+  without a cookie (`401`, unaffected), `POST /api/auth/login` without CSRF (`403`) — all unchanged.
+  `collab-studio-app-1`/`titanorgroup-web-1`/`collab-studio-postgres-1` — identical `StartedAt`/
+  `RestartCount=0` before and after, not touched; `titanorgroup.fi`/`collabstudio.run` — `200` before
+  and after.
+- **Not in this task**: `AuditEvent` design (still the owner's explicit next decision to make, §11),
+  `POST /api/admin/cities`, any other admin/worker endpoint, and a real-cookie end-to-end test of
+  `logout-all` against `titanor-time-db-1` (same open item as prior auth work, §9).
+
 ## 6. Статический аудит initial migration
 
 - Exact migration path: `prisma/migrations/20260728012114_init_titanor_time_foundation/migration.sql`.
@@ -1214,31 +1262,27 @@ subtransaction (`SAVEPOINT`/`ROLLBACK TO SAVEPOINT`), вся сессия зав
 
 ## 9. Не начато
 
-- Seed permission-матрицы (заполнение `Permission`/`RolePermission` из
-  `02_ROLE_PERMISSION_MATRIX.md` — таблицы созданы, но пусты; нужно перед реальным permission guard).
 - Password delivery как общий процесс для будущих (не первого) аккаунтов (доставка пароля/кода
   активации при создании новых пользователей через admin API — для первого `SUPER_ADMIN` уже закрыто:
   владелец ввёл собственный пароль напрямую в TTY, см. §5).
 - MFA production gate (`REQUIRE_MFA_FOR_ADMIN=true`).
 - Полный real-cookie end-to-end тест `GET /api/auth/session`/`logout`/`logout-all`/`proxy.ts`/`GET
   /api/admin/cities` против `titanor-time-db-1` (с реальным паролем владельца) — сделана только
-  структурная проверка без cookie (см. §5, commits `383c7a2`/`a220d39`/этот commit); не блокирует,
-  следующий раз, когда владелец логинится, можно попутно проверить.
+  структурная проверка без cookie (см. §5, commits `383c7a2`/`a220d39`/`bf298d8`/`4f3e5a1`); не
+  блокирует, следующий раз, когда владелец логинится, можно попутно проверить.
 - Permission/role enforcement на `/api/admin/*`+`/api/worker/*` — `proxy.ts` (commit `a220d39`) гейтит
-  только «аутентифицирован», не конкретное разрешение. `GET /api/admin/cities` (§5, этот commit) —
-  первый и пока единственный роут, реально подключивший `hasPermission()`; остальные будущие
-  `/api/admin`/`/api/worker` роуты по-прежнему без permission-проверки, потому что не существуют.
-- `session.revoke_all.own` permission enforcement на `POST /api/auth/logout-all` — эндпоинт пока
-  проверяет только «аутентифицирован» (см. §5, commit `690686d`); может закрыться уже сейчас (`session.
-  revoke_all.own` не требует нового роута — только Permission-seed на все 4 роли + вызвать
-  `hasPermission()` в существующем `logout-all/route.ts`), но не сделана этой задачей — см. §11.
-- Реальный seed остального `Permission`/`RolePermission` из `02_ROLE_PERMISSION_MATRIX.md` — только
-  `city.read.all` засеян (§5, этот commit); ~50+ остальных строк сознательно не заполнены разом, сеются
-  по одному endpoint'у за раз (см. обоснование в комментарии второй migration).
+  только «аутентифицирован», не конкретное разрешение. `GET /api/admin/cities` (commit `bf298d8`) и
+  `POST /api/auth/logout-all` (commit `4f3e5a1`) — пока единственные роуты, реально подключившие
+  `hasPermission()`; остальные будущие `/api/admin`/`/api/worker` роуты по-прежнему без
+  permission-проверки, потому что не существуют.
+- Реальный seed остального `Permission`/`RolePermission` из `02_ROLE_PERMISSION_MATRIX.md` —
+  засеяны только `city.read.all` (commit `bf298d8`) и `session.revoke_all.own` (commit `4f3e5a1`);
+  ~50+ остальных строк сознательно не заполнены разом, сеются по одному endpoint'у за раз (см.
+  обоснование в комментарии второй migration).
 - `AuditEvent` модель — не спроектирована и не показана владельцу; нужна для audit trail при
   grant/revoke роли (`role.assign`), для `CITY_CREATED` (`POST /api/admin/cities`) и для любого
   будущего role-management/mutating endpoint. Требует отдельного design-checkpoint (`AGENT_RULES.md`
-  §11) до создания migration.
+  §11) до создания migration. **Владелец ещё не решил, когда именно этим заняться — см. §11.**
 - Idempotency-record таблица (контракт `04_...` §0: `Idempotency-Key` обязателен/опционален per
   endpoint, encrypted response caching) — не спроектирована; нужна для `POST /api/admin/cities` и
   любого другого мутирующего admin/worker endpoint, поддерживающего idempotency.
@@ -1247,8 +1291,8 @@ subtransaction (`SAVEPOINT`/`ROLLBACK TO SAVEPOINT`), вся сессия зав
   подтверждения владельца на каждый следующий endpoint.
 - Инвариант «последний активный `SUPER_ADMIN` не удаляется/не блокируется/не понижается» — не
   реализован нигде (некуда: нет ни одного role-management endpoint).
-- Admin-first API (`04_ADMIN_FIRST_API_CONTRACTS.md`) — начат (`GET /api/admin/cities`, §5, этот
-  commit), остальное не начато.
+- Admin-first API (`04_ADMIN_FIRST_API_CONTRACTS.md`) — начат (`GET /api/admin/cities`, commit
+  `bf298d8`), остальное не начато.
 - `/admin/setup`.
 - Worker flow.
 - Foreman flow.
@@ -1329,19 +1373,27 @@ primitive (T5.6 первый под-шаг, commit `0214f80`) — реализо
 PostgreSQL 16; без схемы, без seed, без роутов на момент своего commit.
 
 Владелец подтвердил продолжение T5.6 с первого реального admin endpoint. `GET /api/admin/cities`
-(T5.6 второй под-шаг, см. §5, этот commit) реализован, протестирован на одноразовом PostgreSQL 16,
+(T5.6 второй под-шаг, commit `bf298d8`) реализован, протестирован на одноразовом PostgreSQL 16,
 четвёртая migration (seed `city.read.all` → `ADMIN`/`SUPER_ADMIN`) применена владельцем к
-`titanor-time-db-1` (агенту как обычно заблокировано), `app` пересобран и передеплоен, структурно
-проверен. Попутно закрыт долгий «открытый хвост»: `prisma migrate status` против реальной
-`titanor-time-db-1` впервые явно подтверждён владельцем — «Database schema is up to date!».
+`titanor-time-db-1`, `app` пересобран и передеплоен, структурно проверен. Попутно закрыт долгий
+«открытый хвост»: `prisma migrate status` против реальной `titanor-time-db-1` впервые явно подтверждён
+владельцем — «Database schema is up to date!».
 
-**Инцидент этой задачи (не блокирует, зафиксирован для истории):** агент вывел реальный пароль
+**Инцидент (не блокирует, зафиксирован для истории, commit `bf298d8`):** агент вывел реальный пароль
 `titanor_time_app` (внутри `DATABASE_URL`) в chat при подготовке команды миграции — `grep -v PASSWORD`
 не поймал его, так как пароль встроен в URL, а не под отдельным ключом `PASSWORD`. Владелец
 проинформирован сразу же, оценил риск как незначительный (свой сервер, экспозиция только в чате) и
-явно отказался от ротации — см. §5/§10.
+явно отказался от ротации — см. §5/§10. Не повторено в следующей задаче ниже — агент больше не
+`cat`/`grep`'ает `.env.titanor-time` сам, просто передаёт готовую команду владельцу.
 
-Следующей отдельной задачей, **после подтверждения владельца** (T5.6 продолжается, не завершено):
+Владелец явно попросил работать строго по одной задаче за раз, не переходя к следующей, пока текущая
+не закрыта — агент выбрал `session.revoke_all.own` следующим шагом именно потому, что он закрывается
+полностью сам по себе (без нового design-checkpoint), в отличие от `AuditEvent`. **`session.revoke_all.own`
+теперь реально проверяется на `POST /api/auth/logout-all`** (T5.6 третий под-шаг, commit `4f3e5a1`):
+пятая migration (seed → все 4 роли) применена владельцем к `titanor-time-db-1`, `app` пересобран и
+передеплоен, структурно проверен.
+
+Следующей отдельной задачей, **требует решения владельца** (T5.6 продолжается, не завершено):
 1. Спроектировать и показать `AuditEvent` (отдельный design-checkpoint, `AGENT_RULES.md` §11) до
    первого endpoint'а, которому он реально нужен — `POST /api/admin/cities` (`city.create`, `Аудит=да`
    по матрице) естественный кандидат, либо `role.assign` напрямую.
@@ -1351,17 +1403,12 @@ PostgreSQL 16; без схемы, без seed, без роутов на моме
 3. Только после `AuditEvent`: `role.assign`/role-management endpoint — обязателен на сервере запрет
    удаления/блокировки/понижения последнего активного `SUPER_ADMIN`, запись в audit trail, второй
    `SUPER_ADMIN` только через аутентифицированный admin API (не bootstrap CLI).
-4. Заодно (не отдельной задачей, а как только появится подходящий endpoint или прямо сейчас, если
-   решим потратить на это отдельный микро-шаг): закрыть `session.revoke_all.own` на `POST
-   /api/auth/logout-all` — не требует нового роута, только Permission-seed (`session.revoke_all.own` →
-   все 4 роли, per `02_ROLE_PERMISSION_MATRIX.md` §2.1 «все аутентифицированные») + вызов
-   `hasPermission()` в уже существующем `logout-all/route.ts`.
-5. Продолжить admin-first сценарий дальше по `04_ADMIN_FIRST_API_CONTRACTS.md` (`POST
+4. Продолжить admin-first сценарий дальше по `04_ADMIN_FIRST_API_CONTRACTS.md` (`POST
    /api/admin/cities` → объекты → рабочие области → шаблоны → работники → ...), по одному endpoint'у
    за раз, с реальным permission-seed на каждый.
 
-Не начинать реальный admin API или UI раньше отдельного подтверждения владельца (единственное
-исключение — `GET /api/admin/cities`, уже подтверждено и сделано этой задачей). Не запускать `app` в
+Не начинать реальный admin API или UI раньше отдельного подтверждения владельца (исключения —
+`GET /api/admin/cities` и `session.revoke_all.own`, уже подтверждены и сделаны). Не запускать `app` в
 production и не менять CollabStudio без отдельного checkpoint владельца.
 
 ## 12. Правило обновления
