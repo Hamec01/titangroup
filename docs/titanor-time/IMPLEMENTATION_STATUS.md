@@ -1,6 +1,6 @@
 # Titanor Time — Implementation Status
 
-Обновлено: 2026-07-31 00:27 Europe/Helsinki
+Обновлено: 2026-07-31 00:50 Europe/Helsinki
 Ветка: feature/titanor-time-foundation
 Isolated PostgreSQL config commit: `c28af00521ffef322211e2cfae840a5568dc8c03`
 Next.js app scaffold commit: `e15b203fe334fa4e2c68335f1169f78ed9c18ec9`
@@ -32,7 +32,10 @@ Real `SUPER_ADMIN` password reset by owner + real login against `titanor-time-db
 `GET /api/auth/session` + `POST /api/auth/logout`/`logout-all` (§11 item 1) implemented, with shared
 `lib/auth.ts` session-resolution helper — tested only on disposable PostgreSQL 16: commit `690686d`
 Session/logout endpoints deployed to real `app` + structurally verified against `titanor-time-db-1`
-(`app` rebuilt/recreated, `db` untouched, login regression-checked): см. §5, этот commit
+(`app` rebuilt/recreated, `db` untouched, login regression-checked): см. §5, commit `383c7a2`
+Route-protection `proxy.ts` for `/api/admin/*`+`/api/worker/*` (§11 item 1, Next.js 16 "proxy"
+convention, Node.js runtime) implemented, tested via the actual standalone `server.js` against
+disposable PostgreSQL 16, and deployed to real `app`: см. §5, этот commit
 Runtime-tested HEAD (полная повторная verification, full green): `991b8fb8381bff11accd09e2c1c3a3f7748d0832`
 Source fix commit (CK-08/CK-13 rename): `991b8fb8381bff11accd09e2c1c3a3f7748d0832`
 HEAD на момент первого runtime-теста, обнаружившего дефект: bebd6aab5f7a041e6272f24fe32db105ca04f92b
@@ -194,7 +197,8 @@ exists.` — согласуется с проверенным ранее (§5, c
 | Third migration | `prisma/migrations/20260729220524_add_user_session/migration.sql` | создана commit `e273490` — `UserSession` (T5.5, первый под-шаг); протестирована на одноразовом PostgreSQL 16 (все три migrations с нуля, идемпотентность, catalog identity, поведенческие тесты); **применена владельцем** к `titanor-time-db-1` commit `7795d3e` — `prisma migrate deploy` вернул «All migrations have been successfully applied» |
 | Root tsconfig | `tsconfig.json` | исправлен commit `3c39d84` — `titanor-time-app` добавлен в `exclude` (изолированный подпроект со своим `@/*` alias, ранее ошибочно захватывался корневым `**/*.ts`) |
 | Login endpoint | `titanor-time-app/app/api/auth/login/route.ts`, `titanor-time-app/lib/{api-error,rate-limit,session}.ts` | реализован commit `ecb37b2` — `POST /api/auth/login` (T5.5 core); задеплоен и подтверждён реальным входом (commit `e42025d`) |
-| Session/logout endpoints | `titanor-time-app/lib/auth.ts`, `titanor-time-app/app/api/auth/{session,logout,logout-all}/route.ts` | реализованы commit `690686d` — `GET /api/auth/session`, `POST /api/auth/logout`, `POST /api/auth/logout-all` (§11 item 1); задеплоены на реальный `app` и структурно проверены против `titanor-time-db-1` этим commit |
+| Session/logout endpoints | `titanor-time-app/lib/auth.ts`, `titanor-time-app/app/api/auth/{session,logout,logout-all}/route.ts` | реализованы commit `690686d` — `GET /api/auth/session`, `POST /api/auth/logout`, `POST /api/auth/logout-all` (§11 item 1); задеплоены на реальный `app` и структурно проверены против `titanor-time-db-1` commit `383c7a2` |
+| Route-protection proxy | `titanor-time-app/proxy.ts` | реализован, протестирован (standalone `server.js` против одноразового PostgreSQL 16) и задеплоен на реальный `app` этим commit — гейтит `/api/admin/*`+`/api/worker/*` на аутентификацию; role-level permission enforcement всё ещё требует role guard (T5.6, §9) |
 | PostgreSQL infra | `compose.titanor-time.yaml`, `docs/titanor-time/06_DATABASE_INFRASTRUCTURE.md` | подготовлено (commit `c28af00`); `db` реально запущен, обе migrations применены; свежий backup после второй migration проверен restore-ом (этот commit) |
 | Next.js app scaffold | `titanor-time-app/` | commit `e15b203` (scaffold) + `7a854ac` (Prisma Client, `/api/ready`) + этот commit (Prisma Client регенерирован под RBAC-схему, `app` пересобран) |
 | Bootstrap SUPER_ADMIN CLI | `titanor-time-app/scripts/bootstrap-super-admin.ts` | реализован и проверен на одноразовом PostgreSQL 16 (commit `9fbcd1a`); Docker-образ `app` не содержал CLI/зависимости (standalone-трассировка), исправлено в `titanor-time-app/Dockerfile` этим commit — CLI подтверждён исполняемым внутри реального образа; реальный SUPER_ADMIN в постоянной базе не создан |
@@ -767,6 +771,82 @@ only):
   `session.revoke_all.own` enforcement (§11 item 3, T5.6), any real-cookie end-to-end test against
   `titanor-time-db-1`.
 
+**Route-protection `proxy.ts` for `/api/admin/*` + `/api/worker/*`** (§11 item 1 —
+`titanor-time-app/proxy.ts`, implemented, tested, and deployed to real `app` in one task, this
+commit):
+- Причина: `GET /api/auth/session`/`POST /api/auth/logout`/`logout-all` (commit `690686d`) only guard
+  themselves — nothing else calls `resolveAuthenticatedSession()`, so any future admin/worker route
+  would start out completely open unless its author remembered to add the check by hand. Centralizing
+  the auth gate removes that failure mode.
+- **Discovered mid-task**: Next.js 16 deprecated the `middleware.ts` file convention in favor of
+  `proxy.ts` (build emits `⚠ The "middleware" file convention is deprecated. Please use "proxy"
+  instead.` — see `nextjs.org/docs/messages/middleware-to-proxy`). Functionally equivalent (same
+  `NextRequest`/`NextResponse` API, same `matcher` config), but two contract differences matter here:
+  Proxy defaults to the Node.js runtime (was opt-in/experimental for `middleware.ts` as of Next
+  15.2–15.5); and explicitly setting `runtime` in `config` is now a build error on `proxy.ts` (it
+  wasn't on `middleware.ts`). Built directly as `proxy.ts` with `export async function proxy(...)`,
+  never shipped as `middleware.ts`.
+- `matcher: ['/api/admin/:path*', '/api/worker/:path*']` — exactly the two route prefixes
+  `04_ADMIN_FIRST_API_CONTRACTS.md` defines (§2–§8 admin, §9 worker). `/api/auth/*` (self-guarding),
+  `/api/health`, `/api/ready`, and `/` are deliberately outside the matcher — untouched by this proxy.
+  A future `/admin/setup` **page** (§9, not started) is also out of scope: a JSON `401` is the wrong
+  response shape for a page navigation, and no login page exists yet to redirect to.
+- Reuses `resolveAuthenticatedSession()` from `lib/auth.ts` (commit `690686d`) unchanged — same
+  rejection rules (missing/expired/revoked token, `DEACTIVATED` user), same `lastSeenAt` refresh on
+  success. **Authentication only, not authorization**: any authenticated user currently passes the
+  proxy for any `/api/admin/*` or `/api/worker/*` path — per-endpoint permission checks
+  (`04_ADMIN_FIRST_API_CONTRACTS.md` gives each one its own required permission) need the role guard
+  (T5.6, §9/§11), which needs `Permission`/`RolePermission` seeded, neither done yet. No route
+  currently exists under either matched prefix, so this has no live consumer yet — it's put in place
+  ahead of them specifically so no future route can be added unprotected by omission.
+- **Verified the compiled artifact, not just source**: `npx tsc --noEmit`/`npm run build` clean with
+  **no** deprecation warning (confirms `proxy.ts`, not `middleware.ts`, is what actually built).
+  Inspected `.next/server/functions-config-manifest.json` directly (both the plain `.next/` build and
+  the `.next/standalone/` copy that Docker's `runner` stage actually ships) — both register
+  `/_middleware` with `"runtime": "nodejs"` and both exact matcher regexes for `/api/admin/:path*` and
+  `/api/worker/:path*`. This matters because a past task (commit `122c884`) already found that
+  Next.js's standalone-output file tracing can silently omit things a route only reaches indirectly;
+  checking the manifest directly, rather than assuming a passing `build` means correct manifest
+  content, avoids repeating that mistake for Proxy specifically.
+- **Runtime-tested by actually running the standalone server** (`node .next/standalone/server.js`,
+  not `next dev` — the same code path `CMD ["node", "server.js"]` in `Dockerfile` runs in production),
+  against a disposable PostgreSQL 16 (`--rm`, tmpfs, random credentials, no named volume; all three
+  migrations applied from scratch) seeded with one `ACTIVE` user + one valid `UserSession`, `curl`
+  against `127.0.0.1:3989` (not the production port `3200`):
+  - `GET /api/admin/anything` and `GET /api/worker/foo` (neither route exists) without a cookie → both
+    `401 NOT_AUTHENTICATED` from the proxy itself, before Next.js ever resolves that there's no
+    matching route.
+  - Same two paths with a garbage cookie → `401` (same rejection path as an unknown token).
+  - `GET /api/admin/anything` with the valid session cookie → `404` — proxy correctly let it through
+    (`NextResponse.next()`), and Next.js's own router then correctly reports no route exists there.
+    Confirms the proxy is a pure gate, not accidentally intercepting/altering successful requests.
+  - Direct `SELECT` on the seeded `UserSession` row after the valid-cookie request: `lastSeenAt`
+    updated to the exact request timestamp — direct proof the proxy's own Prisma query actually ran
+    against the database from inside the compiled, bundled proxy code (not a crash silently
+    short-circuited into some other response path).
+  - `GET /api/health` (outside the matcher) → unaffected, still `200`; `GET /api/auth/session` (also
+    outside the matcher) → still returns its own route-level `401`, not the proxy's — confirms the
+    matcher correctly scopes the gate to only the two intended prefixes.
+  - Cleanup: standalone server process killed, disposable PostgreSQL container removed (confirmed
+    absent from `docker ps -a` afterward), temporary seed script deleted, nothing committed from the
+    test run.
+- **Deployed to real `app`** (`docker compose -f compose.titanor-time.yaml build app` + `up -d
+  --no-deps app`, same pattern as every prior deploy): `db` `StartedAt` identical before/after
+  (`2026-07-28T14:33:34Z`, not recreated); `app` recreated, `healthy`. Verified against
+  `titanor-time-db-1` without a real session cookie (same constraint as every prior auth deploy — no
+  real password available to this task): `GET /api/admin/anything`/`GET /api/worker/foo` without a
+  cookie → both `401`; `GET /api/health`/`GET /api/ready` (`database: connected`) → unaffected;
+  `GET /api/auth/session` without a cookie → still its own `401`, unaffected by the proxy. Regression
+  check on the three pre-existing auth routes: `POST /api/auth/login`/`logout` without CSRF → still
+  `403` each — confirms the rebuild didn't disturb them.
+  `collab-studio-app-1`/`titanorgroup-web-1`/`collab-studio-postgres-1` — identical `StartedAt`/
+  `RestartCount=0` before and after, not touched; `titanorgroup.fi`/`collabstudio.run` — `200` before
+  and after.
+- **Not in this task**: any actual `/api/admin/*` or `/api/worker/*` route (none exist), permission/
+  role enforcement beyond "authenticated" (§11 item 2 next, T5.6), page-level route protection (e.g. a
+  future `/admin/setup`), and a real-cookie end-to-end test of the proxy against `titanor-time-db-1`
+  (same open item as the session/logout endpoints, §9).
+
 ## 6. Статический аудит initial migration
 
 - Exact migration path: `prisma/migrations/20260728012114_init_titanor_time_foundation/migration.sql`.
@@ -1013,14 +1093,13 @@ subtransaction (`SAVEPOINT`/`ROLLBACK TO SAVEPOINT`), вся сессия зав
   активации при создании новых пользователей через admin API — для первого `SUPER_ADMIN` уже закрыто:
   владелец ввёл собственный пароль напрямую в TTY, см. §5).
 - MFA production gate (`REQUIRE_MFA_FOR_ADMIN=true`).
-- Route-protection middleware, читающая `UserSession` по cookie `tt_session` на защищённых роутах —
-  не начата (`GET /api/auth/session`/`POST /api/auth/logout`/`logout-all` реализованы и задеплоены,
-  commit `690686d` + этот commit, но ничего пока не вызывает `resolveAuthenticatedSession()` вне этих
-  трёх роутов — остальные будущие роуты по-прежнему ничем не защищены).
-- Полный real-cookie end-to-end тест `GET /api/auth/session`/`logout`/`logout-all` против
+- Полный real-cookie end-to-end тест `GET /api/auth/session`/`logout`/`logout-all`/`proxy.ts` против
   `titanor-time-db-1` (с реальным паролем владельца) — сделана только структурная проверка без cookie
-  (см. §5, этот commit); не блокирует, следующий раз, когда владелец логинится, можно попутно
-  проверить.
+  (см. §5, commits `383c7a2`/этот commit); не блокирует, следующий раз, когда владелец логинится, можно
+  попутно проверить.
+- Permission/role enforcement на `/api/admin/*`+`/api/worker/*` — `proxy.ts` (§5, этот commit) гейтит
+  только «аутентифицирован», не конкретное разрешение из `04_ADMIN_FIRST_API_CONTRACTS.md`; требует
+  role guard (T5.6, ниже).
 - `session.revoke_all.own` permission enforcement на `POST /api/auth/logout-all` — эндпоинт пока
   проверяет только «аутентифицирован» (см. §5, commit `690686d`); полная проверка требует role guard
   (T5.6, ниже).
@@ -1093,27 +1172,28 @@ subtransaction (`SAVEPOINT`/`ROLLBACK TO SAVEPOINT`), вся сессия зав
 пересоздавался за все эти шаги.
 
 `GET /api/auth/session` + `POST /api/auth/logout`/`logout-all` реализованы (commit `690686d`) и
-задеплоены на реальный `app` + структурно проверены против `titanor-time-db-1` (см. §5, этот commit):
-`db` не пересоздавался, `app` пересоздан и `healthy`, login-регрессия проверена. Реальный cookie-based
-end-to-end тест (с настоящим паролем владельца) ещё не сделан — см. §9.
+задеплоены на реальный `app` (commit `383c7a2`). Route-protection `proxy.ts` для `/api/admin/*`+
+`/api/worker/*` реализован, протестирован на standalone `server.js` + одноразовом PostgreSQL 16, и
+задеплоен на реальный `app` (см. §5, этот commit): `db` ни разу не пересоздавался за оба деплоя, `app`
+пересоздан и `healthy` оба раза, login-регрессия проверена. Реальный cookie-based end-to-end тест (с
+настоящим паролем владельца) для всех четырёх — session/logout/logout-all/proxy — ещё не сделан, см.
+§9.
 
 **Открытый хвост от более ранней задачи:** явный успешный `prisma migrate status` против самой
 `titanor-time-db-1` всё ещё не зафиксирован (см. §5) — не блокирует, но стоит закрыть при случае.
 
 Следующей отдельной задачей:
-1. Route-protection middleware, читающая `UserSession` по cookie `tt_session` (переиспользуя
-   `resolveAuthenticatedSession()` из `lib/auth.ts`, commit `690686d`) — нужна любому будущему
-   защищённому route.
-2. Только после этого: role guard (T5.6) — вместе с ним seed `Permission`/`RolePermission` по мере
-   реализации каждого endpoint (не одним массовым шагом — см. обоснование в комментарии второй
-   migration), и заодно закрыть известный gap `POST /api/auth/logout-all` (контрактная permission
-   `session.revoke_all.own` пока не проверяется, см. §5/§9). Role guard и любой будущий
-   role-management endpoint обязаны на сервере запрещать удаление/блокировку/понижение последнего
-   активного `SUPER_ADMIN` и писать grant/revoke роли в audit trail (требует модели `AuditEvent`,
-   которой пока нет — см. §9). Второй `SUPER_ADMIN` создаётся только через аутентифицированный admin
-   API, не через bootstrap CLI. Не начинать реальный admin API или UI раньше отдельного подтверждения
-   владельца. Не запускать `app` в production и не менять CollabStudio без отдельного checkpoint
-   владельца.
+1. Role guard (T5.6) — вместе с ним seed `Permission`/`RolePermission` по мере реализации каждого
+   endpoint (не одним массовым шагом — см. обоснование в комментарии второй migration), и заодно
+   закрыть два известных gap: `POST /api/auth/logout-all` (контрактная permission
+   `session.revoke_all.own` пока не проверяется) и `proxy.ts` (сейчас гейтит только «аутентифицирован»,
+   не конкретное разрешение per-endpoint из `04_ADMIN_FIRST_API_CONTRACTS.md`) — см. §5/§9. Role guard
+   и любой будущий role-management endpoint обязаны на сервере запрещать удаление/блокировку/
+   понижение последнего активного `SUPER_ADMIN` и писать grant/revoke роли в audit trail (требует
+   модели `AuditEvent`, которой пока нет — см. §9). Второй `SUPER_ADMIN` создаётся только через
+   аутентифицированный admin API, не через bootstrap CLI. Не начинать реальный admin API или UI раньше
+   отдельного подтверждения владельца. Не запускать `app` в production и не менять CollabStudio без
+   отдельного checkpoint владельца.
 
 ## 12. Правило обновления
 
