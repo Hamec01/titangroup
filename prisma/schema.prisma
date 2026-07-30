@@ -91,6 +91,7 @@ model User {
   createdTimesheetVersions TimesheetVersion[]            @relation("TimesheetVersionCreatedBy")
   userRoles                UserRole[]
   userSessions             UserSession[]
+  auditEvents              AuditEvent[]
 }
 
 model Role {
@@ -603,4 +604,29 @@ model BreakSegment {
   workSegment   WorkSegment @relation(fields: [workSegmentId], references: [id], onDelete: Restrict, onUpdate: Cascade)
 
   @@index([workSegmentId])
+}
+
+// docs/titanor-time/03_DATA_MODEL_ERD.md §4.8 — immutable, append-only (enforced by
+// trg_audit_event_immutable in this migration's raw SQL, not by any API write path —
+// audit.read is the only permission touching this table, per
+// 02_ROLE_PERMISSION_MATRIX.md §2.10). actorUserId/entityId nullable per owner decision
+// (2026-07-31): LOGIN_FAILED for an unrecognized identifier has no resolvable User and
+// no single domain entity — entityType="AUTHENTICATION", entityId=NULL in that case.
+model AuditEvent {
+  id          String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  actorUserId String?   @db.Uuid
+  eventType   String    @db.VarChar(64)
+  entityType  String    @db.VarChar(64)
+  entityId    String?   @db.Uuid
+  beforeValue Json?
+  afterValue  Json?
+  reason      String?   @db.Text
+  requestId   String    @db.Uuid
+  createdAt   DateTime  @default(now()) @db.Timestamptz(6)
+  actor       User?     @relation(fields: [actorUserId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+
+  @@index([actorUserId, createdAt(sort: Desc)])
+  @@index([eventType, createdAt(sort: Desc)])
+  @@index([entityType, entityId, createdAt(sort: Desc)])
+  @@index([createdAt(sort: Desc), id(sort: Desc)])
 }
