@@ -30,8 +30,9 @@ on disposable PostgreSQL 16, commit `ecb37b2`
 Real `SUPER_ADMIN` password reset by owner + real login against `titanor-time-db-1` confirmed —
 `200`, correct `id`/`username`/`roles: ["SUPER_ADMIN"]`: см. §5, commit `e42025d`
 `GET /api/auth/session` + `POST /api/auth/logout`/`logout-all` (§11 item 1) implemented, with shared
-`lib/auth.ts` session-resolution helper — tested only on disposable PostgreSQL 16, not deployed to
-`titanor-time-db-1`/real `app`: см. §5, этот commit
+`lib/auth.ts` session-resolution helper — tested only on disposable PostgreSQL 16: commit `690686d`
+Session/logout endpoints deployed to real `app` + structurally verified against `titanor-time-db-1`
+(`app` rebuilt/recreated, `db` untouched, login regression-checked): см. §5, этот commit
 Runtime-tested HEAD (полная повторная verification, full green): `991b8fb8381bff11accd09e2c1c3a3f7748d0832`
 Source fix commit (CK-08/CK-13 rename): `991b8fb8381bff11accd09e2c1c3a3f7748d0832`
 HEAD на момент первого runtime-теста, обнаружившего дефект: bebd6aab5f7a041e6272f24fe32db105ca04f92b
@@ -193,7 +194,7 @@ exists.` — согласуется с проверенным ранее (§5, c
 | Third migration | `prisma/migrations/20260729220524_add_user_session/migration.sql` | создана commit `e273490` — `UserSession` (T5.5, первый под-шаг); протестирована на одноразовом PostgreSQL 16 (все три migrations с нуля, идемпотентность, catalog identity, поведенческие тесты); **применена владельцем** к `titanor-time-db-1` commit `7795d3e` — `prisma migrate deploy` вернул «All migrations have been successfully applied» |
 | Root tsconfig | `tsconfig.json` | исправлен commit `3c39d84` — `titanor-time-app` добавлен в `exclude` (изолированный подпроект со своим `@/*` alias, ранее ошибочно захватывался корневым `**/*.ts`) |
 | Login endpoint | `titanor-time-app/app/api/auth/login/route.ts`, `titanor-time-app/lib/{api-error,rate-limit,session}.ts` | реализован commit `ecb37b2` — `POST /api/auth/login` (T5.5 core); задеплоен и подтверждён реальным входом (commit `e42025d`) |
-| Session/logout endpoints | `titanor-time-app/lib/auth.ts`, `titanor-time-app/app/api/auth/{session,logout,logout-all}/route.ts` | реализованы commit `690686d` — `GET /api/auth/session`, `POST /api/auth/logout`, `POST /api/auth/logout-all` (§11 item 1); протестированы только на одноразовом PostgreSQL 16, не задеплоены на `titanor-time-db-1`/реальный `app` |
+| Session/logout endpoints | `titanor-time-app/lib/auth.ts`, `titanor-time-app/app/api/auth/{session,logout,logout-all}/route.ts` | реализованы commit `690686d` — `GET /api/auth/session`, `POST /api/auth/logout`, `POST /api/auth/logout-all` (§11 item 1); задеплоены на реальный `app` и структурно проверены против `titanor-time-db-1` этим commit |
 | PostgreSQL infra | `compose.titanor-time.yaml`, `docs/titanor-time/06_DATABASE_INFRASTRUCTURE.md` | подготовлено (commit `c28af00`); `db` реально запущен, обе migrations применены; свежий backup после второй migration проверен restore-ом (этот commit) |
 | Next.js app scaffold | `titanor-time-app/` | commit `e15b203` (scaffold) + `7a854ac` (Prisma Client, `/api/ready`) + этот commit (Prisma Client регенерирован под RBAC-схему, `app` пересобран) |
 | Bootstrap SUPER_ADMIN CLI | `titanor-time-app/scripts/bootstrap-super-admin.ts` | реализован и проверен на одноразовом PostgreSQL 16 (commit `9fbcd1a`); Docker-образ `app` не содержал CLI/зависимости (standalone-трассировка), исправлено в `titanor-time-app/Dockerfile` этим commit — CLI подтверждён исполняемым внутри реального образа; реальный SUPER_ADMIN в постоянной базе не создан |
@@ -736,6 +737,36 @@ commit `690686d`):
   protected routes (§11 item 2, next), and role guard / `session.revoke_all.own` enforcement (§11 item
   3, T5.6).
 
+**Session/logout endpoints deployed to real `app`, structurally verified against `titanor-time-db-1`**
+(§11 item 1, deploy step — code unchanged from commit `690686d`, this commit is deploy + verification
+only):
+- `docker compose -f compose.titanor-time.yaml build app` — image rebuilt from current HEAD (same
+  three-stage Dockerfile as every prior deploy, no Dockerfile changes needed); build output confirms
+  all three new routes (`/api/auth/session`, `/api/auth/logout`, `/api/auth/logout-all`) present
+  alongside the existing `login`/`health`/`ready` routes.
+- `docker compose -f compose.titanor-time.yaml up -d --no-deps app` — `db` stayed `Running` (confirmed
+  identical `StartedAt`/`RestartCount=0` before and after, i.e. not recreated); `app` recreated, became
+  `healthy`.
+- Verified without knowing the real password (same pattern as the original login deploy, commit
+  `ecb37b2`): `GET /api/health` → `200` (unchanged); `GET /api/ready` → `200,
+  database: connected`; `GET /api/auth/session` without a cookie → `401 NOT_AUTHENTICATED`; `POST
+  /api/auth/logout` without `X-Requested-With` → `403 CSRF_REJECTED`, with the header but no cookie →
+  `401 NOT_AUTHENTICATED`; `POST /api/auth/logout-all` — same two cases, same results. Login regression
+  check: `POST /api/auth/login` without CSRF → still `403`; with CSRF and an unknown identifier → still
+  `401 INVALID_CREDENTIALS` — confirms the rebuild didn't disturb the existing endpoint.
+- No real session cookie was exercised against `titanor-time-db-1` in this task (would require the
+  owner's real password, same constraint as every prior deploy) — full end-to-end verification (a real
+  `GET /session` with a real cookie, a real `logout` that then makes that cookie unusable) is left for
+  the owner to confirm opportunistically next time they log in, or for a future task.
+- `titanor-time-app-1`/`titanor-time-db-1` — `db` `StartedAt` identical before/after
+  (`2026-07-28T14:33:34Z`, not recreated); `app` recreated (new `StartedAt`), `healthy`.
+  `collab-studio-app-1`/`titanorgroup-web-1`/`collab-studio-postgres-1` — identical `StartedAt`/
+  `RestartCount=0` before and after, not touched. `titanorgroup.fi`/`collabstudio.run` — `200` before
+  and after.
+- **Not in this task**: route-protection middleware (§11 item 2, still next), role guard /
+  `session.revoke_all.own` enforcement (§11 item 3, T5.6), any real-cookie end-to-end test against
+  `titanor-time-db-1`.
+
 ## 6. Статический аудит initial migration
 
 - Exact migration path: `prisma/migrations/20260728012114_init_titanor_time_foundation/migration.sql`.
@@ -983,12 +1014,13 @@ subtransaction (`SAVEPOINT`/`ROLLBACK TO SAVEPOINT`), вся сессия зав
   владелец ввёл собственный пароль напрямую в TTY, см. §5).
 - MFA production gate (`REQUIRE_MFA_FOR_ADMIN=true`).
 - Route-protection middleware, читающая `UserSession` по cookie `tt_session` на защищённых роутах —
-  не начата (`GET /api/auth/session`/`POST /api/auth/logout`/`logout-all` реализованы, commit
-  `690686d`, но ничего пока не вызывает `resolveAuthenticatedSession()` вне этих трёх роутов —
-  остальные будущие роуты по-прежнему ничем не защищены).
-- Деплой `GET /api/auth/session`/`POST /api/auth/logout`/`logout-all` на реальный `app` — реализовано
-  и протестировано только на одноразовом PostgreSQL 16 (commit `690686d`), `titanor-time-db-1`/реальный
-  `app` не тронуты.
+  не начата (`GET /api/auth/session`/`POST /api/auth/logout`/`logout-all` реализованы и задеплоены,
+  commit `690686d` + этот commit, но ничего пока не вызывает `resolveAuthenticatedSession()` вне этих
+  трёх роутов — остальные будущие роуты по-прежнему ничем не защищены).
+- Полный real-cookie end-to-end тест `GET /api/auth/session`/`logout`/`logout-all` против
+  `titanor-time-db-1` (с реальным паролем владельца) — сделана только структурная проверка без cookie
+  (см. §5, этот commit); не блокирует, следующий раз, когда владелец логинится, можно попутно
+  проверить.
 - `session.revoke_all.own` permission enforcement на `POST /api/auth/logout-all` — эндпоинт пока
   проверяет только «аутентифицирован» (см. §5, commit `690686d`); полная проверка требует role guard
   (T5.6, ниже).
@@ -1060,21 +1092,19 @@ subtransaction (`SAVEPOINT`/`ROLLBACK TO SAVEPOINT`), вся сессия зав
 `200`, корректные `id`/`username`/`roles: ["SUPER_ADMIN"]` (см. §5, commit `e42025d`). `db` ни разу не
 пересоздавался за все эти шаги.
 
-`GET /api/auth/session` + `POST /api/auth/logout`/`logout-all` реализованы (см. §5, commit `690686d`)
-— протестированы только на одноразовом PostgreSQL 16, **ещё не задеплоены** на реальный `app`.
+`GET /api/auth/session` + `POST /api/auth/logout`/`logout-all` реализованы (commit `690686d`) и
+задеплоены на реальный `app` + структурно проверены против `titanor-time-db-1` (см. §5, этот commit):
+`db` не пересоздавался, `app` пересоздан и `healthy`, login-регрессия проверена. Реальный cookie-based
+end-to-end тест (с настоящим паролем владельца) ещё не сделан — см. §9.
 
 **Открытый хвост от более ранней задачи:** явный успешный `prisma migrate status` против самой
 `titanor-time-db-1` всё ещё не зафиксирован (см. §5) — не блокирует, но стоит закрыть при случае.
 
 Следующей отдельной задачей:
-1. Задеплоить `GET /api/auth/session`/`POST /api/auth/logout`/`logout-all` на реальный `app`
-   (`docker compose build` + `up -d --no-deps app`, тот же паттерн, что login) и структурно проверить
-   против `titanor-time-db-1` (без знания реального пароля — как уже делалось для login, commit
-   `ecb37b2`: без cookie → `401`; без CSRF-заголовка → `403`).
-2. Route-protection middleware, читающая `UserSession` по cookie `tt_session` (переиспользуя
+1. Route-protection middleware, читающая `UserSession` по cookie `tt_session` (переиспользуя
    `resolveAuthenticatedSession()` из `lib/auth.ts`, commit `690686d`) — нужна любому будущему
    защищённому route.
-3. Только после этого: role guard (T5.6) — вместе с ним seed `Permission`/`RolePermission` по мере
+2. Только после этого: role guard (T5.6) — вместе с ним seed `Permission`/`RolePermission` по мере
    реализации каждого endpoint (не одним массовым шагом — см. обоснование в комментарии второй
    migration), и заодно закрыть известный gap `POST /api/auth/logout-all` (контрактная permission
    `session.revoke_all.own` пока не проверяется, см. §5/§9). Role guard и любой будущий
