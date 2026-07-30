@@ -1,6 +1,7 @@
+import { randomUUID } from 'node:crypto';
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
-import { jsonError } from '@/lib/api-error';
+import { jsonError, successHeaders } from '@/lib/api-error';
 import { checkRateLimit } from '@/lib/rate-limit';
 import {
   SESSION_COOKIE_NAME,
@@ -34,18 +35,28 @@ function clientIp(request: NextRequest): string | null {
 }
 
 export async function POST(request: NextRequest): Promise<NextResponse> {
+  const requestId = randomUUID();
+
   if (request.headers.get('x-requested-with') !== REQUIRED_CSRF_HEADER_VALUE) {
-    return jsonError(403, {
-      code: 'CSRF_REJECTED',
-      message: 'Missing or invalid X-Requested-With header.'
-    });
+    return jsonError(
+      403,
+      {
+        code: 'CSRF_REJECTED',
+        message: 'Missing or invalid X-Requested-With header.'
+      },
+      requestId
+    );
   }
 
   let body: unknown;
   try {
     body = await request.json();
   } catch {
-    return jsonError(400, { code: 'VALIDATION_ERROR', message: 'Request body must be valid JSON.' });
+    return jsonError(
+      400,
+      { code: 'VALIDATION_ERROR', message: 'Request body must be valid JSON.' },
+      requestId
+    );
   }
 
   const { identifier, password } = (body && typeof body === 'object' ? body : {}) as {
@@ -65,7 +76,11 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     fieldErrors.password = ['too long'];
   }
   if (Object.keys(fieldErrors).length > 0) {
-    return jsonError(400, { code: 'VALIDATION_ERROR', message: 'Invalid request body.', fieldErrors });
+    return jsonError(
+      400,
+      { code: 'VALIDATION_ERROR', message: 'Invalid request body.', fieldErrors },
+      requestId
+    );
   }
 
   const normalizedIdentifier = (identifier as string).trim().toLowerCase();
@@ -78,7 +93,11 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   );
   const ipAllowed = checkRateLimit(`ip:${ip ?? 'unknown'}`, IP_RATE_LIMIT.limit, IP_RATE_LIMIT.windowMs);
   if (!identifierAllowed || !ipAllowed) {
-    return jsonError(429, { code: 'RATE_LIMITED', message: 'Too many login attempts. Try again later.' });
+    return jsonError(
+      429,
+      { code: 'RATE_LIMITED', message: 'Too many login attempts. Try again later.' },
+      requestId
+    );
   }
 
   const user = await prisma.user.findFirst({
@@ -95,17 +114,29 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   // for timing, since that's the one case with no account to reveal status of.
   if (!user) {
     await argon2.verify(DUMMY_PASSWORD_HASH, password as string).catch(() => false);
-    return jsonError(401, { code: 'INVALID_CREDENTIALS', message: 'Invalid username/email or password.' });
+    return jsonError(
+      401,
+      { code: 'INVALID_CREDENTIALS', message: 'Invalid username/email or password.' },
+      requestId
+    );
   }
 
   if (user.status === 'PENDING_ACTIVATION') {
-    return jsonError(403, {
-      code: 'ACCOUNT_PENDING_ACTIVATION',
-      message: 'This account has not been activated yet.'
-    });
+    return jsonError(
+      403,
+      {
+        code: 'ACCOUNT_PENDING_ACTIVATION',
+        message: 'This account has not been activated yet.'
+      },
+      requestId
+    );
   }
   if (user.status === 'DEACTIVATED') {
-    return jsonError(403, { code: 'ACCOUNT_DEACTIVATED', message: 'This account has been deactivated.' });
+    return jsonError(
+      403,
+      { code: 'ACCOUNT_DEACTIVATED', message: 'This account has been deactivated.' },
+      requestId
+    );
   }
 
   const passwordMatches = await argon2
@@ -113,7 +144,11 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     .catch(() => false);
 
   if (!user.passwordHash || !passwordMatches) {
-    return jsonError(401, { code: 'INVALID_CREDENTIALS', message: 'Invalid username/email or password.' });
+    return jsonError(
+      401,
+      { code: 'INVALID_CREDENTIALS', message: 'Invalid username/email or password.' },
+      requestId
+    );
   }
 
   const token = generateSessionToken();
@@ -154,7 +189,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
         locale: user.locale
       }
     },
-    { status: 200, headers: { 'Cache-Control': 'no-store' } }
+    { status: 200, headers: successHeaders(requestId) }
   );
 
   response.cookies.set(SESSION_COOKIE_NAME, token, {

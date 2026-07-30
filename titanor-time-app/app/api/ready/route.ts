@@ -1,10 +1,14 @@
+import { randomUUID } from 'node:crypto';
 import { NextResponse } from 'next/server';
+import { successHeaders } from '@/lib/api-error';
 import { prisma } from '@/lib/prisma';
 
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
 
 export async function GET() {
+  const requestId = randomUUID();
+
   try {
     await prisma.$queryRaw`SELECT 1`;
 
@@ -16,9 +20,7 @@ export async function GET() {
       },
       {
         status: 200,
-        headers: {
-          'Cache-Control': 'no-store'
-        }
+        headers: successHeaders(requestId)
       }
     );
   } catch {
@@ -35,9 +37,7 @@ export async function GET() {
       },
       {
         status: 503,
-        headers: {
-          'Cache-Control': 'no-store'
-        }
+        headers: successHeaders(requestId)
       }
     );
   }

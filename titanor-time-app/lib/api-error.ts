@@ -11,9 +11,13 @@ export interface ApiErrorBody {
   fieldErrors?: Record<string, string[]>;
 }
 
-export function jsonError(status: number, body: ApiErrorBody): NextResponse {
-  const requestId = randomUUID();
-
+// requestId is optional so existing callers keep working unchanged, but every
+// route should generate one request id per incoming request (randomUUID(),
+// once, at the top of the handler) and pass it here — and to every success
+// response of that same request via successHeaders() below — so a single
+// request's success/error responses agree, and any future
+// AuditEvent.requestId (03_DATA_MODEL_ERD.md §4.8) has a real value to use.
+export function jsonError(status: number, body: ApiErrorBody, requestId: string = randomUUID()): NextResponse {
   return NextResponse.json(
     { error: { ...body, requestId } },
     {
@@ -24,4 +28,12 @@ export function jsonError(status: number, body: ApiErrorBody): NextResponse {
       }
     }
   );
+}
+
+/** Headers for a success response, carrying the same request id as any error jsonError() might have returned for this request. */
+export function successHeaders(requestId: string): Record<string, string> {
+  return {
+    'Cache-Control': 'no-store',
+    'X-Request-Id': requestId
+  };
 }

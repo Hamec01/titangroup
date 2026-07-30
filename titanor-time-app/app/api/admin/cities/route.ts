@@ -1,6 +1,7 @@
+import { randomUUID } from 'node:crypto';
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
-import { jsonError } from '@/lib/api-error';
+import { jsonError, successHeaders } from '@/lib/api-error';
 import { resolveAuthenticatedSession } from '@/lib/auth';
 import { hasPermission } from '@/lib/permissions';
 
@@ -15,13 +16,15 @@ export const revalidate = 0;
 // coverage, so each route verifies auth/permission itself rather than
 // trusting the gate alone.
 export async function GET(request: NextRequest): Promise<NextResponse> {
+  const requestId = randomUUID();
+
   const authenticated = await resolveAuthenticatedSession(request);
   if (!authenticated) {
-    return jsonError(401, { code: 'NOT_AUTHENTICATED', message: 'No active session.' });
+    return jsonError(401, { code: 'NOT_AUTHENTICATED', message: 'No active session.' }, requestId);
   }
 
   if (!(await hasPermission(authenticated.user.roles, 'city.read.all'))) {
-    return jsonError(403, { code: 'FORBIDDEN', message: 'Missing required permission.' });
+    return jsonError(403, { code: 'FORBIDDEN', message: 'Missing required permission.' }, requestId);
   }
 
   const cities = await prisma.city.findMany({
@@ -31,6 +34,6 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
 
   return NextResponse.json(
     { items: cities },
-    { status: 200, headers: { 'Cache-Control': 'no-store' } }
+    { status: 200, headers: successHeaders(requestId) }
   );
 }
