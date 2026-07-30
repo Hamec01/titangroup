@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { jsonError } from '@/lib/api-error';
 import { resolveAuthenticatedSession } from '@/lib/auth';
+import { hasPermission } from '@/lib/permissions';
 import { SESSION_COOKIE_NAME } from '@/lib/session';
 
 export const dynamic = 'force-dynamic';
@@ -10,12 +11,6 @@ export const revalidate = 0;
 // docs/titanor-time/04_ADMIN_FIRST_API_CONTRACTS.md §0/§1 — exact contract for this endpoint.
 const REQUIRED_CSRF_HEADER_VALUE = 'titanor-time';
 
-// Contract permission is `session.revoke_all.own`, but Permission/RolePermission
-// enforcement (role guard, T5.6, IMPLEMENTATION_STATUS.md §11) doesn't exist yet —
-// gated on "authenticated" only for now, same as /logout. Revisit once role guard
-// lands: every authenticated user can already only ever revoke their own sessions
-// (scoped by their own userId below), so this gap doesn't let anyone touch another
-// user's sessions in the meantime.
 export async function POST(request: NextRequest): Promise<NextResponse> {
   if (request.headers.get('x-requested-with') !== REQUIRED_CSRF_HEADER_VALUE) {
     return jsonError(403, {
@@ -27,6 +22,10 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   const authenticated = await resolveAuthenticatedSession(request);
   if (!authenticated) {
     return jsonError(401, { code: 'NOT_AUTHENTICATED', message: 'No active session.' });
+  }
+
+  if (!(await hasPermission(authenticated.user.roles, 'session.revoke_all.own'))) {
+    return jsonError(403, { code: 'FORBIDDEN', message: 'Missing required permission.' });
   }
 
   // Soft-revoke only — UserSession rows are never physically deleted.
