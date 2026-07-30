@@ -1,6 +1,6 @@
 # Titanor Time — Implementation Status
 
-Обновлено: 2026-07-31 02:36 Europe/Helsinki
+Обновлено: 2026-07-31 02:57 Europe/Helsinki
 Ветка: feature/titanor-time-foundation
 Isolated PostgreSQL config commit: `c28af00521ffef322211e2cfae840a5568dc8c03`
 Next.js app scaffold commit: `e15b203fe334fa4e2c68335f1169f78ed9c18ec9`
@@ -56,7 +56,10 @@ structurally verified: см. §5, commit `6dbb52e`.
 `AuditEvent` (T5.6 audit-trail foundation) — sixth migration, design shown to and amended by owner
 (nullable `actorUserId`/`entityId`, indexed for cursor pagination), append-only enforced by a real
 `BEFORE UPDATE OR DELETE` trigger, applied by owner to `titanor-time-db-1`, deployed to real `app`: см.
-§5, этот commit. No code writes to it yet — deliberately scoped out (see §11).
+§5, commit `fbeec60`. No code writes to it yet — deliberately scoped out (see §11).
+`X-Request-Id` now generated on every response (not just `jsonError()`, as before) across all seven
+existing routes — prerequisite for `AuditEvent.requestId` — deployed to real `app`, structurally
+verified: см. §5, этот commit.
 Runtime-tested HEAD (полная повторная verification, full green): `991b8fb8381bff11accd09e2c1c3a3f7748d0832`
 Source fix commit (CK-08/CK-13 rename): `991b8fb8381bff11accd09e2c1c3a3f7748d0832`
 HEAD на момент первого runtime-теста, обнаружившего дефект: bebd6aab5f7a041e6272f24fe32db105ca04f92b
@@ -1093,6 +1096,45 @@ commit):
   on the `AuditEvent` side, still needs an idempotency-record schema, its own design checkpoint), the
   last-active-`SUPER_ADMIN` protection invariant, and `role.assign`/any role-management endpoint.
 
+**`X-Request-Id` on every response** (T5.6 fifth sub-step, owner-confirmed as the next task after
+`AuditEvent` — `titanor-time-app/lib/api-error.ts`, all seven existing route files, this commit):
+- Причина: `AuditEvent.requestId` (commit `fbeec60`) is `NOT NULL`, but before this task only
+  `jsonError()` generated an id — every success response (`login`/`session`/`cities` `200`s,
+  `logout`/`logout-all` `204`s, `health`/`ready` `200`s) carried none. Explicit prerequisite the owner
+  called out before `createAuditEvent()` (§11), not started opportunistically.
+- `lib/api-error.ts`: `jsonError()` now takes an optional third `requestId` parameter (defaults to a
+  fresh `randomUUID()` if omitted — any call site that forgets to pass one still works, no silent
+  breakage). Added `successHeaders(requestId)` — `{ 'Cache-Control': 'no-store', 'X-Request-Id':
+  requestId }` — to avoid repeating that exact two-header object literally across 7 route files.
+- Every route (`health`, `ready`, `session`, `login`, `logout`, `logout-all`, `cities`) now generates
+  exactly one `requestId = randomUUID()` at the top of its handler and threads it through **every**
+  response path of that same request — every `jsonError()` call and the success response — so a single
+  request's success and error paths always agree on one id. `proxy.ts`'s own `jsonError()` call (no
+  per-route id to share, since it runs ahead of any specific route) keeps using the default
+  auto-generated fallback — deliberately not changed, no code depends on matching a proxy-level
+  rejection's id to anything else.
+- **Tested on disposable PostgreSQL 16**: seeded one city + one `ADMIN` session, `curl`-tested via `next
+  dev` on `127.0.0.1:3992` (not the production port). Confirmed `X-Request-Id` present on: `GET
+  /api/health` (success, no auth); `GET /api/ready` (success); `GET /api/auth/session` without a cookie
+  (`401`) and with a valid one (`200`); `POST /api/auth/login` without CSRF (`403`); `POST
+  /api/auth/logout-all` without CSRF (`403`); `GET /api/admin/cities` with a valid cookie (`200`) and
+  without one (`401`, from `proxy.ts`'s own fallback). For both error cases explicitly checked, the
+  header value exactly matched the `requestId` embedded in the JSON error body. `npx tsc --noEmit`/`npm
+  run build` clean (root and `titanor-time-app`). Disposable container removed, temporary seed script
+  deleted, nothing else committed from the test run.
+- **Deployed to real `app`** (`docker compose build app` + `up -d --no-deps app` — no schema change, no
+  migration, so no owner action needed this time): `db` `StartedAt` identical before/after
+  (`2026-07-28T14:33:34Z`, not recreated); `app` recreated, `healthy`. Verified against
+  `titanor-time-db-1`: `GET /api/health`/`GET /api/ready` carry `X-Request-Id`; `GET /api/auth/session`
+  without a cookie and `POST /api/auth/login` without CSRF both carry `X-Request-Id` matching their
+  error body's `requestId`; `GET /api/admin/cities` without a cookie and `POST /api/auth/logout-all`
+  without CSRF both carry `X-Request-Id`. `collab-studio-app-1`/`titanorgroup-web-1`/
+  `collab-studio-postgres-1` — identical `StartedAt`/`RestartCount=0` before and after, not touched;
+  `titanorgroup.fi`/`collabstudio.run` — `200` before and after.
+- **Not in this task**: `createAuditEvent()`, any code that actually writes an `AuditEvent` row, `POST
+  /api/admin/cities`, any other admin/worker endpoint, the idempotency-record schema, the
+  last-active-`SUPER_ADMIN` protection invariant, and `role.assign`/any role-management endpoint.
+
 ## 6. Статический аудит initial migration
 
 - Exact migration path: `prisma/migrations/20260728012114_init_titanor_time_foundation/migration.sql`.
@@ -1350,20 +1392,16 @@ subtransaction (`SAVEPOINT`/`ROLLBACK TO SAVEPOINT`), вся сессия зав
   засеяны только `city.read.all` (commit `bf298d8`) и `session.revoke_all.own` (commit `4f3e5a1`);
   ~50+ остальных строк сознательно не заполнены разом, сеются по одному endpoint'у за раз (см.
   обоснование в комментарии второй migration).
-- `X-Request-Id`/request-context на **каждом** ответе (не только `jsonError()`, как сейчас) — не
-  начато; explicit prerequisite перед первой реальной записью в `AuditEvent` (owner decision, см. §5
-  commit `fbeec60`/§11).
 - `createAuditEvent()` (общий helper, пишет строку в той же транзакции, что бизнес-действие) — не
-  начат; после request-context (см. выше). `AuditEvent` таблица/триггер/индексы уже существуют и
-  применены к `titanor-time-db-1` (commit `fbeec60`), но ни один роут/сервис пока не пишет в неё.
+  начат. `X-Request-Id`-prerequisite закрыт (commit `bf75962`); `AuditEvent` таблица/триггер/индексы
+  существуют и применены к `titanor-time-db-1` (commit `fbeec60`), но ни один роут/сервис пока не пишет
+  в неё.
 - Idempotency-record таблица (контракт `04_...` §0: `Idempotency-Key` обязателен/опционален per
   endpoint, encrypted response caching; полный дизайн уже есть в `03_DATA_MODEL_ERD.md` §4.1 —
   `IdempotencyKey`, не показан владельцу как отдельный checkpoint) — не спроектирована формально/не
   смигрирована; нужна для `POST /api/admin/cities` и любого другого мутирующего admin/worker endpoint.
 - `POST /api/admin/cities` (`city.create`) и весь остальной admin/worker API кроме `GET
-  /api/admin/cities` — не начаты; `AuditEvent`-часть блокера снята (commit `fbeec60`), но `city.create`
-  всё ещё требует реальной записи в audit (то есть request-context + `createAuditEvent()`, см. выше) и
-  idempotency-схему.
+  /api/admin/cities` — не начаты; всё ещё требует `createAuditEvent()` (см. выше) и idempotency-схему.
 - Инвариант «последний активный `SUPER_ADMIN` не удаляется/не блокируется/не понижается» — не
   реализован нигде (некуда: нет ни одного role-management endpoint).
 - Admin-first API (`04_ADMIN_FIRST_API_CONTRACTS.md`) — начат (`GET /api/admin/cities`, commit
@@ -1474,20 +1512,27 @@ PostgreSQL 16; без схемы, без seed, без роутов на моме
 (catalog + позитивные/негативные поведенческие тесты триггера и FK RESTRICT), применена владельцем к
 `titanor-time-db-1`, `app` пересобран и передеплоен, полная регрессия чистая. Владелец явно разграничил
 эту задачу от следующих двух — **request-context/`X-Request-Id` на каждом ответе** и
-**`createAuditEvent()`** — как отдельных задач, не сделанных сейчас.
+**`createAuditEvent()`** — как отдельных задач.
+
+**`X-Request-Id` теперь генерируется на каждом ответе** (T5.6 пятый под-шаг, commit `bf75962`): все семь
+существующих роутов (`health`, `ready`, `session`, `login`, `logout`, `logout-all`, `cities`) — не
+только `jsonError()`, как раньше. Протестировано на одноразовом PostgreSQL 16 (success/error пары,
+заголовок = `requestId` в теле ошибки), задеплоено на реальный `app` (без миграции — чистый код),
+структурно проверено, полная регрессия чистая. Это закрывает prerequisite, который сам владелец назвал
+условием для `createAuditEvent()`.
 
 Следующей отдельной задачей, **требует решения владельца** (T5.6 продолжается, не завершено):
-1. Request-context: генерировать `X-Request-Id` на **каждом** ответе, не только в `jsonError()` как
-   сейчас — prerequisite для осмысленного `AuditEvent.requestId` (см. §5 commit `fbeec60`).
-2. `createAuditEvent()` — общий helper, пишет строку `AuditEvent` в той же транзакции, что бизнес-
-   действие (`03_...` §3: «Действие + `AuditEvent` — одна транзакция»). Только после п.1.
-3. Первый реальный audit-writer — естественный кандидат `POST /api/admin/cities` (`city.create`,
+1. `createAuditEvent()` — общий helper, пишет строку `AuditEvent` в той же транзакции, что бизнес-
+   действие (`03_...` §3: «Действие + `AuditEvent` — одна транзакция»). Оба prerequisite закрыты (схема
+   — commit `fbeec60`, request id — commit `bf75962`) — ничего больше не блокирует начало этой задачи
+   технически, кроме самого решения владельца её начать.
+2. Первый реальный audit-writer — естественный кандидат `POST /api/admin/cities` (`city.create`,
    `Аудит=да` по матрице) — также требует idempotency-record таблицу (`IdempotencyKey`, дизайн уже есть
    в `03_DATA_MODEL_ERD.md` §4.1, не показан владельцу как отдельный checkpoint).
-4. Только после `createAuditEvent()` работает: `role.assign`/role-management endpoint — обязателен на
+3. Только после `createAuditEvent()` работает: `role.assign`/role-management endpoint — обязателен на
    сервере запрет удаления/блокировки/понижения последнего активного `SUPER_ADMIN`, запись в audit
    trail, второй `SUPER_ADMIN` только через аутентифицированный admin API (не bootstrap CLI).
-5. Продолжить admin-first сценарий дальше по `04_ADMIN_FIRST_API_CONTRACTS.md` (`POST
+4. Продолжить admin-first сценарий дальше по `04_ADMIN_FIRST_API_CONTRACTS.md` (`POST
    /api/admin/cities` → объекты → рабочие области → шаблоны → работники → ...), по одному endpoint'у
    за раз, с реальным permission-seed на каждый.
 
