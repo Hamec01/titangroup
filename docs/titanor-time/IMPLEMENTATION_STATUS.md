@@ -1,6 +1,6 @@
 # Titanor Time — Implementation Status
 
-Обновлено: 2026-07-31 00:50 Europe/Helsinki
+Обновлено: 2026-07-31 00:58 Europe/Helsinki
 Ветка: feature/titanor-time-foundation
 Isolated PostgreSQL config commit: `c28af00521ffef322211e2cfae840a5568dc8c03`
 Next.js app scaffold commit: `e15b203fe334fa4e2c68335f1169f78ed9c18ec9`
@@ -35,7 +35,10 @@ Session/logout endpoints deployed to real `app` + structurally verified against 
 (`app` rebuilt/recreated, `db` untouched, login regression-checked): см. §5, commit `383c7a2`
 Route-protection `proxy.ts` for `/api/admin/*`+`/api/worker/*` (§11 item 1, Next.js 16 "proxy"
 convention, Node.js runtime) implemented, tested via the actual standalone `server.js` against
-disposable PostgreSQL 16, and deployed to real `app`: см. §5, этот commit
+disposable PostgreSQL 16, and deployed to real `app`: см. §5, commit `a220d39`
+`hasPermission()` role-guard primitive (`lib/permissions.ts`, T5.6 first sub-step) implemented + tested
+on disposable PostgreSQL 16 — not wired into any route yet (none exist under `/api/admin`/`/api/worker`)
+and not deployed (no consumer to deploy): см. §5, этот commit
 Runtime-tested HEAD (полная повторная verification, full green): `991b8fb8381bff11accd09e2c1c3a3f7748d0832`
 Source fix commit (CK-08/CK-13 rename): `991b8fb8381bff11accd09e2c1c3a3f7748d0832`
 HEAD на момент первого runtime-теста, обнаружившего дефект: bebd6aab5f7a041e6272f24fe32db105ca04f92b
@@ -198,7 +201,8 @@ exists.` — согласуется с проверенным ранее (§5, c
 | Root tsconfig | `tsconfig.json` | исправлен commit `3c39d84` — `titanor-time-app` добавлен в `exclude` (изолированный подпроект со своим `@/*` alias, ранее ошибочно захватывался корневым `**/*.ts`) |
 | Login endpoint | `titanor-time-app/app/api/auth/login/route.ts`, `titanor-time-app/lib/{api-error,rate-limit,session}.ts` | реализован commit `ecb37b2` — `POST /api/auth/login` (T5.5 core); задеплоен и подтверждён реальным входом (commit `e42025d`) |
 | Session/logout endpoints | `titanor-time-app/lib/auth.ts`, `titanor-time-app/app/api/auth/{session,logout,logout-all}/route.ts` | реализованы commit `690686d` — `GET /api/auth/session`, `POST /api/auth/logout`, `POST /api/auth/logout-all` (§11 item 1); задеплоены на реальный `app` и структурно проверены против `titanor-time-db-1` commit `383c7a2` |
-| Route-protection proxy | `titanor-time-app/proxy.ts` | реализован, протестирован (standalone `server.js` против одноразового PostgreSQL 16) и задеплоен на реальный `app` этим commit — гейтит `/api/admin/*`+`/api/worker/*` на аутентификацию; role-level permission enforcement всё ещё требует role guard (T5.6, §9) |
+| Route-protection proxy | `titanor-time-app/proxy.ts` | реализован, протестирован (standalone `server.js` против одноразового PostgreSQL 16) и задеплоен на реальный `app` commit `a220d39` — гейтит `/api/admin/*`+`/api/worker/*` на аутентификацию; role-level permission enforcement всё ещё требует role guard (T5.6, §9) |
+| Role-guard primitive | `titanor-time-app/lib/permissions.ts` | `hasPermission(roles, code)` реализован и протестирован на одноразовом PostgreSQL 16 этим commit — чистый lookup по `RolePermission`, без консьюмеров (нет ни одного `/api/admin`/`/api/worker` роута), не задеплоен |
 | PostgreSQL infra | `compose.titanor-time.yaml`, `docs/titanor-time/06_DATABASE_INFRASTRUCTURE.md` | подготовлено (commit `c28af00`); `db` реально запущен, обе migrations применены; свежий backup после второй migration проверен restore-ом (этот commit) |
 | Next.js app scaffold | `titanor-time-app/` | commit `e15b203` (scaffold) + `7a854ac` (Prisma Client, `/api/ready`) + этот commit (Prisma Client регенерирован под RBAC-схему, `app` пересобран) |
 | Bootstrap SUPER_ADMIN CLI | `titanor-time-app/scripts/bootstrap-super-admin.ts` | реализован и проверен на одноразовом PostgreSQL 16 (commit `9fbcd1a`); Docker-образ `app` не содержал CLI/зависимости (standalone-трассировка), исправлено в `titanor-time-app/Dockerfile` этим commit — CLI подтверждён исполняемым внутри реального образа; реальный SUPER_ADMIN в постоянной базе не создан |
@@ -847,6 +851,46 @@ commit):
   future `/admin/setup`), and a real-cookie end-to-end test of the proxy against `titanor-time-db-1`
   (same open item as the session/logout endpoints, §9).
 
+**`hasPermission()` role-guard primitive** (T5.6 first sub-step — `titanor-time-app/lib/permissions.ts`,
+this commit):
+- Причина: `04_ADMIN_FIRST_API_CONTRACTS.md`/`02_ROLE_PERMISSION_MATRIX.md` §5 give every future
+  `/api/admin/*`/`/api/worker/*` endpoint an exact required permission code (e.g.
+  `worker.read.all`, `site.update`) — this is the checking primitive those endpoints will call. Schema
+  support (`Permission`, `RolePermission` tables) already existed since the second migration (commit
+  `c0f5425`); this task adds no schema.
+- `hasPermission(roles: string[], permissionCode: string): Promise<boolean>` — single `RolePermission`
+  lookup filtered by `permission.code` + `role.name IN roles`, `select: { id: true }` (existence check,
+  not a data fetch). Empty `roles` short-circuits to `false` without a query. Deliberately does **not**
+  hardcode a `SUPER_ADMIN` > `ADMIN` hierarchy — `02_ROLE_PERMISSION_MATRIX.md` §2 lists `SUPER_ADMIN`
+  explicitly alongside `ADMIN` on every ADMIN-held permission row, so the intended design is that
+  seeding grants both roles directly; a hardcoded hierarchy in code would silently diverge from
+  whatever the seed data (added later, per-endpoint, see §9) actually says.
+- **Deliberately narrow scope, stopped here on purpose**: this commit does not seed any real
+  `Permission`/`RolePermission` rows, does not add an `AuditEvent` model, does not touch `proxy.ts`
+  (which stays a pure authentication gate — it can't route-map to per-endpoint permission codes when no
+  endpoint exists yet to define that mapping), and does not create any `/api/admin/*`/`/api/worker/*`
+  route. Building those is starting the real admin API, which
+  `AGENT_RULES.md` §15 and this file's own §11 require a separate, explicit owner checkpoint for before
+  beginning — not assumed by this task. Likewise, `AuditEvent` is a schema change, and `AGENT_RULES.md`
+  §11 requires showing the design (entities/fields/relations/constraints/indexes/deletion rules) and
+  getting it approved before any migration is created, same as every prior schema change in this
+  project (Role/Permission/UserRole, UserSession) — not done unilaterally here.
+- **Tested on disposable PostgreSQL 16** (`--rm`, tmpfs, random credentials, no named volume; all three
+  existing migrations applied from scratch — no new migration): seeded exactly one real permission code
+  from the matrix, `worker.read.all`, granted only to `ADMIN` (deliberately not to `SUPER_ADMIN`, to
+  prove the no-hierarchy design actually holds). Six assertions, all passed: `ADMIN` → `true`; `WORKER`
+  → `false`; `SUPER_ADMIN` → `false` (proves no hardcoded hierarchy); `[WORKER, ADMIN]` (multi-role
+  user) → `true` (any granting role is enough); unknown permission code → `false`; empty roles array →
+  `false`. Disposable container removed afterward (confirmed absent from `docker ps -a`), temporary
+  test script deleted, nothing committed from the test run.
+- **Not deployed** — no route imports this file yet, so rebuilding/redeploying real `app` would be a
+  no-op change to the running image; skipped as unnecessary churn on a production container.
+- **Not in this task**: seeding any real `Permission`/`RolePermission` rows, `AuditEvent` model/
+  migration, any `/api/admin/*`/`/api/worker/*` route, wiring `hasPermission()` into `proxy.ts` or any
+  route, the last-active-`SUPER_ADMIN` protection invariant, and `session.revoke_all.own`/proxy
+  permission enforcement (both still open, §9) — all of these need either a real admin/worker endpoint
+  to attach to, an `AuditEvent` schema checkpoint, or both, none of which this task started.
+
 ## 6. Статический аудит initial migration
 
 - Exact migration path: `prisma/migrations/20260728012114_init_titanor_time_foundation/migration.sql`.
@@ -1095,15 +1139,27 @@ subtransaction (`SAVEPOINT`/`ROLLBACK TO SAVEPOINT`), вся сессия зав
 - MFA production gate (`REQUIRE_MFA_FOR_ADMIN=true`).
 - Полный real-cookie end-to-end тест `GET /api/auth/session`/`logout`/`logout-all`/`proxy.ts` против
   `titanor-time-db-1` (с реальным паролем владельца) — сделана только структурная проверка без cookie
-  (см. §5, commits `383c7a2`/этот commit); не блокирует, следующий раз, когда владелец логинится, можно
+  (см. §5, commits `383c7a2`/`a220d39`); не блокирует, следующий раз, когда владелец логинится, можно
   попутно проверить.
-- Permission/role enforcement на `/api/admin/*`+`/api/worker/*` — `proxy.ts` (§5, этот commit) гейтит
-  только «аутентифицирован», не конкретное разрешение из `04_ADMIN_FIRST_API_CONTRACTS.md`; требует
-  role guard (T5.6, ниже).
+- Permission/role enforcement на `/api/admin/*`+`/api/worker/*` — `proxy.ts` (commit `a220d39`) гейтит
+  только «аутентифицирован», не конкретное разрешение из `04_ADMIN_FIRST_API_CONTRACTS.md`. Checking
+  primitive (`hasPermission()`, §5, этот commit) готов, но ничего пока его не вызывает — нет ни одного
+  `/api/admin`/`/api/worker` роута, чтобы к нему подключить.
 - `session.revoke_all.own` permission enforcement на `POST /api/auth/logout-all` — эндпоинт пока
-  проверяет только «аутентифицирован» (см. §5, commit `690686d`); полная проверка требует role guard
-  (T5.6, ниже).
-- Role guard / permission enforcement.
+  проверяет только «аутентифицирован» (см. §5, commit `690686d`); может закрыться уже сейчас (`session.
+  revoke_all.own` не требует нового роута — только вызвать `hasPermission()` в существующем
+  `logout-all/route.ts`), но не сделана этой задачей — см. §11.
+- Реальный seed `Permission`/`RolePermission` из `02_ROLE_PERMISSION_MATRIX.md` — таблицы существуют,
+  `hasPermission()` готов их читать (§5, этот commit), но ни одной реальной строки ещё нет; проект
+  сознательно сеет по одному endpoint'у за раз, не массово (см. обоснование в комментарии второй
+  migration).
+- `AuditEvent` модель — не спроектирована и не показана владельцу; нужна для audit trail при
+  grant/revoke роли (`role.assign`) и для любого будущего role-management endpoint. Требует отдельного
+  design-checkpoint (`AGENT_RULES.md` §11) до создания migration.
+- Любой реальный `/api/admin/*`/`/api/worker/*` endpoint — не начат; `AGENT_RULES.md` §15 и §11 этого
+  файла требуют отдельного подтверждения владельца перед началом реального admin API.
+- Инвариант «последний активный `SUPER_ADMIN` не удаляется/не блокируется/не понижается» — не
+  реализован нигде (некуда: нет ни одного role-management endpoint).
 - Admin-first API (`04_ADMIN_FIRST_API_CONTRACTS.md`).
 - `/admin/setup`.
 - Worker flow.
@@ -1174,26 +1230,44 @@ subtransaction (`SAVEPOINT`/`ROLLBACK TO SAVEPOINT`), вся сессия зав
 `GET /api/auth/session` + `POST /api/auth/logout`/`logout-all` реализованы (commit `690686d`) и
 задеплоены на реальный `app` (commit `383c7a2`). Route-protection `proxy.ts` для `/api/admin/*`+
 `/api/worker/*` реализован, протестирован на standalone `server.js` + одноразовом PostgreSQL 16, и
-задеплоен на реальный `app` (см. §5, этот commit): `db` ни разу не пересоздавался за оба деплоя, `app`
-пересоздан и `healthy` оба раза, login-регрессия проверена. Реальный cookie-based end-to-end тест (с
-настоящим паролем владельца) для всех четырёх — session/logout/logout-all/proxy — ещё не сделан, см.
-§9.
+задеплоен на реальный `app` (commit `a220d39`): `db` ни разу не пересоздавался за оба деплоя, `app`
+пересоздан и `healthy` оба раза, login-регрессия проверена. `hasPermission()` — role-guard checking
+primitive (T5.6 первый под-шаг) — реализован и протестирован на одноразовом PostgreSQL 16 (см. §5, этот
+commit); без схемы, без seed, без роутов, не задеплоен (нет консьюмера). Реальный cookie-based
+end-to-end тест (с настоящим паролем владельца) для session/logout/logout-all/proxy всё ещё не сделан,
+см. §9.
 
 **Открытый хвост от более ранней задачи:** явный успешный `prisma migrate status` против самой
 `titanor-time-db-1` всё ещё не зафиксирован (см. §5) — не блокирует, но стоит закрыть при случае.
 
-Следующей отдельной задачей:
-1. Role guard (T5.6) — вместе с ним seed `Permission`/`RolePermission` по мере реализации каждого
-   endpoint (не одним массовым шагом — см. обоснование в комментарии второй migration), и заодно
-   закрыть два известных gap: `POST /api/auth/logout-all` (контрактная permission
-   `session.revoke_all.own` пока не проверяется) и `proxy.ts` (сейчас гейтит только «аутентифицирован»,
-   не конкретное разрешение per-endpoint из `04_ADMIN_FIRST_API_CONTRACTS.md`) — см. §5/§9. Role guard
-   и любой будущий role-management endpoint обязаны на сервере запрещать удаление/блокировку/
-   понижение последнего активного `SUPER_ADMIN` и писать grant/revoke роли в audit trail (требует
-   модели `AuditEvent`, которой пока нет — см. §9). Второй `SUPER_ADMIN` создаётся только через
-   аутентифицированный admin API, не через bootstrap CLI. Не начинать реальный admin API или UI раньше
-   отдельного подтверждения владельца. Не запускать `app` в production и не менять CollabStudio без
-   отдельного checkpoint владельца.
+**CHECKPOINT — требуется решение владельца, прежде чем T5.6 (role guard) можно продолжить дальше:**
+`hasPermission()` (этот commit) — это только checking primitive; чтобы role guard заработал по-настоящему,
+нужен как минимум один реальный `/api/admin/*` или `/api/worker/*` endpoint, к которому его подключить,
+плюс реальные `Permission`/`RolePermission` строки для этого endpoint. Начало реального admin/worker
+API — это явно отмеченный checkpoint и в `AGENT_RULES.md` §15 («первым запуском контейнера» касается и
+первого реального route, по духу правила — «не начинать функцию вне задачи» §8), и в этом файле («не
+начинать реальный admin API или UI раньше отдельного подтверждения владельца»). Отдельно —
+`AuditEvent` модель (нужна для audit trail grant/revoke роли, того же T5.6) требует своего
+design-checkpoint (`AGENT_RULES.md` §11: сущности/поля/связи/ограничения/индексы/правила удаления
+показываются до создания migration) — этот файл не принимает такое решение сам.
+
+Следующей отдельной задачей, **после подтверждения владельца**:
+1. Выбрать первый реальный admin endpoint (по сценарию `04_ADMIN_FIRST_API_CONTRACTS.md`: `admin
+   создаёт объект → рабочую область → шаблон → регистрирует работника → ...` — естественная первая
+   точка `POST /api/admin/cities` или `POST /api/admin/sites`), показать дизайн, реализовать вместе с
+   первым реальным seed `Permission`/`RolePermission` для него (не массово — по одному endpoint'у),
+   подключить `hasPermission()`.
+2. Спроектировать и показать `AuditEvent` (отдельный design-checkpoint) до первого endpoint'а, которому
+   он реально нужен (grant/revoke роли, `role.assign`).
+3. Только после этого — `role.assign`/role-management endpoint: обязателен на сервере запрет
+   удаления/блокировки/понижения последнего активного `SUPER_ADMIN`, запись в audit trail, второй
+   `SUPER_ADMIN` только через аутентифицированный admin API (не bootstrap CLI).
+4. Заодно (не отдельной задачей, а как только появится подходящий endpoint): закрыть
+   `session.revoke_all.own` на `POST /api/auth/logout-all` — не требует нового роута, только вызвать
+   `hasPermission()` в уже существующем `logout-all/route.ts`.
+
+Не начинать реальный admin API или UI раньше отдельного подтверждения владельца. Не запускать `app` в
+production и не менять CollabStudio без отдельного checkpoint владельца.
 
 ## 12. Правило обновления
 
