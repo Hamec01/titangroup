@@ -1,6 +1,6 @@
 # Titanor Time — Implementation Status
 
-Обновлено: 2026-07-31 03:44 Europe/Helsinki
+Обновлено: 2026-08-01 00:27 Europe/Helsinki
 Ветка: feature/titanor-time-foundation
 Isolated PostgreSQL config commit: `c28af00521ffef322211e2cfae840a5568dc8c03`
 Next.js app scaffold commit: `e15b203fe334fa4e2c68335f1169f78ed9c18ec9`
@@ -72,6 +72,10 @@ cleanup of stray local dev servers repeatedly killed the real `app` container's 
 (indistinguishable process name, wrong assumed timezone) — 4 unwanted restarts, no data loss (`db`
 untouched throughout), service self-healed each time via `restart: unless-stopped`; disclosed
 immediately, see §10.
+`GET /api/admin/setup-status` + `/admin/setup` — first protected admin screen, real checklist data, no
+mock statistics (commits `90d2e55`/`1cba420`), plus a same-day fix (`fa7720e`, removed `loading.tsx`
+that was silently downgrading unauthenticated visits from a real `307` to a client-side-only redirect)
+— deployed to real `app`: см. §5, этот commit.
 Runtime-tested HEAD (полная повторная verification, full green): `991b8fb8381bff11accd09e2c1c3a3f7748d0832`
 Source fix commit (CK-08/CK-13 rename): `991b8fb8381bff11accd09e2c1c3a3f7748d0832`
 HEAD на момент первого runtime-теста, обнаружившего дефект: bebd6aab5f7a041e6272f24fe32db105ca04f92b
@@ -1289,6 +1293,59 @@ now audit-wired `POST /api/auth/login`, no mock API, no fake auth:
 - **Not in this task**: `/admin/setup`, admin shell, `POST /api/admin/cities`/`IdempotencyKey`, any new
   backend endpoint, schema changes, migrations — all explicitly deferred per owner instruction.
 
+**`/admin/setup` — first protected admin screen, real checklist, no mock statistics (two checkpoints +
+one same-day fix, commits `90d2e55`/`1cba420`/`fa7720e`)**:
+- Причина: owner-named next step после login. Per `01_SCREEN_MAP.md` §2 и `04_ADMIN_FIRST_API_CONTRACTS.md`
+  §10 — чек-лист первого вертикального сценария (7 булевых флагов: `hasCity`/`hasSite`/`hasWorkArea`/
+  `hasTemplate`/`hasWorker`/`hasAssignment`/`hasOpenPeriod`), явно «не декоративный dashboard». Нужен ни
+  новой схемы (все 7 таблиц существуют с первой migration), ни `AuditEvent` (read-only, `Аудит=нет` по
+  матрице), ни `IdempotencyKey` (не мутирующий endpoint) — поэтому достижим без `POST /api/admin/cities`.
+- **Checkpoint 1 (commit `90d2e55`)** — backend: седьмая migration (чистый `INSERT`) сеет
+  `worker.read.all` → `ADMIN`/`SUPER_ADMIN` (тот же паттерн, что `city.read.all`); `lib/setup-status.ts`
+  (`getSetupStatus()`) — единый источник для 7 флагов, переиспользуемый и роутом, и страницей (без
+  HTTP self-fetch и без дублирования запросов); `GET /api/admin/setup-status`. Попутный рефактор:
+  `resolveAuthenticatedSession()` теперь принимает `string | undefined` (токен) вместо `NextRequest` —
+  Server Component (страница) не имеет `NextRequest`, только `next/headers` `cookies()`; обновлены все
+  5 существующих вызовов (session/logout/logout-all/cities роуты + `proxy.ts`), поведение не изменилось.
+  Добавлен `lib/server-session.ts` (`resolveServerSession()`) — тонкая обёртка для будущих защищённых
+  страниц (`/foreman`, `/worker`).
+- **Checkpoint 2 (commit `1cba420`)** — frontend: `app/admin/setup/page.tsx`, Server Component.
+  Нет сессии → `redirect('/login')`; есть сессия, но нет роли `ADMIN`/`SUPER_ADMIN` → inline «Access
+  denied» на этой же странице (не редирект — пользователь уже аутентифицирован, отправлять его обратно
+  на форму логина было бы confusing; не отдельная `/403`-страница — не создана, вне scope). Чек-лист —
+  ровно то, что вернул `getSetupStatus()`, без чисел; ссылки «Create» только на пункты, у которых
+  screen map явно называет destination (`/admin/sites/new`, `/admin/templates/new`,
+  `/admin/workers/new`, `/admin/assignments/new`, `/admin/periods`) — ни для City (informational), ни
+  для Work area (создаётся в рамках объекта, отдельного route в доках нет) ссылка не придумана.
+- **Тестировано в реальном браузере** (Playwright + системный Chromium, эфемерно через `npx`, не
+  зависимость проекта) на одноразовом PostgreSQL 16 с частично заполненными данными (реальные `City`+
+  `WorkSite`+`Employee` в базе — не all-true/all-false): реальный логин `SUPER_ADMIN` → реальная
+  страница с реальными данными сессии (username+роль в подзаголовке); все 7 пунктов присутствуют;
+  City/Site/Worker (засеяны) → `Done`; остальные 4 → `Not done` с `Create`-ссылкой (кроме Work area —
+  без ссылки, как задумано); `FOREMAN` с валидной сессией, но не тем URL → inline «Access denied», без
+  redirect-петли; без сессии совсем → редирект на `/login`. Скриншот проверен визуально.
+- **Инцидент того же дня (commit `fa7720e`), обнаружен и исправлен агентом самостоятельно после
+  первого деплоя checkpoint 2**: `curl` на `/admin/setup` без cookie возвращал `200` со stub-HTML
+  (meta-refresh + RSC redirect marker) вместо честного `307` — из-за `loading.tsx`, включавшего
+  streaming для этого route segment: `async`-компонент успевал начать отправку ответа (200, уже
+  отправленные заголовки) до того, как `await resolveServerSession()` разрешался и `redirect()`
+  вызывался, так что Next.js не мог изменить statuscode постфактум и подставлял client-side fallback.
+  В реальном браузере это работало (JS подхватывал redirect, тест checkpoint 2 это не поймал), но было
+  тише/слабее для любого non-JS клиента (curl, боты, health-check). Исправление — убрать `loading.tsx`
+  (резолв сессии + 7 `count()`-запросов — суб-100мс, полноценный loading UI не требовался), это
+  останавливает streaming для этого route и возвращает honest top-level `307`. Проверено на реальной
+  standalone-сборке (`node .next/standalone/server.js`, тот же код-путь, что Docker) против
+  одноразового PostgreSQL 16: без cookie → `307`+`Location: /login`; с валидной cookie `SUPER_ADMIN` →
+  по-прежнему `200` с реальным чек-листом (аутентифицированный путь не задет фиксом).
+- **Деплой** (два `docker compose build app` + `up -d --no-deps app` шага — второй после fix):
+  `db` не пересоздавалась ни разу (`StartedAt` неизменен, `RestartCount=0`), `app` пересоздан дважды,
+  healthy оба раза. Финально на `titanor-time-db-1`: `GET /admin/setup` без cookie → честный `307` на
+  `/login`; `GET /api/admin/setup-status` без cookie → `401`; регрессия (`login` без CSRF → `403`,
+  `cities` без cookie → `401`) не нарушена. CollabStudio/`titanorgroup.fi` не задеты.
+- **Not in this task**: `/admin/sites/new`, `/admin/templates/new`, `/admin/workers/new`,
+  `/admin/assignments/new`, `/admin/periods` — целевые страницы не существуют, их `Create`-ссылки
+  сейчас дают `404` (не скрыто, явно отмечено). Admin shell/nav — по-прежнему не построен.
+
 ## 6. Статический аудит initial migration
 
 - Exact migration path: `prisma/migrations/20260728012114_init_titanor_time_foundation/migration.sql`.
@@ -1538,14 +1595,14 @@ subtransaction (`SAVEPOINT`/`ROLLBACK TO SAVEPOINT`), вся сессия зав
   структурная проверка без cookie (см. §5, commits `383c7a2`/`a220d39`/`bf298d8`/`4f3e5a1`); не
   блокирует, следующий раз, когда владелец логинится, можно попутно проверить.
 - Permission/role enforcement на `/api/admin/*`+`/api/worker/*` — `proxy.ts` (commit `a220d39`) гейтит
-  только «аутентифицирован», не конкретное разрешение. `GET /api/admin/cities` (commit `bf298d8`) и
-  `POST /api/auth/logout-all` (commit `4f3e5a1`) — пока единственные роуты, реально подключившие
-  `hasPermission()`; остальные будущие `/api/admin`/`/api/worker` роуты по-прежнему без
-  permission-проверки, потому что не существуют.
+  только «аутентифицирован», не конкретное разрешение. `GET /api/admin/cities` (commit `bf298d8`),
+  `POST /api/auth/logout-all` (commit `4f3e5a1`) и `GET /api/admin/setup-status` (commit `90d2e55`) —
+  пока единственные роуты, реально подключившие `hasPermission()`; остальные будущие
+  `/api/admin`/`/api/worker` роуты по-прежнему без permission-проверки, потому что не существуют.
 - Реальный seed остального `Permission`/`RolePermission` из `02_ROLE_PERMISSION_MATRIX.md` —
-  засеяны только `city.read.all` (commit `bf298d8`) и `session.revoke_all.own` (commit `4f3e5a1`);
-  ~50+ остальных строк сознательно не заполнены разом, сеются по одному endpoint'у за раз (см.
-  обоснование в комментарии второй migration).
+  засеяны только `city.read.all` (commit `bf298d8`), `session.revoke_all.own` (commit `4f3e5a1`) и
+  `worker.read.all` (commit `90d2e55`); ~50+ остальных строк сознательно не заполнены разом, сеются по
+  одному endpoint'у за раз (см. обоснование в комментарии второй migration).
 - `createAuditEvent()` (`lib/audit.ts`, commit `f67159f`) теперь вызывается из `POST /api/auth/login`
   (commit `80c201d`) — первый и пока единственный реальный audit-writer. Остальные будущие
   mutating-эндпоинты (в т.ч. `POST /api/admin/cities`) его ещё не вызывают.
@@ -1561,8 +1618,11 @@ subtransaction (`SAVEPOINT`/`ROLLBACK TO SAVEPOINT`), вся сессия зав
   реализован нигде (некуда: нет ни одного role-management endpoint).
 - Admin-first API (`04_ADMIN_FIRST_API_CONTRACTS.md`) — начат (`GET /api/admin/cities`, commit
   `bf298d8`), остальное не начато.
-- `/admin/setup`, `/foreman`, `/worker` — целевые страницы после логина (см. §5, commit `5bb5cb2`) не
-  реализованы; вход, ведущий на них, сейчас закономерно даёт `404`.
+- `/admin/setup` реализован (см. §5, commits `90d2e55`/`1cba420`/`fa7720e`); `/foreman`, `/worker` —
+  целевые страницы после логина для остальных ролей всё ещё не реализованы, вход туда даёт `404`.
+- `/admin/sites/new`, `/admin/templates/new`, `/admin/workers/new`, `/admin/assignments/new`,
+  `/admin/periods` — destinations с чек-листа `/admin/setup`, ни одна не реализована, `Create`-ссылки
+  дают `404`.
 - Worker flow.
 - Foreman flow.
 - Production deployment Titanor Time (`app.titanorgroup.fi`).
@@ -1621,7 +1681,26 @@ subtransaction (`SAVEPOINT`/`ROLLBACK TO SAVEPOINT`), вся сессия зав
     `200` до/во время/после.
   - **Исправление процесса**: больше не `kill -9` ничего, подходящего по имени процесса контейнера, без
     предварительной сверки PID через `docker inspect`; не полагаться на предположение таймзоны хоста —
-    проверять `date`/`timedatectl` напрямую.
+    проверять `date`/`timedatectl` напрямую. Соблюдено в следующей же задаче (`/admin/setup`) — очистка
+    тестовых dev-серверов делалась по точному PID, найденному через `ss -tlnp` по порту, со сверкой
+    против `docker inspect titanor-time-app-1` перед каждым `kill`.
+
+- **`/admin/setup` тихо отдавал `200` вместо `307` неаутентифицированным non-JS клиентам —
+  RESOLVED, найдено и исправлено агентом самостоятельно (commit `fa7720e`), без отдельного инцидента
+  для владельца.** Причина — `loading.tsx` включал streaming для route segment; `async` Server
+  Component с `await` перед `redirect()` не успевал вызвать redirect до того, как Next.js уже начинал
+  отправлять `200`-ответ (`loading.tsx`-заглушку), из-за чего наружу уходил client-side fallback
+  (meta-refresh + RSC redirect marker) вместо честного top-level HTTP `307`. В реальном браузере
+  (включая Playwright-тест checkpoint 2) это работало корректно — JS подхватывал redirect — поэтому
+  тест checkpoint 2 не поймал проблему; обнаружено только при структурной curl-проверке после первого
+  деплоя. Исправление — убрать `loading.tsx` (резолв сессии + 7 `count()` — суб-100мс, полноценный
+  loading UI не был нужен), что останавливает streaming и возвращает честный `307`. Подтверждено на
+  реальной standalone-сборке против одноразового PostgreSQL 16 до повторного деплоя. **Урок для будущих
+  защищённых Server Component страниц** (`/foreman`, `/worker` и т.д.): `async`-компонент с
+  `redirect()` после `await` + соседний `loading.tsx` = client-side-only redirect для non-JS клиентов;
+  либо не добавлять `loading.tsx`, если асинхронная работа перед `redirect()` действительно быстрая
+  (сотни миллисекунд и меньше), либо явно проверять `curl` (не только реальный браузер) на предмет
+  top-level статус-кода после любого такого изменения.
 
 ### Owner decisions
 
@@ -1733,9 +1812,18 @@ PostgreSQL 16 доказал это напрямую: после симулир�
 владелец): `db` не пересоздавалась, `app` пересоздан и healthy, `/login`/`/`/`/api/health`/`/api/ready`
 проверены напрямую на `titanor-time-db-1`, регрессия чистая, CollabStudio/`titanorgroup.fi` не задеты.
 
+**`/admin/setup` реализован** — первая защищённая страница с реальными данными, без mock-статистики,
+двумя checkpoint'ами + один same-day fix (commits `90d2e55`/`1cba420`/`fa7720e`, см. §5 для деталей):
+седьмая migration (seed `worker.read.all`), `GET /api/admin/setup-status`, рефактор
+`resolveAuthenticatedSession()` под Server Component (`lib/server-session.ts`), сама страница-чек-лист,
+и исправление найденного агентом бага (тихий `200`+client-redirect вместо честного `307` для
+неаутентифицированных non-JS клиентов — см. §10). Применено владельцем к `titanor-time-db-1`,
+задеплоено на реальный `app` дважды (второй раз — с fix), полная регрессия чистая.
+
 Следующей отдельной задачей, **требует решения владельца**:
-1. `/admin/setup` — первая защищённая страница с реальными данными (без mock-статистики, как явно
-   потребовал владелец) — следующий шаг, названный самим владельцем.
+1. Destinations с чек-листа `/admin/setup` (`/admin/sites/new`, `/admin/templates/new`,
+   `/admin/workers/new`, `/admin/assignments/new`, `/admin/periods`) — ни одна не реализована, но
+   именно они делают чек-лист реально проходимым, а не просто читаемым.
 2. Отдельно всё ещё отложено (T5.6, не отменено, просто не сейчас): `POST /api/admin/cities` +
    `IdempotencyKey` (дизайн есть в `03_DATA_MODEL_ERD.md` §4.1, не показан как checkpoint), затем
    `role.assign`/role-management endpoint (запрет трогать последнего `SUPER_ADMIN`, audit trail — уже
@@ -1743,8 +1831,8 @@ PostgreSQL 16 доказал это напрямую: после симулир�
    раз с реальным permission-seed на каждый.
 
 Не начинать реальный admin API или UI раньше отдельного подтверждения владельца (исключения —
-`GET /api/admin/cities`, `session.revoke_all.own`, `/login` — уже подтверждены и сделаны). Не запускать
-`app` в production и не менять CollabStudio без отдельного checkpoint владельца.
+`GET /api/admin/cities`, `session.revoke_all.own`, `/login`, `/admin/setup` — уже подтверждены и
+сделаны). Не запускать `app` в production и не менять CollabStudio без отдельного checkpoint владельца.
 
 ## 12. Правило обновления
 
