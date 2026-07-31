@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { jsonError, successHeaders } from '@/lib/api-error';
 import { checkRateLimit } from '@/lib/rate-limit';
+import { createAuditEvent } from '@/lib/audit';
 import {
   SESSION_COOKIE_NAME,
   SESSION_DURATION_MS,
@@ -32,6 +33,27 @@ function clientIp(request: NextRequest): string | null {
   const forwardedFor = request.headers.get('x-forwarded-for');
   const first = forwardedFor?.split(',')[0]?.trim();
   return first && first.length > 0 ? first : null;
+}
+
+// Shared by both INVALID_CREDENTIALS paths below (unknown identifier, wrong
+// password) — deliberately identical in both cases: no identifier, email,
+// username, password, hash, cookie, token, IP, or user-agent is ever passed
+// in, and actorUserId/entityId are always null, so the audit trail itself
+// cannot be used to distinguish "no such account" from "wrong password" any
+// more than the 401 response already can (docs/titanor-time/
+// 04_ADMIN_FIRST_API_CONTRACTS.md §1: Audit LOGIN_FAILED). Own transaction
+// (nothing else to be atomic with — no session is created on failure), still
+// via createAuditEvent()'s required tx client, not the top-level `prisma`.
+async function recordLoginFailed(requestId: string): Promise<void> {
+  await prisma.$transaction(async (tx) => {
+    await createAuditEvent(tx, {
+      actorUserId: null,
+      eventType: 'LOGIN_FAILED',
+      entityType: 'AUTHENTICATION',
+      entityId: null,
+      requestId
+    });
+  });
 }
 
 export async function POST(request: NextRequest): Promise<NextResponse> {
@@ -114,6 +136,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   // for timing, since that's the one case with no account to reveal status of.
   if (!user) {
     await argon2.verify(DUMMY_PASSWORD_HASH, password as string).catch(() => false);
+    await recordLoginFailed(requestId);
     return jsonError(
       401,
       { code: 'INVALID_CREDENTIALS', message: 'Invalid username/email or password.' },
@@ -144,6 +167,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     .catch(() => false);
 
   if (!user.passwordHash || !passwordMatches) {
+    await recordLoginFailed(requestId);
     return jsonError(
       401,
       { code: 'INVALID_CREDENTIALS', message: 'Invalid username/email or password.' },
@@ -175,6 +199,17 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
         ipAddress: ip,
         userAgent
       }
+    });
+
+    // Same tx as the UserSession write above — not a separate transaction
+    // after the session is issued (docs/titanor-time/03_DATA_MODEL_ERD.md §3:
+    // «Действие + AuditEvent — одна транзакция»).
+    await createAuditEvent(tx, {
+      actorUserId: user.id,
+      eventType: 'LOGIN_SUCCEEDED',
+      entityType: 'AUTHENTICATION',
+      entityId: user.id,
+      requestId
     });
 
     return { activeRoles };
