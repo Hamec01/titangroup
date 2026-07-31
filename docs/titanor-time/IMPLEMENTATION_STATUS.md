@@ -1,6 +1,6 @@
 # Titanor Time — Implementation Status
 
-Обновлено: 2026-07-31 03:05 Europe/Helsinki
+Обновлено: 2026-07-31 03:44 Europe/Helsinki
 Ветка: feature/titanor-time-foundation
 Isolated PostgreSQL config commit: `c28af00521ffef322211e2cfae840a5568dc8c03`
 Next.js app scaffold commit: `e15b203fe334fa4e2c68335f1169f78ed9c18ec9`
@@ -63,7 +63,15 @@ verified: см. §5, commit `bf75962`.
 `createAuditEvent()` shared helper (`lib/audit.ts`) implemented — writes one `AuditEvent` row via the
 same Prisma transaction client as the business action, atomicity proven on disposable PostgreSQL 16
 (rollback test: neither the business row nor the audit row exists after a simulated failure). No route
-calls it yet, not deployed: см. §5, этот commit.
+calls it yet, not deployed: см. §5, commit `f67159f`.
+Owner priority change: `IdempotencyKey`/`POST /api/admin/cities` deferred; first visible working user
+path chosen instead — `POST /api/auth/login` wired to `createAuditEvent()` (`LOGIN_SUCCEEDED`/
+`LOGIN_FAILED`, commit `80c201d`) and a real `/login` page replacing the scaffold (commit `5bb5cb2`),
+deployed to real `app`: см. §5, этот commit. **Incident this task**: agent's host-level `kill -9`
+cleanup of stray local dev servers repeatedly killed the real `app` container's process instead
+(indistinguishable process name, wrong assumed timezone) — 4 unwanted restarts, no data loss (`db`
+untouched throughout), service self-healed each time via `restart: unless-stopped`; disclosed
+immediately, see §10.
 Runtime-tested HEAD (полная повторная verification, full green): `991b8fb8381bff11accd09e2c1c3a3f7748d0832`
 Source fix commit (CK-08/CK-13 rename): `991b8fb8381bff11accd09e2c1c3a3f7748d0832`
 HEAD на момент первого runtime-теста, обнаружившего дефект: bebd6aab5f7a041e6272f24fe32db105ca04f92b
@@ -1184,6 +1192,103 @@ prerequisites closed — `titanor-time-app/lib/audit.ts`, this commit):
   /api/admin/cities` or any other admin/worker endpoint, the idempotency-record schema, the
   last-active-`SUPER_ADMIN` protection invariant, and `role.assign`/any role-management endpoint.
 
+**Owner priority pivot: `POST /api/auth/login` wired to `createAuditEvent()` (checkpoint 1 of 2, commit
+`80c201d`)** — owner explicitly deferred `IdempotencyKey`/`POST /api/admin/cities` in favor of the
+first visible, real, working user path. `login` chosen as first audit-writer specifically because it's
+already contract-required (`04_...` §1: `Audit: LOGIN_SUCCEEDED / LOGIN_FAILED`), needs no
+`Idempotency-Key`, and leads directly to a working login page (checkpoint 2):
+- `LOGIN_SUCCEEDED` added inside the pre-existing success `$transaction()`, same `tx` as the
+  `UserSession` write — not a second transaction after the session is issued. `actorUserId`/`entityId`
+  = the authenticated user's id, `entityType='AUTHENTICATION'`, `requestId` = the handler's existing
+  request-scoped id.
+- `LOGIN_FAILED` added via a new `recordLoginFailed(requestId)` helper, shared by both
+  `INVALID_CREDENTIALS` paths (unknown identifier, wrong password) — `actorUserId=null`,
+  `entityId=null`, no identifier/email/username/password/hash/cookie/token/IP/user-agent ever passed
+  in, so the audit trail can't be used to distinguish "no such account" from "wrong password" any more
+  than the already-shared `401` response can. `PENDING_ACTIVATION`/`DEACTIVATED`/`CSRF`/`VALIDATION`/
+  `RATE_LIMITED` paths untouched — contract names only these two events for this endpoint.
+- Tested on disposable PostgreSQL 16: successful login → exactly one `UserSession` + one
+  `LOGIN_SUCCEEDED` `AuditEvent`, `requestId` matching the response's `X-Request-Id` header exactly;
+  wrong password / unknown identifier → identical `401 INVALID_CREDENTIALS`, each producing one
+  `LOGIN_FAILED` with `actorUserId`/`entityId` both `NULL` and `beforeValue`/`afterValue`/`reason` all
+  `NULL` (nothing could have leaked into them — the schema has no field for those values at all);
+  dedicated atomicity test replicating login's exact transaction shape (`UserSession.create` +
+  `createAuditEvent` via the same `tx`, then a deliberate throw) confirmed neither row exists after
+  rollback; regression-confirmed `PENDING_ACTIVATION`/`DEACTIVATED`/`CSRF_REJECTED`/`RATE_LIMITED`
+  (6th attempt) all unchanged. `npx tsc --noEmit`/`npm run build` clean, `prisma validate` clean (no
+  schema change). Not deployed as part of this commit — bundled into the checkpoint-2 deploy below.
+
+**First real `/login` page, scaffold removed (checkpoint 2 of 2, commit `5bb5cb2`)** — connects to the
+now audit-wired `POST /api/auth/login`, no mock API, no fake auth:
+- `app/login/page.tsx` (client component): single `identifier` field + `password`, real `fetch` with
+  the required `X-Requested-With: titanor-time` header and same-origin credentials. Loading state
+  disables both fields + the submit button and swaps its label (no double-submit). `INVALID_CREDENTIALS`
+  shows one identical message regardless of cause (`01_SCREEN_MAP.md` §1 enumeration-safety
+  requirement); `ACCOUNT_PENDING_ACTIVATION`/`ACCOUNT_DEACTIVATED`/`RATE_LIMITED` each get their own
+  distinct message. Network/fetch failures are caught inline — never an uncaught rejection/blank
+  screen. Password only ever lives in React state long enough to submit — never logged, never in
+  `localStorage`, never in a URL.
+- `app/login/i18n.ts`: small self-contained FI/EN/RU dictionary, no i18n library — chosen locale
+  persists to both `localStorage` (`titanor-time-locale`) and cookie `NEXT_LOCALE`, matching the screen
+  map's spec; `document.lang` updates too.
+- Post-login redirect (owner's explicit mapping for this checkpoint, not `01_SCREEN_MAP.md`'s
+  `/admin`/etc — none of these destinations exist as real pages yet, and per instruction no placeholder
+  was faked in to hide that): `SUPER_ADMIN`/`ADMIN` → `/admin/setup`, `FOREMAN` → `/foreman`, `WORKER`
+  → `/worker`. No matching role → inline "no role assigned" message, no dead-end redirect.
+- `app/globals.css` (new): dark theme reusing the exact color tokens and input/button/focus-state
+  patterns already established in the root `titangroup` site's own `globals.css` (particularly its
+  existing `.admin-login-form` rules) — matched by value, not imported (separate deployable app/Docker
+  service). No new UI library. `public/titanor-logo.png`: physical copy of the existing brand asset
+  (root `public/assets/brand/titanor-group.png`, already used in the main site's header), unmodified.
+- `app/page.tsx`: root now `redirect('/login')` (server component, `next/navigation`) — the "scaffold
+  only" placeholder text is gone; no duplicate form on both `/` and `/login`.
+- **Tested in a real browser**, not just `tsc`/`build`: Playwright + the system's already-cached
+  Chromium build, invoked via `npx` from the scratchpad directory (a throwaway `npm install
+  playwright --no-save` there, never touching `titanor-time-app/package.json` — not a project
+  dependency) — against `next dev` on disposable PostgreSQL 16 (all six migrations, seeded
+  `SUPER_ADMIN`/`FOREMAN`/`WORKER`/`PENDING_ACTIVATION`/`DEACTIVATED` users with real Argon2id
+  passwords). 19 assertions, all passed: root redirects to `/login`; default locale Finnish, `EN`/`RU`
+  switch correctly and persist to `localStorage` + `NEXT_LOCALE` cookie; empty submit blocked by native
+  `required` validation; wrong password and unknown identifier produce the byte-identical
+  `INVALID_CREDENTIALS` message; form re-enables after a failed attempt; `PENDING_ACTIVATION`/
+  `DEACTIVATED` show their own distinct messages; a real successful `SUPER_ADMIN` login sets a real
+  `HttpOnly` `tt_session` cookie and navigates toward `/admin/setup` (`404` there is expected — that
+  page doesn't exist yet); `390px` mobile viewport fits the card without overflow; labels correctly
+  associated via `htmlFor`, `Tab` moves `identifier` → `password`. Desktop/mobile screenshots visually
+  reviewed. `npx tsc --noEmit`/`npm run build` clean (root and `titanor-time-app`; `/login` and `/` both
+  compile, `/` static per Next's own build output).
+- **Security/ops incident during this task's cleanup, disclosed immediately, no data loss**: while
+  killing stray local `next dev` test servers on the host between test runs, the agent repeatedly
+  matched and killed the **real `titanor-time-app-1` container's own process** instead — its
+  `node server.js` process is visible on the host (no `PidMode: host` is set, but Docker does not hide
+  container processes from the host process list either) as `next-server (v16.2.12)`, indistinguishable
+  by name from the agent's own local test instances, and the agent had been killing by name-pattern
+  match without cross-checking `docker inspect titanor-time-app-1 --format '{{.State.Pid}}'` first. A
+  second contributing factor: the agent had been assuming system local time was `Europe/Helsinki`
+  (matching the project's own timestamps) when correlating "recent" PIDs, but the host's actual local
+  timezone is `Europe/Berlin` (CEST, +02:00) — a mismatch that made the real container process's start
+  time look more "recent/suspicious" than it should have. Net effect: 4 unwanted restarts of the real
+  `app` container between roughly 02:24–02:37 CEST, self-healed each time via its existing
+  `restart: unless-stopped` policy (visible in `docker logs` as repeated clean `✓ Ready in 0ms`, no
+  crash/error output). **No data loss** — `app` is fully stateless, all real state lives in `db`, which
+  showed `RestartCount=0` throughout and was never touched; CollabStudio and `titanorgroup.fi` were
+  unaffected (`200` before/during/after). Caught and disclosed to the owner *before* the checkpoint-2
+  deploy step below, not after. Process fix going forward: never `kill -9` anything matching a
+  container's process name on this host without first confirming the PID against `docker inspect`;
+  don't assume this host's local `date`/`ps` timestamps are in `Europe/Helsinki` — they're
+  `Europe/Berlin`.
+- **Deployed to real `app`** (`docker compose -f compose.titanor-time.yaml up -d --build app`, exactly
+  as instructed): `db` `StartedAt` identical before/after (`2026-07-28T14:33:34Z`, `RestartCount=0`
+  throughout, never recreated); `app` recreated fresh, `healthy`, `RestartCount=0` on the new instance.
+  Verified against `titanor-time-db-1`: `GET /api/health` → `200`; `GET /api/ready` → `200, database:
+  connected`; `GET /login` → `200` (static, prerendered); `GET /` → `307` to `/login`; logo asset →
+  `200`. Regression: `POST /api/auth/login` without CSRF → still `403`; `GET /api/admin/cities`/`GET
+  /api/auth/session` without a cookie → still `401`. `collab-studio-app-1`/`titanorgroup-web-1`/
+  `collab-studio-postgres-1` — identical `StartedAt`/`RestartCount=0` before and after this deploy step,
+  not touched; `titanorgroup.fi`/`collabstudio.run` — `200` before and after.
+- **Not in this task**: `/admin/setup`, admin shell, `POST /api/admin/cities`/`IdempotencyKey`, any new
+  backend endpoint, schema changes, migrations — all explicitly deferred per owner instruction.
+
 ## 6. Статический аудит initial migration
 
 - Exact migration path: `prisma/migrations/20260728012114_init_titanor_time_foundation/migration.sql`.
@@ -1441,22 +1546,23 @@ subtransaction (`SAVEPOINT`/`ROLLBACK TO SAVEPOINT`), вся сессия зав
   засеяны только `city.read.all` (commit `bf298d8`) и `session.revoke_all.own` (commit `4f3e5a1`);
   ~50+ остальных строк сознательно не заполнены разом, сеются по одному endpoint'у за раз (см.
   обоснование в комментарии второй migration).
-- Ни один реальный роут/сервис не вызывает `createAuditEvent()` (`lib/audit.ts`, commit `f67159f`) —
-  сам helper готов и протестирован (включая атомарность через rollback-тест), но не подключён нигде;
-  `AuditEvent` таблица/триггер/индексы применены к `titanor-time-db-1` (commit `fbeec60`) и по-прежнему
-  пусты.
+- `createAuditEvent()` (`lib/audit.ts`, commit `f67159f`) теперь вызывается из `POST /api/auth/login`
+  (commit `80c201d`) — первый и пока единственный реальный audit-writer. Остальные будущие
+  mutating-эндпоинты (в т.ч. `POST /api/admin/cities`) его ещё не вызывают.
 - Idempotency-record таблица (контракт `04_...` §0: `Idempotency-Key` обязателен/опционален per
   endpoint, encrypted response caching; полный дизайн уже есть в `03_DATA_MODEL_ERD.md` §4.1 —
   `IdempotencyKey`, не показан владельцу как отдельный checkpoint) — не спроектирована формально/не
   смигрирована; нужна для `POST /api/admin/cities` и любого другого мутирующего admin/worker endpoint.
+  Владелец явно отложил эту работу (см. §11).
 - `POST /api/admin/cities` (`city.create`) и весь остальной admin/worker API кроме `GET
-  /api/admin/cities` — не начаты; `createAuditEvent()` готов к использованию (см. выше), но
-  `POST /api/admin/cities` всё ещё требует idempotency-схему.
+  /api/admin/cities` — не начаты; отложены владельцем в пользу первого рабочего пользовательского пути
+  (`/login`, см. §5, commits `80c201d`/`5bb5cb2`).
 - Инвариант «последний активный `SUPER_ADMIN` не удаляется/не блокируется/не понижается» — не
   реализован нигде (некуда: нет ни одного role-management endpoint).
 - Admin-first API (`04_ADMIN_FIRST_API_CONTRACTS.md`) — начат (`GET /api/admin/cities`, commit
   `bf298d8`), остальное не начато.
-- `/admin/setup`.
+- `/admin/setup`, `/foreman`, `/worker` — целевые страницы после логина (см. §5, commit `5bb5cb2`) не
+  реализованы; вход, ведущий на них, сейчас закономерно даёт `404`.
 - Worker flow.
 - Foreman flow.
 - Production deployment Titanor Time (`app.titanorgroup.fi`).
@@ -1494,6 +1600,28 @@ subtransaction (`SAVEPOINT`/`ROLLBACK TO SAVEPOINT`), вся сессия зав
   закрыт.
 
 Стилевая форма `RAISE EXCEPTION` (см. §6) остаётся отмеченным, но не блокирующим расхождением.
+
+### Operational incidents
+
+- **Агент случайно перезапускал реальный `titanor-time-app-1` 4 раза во время локальной очистки
+  тестовых процессов — RESOLVED, без потери данных.** Во время runtime-тестирования checkpoint 2 (commit
+  `5bb5cb2`) агент неоднократно чистил зависшие локальные `next dev`-серверы командой вида `ps aux |
+  grep "next-server" | grep -v grep` + `kill -9 <pid>` по имени процесса, не сверяя PID с `docker
+  inspect titanor-time-app-1 --format '{{.State.Pid}}'` перед убийством. Реальный процесс контейнера
+  (`node server.js`) виден в хостовом `ps aux` как `next-server (v16.2.12)` — неотличимо по имени от
+  локальных тестовых инстансов. Отдельно агент ошибочно полагал системную таймзону этой машины
+  `Europe/Helsinki` (по аналогии с таймстампами проекта), тогда как реальная — `Europe/Berlin` (CEST,
+  +02:00); это исказило суждение о том, какой PID «недавний и явно мой тестовый».
+  - **Обнаружено и раскрыто владельцу самим агентом**, до выполнения запрошенного финального шага
+    (`docker compose up -d --build app`) — не после, не по запросу владельца.
+  - **Факт**: 4 рестарта контейнера `app` между ~02:24 и ~02:37 CEST (по `docker logs --timestamps` —
+    чистые повторные `✓ Ready in 0ms`, без crash/error вывода — процесс завершался, `restart:
+    unless-stopped` поднимал заново). `db` — `RestartCount=0` весь период, не тронута ни разу (все
+    реальные данные живут там, `app` полностью stateless). CollabStudio/`titanorgroup.fi` — не задеты,
+    `200` до/во время/после.
+  - **Исправление процесса**: больше не `kill -9` ничего, подходящего по имени процесса контейнера, без
+    предварительной сверки PID через `docker inspect`; не полагаться на предположение таймзоны хоста —
+    проверять `date`/`timedatectl` напрямую.
 
 ### Owner decisions
 
@@ -1578,22 +1706,45 @@ PostgreSQL 16 доказал это напрямую: после симулир�
 бизнес-таблицы, ни строки `AuditEvent`. Не задеплоено (нет вызывающего кода) и не подключено ни к одному
 роуту — по тому же принципу, что `hasPermission()`: строится раньше первого реального потребителя.
 
-Следующей отдельной задачей, **требует решения владельца** (T5.6 продолжается, не завершено):
-1. Первый реальный audit-writer — естественный кандидат `POST /api/admin/cities` (`city.create`,
-   `Аудит=да` по матрице) — вызывает уже готовый `createAuditEvent()` внутри своей транзакции, но также
-   требует idempotency-record таблицу (`IdempotencyKey`, дизайн уже есть в `03_DATA_MODEL_ERD.md` §4.1,
-   не показан владельцу как отдельный checkpoint) — контракт эндпоинта требует `Idempotency-Key`.
-2. Только после первого реального audit-writer: `role.assign`/role-management endpoint — обязателен на
-   сервере запрет удаления/блокировки/понижения последнего активного `SUPER_ADMIN`, запись в audit
-   trail (`createAuditEvent()` уже готов), второй `SUPER_ADMIN` только через аутентифицированный admin
-   API (не bootstrap CLI).
-3. Продолжить admin-first сценарий дальше по `04_ADMIN_FIRST_API_CONTRACTS.md` (`POST
-   /api/admin/cities` → объекты → рабочие области → шаблоны → работники → ...), по одному endpoint'у
-   за раз, с реальным permission-seed на каждый.
+**Владелец сменил приоритет**: `IdempotencyKey`/`POST /api/admin/cities` отложены; вместо них —
+**первый видимый и реально работающий пользовательский путь**, двумя изолированными checkpoint'ами,
+каждый своим коммитом:
+1. **Checkpoint 1** (commit `80c201d`): `createAuditEvent()` подключён к `POST /api/auth/login` —
+   `LOGIN_SUCCEEDED` внутри уже существующей success-транзакции (тот же `tx`, что `UserSession`),
+   `LOGIN_FAILED` для обоих `INVALID_CREDENTIALS`-путей с `actorUserId`/`entityId = null`, без единого
+   секретного/персонального значения. Протестировано на одноразовом PostgreSQL 16, включая
+   dedicated-тест атомарности именно в форме login-транзакции.
+2. **Checkpoint 2** (commit `5bb5cb2`): реальная страница `/login`, заменяет scaffold-заглушку `/`.
+   Один `identifier`+`password`, реальный `fetch` в `POST /api/auth/login` с CSRF-заголовком,
+   loading-состояние, enumeration-safe `INVALID_CREDENTIALS`, отдельные сообщения для
+   `PENDING_ACTIVATION`/`DEACTIVATED`/`RATE_LIMITED`, FI/EN/RU с persist в `localStorage`+
+   `NEXT_LOCALE`, существующий брендинг (логотип+палитра главного сайта, без новых UI-зависимостей).
+   Redirect после входа: `SUPER_ADMIN`/`ADMIN` → `/admin/setup`, `FOREMAN` → `/foreman`, `WORKER` →
+   `/worker` — ни одна из целевых страниц ещё не реализована, это явно зафиксировано, а не скрыто
+   заглушкой. Протестировано в реальном headless-браузере (Playwright, эфемерно через `npx`, не
+   зависимость проекта) — 19 assertions, все прошли.
+
+**Инцидент во время тестирования checkpoint 2 (RESOLVED, без потери данных, зафиксирован в §10):**
+агент по ошибке несколько раз перезапустил реальный `app`-контейнер при чистке локальных тестовых
+процессов (совпадение имени процесса + неверное предположение о таймзоне хоста). `db` не пострадала,
+раскрыто владельцу до выполнения финального деплоя.
+
+Оба коммита задеплоены на реальный `app` одним шагом (`docker compose up -d --build app`, как просил
+владелец): `db` не пересоздавалась, `app` пересоздан и healthy, `/login`/`/`/`/api/health`/`/api/ready`
+проверены напрямую на `titanor-time-db-1`, регрессия чистая, CollabStudio/`titanorgroup.fi` не задеты.
+
+Следующей отдельной задачей, **требует решения владельца**:
+1. `/admin/setup` — первая защищённая страница с реальными данными (без mock-статистики, как явно
+   потребовал владелец) — следующий шаг, названный самим владельцем.
+2. Отдельно всё ещё отложено (T5.6, не отменено, просто не сейчас): `POST /api/admin/cities` +
+   `IdempotencyKey` (дизайн есть в `03_DATA_MODEL_ERD.md` §4.1, не показан как checkpoint), затем
+   `role.assign`/role-management endpoint (запрет трогать последнего `SUPER_ADMIN`, audit trail — уже
+   готов через `createAuditEvent()`), затем продолжение admin-first сценария по одному endpoint'у за
+   раз с реальным permission-seed на каждый.
 
 Не начинать реальный admin API или UI раньше отдельного подтверждения владельца (исключения —
-`GET /api/admin/cities` и `session.revoke_all.own`, уже подтверждены и сделаны). Не запускать `app` в
-production и не менять CollabStudio без отдельного checkpoint владельца.
+`GET /api/admin/cities`, `session.revoke_all.own`, `/login` — уже подтверждены и сделаны). Не запускать
+`app` в production и не менять CollabStudio без отдельного checkpoint владельца.
 
 ## 12. Правило обновления
 
