@@ -1,6 +1,6 @@
 # Titanor Time — Implementation Status
 
-Обновлено: 2026-08-01 00:27 Europe/Helsinki
+Обновлено: 2026-08-01 01:27 Europe/Helsinki
 Ветка: feature/titanor-time-foundation
 Isolated PostgreSQL config commit: `c28af00521ffef322211e2cfae840a5568dc8c03`
 Next.js app scaffold commit: `e15b203fe334fa4e2c68335f1169f78ed9c18ec9`
@@ -76,6 +76,13 @@ immediately, see §10.
 mock statistics (commits `90d2e55`/`1cba420`), plus a same-day fix (`fa7720e`, removed `loading.tsx`
 that was silently downgrading unauthenticated visits from a real `307` to a client-side-only redirect)
 — deployed to real `app`: см. §5, этот commit.
+`IdempotencyKey` (schema `ddf44a3`, `lib/idempotency.ts` `6a322bc`) + first mutating admin-first
+endpoint `POST /api/admin/sites` (`d1c6cc0`, ninth migration seeding `site.create`) + first walkable
+`/admin/setup` checklist destination `/admin/sites/new` (`145bfec`) — agent-selected next step per
+owner delegation ("что важней ... то и делай"); deployed to real `app`. **Incident this task**:
+`docker compose up -d --build app` also recreated `db` (shared `env_file`, unrelated env var change)
+despite only `app` being named — same named volume reused, no data loss, confirmed by owner login;
+disclosed immediately, see §10.
 Runtime-tested HEAD (полная повторная verification, full green): `991b8fb8381bff11accd09e2c1c3a3f7748d0832`
 Source fix commit (CK-08/CK-13 rename): `991b8fb8381bff11accd09e2c1c3a3f7748d0832`
 HEAD на момент первого runtime-теста, обнаружившего дефект: bebd6aab5f7a041e6272f24fe32db105ca04f92b
@@ -1346,6 +1353,81 @@ one same-day fix, commits `90d2e55`/`1cba420`/`fa7720e`)**:
   `/admin/assignments/new`, `/admin/periods` — целевые страницы не существуют, их `Create`-ссылки
   сейчас дают `404` (не скрыто, явно отмечено). Admin shell/nav — по-прежнему не построен.
 
+**`IdempotencyKey` + первый мутирующий admin-first endpoint + первая проходимая destination чек-листа
+(четыре коммита `ddf44a3`/`6a322bc`/`d1c6cc0`/`145bfec`)**:
+- Причина: явное делегирование владельца — «делаем всё по roadmap ... чек-лист должен быть проходимым.
+  Что важней ... то и делай». Разбор контрактов (`04_...` §2–3) показал: и `city.create`, и
+  `site.create` требуют `Idempotency-Key` support, но `City` информационный/необязательный (сам
+  чек-лист это отмечает), а `Site` — первый по-настоящему обязательный пункт (`01_SCREEN_MAP.md`:
+  «`/admin/sites/new` ... DoD: создание работает без единого города в системе»). Значит
+  `IdempotencyKey` — не откладываемая параллельная ветка, а прямая зависимость первого настоящего шага.
+- **`IdempotencyKey` schema (commit `ddf44a3`, восьмая migration)** — дизайн из `03_DATA_MODEL_ERD.md`
+  §4.1 показан владельцу и подтверждён без правок (в отличие от `AuditEvent`): `actorUserId` NOT NULL
+  FK→User (здесь всегда есть аутентифицированный actor, в отличие от nullable в `AuditEvent`),
+  `httpMethod`/`routeTemplate`/`idempotencyKey`(uuid)/`requestHash`(hex sha256)/
+  `status enum(PROCESSING|COMPLETED)`/`encryptedResponseBody bytea?`/`statusCode int?`/`expiresAt`;
+  unique `(actorUserId, httpMethod, routeTemplate, idempotencyKey)` — path-параметры сознательно
+  исключены из ключа (участвуют только в `requestHash`). Владелец выбрал способ обеспечения
+  AES-256-GCM ключа: агент даёт `openssl rand -base64 32`, владелец сам добавляет
+  `IDEMPOTENCY_ENCRYPTION_KEY` в `.env.titanor-time` — агент этот файл не видит и не трогает.
+  Протестировано `migrate deploy` + `migrate diff --exit-code` на одноразовом PostgreSQL 16 — ноль drift.
+- **`lib/idempotency.ts` (commit `6a322bc`, без вызывающего кода)** — `beginIdempotentRequest()`/
+  `completeIdempotentRequest()`: insert-then-catch-`P2002` (unique constraint БД, а не код,
+  сериализует гонку), четыре ветки контракта (new/cached/reused-conflict/in-progress-conflict),
+  AES-256-GCM через `IDEMPOTENCY_ENCRYPTION_KEY`. Вызывается только когда клиент реально прислал
+  заголовок `Idempotency-Key` — по `04_...` §3 он «поддерживается», не «обязателен» для `site.create`
+  (в отличие от `absence.approve`). 15 assertions на одноразовом PostgreSQL 16: точный повтор → кэш,
+  тот же ключ/другое тело → `IDEMPOTENCY_KEY_REUSED`, ещё обрабатывается →
+  `IDEMPOTENCY_KEY_IN_PROGRESS`, **настоящая гонка через `Promise.all`** (доказывает, что сериализует
+  constraint БД, не порядок вызовов в коде), независимость между разными `actorUserId`, расшифровка
+  чужим ключом падает (проверка GCM auth tag).
+- **`POST /api/admin/sites` (commit `d1c6cc0`, девятая migration — seed `site.create` →
+  `ADMIN`/`SUPER_ADMIN`)** — первый реальный мутирующий admin-first endpoint. CSRF → auth →
+  permission → parse body → (если есть `Idempotency-Key`) begin/cache-branch → валидация (`name`
+  обязателен, `cityId` опционален и должен существовать → `404 CITY_NOT_FOUND`, `address`/
+  `description` опциональны) → `WorkSite.create` + `createAuditEvent(SITE_CREATED)` в одной
+  транзакции → (если был ключ) complete. Валидационные и `CITY_NOT_FOUND`-ошибки тоже кэшируются
+  идемпотентностью. Протестировано по реальному HTTP на одноразовом PostgreSQL 16: 401/403/CSRF-403/
+  400/404/201 плюс полный жизненный цикл `Idempotency-Key` — кэшированный повтор подтверждён на уровне
+  БД: ровно 1 `WorkSite` и ровно 1 `AuditEvent` на 2 реальных создания (не 3).
+- **`/admin/sites/new` (commit `145bfec`)** — первая реально работающая destination чек-листа
+  `/admin/setup`. Тот же Server Component auth/role-gate паттерн, что `/admin/setup` (без
+  `loading.tsx`, урок §10). Клиентская форма: `name`/`cityId` (select, заполняется через уже
+  существующий `GET /api/admin/cities`)/`address`/`description`; один `Idempotency-Key` на попытку
+  отправки, переиспользуется только при повторе после сетевой ошибки (не после настоящего
+  HTTP-ответа — тогда ключ сбрасывается, чтобы отредактированная форма не наткнулась на
+  `IDEMPOTENCY_KEY_REUSED`). После успеха — редирект на `/admin/setup` (не на ещё не существующий
+  `/admin/sites/[siteId]`, явно, а не скрыто заглушкой). Протестировано в реальном headless-браузере
+  (Playwright, `node .next/standalone/server.js` — тот же код-путь, что Docker) на одноразовом
+  PostgreSQL 16: полный флоу с выбором города, inline-ошибка валидации без навигации, `WORKER` —
+  inline access denied без redirect-петли, без сессии — редирект на `/login`; данные созданного
+  `WorkSite` сверены напрямую в БД.
+- **Деплой и инцидент (не запрошенный владельцем, найден и раскрыт агентом сразу)**: владелец
+  сгенерировал `IDEMPOTENCY_ENCRYPTION_KEY` (`openssl rand -base64 32`) и добавил в
+  `.env.titanor-time` сам; применил обе migrations (8-ю, 9-ю) к `titanor-time-db-1` тем же способом,
+  что раньше. Агент выполнил `docker compose -f compose.titanor-time.yaml up -d --build app` — **но
+  пересоздался не только `app`, а и `db`**, хотя явно был указан только `app`: `db` тоже читает
+  `.env.titanor-time` через `env_file`, и добавленная владельцем строка изменила вычисленный конфиг
+  `db`-сервиса, из-за чего Compose пересоздал и его контейнер тоже. Проверено сразу (см. §10): том
+  `titanor-time_db_data` — тот же самый (не новый volume); `docker logs` показал «database directory
+  appears to contain a database; skipping initialization» и обычный `shutdown at ... / ready to accept
+  connections» — не `initdb` с нуля; `prisma migrate deploy`, выполненный владельцем непосредственно
+  перед этим шагом, уже подтвердил «9 migrations found», из которых применились только 2 новые — то
+  есть прежняя история/данные были на месте до пересоздания. Данные не теряются при пересоздании
+  контейнера, пока volume тот же (стандартное поведение Docker), но это всё равно нарушает правило
+  «`db` не пересоздавать без подтверждения» — раскрыто владельцу немедленно. Владелец лично зашёл на
+  сайт и подтвердил: вход работает, меню и данные видны как обычно. Структурная проверка агента:
+  `/api/health` ok, `/api/ready` → `database: connected`, `/`/`/admin/setup`/`/admin/sites/new` без
+  сессии → честный `307` на `/login`, `POST /api/admin/sites` без сессии → `401`; CollabStudio/
+  `titanorgroup.fi` не задеты (`docker ps`, идентичные `StartedAt`/healthy).
+- **Not in this task**: `POST /api/admin/cities` (`city.create`) по-прежнему не реализован — `City`
+  информационный/необязательный, поэтому не требовался для «проходимости» чек-листа; `GET
+  /api/admin/sites` (список)/`PATCH /api/admin/sites/:siteId`/`/admin/sites/[siteId]` — не
+  реализованы, поэтому форма редиректит на `/admin/setup`, а не на карточку созданного объекта;
+  `role.assign`/role-management — не начат; `/admin/templates/new`, `/admin/workers/new`,
+  `/admin/assignments/new`, `/admin/periods` — остальные destinations чек-листа всё ещё не
+  реализованы, их `Create`-ссылки по-прежнему дают `404`.
+
 ## 6. Статический аудит initial migration
 
 - Exact migration path: `prisma/migrations/20260728012114_init_titanor_time_foundation/migration.sql`.
@@ -1606,23 +1688,23 @@ subtransaction (`SAVEPOINT`/`ROLLBACK TO SAVEPOINT`), вся сессия зав
 - `createAuditEvent()` (`lib/audit.ts`, commit `f67159f`) теперь вызывается из `POST /api/auth/login`
   (commit `80c201d`) — первый и пока единственный реальный audit-writer. Остальные будущие
   mutating-эндпоинты (в т.ч. `POST /api/admin/cities`) его ещё не вызывают.
-- Idempotency-record таблица (контракт `04_...` §0: `Idempotency-Key` обязателен/опционален per
-  endpoint, encrypted response caching; полный дизайн уже есть в `03_DATA_MODEL_ERD.md` §4.1 —
-  `IdempotencyKey`, не показан владельцу как отдельный checkpoint) — не спроектирована формально/не
-  смигрирована; нужна для `POST /api/admin/cities` и любого другого мутирующего admin/worker endpoint.
-  Владелец явно отложил эту работу (см. §11).
-- `POST /api/admin/cities` (`city.create`) и весь остальной admin/worker API кроме `GET
-  /api/admin/cities` — не начаты; отложены владельцем в пользу первого рабочего пользовательского пути
-  (`/login`, см. §5, commits `80c201d`/`5bb5cb2`).
+- `IdempotencyKey` (`03_DATA_MODEL_ERD.md` §4.1) — **реализована** (schema `ddf44a3`, helper
+  `6a322bc`, см. §5); пока подключена только к `POST /api/admin/sites` (`d1c6cc0`). Любой другой
+  будущий мутирующий admin/worker endpoint, где контракт помечает `Idempotency-Key`, должен подключить
+  её так же.
+- `POST /api/admin/cities` (`city.create`) — не начат; `City` информационный/необязательный флаг
+  чек-листа, поэтому не был нужен для первой проходимой destination. `GET /api/admin/sites` (список),
+  `PATCH /api/admin/sites/:siteId`, `/admin/sites/[siteId]` — не начаты; весь остальной admin/worker
+  API кроме `GET /api/admin/cities`/`POST /api/admin/sites` — тоже не начат.
 - Инвариант «последний активный `SUPER_ADMIN` не удаляется/не блокируется/не понижается» — не
   реализован нигде (некуда: нет ни одного role-management endpoint).
-- Admin-first API (`04_ADMIN_FIRST_API_CONTRACTS.md`) — начат (`GET /api/admin/cities`, commit
-  `bf298d8`), остальное не начато.
+- Admin-first API (`04_ADMIN_FIRST_API_CONTRACTS.md`) — начат (`GET /api/admin/cities` commit
+  `bf298d8`, `POST /api/admin/sites` commit `d1c6cc0`), остальное не начато.
 - `/admin/setup` реализован (см. §5, commits `90d2e55`/`1cba420`/`fa7720e`); `/foreman`, `/worker` —
   целевые страницы после логина для остальных ролей всё ещё не реализованы, вход туда даёт `404`.
-- `/admin/sites/new`, `/admin/templates/new`, `/admin/workers/new`, `/admin/assignments/new`,
-  `/admin/periods` — destinations с чек-листа `/admin/setup`, ни одна не реализована, `Create`-ссылки
-  дают `404`.
+- `/admin/sites/new` реализован (commit `145bfec`, см. §5). `/admin/templates/new`,
+  `/admin/workers/new`, `/admin/assignments/new`, `/admin/periods` — остальные destinations с
+  чек-листа `/admin/setup`, ни одна не реализована, `Create`-ссылки дают `404`.
 - Worker flow.
 - Foreman flow.
 - Production deployment Titanor Time (`app.titanorgroup.fi`).
@@ -1701,6 +1783,27 @@ subtransaction (`SAVEPOINT`/`ROLLBACK TO SAVEPOINT`), вся сессия зав
   либо не добавлять `loading.tsx`, если асинхронная работа перед `redirect()` действительно быстрая
   (сотни миллисекунд и меньше), либо явно проверять `curl` (не только реальный браузер) на предмет
   top-level статус-кода после любого такого изменения.
+
+- **`docker compose up -d --build app` пересоздал также `db`, хотя был указан только `app` — RESOLVED,
+  без потери данных, найдено и раскрыто агентом самостоятельно сразу после деплоя, до подтверждения
+  задачи закрытой.** Причина: `db`-сервис тоже подключает `.env.titanor-time` через `env_file` в
+  `compose.titanor-time.yaml`; когда владелец добавил туда новую строку `IDEMPOTENCY_ENCRYPTION_KEY`
+  (нужна только `app`), это изменило вычисленный Compose-конфиг `db` тоже, и Compose решил, что `db`
+  требует пересоздания контейнера — несмотря на то, что в команде был явно указан только сервис `app`.
+  - **Проверено немедленно**: `docker inspect titanor-time-db-1` — примонтирован тот же named volume
+    `titanor-time_db_data` (не новый); `docker logs titanor-time-db-1` — «Database directory appears to
+    contain a database; Skipping initialization» + обычный `shutdown at ... / ready to accept
+    connections», не `initdb` с нуля; `prisma migrate deploy`, который владелец выполнил
+    непосредственно перед этим шагом, уже подтвердил «9 migrations found», из которых применились
+    только 2 новые — то есть вся прежняя история миграций и данные были на месте до пересоздания
+    контейнера. Пересоздание контейнера при том же volume не теряет данные (стандартное поведение
+    Docker Compose) — но само событие всё равно противоречит правилу «`db` не пересоздавать без
+    подтверждения владельца», поэтому раскрыто сразу, а не тихо пропущено.
+  - **Подтверждено владельцем лично**: зашёл на реальный сайт, вход и меню/данные выглядят как обычно.
+  - **Процесс на будущее**: если в `.env.titanor-time` меняется переменная, нужная только одному
+    сервису, а `env_file` в compose общий для нескольких сервисов — Compose всё равно может счесть
+    другие сервисы «изменившимися» и пересоздать их тоже, даже если в команде указан только один
+    сервис. Явно предупреждать владельца об этом риске *до* следующего такого деплоя, а не только после.
 
 ### Owner decisions
 
@@ -1820,19 +1923,33 @@ PostgreSQL 16 доказал это напрямую: после симулир�
 неаутентифицированных non-JS клиентов — см. §10). Применено владельцем к `titanor-time-db-1`,
 задеплоено на реальный `app` дважды (второй раз — с fix), полная регрессия чистая.
 
-Следующей отдельной задачей, **требует решения владельца**:
-1. Destinations с чек-листа `/admin/setup` (`/admin/sites/new`, `/admin/templates/new`,
-   `/admin/workers/new`, `/admin/assignments/new`, `/admin/periods`) — ни одна не реализована, но
-   именно они делают чек-лист реально проходимым, а не просто читаемым.
-2. Отдельно всё ещё отложено (T5.6, не отменено, просто не сейчас): `POST /api/admin/cities` +
-   `IdempotencyKey` (дизайн есть в `03_DATA_MODEL_ERD.md` §4.1, не показан как checkpoint), затем
-   `role.assign`/role-management endpoint (запрет трогать последнего `SUPER_ADMIN`, audit trail — уже
-   готов через `createAuditEvent()`), затем продолжение admin-first сценария по одному endpoint'у за
-   раз с реальным permission-seed на каждый.
+Владелец разрешил агенту самому определить и выполнить следующий шаг («что важней в данный момент и
+правильней — то и делай»), при условии строгого следования roadmap и требования сделать чек-лист
+реально проходимым. Разбор контрактов показал, что `IdempotencyKey` — не отдельная отложенная ветка, а
+прямая зависимость первого настоящего (не-опционального) шага чек-листа (`Site`, не `City`) — поэтому
+обе цели сошлись на одной задаче: **`IdempotencyKey` schema + `lib/idempotency.ts` +
+`POST /api/admin/sites` + `/admin/sites/new` реализованы, протестированы и задеплоены** (четыре
+коммита `ddf44a3`/`6a322bc`/`d1c6cc0`/`145bfec`, десятая и девятая migrations, см. §5 для полного
+разбора). Чек-лист `/admin/setup` теперь имеет первую по-настоящему проходимую destination. Побочно
+найден и раскрыт владельцу инцидент с непреднамеренным пересозданием `db`-контейнера при деплое (см.
+§10, без потери данных, подтверждено владельцем лично).
+
+Следующей отдельной задачей:
+1. `POST /api/admin/cities` (`city.create`) — теперь простая задача (тот же паттерн, что `site.create`,
+   `IdempotencyKey`/`createAuditEvent()` уже готовы) — но `City` информационный, не блокирует чек-лист,
+   так что приоритет ниже, чем остальные destinations.
+2. Остальные destinations чек-листа: `/admin/templates/new`, `/admin/workers/new`,
+   `/admin/assignments/new`, `/admin/periods` — по одной за раз, тем же паттерном (permission-seed →
+   endpoint с `IdempotencyKey`+`AuditEvent` → страница → Playwright-проверка).
+3. `role.assign`/role-management endpoint (запрет трогать последнего `SUPER_ADMIN`, audit trail — уже
+   готов через `createAuditEvent()`).
+4. `GET /api/admin/sites` (список) + `/admin/sites/[siteId]` — чтобы `/admin/sites/new` мог редиректить
+   на карточку созданного объекта вместо `/admin/setup`.
 
 Не начинать реальный admin API или UI раньше отдельного подтверждения владельца (исключения —
-`GET /api/admin/cities`, `session.revoke_all.own`, `/login`, `/admin/setup` — уже подтверждены и
-сделаны). Не запускать `app` в production и не менять CollabStudio без отдельного checkpoint владельца.
+`GET /api/admin/cities`, `session.revoke_all.own`, `/login`, `/admin/setup`, `POST /api/admin/sites`,
+`/admin/sites/new` — уже подтверждены и сделаны). Не запускать `app` в production и не менять
+CollabStudio без отдельного checkpoint владельца.
 
 ## 12. Правило обновления
 
