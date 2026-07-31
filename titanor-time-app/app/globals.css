@@ -255,6 +255,57 @@ button:disabled {
   flex: 1;
 }
 
+.template-days {
+  display: grid;
+  gap: 8px;
+}
+
+.template-day-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding: 10px 12px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 4px;
+  background: rgba(7, 11, 17, 0.5);
+}
+
+.template-day-label {
+  width: 36px;
+  flex-shrink: 0;
+  font-weight: 600;
+}
+
+.template-day-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.85rem;
+  color: var(--text-soft);
+  flex-shrink: 0;
+}
+
+.template-day-row input[type='time'],
+.template-day-row input[type='number'] {
+  height: 36px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 4px;
+  background: rgba(7, 11, 17, 0.88);
+  color: var(--text);
+  padding: 0 10px;
+}
+
+.template-day-row input[type='number'] {
+  width: 70px;
+}
+
+.template-day-unit,
+.template-day-off {
+  color: var(--text-soft);
+  font-size: 0.85rem;
+}
+
 .setup-action {
   flex-shrink: 0;
   font-size: 0.85rem;
