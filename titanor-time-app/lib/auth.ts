@@ -1,6 +1,5 @@
-import { NextRequest } from 'next/server';
 import { prisma } from '@/lib/prisma';
-import { SESSION_COOKIE_NAME, hashSessionToken } from '@/lib/session';
+import { hashSessionToken } from '@/lib/session';
 
 export interface AuthenticatedSession {
   sessionId: string;
@@ -13,18 +12,21 @@ export interface AuthenticatedSession {
 }
 
 /**
- * Resolves the tt_session cookie on `request` to its User + active roles
+ * Resolves an opaque tt_session cookie value to its User + active roles
  * (docs/titanor-time/04_ADMIN_FIRST_API_CONTRACTS.md §0: opaque token,
- * SHA-256 looked up in UserSession.tokenHash). Returns null for any invalid
- * session: missing cookie, unknown/expired/revoked token, or a user whose
- * account was deactivated after the session was issued (AGENT_RULES.md §12
- * requires a deactivated account to stop working immediately, not just at
- * next login attempt). OFFBOARDING is intentionally not rejected here, same
- * as at login (03_DATA_MODEL_ERD.md §4.2). On success, refreshes
- * UserSession.lastSeenAt.
+ * SHA-256 looked up in UserSession.tokenHash). Takes the raw token string
+ * rather than a NextRequest so both Route Handlers (`request.cookies.get(...)
+ * ?.value`) and Server Components (`(await cookies()).get(...)?.value` from
+ * `next/headers`, which isn't a NextRequest) can call it — see
+ * lib/server-session.ts for the Server Component wrapper. Returns null for
+ * any invalid session: missing/empty token, unknown/expired/revoked token,
+ * or a user whose account was deactivated after the session was issued
+ * (AGENT_RULES.md §12 requires a deactivated account to stop working
+ * immediately, not just at next login attempt). OFFBOARDING is intentionally
+ * not rejected here, same as at login (03_DATA_MODEL_ERD.md §4.2). On
+ * success, refreshes UserSession.lastSeenAt.
  */
-export async function resolveAuthenticatedSession(request: NextRequest): Promise<AuthenticatedSession | null> {
-  const token = request.cookies.get(SESSION_COOKIE_NAME)?.value;
+export async function resolveAuthenticatedSession(token: string | undefined): Promise<AuthenticatedSession | null> {
   if (!token) {
     return null;
   }

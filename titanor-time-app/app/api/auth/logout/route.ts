@@ -25,7 +25,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     );
   }
 
-  const authenticated = await resolveAuthenticatedSession(request);
+  const authenticated = await resolveAuthenticatedSession(request.cookies.get(SESSION_COOKIE_NAME)?.value);
   if (!authenticated) {
     return jsonError(401, { code: 'NOT_AUTHENTICATED', message: 'No active session.' }, requestId);
   }

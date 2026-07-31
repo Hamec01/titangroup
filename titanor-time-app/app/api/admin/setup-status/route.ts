@@ -1,21 +1,15 @@
 import { randomUUID } from 'node:crypto';
 import { NextRequest, NextResponse } from 'next/server';
-import { prisma } from '@/lib/prisma';
 import { jsonError, successHeaders } from '@/lib/api-error';
 import { resolveAuthenticatedSession } from '@/lib/auth';
 import { hasPermission } from '@/lib/permissions';
 import { SESSION_COOKIE_NAME } from '@/lib/session';
+import { getSetupStatus } from '@/lib/setup-status';
 
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
 
-// docs/titanor-time/04_ADMIN_FIRST_API_CONTRACTS.md §2 — exact contract for this endpoint.
-//
-// proxy.ts already blocks unauthenticated requests to /api/admin/* at the
-// gate, but re-checks the session here anyway — per Next.js's own Proxy
-// guidance, a matcher change or a route move can silently remove that
-// coverage, so each route verifies auth/permission itself rather than
-// trusting the gate alone.
+// docs/titanor-time/04_ADMIN_FIRST_API_CONTRACTS.md §10 — exact contract for this endpoint.
 export async function GET(request: NextRequest): Promise<NextResponse> {
   const requestId = randomUUID();
 
@@ -24,17 +18,11 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     return jsonError(401, { code: 'NOT_AUTHENTICATED', message: 'No active session.' }, requestId);
   }
 
-  if (!(await hasPermission(authenticated.user.roles, 'city.read.all'))) {
+  if (!(await hasPermission(authenticated.user.roles, 'worker.read.all'))) {
     return jsonError(403, { code: 'FORBIDDEN', message: 'Missing required permission.' }, requestId);
   }
 
-  const cities = await prisma.city.findMany({
-    orderBy: { name: 'asc' },
-    select: { id: true, name: true }
-  });
+  const status = await getSetupStatus();
 
-  return NextResponse.json(
-    { items: cities },
-    { status: 200, headers: successHeaders(requestId) }
-  );
+  return NextResponse.json(status, { status: 200, headers: successHeaders(requestId) });
 }

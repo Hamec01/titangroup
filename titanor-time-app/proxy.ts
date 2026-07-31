@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { jsonError } from '@/lib/api-error';
 import { resolveAuthenticatedSession } from '@/lib/auth';
+import { SESSION_COOKIE_NAME } from '@/lib/session';
 
 // Proxy (formerly "middleware", renamed in Next.js 16 — see
 // https://nextjs.org/docs/messages/middleware-to-proxy) defaults to the
@@ -21,7 +22,7 @@ export const config = {
 // under /api/admin/* and /api/worker/* is reachable by any authenticated
 // user; none of those routes exist yet either.
 export async function proxy(request: NextRequest): Promise<NextResponse> {
-  const authenticated = await resolveAuthenticatedSession(request);
+  const authenticated = await resolveAuthenticatedSession(request.cookies.get(SESSION_COOKIE_NAME)?.value);
   if (!authenticated) {
     return jsonError(401, { code: 'NOT_AUTHENTICATED', message: 'No active session.' });
   }
