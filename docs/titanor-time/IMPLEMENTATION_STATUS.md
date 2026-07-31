@@ -1,6 +1,6 @@
 # Titanor Time — Implementation Status
 
-Обновлено: 2026-07-31 02:57 Europe/Helsinki
+Обновлено: 2026-07-31 03:05 Europe/Helsinki
 Ветка: feature/titanor-time-foundation
 Isolated PostgreSQL config commit: `c28af00521ffef322211e2cfae840a5568dc8c03`
 Next.js app scaffold commit: `e15b203fe334fa4e2c68335f1169f78ed9c18ec9`
@@ -59,7 +59,11 @@ structurally verified: см. §5, commit `6dbb52e`.
 §5, commit `fbeec60`. No code writes to it yet — deliberately scoped out (see §11).
 `X-Request-Id` now generated on every response (not just `jsonError()`, as before) across all seven
 existing routes — prerequisite for `AuditEvent.requestId` — deployed to real `app`, structurally
-verified: см. §5, этот commit.
+verified: см. §5, commit `bf75962`.
+`createAuditEvent()` shared helper (`lib/audit.ts`) implemented — writes one `AuditEvent` row via the
+same Prisma transaction client as the business action, atomicity proven on disposable PostgreSQL 16
+(rollback test: neither the business row nor the audit row exists after a simulated failure). No route
+calls it yet, not deployed: см. §5, этот commit.
 Runtime-tested HEAD (полная повторная verification, full green): `991b8fb8381bff11accd09e2c1c3a3f7748d0832`
 Source fix commit (CK-08/CK-13 rename): `991b8fb8381bff11accd09e2c1c3a3f7748d0832`
 HEAD на момент первого runtime-теста, обнаружившего дефект: bebd6aab5f7a041e6272f24fe32db105ca04f92b
@@ -1135,6 +1139,51 @@ commit):
   /api/admin/cities`, any other admin/worker endpoint, the idempotency-record schema, the
   last-active-`SUPER_ADMIN` protection invariant, and `role.assign`/any role-management endpoint.
 
+**`createAuditEvent()` shared helper** (T5.6 sixth sub-step, owner-confirmed to proceed once both
+prerequisites closed — `titanor-time-app/lib/audit.ts`, this commit):
+- Причина: both things the owner named as blocking this — `AuditEvent` schema (commit `fbeec60`) and
+  `X-Request-Id` on every response (commit `bf75962`) — were done; nothing technical remained except
+  writing the helper itself. Same "build ahead of the first real consumer" pattern already used for
+  `hasPermission()` (commit `8fb72c2`) — no route calls this yet.
+- `createAuditEvent(tx: Prisma.TransactionClient, input: AuditEventInput): Promise<void>` — takes the
+  caller's own transaction client, not the top-level `prisma` singleton, and writes exactly one
+  `AuditEvent` row through it. This is what makes `03_DATA_MODEL_ERD.md` §3's rule ("Действие +
+  `AuditEvent` — одна транзакция") structural rather than a convention callers have to remember: since
+  `tx` must already come from an open `$transaction()`, the audit row can only ever commit or roll back
+  together with whatever business write it documents. Doc comment also restates the §4.8 constraint
+  that `beforeValue`/`afterValue` must never carry GPS/password/token values — the function itself does
+  not scrub them, that's on each caller.
+- **Two implementation snags found by the type checker/build, not manually** — both fixed before
+  testing:
+  - Prisma's generated input type for a nullable `Json` column doesn't accept a plain TypeScript `null`
+    (only `InputJsonValue | NullableJsonNullValueInput | undefined`) — passing bare `null` would need
+    `Prisma.JsonNull` (stores the JSON literal `null`) vs. the actually-intended `Prisma.DbNull` (stores
+    real SQL `NULL`). Fixed by mapping an explicit `null` input to `Prisma.DbNull`.
+  - `titanor-time-app/node_modules`' local physical copy of the generated Prisma Client (kept for local
+    type-checking only — separate from what Docker regenerates independently during its own image
+    build, same setup used after every prior schema change) was stale from before the `AuditEvent`
+    migration, causing a real `Property 'auditEvent' does not exist on type 'TransactionClient'` build
+    error. Regenerated at the repo root and re-copied — same procedure as after the second migration.
+- **Tested on disposable PostgreSQL 16** (`--rm`, tmpfs, random credentials, no named volume, all six
+  migrations applied): one throwaway script, three scenarios, 12 assertions, all passed —
+  - Committed transaction: a `City` row and an `AuditEvent` row created together via the same `tx`,
+    both persisted after commit; `actorUserId` and `afterValue` (a small JSON object) stored correctly.
+  - **Rolled-back transaction — the actual point of this helper**: `City` created, `createAuditEvent()`
+    called, then the callback throws (simulating a business-logic failure *after* the audit write).
+    Caught the rejection outside, then confirmed via direct query that **neither** the `City` **nor**
+    the `AuditEvent` row exists — proving real atomicity, not just documented intent.
+  - `LOGIN_FAILED`-style call with `actorUserId=null`/`entityId=null` in its own committed
+    transaction — persisted correctly; omitted `beforeValue`/`afterValue` confirmed stored as real SQL
+    `NULL` (not the JSON literal `null`) via a follow-up query.
+  - `npx tsc --noEmit`/`npm run build` clean (root and `titanor-time-app`) after the Prisma Client
+    refresh. Disposable container removed, temporary test script deleted, nothing else committed from
+    the test run.
+- **Not deployed** — no route calls this yet, so rebuilding/redeploying real `app` would be a no-op
+  change to the running image; same reasoning as `hasPermission()`'s commit.
+- **Not in this task**: any code that actually calls `createAuditEvent()` from a real route, `POST
+  /api/admin/cities` or any other admin/worker endpoint, the idempotency-record schema, the
+  last-active-`SUPER_ADMIN` protection invariant, and `role.assign`/any role-management endpoint.
+
 ## 6. Статический аудит initial migration
 
 - Exact migration path: `prisma/migrations/20260728012114_init_titanor_time_foundation/migration.sql`.
@@ -1392,16 +1441,17 @@ subtransaction (`SAVEPOINT`/`ROLLBACK TO SAVEPOINT`), вся сессия зав
   засеяны только `city.read.all` (commit `bf298d8`) и `session.revoke_all.own` (commit `4f3e5a1`);
   ~50+ остальных строк сознательно не заполнены разом, сеются по одному endpoint'у за раз (см.
   обоснование в комментарии второй migration).
-- `createAuditEvent()` (общий helper, пишет строку в той же транзакции, что бизнес-действие) — не
-  начат. `X-Request-Id`-prerequisite закрыт (commit `bf75962`); `AuditEvent` таблица/триггер/индексы
-  существуют и применены к `titanor-time-db-1` (commit `fbeec60`), но ни один роут/сервис пока не пишет
-  в неё.
+- Ни один реальный роут/сервис не вызывает `createAuditEvent()` (`lib/audit.ts`, commit `f67159f`) —
+  сам helper готов и протестирован (включая атомарность через rollback-тест), но не подключён нигде;
+  `AuditEvent` таблица/триггер/индексы применены к `titanor-time-db-1` (commit `fbeec60`) и по-прежнему
+  пусты.
 - Idempotency-record таблица (контракт `04_...` §0: `Idempotency-Key` обязателен/опционален per
   endpoint, encrypted response caching; полный дизайн уже есть в `03_DATA_MODEL_ERD.md` §4.1 —
   `IdempotencyKey`, не показан владельцу как отдельный checkpoint) — не спроектирована формально/не
   смигрирована; нужна для `POST /api/admin/cities` и любого другого мутирующего admin/worker endpoint.
 - `POST /api/admin/cities` (`city.create`) и весь остальной admin/worker API кроме `GET
-  /api/admin/cities` — не начаты; всё ещё требует `createAuditEvent()` (см. выше) и idempotency-схему.
+  /api/admin/cities` — не начаты; `createAuditEvent()` готов к использованию (см. выше), но
+  `POST /api/admin/cities` всё ещё требует idempotency-схему.
 - Инвариант «последний активный `SUPER_ADMIN` не удаляется/не блокируется/не понижается» — не
   реализован нигде (некуда: нет ни одного role-management endpoint).
 - Admin-first API (`04_ADMIN_FIRST_API_CONTRACTS.md`) — начат (`GET /api/admin/cities`, commit
@@ -1521,18 +1571,23 @@ PostgreSQL 16; без схемы, без seed, без роутов на моме
 структурно проверено, полная регрессия чистая. Это закрывает prerequisite, который сам владелец назвал
 условием для `createAuditEvent()`.
 
+**`createAuditEvent()` реализован** (T5.6 шестой под-шаг, commit `f67159f`): общий helper пишет строку
+`AuditEvent` через переданный вызывающим `tx` (Prisma transaction client), а не через синглтон `prisma`
+— атомарность с бизнес-действием обеспечена конструктивно, не соглашением. Rollback-тест на одноразовом
+PostgreSQL 16 доказал это напрямую: после симулированного сбоя внутри транзакции не остаётся ни строки
+бизнес-таблицы, ни строки `AuditEvent`. Не задеплоено (нет вызывающего кода) и не подключено ни к одному
+роуту — по тому же принципу, что `hasPermission()`: строится раньше первого реального потребителя.
+
 Следующей отдельной задачей, **требует решения владельца** (T5.6 продолжается, не завершено):
-1. `createAuditEvent()` — общий helper, пишет строку `AuditEvent` в той же транзакции, что бизнес-
-   действие (`03_...` §3: «Действие + `AuditEvent` — одна транзакция»). Оба prerequisite закрыты (схема
-   — commit `fbeec60`, request id — commit `bf75962`) — ничего больше не блокирует начало этой задачи
-   технически, кроме самого решения владельца её начать.
-2. Первый реальный audit-writer — естественный кандидат `POST /api/admin/cities` (`city.create`,
-   `Аудит=да` по матрице) — также требует idempotency-record таблицу (`IdempotencyKey`, дизайн уже есть
-   в `03_DATA_MODEL_ERD.md` §4.1, не показан владельцу как отдельный checkpoint).
-3. Только после `createAuditEvent()` работает: `role.assign`/role-management endpoint — обязателен на
+1. Первый реальный audit-writer — естественный кандидат `POST /api/admin/cities` (`city.create`,
+   `Аудит=да` по матрице) — вызывает уже готовый `createAuditEvent()` внутри своей транзакции, но также
+   требует idempotency-record таблицу (`IdempotencyKey`, дизайн уже есть в `03_DATA_MODEL_ERD.md` §4.1,
+   не показан владельцу как отдельный checkpoint) — контракт эндпоинта требует `Idempotency-Key`.
+2. Только после первого реального audit-writer: `role.assign`/role-management endpoint — обязателен на
    сервере запрет удаления/блокировки/понижения последнего активного `SUPER_ADMIN`, запись в audit
-   trail, второй `SUPER_ADMIN` только через аутентифицированный admin API (не bootstrap CLI).
-4. Продолжить admin-first сценарий дальше по `04_ADMIN_FIRST_API_CONTRACTS.md` (`POST
+   trail (`createAuditEvent()` уже готов), второй `SUPER_ADMIN` только через аутентифицированный admin
+   API (не bootstrap CLI).
+3. Продолжить admin-first сценарий дальше по `04_ADMIN_FIRST_API_CONTRACTS.md` (`POST
    /api/admin/cities` → объекты → рабочие области → шаблоны → работники → ...), по одному endpoint'у
    за раз, с реальным permission-seed на каждый.
 
