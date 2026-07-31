@@ -1,0 +1,168 @@
+/* Color palette matches the main Titanor Group site (repo root app/globals.css)
+   for brand consistency — titanor-time-app is a separate deployable Next.js
+   app with its own build, so the values are reused here rather than the file
+   itself being shared. */
+:root {
+  --bg: #05070b;
+  --card: #3b576f;
+  --border: #1d2a3a;
+  --text: #f2f5f7;
+  --text-soft: #9aa7b5;
+  --accent: #5282a8;
+  --accent-light: #7b99aa;
+  --white: #ffffff;
+  --error: #fda4af;
+  color-scheme: dark;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  min-height: 100%;
+}
+
+body {
+  background:
+    radial-gradient(circle at top, rgba(82, 130, 168, 0.14), transparent 30%),
+    linear-gradient(180deg, #04060a 0%, #060a12 45%, #05070b 100%);
+  color: var(--text);
+  font-family: system-ui, -apple-system, 'Segoe UI', sans-serif;
+}
+
+a {
+  color: inherit;
+}
+
+button,
+input {
+  font: inherit;
+}
+
+button {
+  cursor: pointer;
+}
+
+button:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+.login-page {
+  min-height: 100dvh;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  gap: 24px;
+}
+
+.login-locale-switch {
+  display: flex;
+  gap: 8px;
+}
+
+.login-locale-switch button {
+  border: 1px solid var(--border);
+  background: rgba(7, 11, 17, 0.6);
+  color: var(--text-soft);
+  padding: 6px 14px;
+  border-radius: 4px;
+  font-size: 0.8rem;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.login-locale-switch button[aria-pressed='true'] {
+  color: var(--white);
+  border-color: var(--accent-light);
+  background: rgba(82, 130, 168, 0.25);
+}
+
+.login-card {
+  width: 100%;
+  max-width: 420px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: linear-gradient(180deg, rgba(16, 23, 34, 0.96), rgba(10, 14, 21, 0.96));
+  padding: 32px;
+  border-radius: 6px;
+  display: grid;
+  gap: 16px;
+}
+
+.login-logo {
+  display: block;
+  height: 36px;
+  width: auto;
+  margin: 0 auto 4px;
+}
+
+.login-card h1 {
+  margin: 0;
+  text-align: center;
+  font-size: 1.3rem;
+  letter-spacing: 0.03em;
+}
+
+.login-field {
+  display: grid;
+  gap: 6px;
+}
+
+.login-field label {
+  color: var(--accent-light);
+  font-size: 0.85rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.login-field input {
+  height: 48px;
+  width: 100%;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 4px;
+  background: rgba(7, 11, 17, 0.88);
+  color: var(--text);
+  padding: 0 14px;
+  transition:
+    border-color 180ms ease,
+    box-shadow 180ms ease;
+}
+
+.login-field input:focus {
+  outline: none;
+  border-color: rgba(76, 123, 192, 0.8);
+  box-shadow: 0 0 0 4px rgba(47, 94, 157, 0.18);
+}
+
+.login-field input:disabled {
+  opacity: 0.6;
+}
+
+.login-submit {
+  height: 48px;
+  border: none;
+  border-radius: 4px;
+  background: linear-gradient(135deg, var(--accent) 0%, var(--accent-light) 100%);
+  color: var(--white);
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  box-shadow: 0 14px 30px rgba(47, 94, 157, 0.35);
+}
+
+.login-error {
+  color: var(--error);
+  font-size: 0.9rem;
+  text-align: center;
+  margin: 0;
+}
+
+@media (max-width: 480px) {
+  .login-card {
+    padding: 24px 20px;
+  }
+}

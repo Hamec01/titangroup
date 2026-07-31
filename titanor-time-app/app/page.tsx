@@ -1,7 +1,5 @@
-export default function HomePage() {
-  return (
-    <main>
-      <p>Titanor Time — scaffold only. No login, no data, no features yet.</p>
-    </main>
-  );
+import { redirect } from 'next/navigation';
+
+export default function HomePage(): never {
+  redirect('/login');
 }
