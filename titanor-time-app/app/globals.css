@@ -120,7 +120,9 @@ button:disabled {
   text-transform: uppercase;
 }
 
-.login-field input {
+.login-field input,
+.login-field select,
+.login-field textarea {
   height: 48px;
   width: 100%;
   border: 1px solid rgba(255, 255, 255, 0.14);
@@ -133,13 +135,24 @@ button:disabled {
     box-shadow 180ms ease;
 }
 
-.login-field input:focus {
+.login-field textarea {
+  height: auto;
+  min-height: 72px;
+  padding: 10px 14px;
+  resize: vertical;
+}
+
+.login-field input:focus,
+.login-field select:focus,
+.login-field textarea:focus {
   outline: none;
   border-color: rgba(76, 123, 192, 0.8);
   box-shadow: 0 0 0 4px rgba(47, 94, 157, 0.18);
 }
 
-.login-field input:disabled {
+.login-field input:disabled,
+.login-field select:disabled,
+.login-field textarea:disabled {
   opacity: 0.6;
 }
 
@@ -193,6 +206,11 @@ button:disabled {
   margin: 0 0 24px;
   color: var(--text-soft);
   font-size: 0.9rem;
+}
+
+.setup-card form {
+  display: grid;
+  gap: 16px;
 }
 
 .setup-list {
