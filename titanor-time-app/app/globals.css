@@ -255,6 +255,31 @@ button:disabled {
   flex: 1;
 }
 
+.worker-card {
+  max-width: 960px;
+}
+
+.worker-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.9rem;
+}
+
+.worker-table th,
+.worker-table td {
+  text-align: left;
+  padding: 10px 12px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.worker-table th {
+  color: var(--text-soft);
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
 .template-days {
   display: grid;
   gap: 8px;
