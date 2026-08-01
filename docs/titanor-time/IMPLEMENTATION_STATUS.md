@@ -1,6 +1,6 @@
 # Titanor Time — Implementation Status
 
-Обновлено: 2026-08-01 08:20 Europe/Helsinki
+Обновлено: 2026-08-01 15:17 Europe/Helsinki
 Ветка: feature/titanor-time-foundation
 Isolated PostgreSQL config commit: `c28af00521ffef322211e2cfae840a5568dc8c03`
 Next.js app scaffold commit: `e15b203fe334fa4e2c68335f1169f78ed9c18ec9`
@@ -93,6 +93,12 @@ Runtime-tested HEAD (полная повторная verification, full green): 
 Source fix commit (CK-08/CK-13 rename): `991b8fb8381bff11accd09e2c1c3a3f7748d0832`
 HEAD на момент первого runtime-теста, обнаружившего дефект: bebd6aab5f7a041e6272f24fe32db105ca04f92b
 HEAD на момент предыдущего (статического) аудита: 30d2364ffe58679856d6a29d91c9992a941c2b65
+Владелец зафиксировал: дальше работаем строго по `PROJECT_ROADMAP.md` ЭТАП 6 по порядку (T6.1→T6.9),
+агент больше не выбирает следующий шаг сам. T6.1 («Расширить User — только утверждённые поля»)
+проверен и закрыт без изменений кода — `User`/`Employee` в `prisma/schema.prisma` уже содержат ровно
+поля из `03_DATA_MODEL_ERD.md` §4.1/§4.2, добавлять нечего. T6.2 («Список работников, read-only») —
+`GET /api/admin/workers` + `/admin/workers`, переиспользует уже засеянный `worker.read.all` (седьмая
+migration, без новой migration в этой задаче), задеплоено на реальный `app`: commit `45aece3`.
 Статус документа: living implementation record
 
 ## 1. Назначение документа
@@ -1997,20 +2003,57 @@ seed → endpoint с `IdempotencyKey`+`createAuditEvent()` → страница 
 не менялся) — подтверждает, что прошлый инцидент был вызван именно изменением `env_file`, а не общим
 поведением. Чек-лист `/admin/setup` теперь имеет две проходимые destinations из пяти.
 
-Следующей отдельной задачей:
-1. `POST /api/admin/cities` (`city.create`) — простая задача (паттерн полностью готов), но `City`
-   информационный, не блокирует чек-лист, поэтому приоритет ниже остальных destinations.
-2. Остальные destinations чек-листа: `/admin/workers/new`, `/admin/assignments/new`, `/admin/periods` —
-   по одной за раз, тем же паттерном.
-3. `role.assign`/role-management endpoint (запрет трогать последнего `SUPER_ADMIN`, audit trail — уже
-   готов через `createAuditEvent()`).
-4. `GET /api/admin/sites`/`/api/admin/templates` (списки) + `/admin/sites/[siteId]`/
-   `/admin/templates/[templateId]` — чтобы формы создания могли редиректить на карточку созданного
-   объекта вместо `/admin/setup`.
+**Владелец сменил режим работы**: агент больше не выбирает следующий шаг сам («что важней — то и
+делай» отменено). Дальше строго `PROJECT_ROADMAP.md` ЭТАП 6 по порядку, T6.1→T6.9, не чек-лист
+`/admin/setup` и не собственный приоритет агента.
+
+**T6.1 «Расширить User» — проверен, закрыт без изменений кода**: `User`
+(`id`/`username`/`email`/`passwordHash`/`status`/`locale`/`twoFactorEnabled`/`twoFactorSecret`/
+`employeeId`/`lastLoginAt`/`createdAt`/`updatedAt`) и `Employee`
+(`id`/`employeeNumber`/`firstName`/`lastName`/`phone`/`version`/`createdAt`/`updatedAt`) в
+`prisma/schema.prisma` уже содержат ровно поля, утверждённые в `03_DATA_MODEL_ERD.md` §4.1/§4.2 —
+ни одного отсутствующего, ни одного лишнего (обе модели — часть frozen initial migration, commit
+`9b2cbab`). Добавлять что-либо сверх ERD было бы нарушением §8 `AGENT_RULES.md`.
+
+**T6.2 «Список работников, read-only» реализован**: `GET /api/admin/workers` (`lib/workers.ts`,
+`app/api/admin/workers/route.ts`) + `/admin/workers` (`app/admin/workers/page.tsx`), точный контракт
+`04_ADMIN_FIRST_API_CONTRACTS.md` §5 (`items`+пагинация `page`/`pageSize`/`totalItems`/`totalPages`,
+`currentAssignments` — только `SiteAssignment`, чей `[validFrom, validTo]` покрывает сегодняшний
+календарный день в `Europe/Helsinki`, не host-local/UTC). Новой migration не понадобилось —
+`worker.read.all` уже засеян седьмой migration (`20260731210728`, коммит `90d2e55`) под `/admin/setup`.
+Commit `45aece3`.
+- Протестировано на одноразовом PostgreSQL 16 (все 10 migrations с нуля): unit-уровень (`listWorkers()`
+  напрямую) — сортировка `lastName,firstName`, `active` из `Employment.active`, пагинация
+  (`pageSize=2` → 2 страницы), граничный случай `validTo = сегодня` (assignment должен остаться
+  текущим — Postgres date/timestamp cast был реальным риском, проверен явно) — все прошли; HTTP-уровень
+  (реальный `next dev` + вручную созданная `UserSession`) — `401` без cookie, `403` для роли `WORKER`
+  без `worker.read.all`, `200` для `ADMIN` с точной формой ответа, `/admin/workers` без cookie —
+  настоящий `307` на `/login` (не client-side redirect — тот баг уже исправлен commit `fa7720e`).
+  Одноразовый контейнер и весь тестовый код удалены после проверки.
+- Задеплоено на реальный `app` (`docker compose up -d --build --no-deps app`) — на этот раз `db` не
+  пересоздавалась (только `app`, `--no-deps`); `/api/health`/`/api/ready` регрессия чистая,
+  `/api/admin/workers` без cookie → `401`, `/admin/workers` без cookie → `307`. Реальная
+  `titanor_time` база: `Employee`/`WorkSite` = 0 строк (владелец ещё не создавал ни одного работника
+  через `/admin/workers/new`, той страницы ещё нет — T6.3), поэтому реальная страница сейчас показывает
+  пустой список («No workers yet.») — это ожидаемо, не проверено логином живого `SUPER_ADMIN`
+  намеренно (не было причины создавать тестовую сессию/данные в реальной базе для строки с 0 записей).
+
+Следующей отдельной задачей (строго по порядку `PROJECT_ROADMAP.md` ЭТАП 6):
+- **T6.3 — Создание работника.** «Публичной регистрации нет» — т.е. `POST /api/admin/workers`
+  (`worker.create`, контракт `04_...` §5) требует новую migration (seed `worker.create` permission) +
+  endpoint + `/admin/workers/new` форма. Это уже совпадает с destination `/admin/setup`
+  (`hasWorker` → `/admin/workers/new`), но выполняется как T6.3, а не потому что чек-лист так
+  указывает.
+- Далее по роадмапу: T6.4 (редактирование/`active=false`, не удаление), T6.5 (`Worksite schema` — уже
+  фактически есть в frozen initial migration, потребует того же короткого «проверен, изменений не
+  нужно» разбора, что и T6.1), T6.6 (CRUD объектов — `POST /api/admin/sites` из T6.6 уже сделан раньше
+  по владельческому приоритету, остаются список/редактирование/закрытие), T6.7–T6.9 (Assignment schema
+  и назначения).
 
 Не начинать реальный admin API или UI раньше отдельного подтверждения владельца (исключения —
 `GET /api/admin/cities`, `session.revoke_all.own`, `/login`, `/admin/setup`, `POST /api/admin/sites`,
-`/admin/sites/new`, `POST /api/admin/templates`, `/admin/templates/new` — уже подтверждены и сделаны).
+`/admin/sites/new`, `POST /api/admin/templates`, `/admin/templates/new`, `GET /api/admin/workers`,
+`/admin/workers` — уже подтверждены и сделаны).
 Не запускать `app` в production и не менять CollabStudio без отдельного checkpoint владельца.
 
 ## 12. Правило обновления
