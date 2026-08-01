@@ -1,6 +1,6 @@
 # Titanor Time — Implementation Status
 
-Обновлено: 2026-08-01 15:17 Europe/Helsinki
+Обновлено: 2026-08-01 16:05 Europe/Helsinki
 Ветка: feature/titanor-time-foundation
 Isolated PostgreSQL config commit: `c28af00521ffef322211e2cfae840a5568dc8c03`
 Next.js app scaffold commit: `e15b203fe334fa4e2c68335f1169f78ed9c18ec9`
@@ -99,6 +99,10 @@ HEAD на момент предыдущего (статического) ауд�
 поля из `03_DATA_MODEL_ERD.md` §4.1/§4.2, добавлять нечего. T6.2 («Список работников, read-only») —
 `GET /api/admin/workers` + `/admin/workers`, переиспользует уже засеянный `worker.read.all` (седьмая
 migration, без новой migration в этой задаче), задеплоено на реальный `app`: commit `45aece3`.
+T6.3 («Создание работника») — `POST /api/admin/workers` + `/admin/workers/new`, двенадцатая migration
+(seed `worker.create`), применена **владельцем** (агент по-прежнему заблокирован tool policy на прямые
+изменения реальной базы — та же одноразовая `node:22`-container команда, что и во всех предыдущих
+migrations), задеплоено на реальный `app`: commit `95e2f74`.
 Статус документа: living implementation record
 
 ## 1. Назначение документа
@@ -2038,22 +2042,61 @@ Commit `45aece3`.
   пустой список («No workers yet.») — это ожидаемо, не проверено логином живого `SUPER_ADMIN`
   намеренно (не было причины создавать тестовую сессию/данные в реальной базе для строки с 0 записей).
 
+**T6.3 «Создание работника» реализован**: `POST /api/admin/workers`
+(`app/api/admin/workers/route.ts`) + `/admin/workers/new`
+(`app/admin/workers/new/{page.tsx,NewWorkerForm.tsx}`) — точный контракт
+`04_ADMIN_FIRST_API_CONTRACTS.md` §5: одна транзакция создаёт `Employee`+`User(PENDING_ACTIVATION,
+locale=FI)`+`Employment(active=true, startDate=сегодня)`, `ActivationToken` не создаётся (см.
+`01_SCREEN_MAP.md`). Двенадцатая migration засеяла `worker.create` (`ADMIN`/`SUPER_ADMIN`,
+`02_ROLE_PERMISSION_MATRIX.md` §2.2). `employeeNumber` можно передать или оставить пустым —
+генерируется как следующее целое после текущего числового максимума (не зафиксировано ни одним
+документом точнее, чем «можно сгенерировать», `01_...`); он же становится `User.username`
+(единственное согласованное толкование примеров `"1042"`, повторяющихся и в `GET
+/api/admin/workers`, и в `POST /auth/login` контракта). `Idempotency-Key` обязателен для этого
+endpoint (в отличие от `POST /api/admin/sites`, где он опционален) — контракт прямо говорит
+«обязателен». Commit `95e2f74`.
+- Race-safety генерации `employeeNumber` — не advisory lock (как у единственного `SUPER_ADMIN` в
+  `bootstrap-super-admin.ts`), а просто DB `UNIQUE`-ограничение: коллизия ловится как `P2002` и
+  превращается в штатный `409 DUPLICATE_EMPLOYEE_NUMBER` — осознанно более лёгкое решение, т.к. цена
+  ошибки здесь — retryable конфликт, а не потеря инварианта «ровно один активный SUPER_ADMIN».
+- Протестировано на одноразовом PostgreSQL 16 (все 11 migrations с нуля): `401`/`403`/
+  `CSRF_REJECTED`/отсутствие `Idempotency-Key` (`400`)/`VALIDATION_ERROR` (пустой `firstName`) — все
+  корректны; успешное создание с сгенерированным (`5001` после существующего `5000`) и явным
+  (`1042`) `employeeNumber`; `409 DUPLICATE_EMPLOYEE_NUMBER` при повторе занятого номера; **точный
+  повтор** (тот же `Idempotency-Key`+тело) вернул закешированный `201` с тем же `employee.id` — прямой
+  SQL-подсчёт подтвердил отсутствие дубликата (`Employee`/`User`/`Employment`/`AuditEvent` — по 1 новой
+  строке на реальное создание, не 2); тот же `Idempotency-Key` с другим телом → `409
+  IDEMPOTENCY_KEY_REUSED`; `GET /api/admin/workers` сразу отразил созданных работников с верной формой
+  (`active`, пустой `currentAssignments[]` — назначений ещё нет). Одноразовый контейнер и весь
+  тестовый код удалены после проверки.
+- **Migration применена владельцем** к `titanor-time-db-1` (агент по-прежнему заблокирован tool
+  policy на прямые изменения реальной базы — тот же одноразовый `node:22`-container паттерн,
+  `--network titanor-time_internal`, bind-mount репозитория, `--env-file .env.titanor-time`, без `npm
+  install`, что и во всех предыдущих migrations этого проекта): «Applying migration
+  `20260801123904_seed_worker_create_permission`» → «All migrations have been successfully applied.»
+  Подтверждено агентом read-only запросом: `worker.create` есть в `Permission`, `_prisma_migrations` =
+  11 записей.
+- **Задеплоено на реальный `app`** (`docker compose up -d --build --no-deps app`) — `db` не
+  пересоздавалась; `/api/health`/`/api/ready` регрессия чистая; `/api/admin/workers` (`POST`, без
+  cookie) → `401`; `/admin/workers/new` без cookie → настоящий `307` на `/login`; реальная `Employee`/
+  `AuditEvent(WORKER_CREATED)` — по-прежнему 0 строк (тестовых данных в реальную базу не вносилось).
+
 Следующей отдельной задачей (строго по порядку `PROJECT_ROADMAP.md` ЭТАП 6):
-- **T6.3 — Создание работника.** «Публичной регистрации нет» — т.е. `POST /api/admin/workers`
-  (`worker.create`, контракт `04_...` §5) требует новую migration (seed `worker.create` permission) +
-  endpoint + `/admin/workers/new` форма. Это уже совпадает с destination `/admin/setup`
-  (`hasWorker` → `/admin/workers/new`), но выполняется как T6.3, а не потому что чек-лист так
-  указывает.
-- Далее по роадмапу: T6.4 (редактирование/`active=false`, не удаление), T6.5 (`Worksite schema` — уже
-  фактически есть в frozen initial migration, потребует того же короткого «проверен, изменений не
-  нужно» разбора, что и T6.1), T6.6 (CRUD объектов — `POST /api/admin/sites` из T6.6 уже сделан раньше
-  по владельческому приоритету, остаются список/редактирование/закрытие), T6.7–T6.9 (Assignment schema
-  и назначения).
+- **T6.4 — Редактирование и отключение.** `PATCH /api/admin/workers/:employeeId` (`worker.update`) +
+  `POST /api/admin/workers/:employeeId/deactivate` (`worker.deactivate`) — «предпочтительно
+  `active=false`, а не удаление» (роадмап это и так же подтверждает контракт: `Employment.active=false`
+  + `User.status → OFFBOARDING`/`DEACTIVATED` по правилу отработанных периодов, `03_...` §4.2). Обеим
+  нужна карточка `GET /api/admin/workers/:employeeId` + `/admin/workers/[employeeId]` как минимум для
+  того, чтобы было что редактировать — без неё T6.4 не имеет отображения.
+- Далее: T6.5 (`Worksite schema` — уже фактически есть в frozen initial migration, потребует того же
+  короткого «проверен, изменений не нужно» разбора, что и T6.1), T6.6 (CRUD объектов — `POST
+  /api/admin/sites` из T6.6 уже сделан раньше по владельческому приоритету, остаются список/
+  редактирование/закрытие), T6.7–T6.9 (Assignment schema и назначения).
 
 Не начинать реальный admin API или UI раньше отдельного подтверждения владельца (исключения —
 `GET /api/admin/cities`, `session.revoke_all.own`, `/login`, `/admin/setup`, `POST /api/admin/sites`,
 `/admin/sites/new`, `POST /api/admin/templates`, `/admin/templates/new`, `GET /api/admin/workers`,
-`/admin/workers` — уже подтверждены и сделаны).
+`/admin/workers`, `POST /api/admin/workers`, `/admin/workers/new` — уже подтверждены и сделаны).
 Не запускать `app` в production и не менять CollabStudio без отдельного checkpoint владельца.
 
 ## 12. Правило обновления
