@@ -1,6 +1,6 @@
 # Titanor Time — Implementation Status
 
-Обновлено: 2026-08-01 01:27 Europe/Helsinki
+Обновлено: 2026-08-01 08:20 Europe/Helsinki
 Ветка: feature/titanor-time-foundation
 Isolated PostgreSQL config commit: `c28af00521ffef322211e2cfae840a5568dc8c03`
 Next.js app scaffold commit: `e15b203fe334fa4e2c68335f1169f78ed9c18ec9`
@@ -83,6 +83,12 @@ owner delegation ("что важней ... то и делай"); deployed to rea
 `docker compose up -d --build app` also recreated `db` (shared `env_file`, unrelated env var change)
 despite only `app` being named — same named volume reused, no data loss, confirmed by owner login;
 disclosed immediately, see §10.
+`POST /api/admin/templates` (eleventh migration seeding `template.create`) + `/admin/templates/new` —
+second mutating admin-first endpoint and second walkable `/admin/setup` destination (commits `6bf5232`/
+`4962ac6`), same pattern as sites (`IdempotencyKey`+`createAuditEvent()`+shape-validation mirroring the
+already-frozen CK-06/07/08 constraints). Deployed to real `app`: this time `db`'s `env_file` was
+unchanged, so `docker compose up -d --build app` recreated only `app` — confirms the previous
+incident's root cause (a shared `env_file` var change) rather than a general pattern.
 Runtime-tested HEAD (полная повторная verification, full green): `991b8fb8381bff11accd09e2c1c3a3f7748d0832`
 Source fix commit (CK-08/CK-13 rename): `991b8fb8381bff11accd09e2c1c3a3f7748d0832`
 HEAD на момент первого runtime-теста, обнаружившего дефект: bebd6aab5f7a041e6272f24fe32db105ca04f92b
@@ -1428,6 +1434,52 @@ one same-day fix, commits `90d2e55`/`1cba420`/`fa7720e`)**:
   `/admin/assignments/new`, `/admin/periods` — остальные destinations чек-листа всё ещё не
   реализованы, их `Create`-ссылки по-прежнему дают `404`.
 
+**`POST /api/admin/templates` + `/admin/templates/new` — второй мутирующий admin-first endpoint и
+вторая проходимая destination чек-листа (коммиты `6bf5232`/`4962ac6`, одиннадцатая migration)**:
+- Причина: продолжение той же задачи владельца («продолжаем!») тем же паттерном, что `Site` — по
+  порядку сценария `04_...` (объект → рабочая область → шаблон → …) и по чек-листу `/admin/setup`
+  следующий проходимый пункт — `Work schedule template` (у `Work area` по-прежнему нет отдельного
+  route в доках, создаётся в рамках объекта). Никакой новой схемы не нужно —
+  `WorkScheduleTemplate`/`Version`/`VersionDay` существуют с самой первой (frozen) migration, включая
+  реальные CHECK-constraints CK-06 (`weekday` 0–6)/CK-07 (working/non-working day shape)/CK-08
+  (`plannedBreakMinutes >= 0`) — нужен был только новый permission seed.
+- **`POST /api/admin/templates` (commit `6bf5232`, одиннадцатая migration — seed `template.create` →
+  `ADMIN`/`SUPER_ADMIN`)**: CSRF → auth → permission → parse body → (если есть `Idempotency-Key`)
+  begin/cache-branch → валидация `days` (ровно 7 элементов, `weekday` 0–6 без повторов, для
+  `isWorkingDay=true` обязательны `plannedStartTime`/`plannedEndTime` и `plannedBreakMinutes >= 0`,
+  для `isWorkingDay=false` оба времени обязаны отсутствовать и `plannedBreakMinutes` обязан быть `0`)
+  → `WorkScheduleTemplate.create` + `WorkScheduleTemplateVersion` (versionNumber=1) + 7
+  `WorkScheduleTemplateVersionDay` + `createAuditEvent(TEMPLATE_CREATED)` в одной транзакции → (если
+  был ключ) complete. Валидация приложения намеренно зеркалит уже существующие DB CHECK CK-06/07/08 —
+  единственная цель зеркалирования: вернуть чистый `400 VALIDATION_ERROR` вместо сырого `23514`.
+  Протестировано по реальному HTTP на одноразовом PostgreSQL 16: валидное создание (5 рабочих + 2
+  выходных дня), неверное количество дней, дублирующийся `weekday`, все 4 нарушения shape (рабочий
+  день без времени, выходной со временем, выходной с ненулевым перерывом, отрицательный перерыв),
+  полный жизненный цикл `Idempotency-Key` (кэшированный повтор подтверждён на уровне БД — ровно 1
+  `WorkScheduleTemplate` и ровно 1 `AuditEvent` на 2 реальных создания), 401/403/CSRF-403. Отдельно
+  сверены в БД все 7 `WorkScheduleTemplateVersionDay` — времена корректно round-trip'ятся через
+  `@db.Time(0)`.
+- **`/admin/templates/new` (commit `4962ac6`)** — вторая реально работающая destination чек-листа. Тот
+  же Server Component auth/role-gate паттерн (без `loading.tsx`). Форма: `name`/`description`
+  (опционально) + 7 строк пн–вс, каждая с чекбоксом «рабочий день», по умолчанию пн–пт рабочие
+  (09:00–17:00, перерыв 30 мин), сб–вс выходные — время/перерыв скрываются, когда день выходной, и
+  появляются обратно при включении, без перезагрузки формы. Тот же `Idempotency-Key`-паттерн
+  (переиспользуется только после сетевой ошибки), редирект на `/admin/setup` после успеха (страницы
+  `/admin/templates/[templateId]` ещё нет). Протестировано в реальном headless-браузере (Playwright,
+  standalone-сборка) на одноразовом PostgreSQL 16: дефолтная форма отправляется успешно, toggle
+  чекбокса живо показывает/прячет поля времени, вторая заявка с изменённой формой тоже создаётся
+  успешно, без сессии — редирект на `/login`.
+- **Деплой**: применено владельцем к `titanor-time-db-1` тем же способом, что раньше (без нового
+  секрета — `IDEMPOTENCY_ENCRYPTION_KEY` уже добавлен в прошлый раз). `docker compose up -d --build
+  app` на этот раз пересоздал **только** `app` (`db` `StartedAt` не изменился) — подтверждает, что
+  прошлый инцидент (см. §10) был вызван именно изменением `env_file`, а не общим паттерном поведения
+  Compose. Структурная проверка: `/api/health` ok, `/api/ready` → `connected`,
+  `/admin/templates/new` без сессии → `307`, `POST /api/admin/templates` без сессии → `401`,
+  регрессия (`sites`/`setup`/`login`) чистая, CollabStudio/`titanorgroup.fi` не задеты.
+- **Not in this task**: `GET /api/admin/templates` (список)/`PATCH /api/admin/templates/:templateId`/
+  `/admin/templates/[templateId]` — не реализованы; `POST /api/admin/cities`, `/admin/workers/new`,
+  `/admin/assignments/new`, `/admin/periods` — не реализованы; `role.assign`/role-management — не начат.
+
 ## 6. Статический аудит initial migration
 
 - Exact migration path: `prisma/migrations/20260728012114_init_titanor_time_foundation/migration.sql`.
@@ -1685,24 +1737,25 @@ subtransaction (`SAVEPOINT`/`ROLLBACK TO SAVEPOINT`), вся сессия зав
   засеяны только `city.read.all` (commit `bf298d8`), `session.revoke_all.own` (commit `4f3e5a1`) и
   `worker.read.all` (commit `90d2e55`); ~50+ остальных строк сознательно не заполнены разом, сеются по
   одному endpoint'у за раз (см. обоснование в комментарии второй migration).
-- `createAuditEvent()` (`lib/audit.ts`, commit `f67159f`) теперь вызывается из `POST /api/auth/login`
-  (commit `80c201d`) — первый и пока единственный реальный audit-writer. Остальные будущие
-  mutating-эндпоинты (в т.ч. `POST /api/admin/cities`) его ещё не вызывают.
+- `createAuditEvent()` (`lib/audit.ts`, commit `f67159f`) вызывается из `POST /api/auth/login`
+  (`80c201d`), `POST /api/admin/sites` (`d1c6cc0`) и `POST /api/admin/templates` (`6bf5232`). Остальные
+  будущие mutating-эндпоинты (в т.ч. `POST /api/admin/cities`) его ещё не вызывают.
 - `IdempotencyKey` (`03_DATA_MODEL_ERD.md` §4.1) — **реализована** (schema `ddf44a3`, helper
-  `6a322bc`, см. §5); пока подключена только к `POST /api/admin/sites` (`d1c6cc0`). Любой другой
-  будущий мутирующий admin/worker endpoint, где контракт помечает `Idempotency-Key`, должен подключить
-  её так же.
+  `6a322bc`, см. §5); подключена к `POST /api/admin/sites` (`d1c6cc0`) и `POST /api/admin/templates`
+  (`6bf5232`). Любой другой будущий мутирующий admin/worker endpoint, где контракт помечает
+  `Idempotency-Key`, должен подключить её так же.
 - `POST /api/admin/cities` (`city.create`) — не начат; `City` информационный/необязательный флаг
-  чек-листа, поэтому не был нужен для первой проходимой destination. `GET /api/admin/sites` (список),
-  `PATCH /api/admin/sites/:siteId`, `/admin/sites/[siteId]` — не начаты; весь остальной admin/worker
-  API кроме `GET /api/admin/cities`/`POST /api/admin/sites` — тоже не начат.
+  чек-листа, поэтому не был нужен ни для первой, ни для второй проходимой destination. `GET
+  /api/admin/sites`/`/api/admin/templates` (списки), `PATCH /api/admin/sites/:siteId`/
+  `/api/admin/templates/:templateId`, `/admin/sites/[siteId]`/`/admin/templates/[templateId]` — не
+  начаты; весь остальной admin/worker API кроме уже реализованных — тоже не начат.
 - Инвариант «последний активный `SUPER_ADMIN` не удаляется/не блокируется/не понижается» — не
   реализован нигде (некуда: нет ни одного role-management endpoint).
-- Admin-first API (`04_ADMIN_FIRST_API_CONTRACTS.md`) — начат (`GET /api/admin/cities` commit
-  `bf298d8`, `POST /api/admin/sites` commit `d1c6cc0`), остальное не начато.
+- Admin-first API (`04_ADMIN_FIRST_API_CONTRACTS.md`) — начат (`GET /api/admin/cities` `bf298d8`,
+  `POST /api/admin/sites` `d1c6cc0`, `POST /api/admin/templates` `6bf5232`), остальное не начато.
 - `/admin/setup` реализован (см. §5, commits `90d2e55`/`1cba420`/`fa7720e`); `/foreman`, `/worker` —
   целевые страницы после логина для остальных ролей всё ещё не реализованы, вход туда даёт `404`.
-- `/admin/sites/new` реализован (commit `145bfec`, см. §5). `/admin/templates/new`,
+- `/admin/sites/new` (`145bfec`) и `/admin/templates/new` (`4962ac6`) реализованы (см. §5).
   `/admin/workers/new`, `/admin/assignments/new`, `/admin/periods` — остальные destinations с
   чек-листа `/admin/setup`, ни одна не реализована, `Create`-ссылки дают `404`.
 - Worker flow.
@@ -1934,22 +1987,31 @@ PostgreSQL 16 доказал это напрямую: после симулир�
 найден и раскрыт владельцу инцидент с непреднамеренным пересозданием `db`-контейнера при деплое (см.
 §10, без потери данных, подтверждено владельцем лично).
 
+Владелец продолжил делегировать выбор следующего шага («продолжаем!»). Тем же паттерном (permission
+seed → endpoint с `IdempotencyKey`+`createAuditEvent()` → страница → Playwright-проверка) реализован
+**второй** мутирующий admin-first endpoint: **`POST /api/admin/templates` + `/admin/templates/new`**
+(commits `6bf5232`/`4962ac6`, одиннадцатая migration — seed `template.create`). Новой схемы не
+понадобилось — `WorkScheduleTemplate`/`Version`/`VersionDay` и их CHECK-constraints (CK-06/07/08) уже
+были в frozen initial migration; endpoint зеркалит их в application-валидации ради чистого `400`
+вместо сырого `23514`. Задеплоено на реальный `app`; на этот раз `db` не пересоздавалась (`env_file`
+не менялся) — подтверждает, что прошлый инцидент был вызван именно изменением `env_file`, а не общим
+поведением. Чек-лист `/admin/setup` теперь имеет две проходимые destinations из пяти.
+
 Следующей отдельной задачей:
-1. `POST /api/admin/cities` (`city.create`) — теперь простая задача (тот же паттерн, что `site.create`,
-   `IdempotencyKey`/`createAuditEvent()` уже готовы) — но `City` информационный, не блокирует чек-лист,
-   так что приоритет ниже, чем остальные destinations.
-2. Остальные destinations чек-листа: `/admin/templates/new`, `/admin/workers/new`,
-   `/admin/assignments/new`, `/admin/periods` — по одной за раз, тем же паттерном (permission-seed →
-   endpoint с `IdempotencyKey`+`AuditEvent` → страница → Playwright-проверка).
+1. `POST /api/admin/cities` (`city.create`) — простая задача (паттерн полностью готов), но `City`
+   информационный, не блокирует чек-лист, поэтому приоритет ниже остальных destinations.
+2. Остальные destinations чек-листа: `/admin/workers/new`, `/admin/assignments/new`, `/admin/periods` —
+   по одной за раз, тем же паттерном.
 3. `role.assign`/role-management endpoint (запрет трогать последнего `SUPER_ADMIN`, audit trail — уже
    готов через `createAuditEvent()`).
-4. `GET /api/admin/sites` (список) + `/admin/sites/[siteId]` — чтобы `/admin/sites/new` мог редиректить
-   на карточку созданного объекта вместо `/admin/setup`.
+4. `GET /api/admin/sites`/`/api/admin/templates` (списки) + `/admin/sites/[siteId]`/
+   `/admin/templates/[templateId]` — чтобы формы создания могли редиректить на карточку созданного
+   объекта вместо `/admin/setup`.
 
 Не начинать реальный admin API или UI раньше отдельного подтверждения владельца (исключения —
 `GET /api/admin/cities`, `session.revoke_all.own`, `/login`, `/admin/setup`, `POST /api/admin/sites`,
-`/admin/sites/new` — уже подтверждены и сделаны). Не запускать `app` в production и не менять
-CollabStudio без отдельного checkpoint владельца.
+`/admin/sites/new`, `POST /api/admin/templates`, `/admin/templates/new` — уже подтверждены и сделаны).
+Не запускать `app` в production и не менять CollabStudio без отдельного checkpoint владельца.
 
 ## 12. Правило обновления
 
