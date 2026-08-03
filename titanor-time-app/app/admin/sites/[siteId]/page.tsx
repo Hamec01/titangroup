@@ -2,6 +2,7 @@ import { redirect } from 'next/navigation';
 import { resolveServerSession } from '@/lib/server-session';
 import { getSiteDetail } from '@/lib/sites';
 import { SiteEditForm } from './SiteEditForm';
+import { WorkAreaSection } from './WorkAreaSection';
 
 export const dynamic = 'force-dynamic';
 
@@ -50,21 +51,7 @@ export default async function SiteDetailPage({ params }: { params: Promise<{ sit
           {site.defaultForemanUsername ? ` · default foreman: ${site.defaultForemanUsername}` : ''}
         </p>
 
-        <h2>Work areas</h2>
-        {site.workAreas.length === 0 ? (
-          <p>None yet.</p>
-        ) : (
-          <ul className="setup-list">
-            {site.workAreas.map((area) => (
-              <li key={area.id} className="setup-item">
-                <span className="setup-label">
-                  {area.name}
-                  {!area.active ? ' (inactive)' : ''}
-                </span>
-              </li>
-            ))}
-          </ul>
-        )}
+        <WorkAreaSection siteId={site.id} workAreas={site.workAreas} />
 
         <h2>Active assignments</h2>
         {site.activeAssignments.length === 0 ? (
