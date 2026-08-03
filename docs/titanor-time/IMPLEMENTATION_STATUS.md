@@ -1,6 +1,6 @@
 # Titanor Time — Implementation Status
 
-Обновлено: 2026-08-03 17:15 Europe/Helsinki
+Обновлено: 2026-08-03 18:00 Europe/Helsinki
 Ветка: feature/titanor-time-foundation
 Isolated PostgreSQL config commit: `c28af00521ffef322211e2cfae840a5568dc8c03`
 Next.js app scaffold commit: `e15b203fe334fa4e2c68335f1169f78ed9c18ec9`
@@ -118,6 +118,11 @@ migration (seed `site.read.all`/`site.update`), применена **владе�
 содержат ошибочные ordinal-комментарии «twelfth»/«thirteenth»/«fourteenth» вместо реальных
 11/12/13 — обнаружено этой задачей; файлы уже применены к реальной базе и заморожены по конвенции
 проекта, поэтому не редактируются задним числом, ошибка исправлена только здесь, в живом статусе.)
+T6.6 вторая половина («`WorkArea` CRUD») — `GET`/`POST /api/admin/sites/:siteId/work-areas` +
+`PATCH .../work-areas/:workAreaId`, секция внутри уже существующей `/admin/sites/[siteId]` (без
+отдельной страницы, per `01_SCREEN_MAP.md`), четырнадцатая migration (seed `workarea.read.all`/
+`workarea.create`/`workarea.update`), применена **владельцем**, задеплоено на реальный `app`: commit
+`b25a098`. **Закрывает T6.6 полностью.**
 Статус документа: living implementation record
 
 ## 1. Назначение документа
@@ -2131,23 +2136,26 @@ endpoint (в отличие от `POST /api/admin/sites`, где он опцио
   же одноразовая `node:22`-container команда), задеплоено на реальный `app`, регрессия чистая, реальная
   `Employee`/`AuditEvent` — по-прежнему 0 строк.
 
-Следующей отдельной задачей (строго по порядку `PROJECT_ROADMAP.md` ЭТАП 6):
-- **T6.6 вторая половина — `WorkArea` CRUD.** Контракт уже сверен (`04_...` §3): `GET`/
-  `POST /api/admin/sites/:siteId/work-areas` (`workarea.read.all`/`workarea.create`) +
-  `PATCH /api/admin/sites/:siteId/work-areas/:workAreaId` (`workarea.update`, включает `active` —
-  тот же принцип «закрытие = обычное поле», что у сайта). Ни один из трёх permission-кодов ещё не
-  засеян. UI — секция внутри уже существующей `/admin/sites/[siteId]` карточки (своей отдельной
-  страницы `WorkArea` не имеет per `01_SCREEN_MAP.md`), не новая страница.
-- Далее: T6.7–T6.9 (Assignment schema и назначения — `SiteAssignment` тоже уже в frozen initial
-  migration, вероятно тот же «проверено» разбор для схемы, реальный код — для назначения работника и
-  прораба).
+Следующей отдельной задачей (строго по порядку `PROJECT_ROADMAP.md` ЭТАП 6), T6.6 полностью закрыт:
+- **T6.7 — Assignment schema.** Ожидается по образцу T6.1/T6.5: `SiteAssignment` уже полностью в
+  frozen initial migration (`03_DATA_MODEL_ERD.md` §4.4, включая exclusion constraint из
+  `05_RAW_SQL_REGISTER.md`) — вероятно снова «проверен, изменений не нужно», а не новый код.
+  `ForemanAssignment` (нужен для T6.9) — модели ещё нет, это будет отдельный design-checkpoint с
+  владельцем перед migration (`AGENT_RULES.md` §11), не входит в T6.7.
+- **T6.8 — Назначение работника.** Существенный кусок контракта (`04_...` §6 «Назначения»): `GET
+  /api/admin/assignments`, `POST /api/admin/assignments/validate-overlap`, `POST
+  /api/admin/assignments`, `PATCH /api/admin/assignments/:assignmentId`, `.../split`,
+  `.../promote`, `.../end` — вероятно потребует разбивки на несколько под-задач, не одна.
+- **T6.9 — Назначение прораба.** Требует новую модель `ForemanAssignment` — design-checkpoint с
+  владельцем обязателен до migration.
 
 Не начинать реальный admin API или UI раньше отдельного подтверждения владельца (исключения —
 `GET /api/admin/cities`, `session.revoke_all.own`, `/login`, `/admin/setup`, `POST /api/admin/sites`,
 `/admin/sites/new`, `POST /api/admin/templates`, `/admin/templates/new`, `GET/PATCH
 /api/admin/workers[/:employeeId]`, `POST /api/admin/workers[/:employeeId/deactivate]`,
 `/admin/workers[/new|/[employeeId]]`, `GET /api/admin/sites`, `GET/PATCH /api/admin/sites/:siteId`,
-`/admin/sites`, `/admin/sites/[siteId]` — уже подтверждены и сделаны).
+`/admin/sites`, `/admin/sites/[siteId]`, `GET/POST /api/admin/sites/:siteId/work-areas`,
+`PATCH .../work-areas/:workAreaId` — уже подтверждены и сделаны).
 Не запускать `app` в production и не менять CollabStudio без отдельного checkpoint владельца.
 
 ## 12. Правило обновления
