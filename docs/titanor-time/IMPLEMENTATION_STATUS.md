@@ -1,6 +1,6 @@
 # Titanor Time — Implementation Status
 
-Обновлено: 2026-08-03 15:47 Europe/Helsinki
+Обновлено: 2026-08-03 15:51 Europe/Helsinki
 Ветка: feature/titanor-time-foundation
 Isolated PostgreSQL config commit: `c28af00521ffef322211e2cfae840a5568dc8c03`
 Next.js app scaffold commit: `e15b203fe334fa4e2c68335f1169f78ed9c18ec9`
@@ -106,6 +106,10 @@ migrations), задеплоено на реальный `app`: commit `95e2f74`.
 T6.4 («Редактирование и отключение») — `GET`/`PATCH /api/admin/workers/:employeeId` +
 `POST .../deactivate` + `/admin/workers/[employeeId]`, тринадцатая migration (seed `worker.update`/
 `worker.deactivate`), применена **владельцем**, задеплоено на реальный `app`: commit `64cc569`.
+T6.5 («Worksite schema») — проверен, закрыт без изменений кода: `City`/`WorkSite`/`WorkArea` в
+`prisma/schema.prisma` уже содержат ровно поля из `03_DATA_MODEL_ERD.md` §4.3 (та же ситуация, что
+T6.1), включая оба unique-индекса `WorkArea` (`(siteId,name)`, `(siteId,id)`); `05_RAW_SQL_REGISTER.md`
+не содержит ни одного CHECK/EXCLUDE/триггера для этих трёх моделей.
 Статус документа: living implementation record
 
 ## 1. Назначение документа
@@ -2120,12 +2124,13 @@ endpoint (в отличие от `POST /api/admin/sites`, где он опцио
   `Employee`/`AuditEvent` — по-прежнему 0 строк.
 
 Следующей отдельной задачей (строго по порядку `PROJECT_ROADMAP.md` ЭТАП 6):
-- **T6.5 — Worksite schema.** По образцу T6.1: `WorkSite`/`WorkArea` уже полностью в frozen initial
-  migration (см. `03_DATA_MODEL_ERD.md` §4.3) — ожидается такой же короткий «проверен, изменений не
-  нужно» разбор, а не новый код.
 - **T6.6 — CRUD объектов.** `POST /api/admin/sites` уже сделан раньше по владельческому приоритету;
   остаются список (`GET /api/admin/sites` + `/admin/sites`), редактирование (`PATCH`), закрытие
-  (`active=false`, тот же паттерн, что T6.4).
+  (`active=false`, тот же паттерн, что T6.4). `WorkArea` (рабочая область внутри объекта) — своей
+  destination в `01_SCREEN_MAP.md` не имеет (создаётся внутри объекта, не отдельной страницей per
+  `/admin/setup`'s `hasWorkArea` note), но `WorkArea`-CRUD (`GET`/`POST /api/admin/sites/:siteId/areas`
+  и т.п., если контракт их определяет) логически тоже часть T6.6 — уточнить объём в контракте перед
+  началом.
 - Далее: T6.7–T6.9 (Assignment schema и назначения — `SiteAssignment` тоже уже в frozen initial
   migration, вероятно тот же «проверено» разбор для схемы, реальный код — для назначения работника и
   прораба).
