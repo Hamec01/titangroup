@@ -1,6 +1,6 @@
 # Titanor Time — Implementation Status
 
-Обновлено: 2026-08-01 16:05 Europe/Helsinki
+Обновлено: 2026-08-03 15:47 Europe/Helsinki
 Ветка: feature/titanor-time-foundation
 Isolated PostgreSQL config commit: `c28af00521ffef322211e2cfae840a5568dc8c03`
 Next.js app scaffold commit: `e15b203fe334fa4e2c68335f1169f78ed9c18ec9`
@@ -103,6 +103,9 @@ T6.3 («Создание работника») — `POST /api/admin/workers` + `
 (seed `worker.create`), применена **владельцем** (агент по-прежнему заблокирован tool policy на прямые
 изменения реальной базы — та же одноразовая `node:22`-container команда, что и во всех предыдущих
 migrations), задеплоено на реальный `app`: commit `95e2f74`.
+T6.4 («Редактирование и отключение») — `GET`/`PATCH /api/admin/workers/:employeeId` +
+`POST .../deactivate` + `/admin/workers/[employeeId]`, тринадцатая migration (seed `worker.update`/
+`worker.deactivate`), применена **владельцем**, задеплоено на реальный `app`: commit `64cc569`.
 Статус документа: living implementation record
 
 ## 1. Назначение документа
@@ -2081,22 +2084,57 @@ endpoint (в отличие от `POST /api/admin/sites`, где он опцио
   cookie) → `401`; `/admin/workers/new` без cookie → настоящий `307` на `/login`; реальная `Employee`/
   `AuditEvent(WORKER_CREATED)` — по-прежнему 0 строк (тестовых данных в реальную базу не вносилось).
 
+**T6.4 «Редактирование и отключение» реализован**: `GET`/`PATCH /api/admin/workers/:employeeId`
+(`app/api/admin/workers/[employeeId]/route.ts`) + `POST .../deactivate`
+(`app/api/admin/workers/[employeeId]/deactivate/route.ts`) + `/admin/workers/[employeeId]`
+(`page.tsx`+`WorkerActions.tsx`, плюс ссылка на карточку из `/admin/workers`). Тринадцатая migration
+засеяла `worker.update`/`worker.deactivate` (`ADMIN`/`SUPER_ADMIN`). Commit `64cc569`.
+- `GET` возвращает `Employee`+`Employment`+`currentAssignments[]`+вычисляемый `activationStatus`
+  (`ActivationToken` в схеме ещё нет — будущая задача `worker.activation.generate`; статус мимикрирует
+  под условие его будущей выдачи из `03_DATA_MODEL_ERD.md` §4.1). `PATCH` редактирует только
+  `firstName`/`lastName`/`phone` — **`employeeNumber` осознанно не редактируется** (это `User.username`
+  1:1 с T6.3, а список ошибок контракта для этого endpoint не включает конфликт employeeNumber).
+  Optimistic locking через `version`, атомарный compare-and-swap (`Employee.updateMany`), апдейт+audit
+  в одной транзакции.
+- `deactivate` реализует правило `03_...` §4.2 целиком: `Employment.active=false`+`endDate`+`reason`
+  всегда; `User.status=DEACTIVATED`+отзыв всех `UserSession`, если у работника нет ожидающего
+  (`expected=true`) `PayrollPeriodParticipant` в `OPEN`-периоде без `FINAL_APPROVED` табеля (в том числе
+  если табеля вовсе ещё нет — трактуется как «незавершено»); иначе `User.status=OFFBOARDING`, сессии не
+  трогаются. Сегодня в реальной базе периоды/участники ещё никем не создаются (`/admin/periods` не
+  реализован) — поэтому ветка `OFFBOARDING` пока недостижима в реальных данных, только на тестовых
+  фикстурах; это ожидаемо, не баг.
+- **Найдено и исправлено в ходе тестирования**: `activationStatus` изначально не учитывал
+  `Employment.active` — деактивированный работник с ещё не закрытым (`validTo=null`) старым
+  `SiteAssignment` показывал `READY_FOR_ACTIVATION`, хотя увольнение не отзывает существующие
+  назначения (только блокирует новые, `03_...` §4.2). Добавлена проверка `employmentActive` —
+  подтверждено на одноразовой базе: тот же работник после деактивации стал `SETUP_INCOMPLETE`, второй
+  (всё ещё активный) работник с идентичными assignment/participant остался `READY_FOR_ACTIVATION`.
+- Протестировано на одноразовом PostgreSQL 16 (все 13 migrations с нуля): три fixture-работника
+  покрыли все три `activationStatus`; `GET` — `404`/`403`/`401`; `PATCH` — успех+инкремент `version`,
+  `409 VERSION_CONFLICT` на устаревшей версии, `404`, `400` на отсутствующих/невалидных полях,
+  `403`/CSRF; `deactivate` — обе ветки `userStatus` против реальных `PayrollPeriodParticipant`/
+  `Timesheet` фикстур, `409 ALREADY_DEACTIVATED` на повторе, валидация `endDate` (формат + раньше
+  `startDate`), отзыв сессии подтверждён только на ветке `DEACTIVATED`, `AuditEvent`
+  (`WORKER_UPDATED`/`WORKER_DEACTIVATED`) подтверждены прямым SQL. Migration применена владельцем (та
+  же одноразовая `node:22`-container команда), задеплоено на реальный `app`, регрессия чистая, реальная
+  `Employee`/`AuditEvent` — по-прежнему 0 строк.
+
 Следующей отдельной задачей (строго по порядку `PROJECT_ROADMAP.md` ЭТАП 6):
-- **T6.4 — Редактирование и отключение.** `PATCH /api/admin/workers/:employeeId` (`worker.update`) +
-  `POST /api/admin/workers/:employeeId/deactivate` (`worker.deactivate`) — «предпочтительно
-  `active=false`, а не удаление» (роадмап это и так же подтверждает контракт: `Employment.active=false`
-  + `User.status → OFFBOARDING`/`DEACTIVATED` по правилу отработанных периодов, `03_...` §4.2). Обеим
-  нужна карточка `GET /api/admin/workers/:employeeId` + `/admin/workers/[employeeId]` как минимум для
-  того, чтобы было что редактировать — без неё T6.4 не имеет отображения.
-- Далее: T6.5 (`Worksite schema` — уже фактически есть в frozen initial migration, потребует того же
-  короткого «проверен, изменений не нужно» разбора, что и T6.1), T6.6 (CRUD объектов — `POST
-  /api/admin/sites` из T6.6 уже сделан раньше по владельческому приоритету, остаются список/
-  редактирование/закрытие), T6.7–T6.9 (Assignment schema и назначения).
+- **T6.5 — Worksite schema.** По образцу T6.1: `WorkSite`/`WorkArea` уже полностью в frozen initial
+  migration (см. `03_DATA_MODEL_ERD.md` §4.3) — ожидается такой же короткий «проверен, изменений не
+  нужно» разбор, а не новый код.
+- **T6.6 — CRUD объектов.** `POST /api/admin/sites` уже сделан раньше по владельческому приоритету;
+  остаются список (`GET /api/admin/sites` + `/admin/sites`), редактирование (`PATCH`), закрытие
+  (`active=false`, тот же паттерн, что T6.4).
+- Далее: T6.7–T6.9 (Assignment schema и назначения — `SiteAssignment` тоже уже в frozen initial
+  migration, вероятно тот же «проверено» разбор для схемы, реальный код — для назначения работника и
+  прораба).
 
 Не начинать реальный admin API или UI раньше отдельного подтверждения владельца (исключения —
 `GET /api/admin/cities`, `session.revoke_all.own`, `/login`, `/admin/setup`, `POST /api/admin/sites`,
-`/admin/sites/new`, `POST /api/admin/templates`, `/admin/templates/new`, `GET /api/admin/workers`,
-`/admin/workers`, `POST /api/admin/workers`, `/admin/workers/new` — уже подтверждены и сделаны).
+`/admin/sites/new`, `POST /api/admin/templates`, `/admin/templates/new`, `GET/PATCH
+/api/admin/workers[/:employeeId]`, `POST /api/admin/workers[/:employeeId/deactivate]`,
+`/admin/workers[/new|/[employeeId]]` — уже подтверждены и сделаны).
 Не запускать `app` в production и не менять CollabStudio без отдельного checkpoint владельца.
 
 ## 12. Правило обновления
