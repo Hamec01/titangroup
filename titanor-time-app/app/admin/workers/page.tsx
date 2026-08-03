@@ -1,4 +1,5 @@
 import { redirect } from 'next/navigation';
+import Link from 'next/link';
 import { resolveServerSession } from '@/lib/server-session';
 import { listWorkers } from '@/lib/workers';
 
@@ -53,7 +54,9 @@ export default async function AdminWorkersPage() {
                 <tr key={worker.id}>
                   <td>{worker.employeeNumber}</td>
                   <td>
-                    {worker.firstName} {worker.lastName}
+                    <Link href={`/admin/workers/${worker.id}`}>
+                      {worker.firstName} {worker.lastName}
+                    </Link>
                   </td>
                   <td>{worker.active ? 'Active' : 'Inactive'}</td>
                   <td>
