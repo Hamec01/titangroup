@@ -1,6 +1,6 @@
 # Titanor Time — Implementation Status
 
-Обновлено: 2026-08-03 15:51 Europe/Helsinki
+Обновлено: 2026-08-03 17:15 Europe/Helsinki
 Ветка: feature/titanor-time-foundation
 Isolated PostgreSQL config commit: `c28af00521ffef322211e2cfae840a5568dc8c03`
 Next.js app scaffold commit: `e15b203fe334fa4e2c68335f1169f78ed9c18ec9`
@@ -99,17 +99,25 @@ HEAD на момент предыдущего (статического) ауд�
 поля из `03_DATA_MODEL_ERD.md` §4.1/§4.2, добавлять нечего. T6.2 («Список работников, read-only») —
 `GET /api/admin/workers` + `/admin/workers`, переиспользует уже засеянный `worker.read.all` (седьмая
 migration, без новой migration в этой задаче), задеплоено на реальный `app`: commit `45aece3`.
-T6.3 («Создание работника») — `POST /api/admin/workers` + `/admin/workers/new`, двенадцатая migration
+T6.3 («Создание работника») — `POST /api/admin/workers` + `/admin/workers/new`, одиннадцатая migration
 (seed `worker.create`), применена **владельцем** (агент по-прежнему заблокирован tool policy на прямые
 изменения реальной базы — та же одноразовая `node:22`-container команда, что и во всех предыдущих
 migrations), задеплоено на реальный `app`: commit `95e2f74`.
 T6.4 («Редактирование и отключение») — `GET`/`PATCH /api/admin/workers/:employeeId` +
-`POST .../deactivate` + `/admin/workers/[employeeId]`, тринадцатая migration (seed `worker.update`/
+`POST .../deactivate` + `/admin/workers/[employeeId]`, двенадцатая migration (seed `worker.update`/
 `worker.deactivate`), применена **владельцем**, задеплоено на реальный `app`: commit `64cc569`.
 T6.5 («Worksite schema») — проверен, закрыт без изменений кода: `City`/`WorkSite`/`WorkArea` в
 `prisma/schema.prisma` уже содержат ровно поля из `03_DATA_MODEL_ERD.md` §4.3 (та же ситуация, что
 T6.1), включая оба unique-индекса `WorkArea` (`(siteId,name)`, `(siteId,id)`); `05_RAW_SQL_REGISTER.md`
 не содержит ни одного CHECK/EXCLUDE/триггера для этих трёх моделей.
+T6.6 первая половина («Список/карточка/редактирование объекта») — `GET /api/admin/sites` +
+`GET`/`PATCH /api/admin/sites/:siteId` + `/admin/sites` + `/admin/sites/[siteId]`, тринадцатая
+migration (seed `site.read.all`/`site.update`), применена **владельцем**, задеплоено на реальный
+`app`: commit `0978634`. `WorkArea` CRUD (вложенный ресурс) отложен отдельной задачей.
+(Примечание к нумерации: migration-файлы `20260801123904`/`20260803123201`/`20260803125804` сами
+содержат ошибочные ordinal-комментарии «twelfth»/«thirteenth»/«fourteenth» вместо реальных
+11/12/13 — обнаружено этой задачей; файлы уже применены к реальной базе и заморожены по конвенции
+проекта, поэтому не редактируются задним числом, ошибка исправлена только здесь, в живом статусе.)
 Статус документа: living implementation record
 
 ## 1. Назначение документа
@@ -2124,13 +2132,12 @@ endpoint (в отличие от `POST /api/admin/sites`, где он опцио
   `Employee`/`AuditEvent` — по-прежнему 0 строк.
 
 Следующей отдельной задачей (строго по порядку `PROJECT_ROADMAP.md` ЭТАП 6):
-- **T6.6 — CRUD объектов.** `POST /api/admin/sites` уже сделан раньше по владельческому приоритету;
-  остаются список (`GET /api/admin/sites` + `/admin/sites`), редактирование (`PATCH`), закрытие
-  (`active=false`, тот же паттерн, что T6.4). `WorkArea` (рабочая область внутри объекта) — своей
-  destination в `01_SCREEN_MAP.md` не имеет (создаётся внутри объекта, не отдельной страницей per
-  `/admin/setup`'s `hasWorkArea` note), но `WorkArea`-CRUD (`GET`/`POST /api/admin/sites/:siteId/areas`
-  и т.п., если контракт их определяет) логически тоже часть T6.6 — уточнить объём в контракте перед
-  началом.
+- **T6.6 вторая половина — `WorkArea` CRUD.** Контракт уже сверен (`04_...` §3): `GET`/
+  `POST /api/admin/sites/:siteId/work-areas` (`workarea.read.all`/`workarea.create`) +
+  `PATCH /api/admin/sites/:siteId/work-areas/:workAreaId` (`workarea.update`, включает `active` —
+  тот же принцип «закрытие = обычное поле», что у сайта). Ни один из трёх permission-кодов ещё не
+  засеян. UI — секция внутри уже существующей `/admin/sites/[siteId]` карточки (своей отдельной
+  страницы `WorkArea` не имеет per `01_SCREEN_MAP.md`), не новая страница.
 - Далее: T6.7–T6.9 (Assignment schema и назначения — `SiteAssignment` тоже уже в frozen initial
   migration, вероятно тот же «проверено» разбор для схемы, реальный код — для назначения работника и
   прораба).
@@ -2139,7 +2146,8 @@ endpoint (в отличие от `POST /api/admin/sites`, где он опцио
 `GET /api/admin/cities`, `session.revoke_all.own`, `/login`, `/admin/setup`, `POST /api/admin/sites`,
 `/admin/sites/new`, `POST /api/admin/templates`, `/admin/templates/new`, `GET/PATCH
 /api/admin/workers[/:employeeId]`, `POST /api/admin/workers[/:employeeId/deactivate]`,
-`/admin/workers[/new|/[employeeId]]` — уже подтверждены и сделаны).
+`/admin/workers[/new|/[employeeId]]`, `GET /api/admin/sites`, `GET/PATCH /api/admin/sites/:siteId`,
+`/admin/sites`, `/admin/sites/[siteId]` — уже подтверждены и сделаны).
 Не запускать `app` в production и не менять CollabStudio без отдельного checkpoint владельца.
 
 ## 12. Правило обновления
