@@ -13,11 +13,49 @@ import {
   completeIdempotentRequest,
   type IdempotencyIdentity
 } from '@/lib/idempotency';
+import { listSites } from '@/lib/sites';
 
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
 
+const DEFAULT_PAGE_SIZE = 20;
+const MAX_PAGE_SIZE = 100;
+
 // docs/titanor-time/04_ADMIN_FIRST_API_CONTRACTS.md §3 — exact contract for this endpoint.
+export async function GET(request: NextRequest): Promise<NextResponse> {
+  const requestId = randomUUID();
+
+  const authenticated = await resolveAuthenticatedSession(request.cookies.get(SESSION_COOKIE_NAME)?.value);
+  if (!authenticated) {
+    return jsonError(401, { code: 'NOT_AUTHENTICATED', message: 'No active session.' }, requestId);
+  }
+
+  if (!(await hasPermission(authenticated.user.roles, 'site.read.all'))) {
+    return jsonError(403, { code: 'FORBIDDEN', message: 'Missing required permission.' }, requestId);
+  }
+
+  const { searchParams } = new URL(request.url);
+  const pageParam = Number(searchParams.get('page'));
+  const page = Number.isInteger(pageParam) && pageParam >= 1 ? pageParam : 1;
+  const pageSizeParam = Number(searchParams.get('pageSize'));
+  const pageSize =
+    Number.isInteger(pageSizeParam) && pageSizeParam >= 1 && pageSizeParam <= MAX_PAGE_SIZE
+      ? pageSizeParam
+      : DEFAULT_PAGE_SIZE;
+
+  const search = searchParams.get('search')?.trim() || undefined;
+  const cityIdParam = searchParams.get('cityId');
+  const cityId = cityIdParam && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(cityIdParam) ? cityIdParam : undefined;
+  const activeParam = searchParams.get('active');
+  const active = activeParam === 'true' ? true : activeParam === 'false' ? false : undefined;
+  const sort = searchParams.get('sort') ?? undefined;
+
+  const result = await listSites(page, pageSize, { search, cityId, active, sort });
+
+  return NextResponse.json(result, { status: 200, headers: successHeaders(requestId) });
+}
+
+// docs/titanor-time/04_ADMIN_FIRST_API_CONTRACTS.md §3 — exact contract for this endpoint (POST).
 const REQUIRED_CSRF_HEADER_VALUE = 'titanor-time';
 const ROUTE_TEMPLATE = '/api/admin/sites';
 // Not specified by the contract (it only says "название, город — опционально,
