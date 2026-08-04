@@ -2,6 +2,7 @@ import { redirect } from 'next/navigation';
 import Link from 'next/link';
 import { resolveServerSession } from '@/lib/server-session';
 import { listAssignments } from '@/lib/assignments';
+import { AssignmentPrimaryToggle } from './AssignmentPrimaryToggle';
 
 export const dynamic = 'force-dynamic';
 
@@ -51,6 +52,7 @@ export default async function AdminAssignmentsPage() {
                 <th>Template</th>
                 <th>Valid from</th>
                 <th>Valid to</th>
+                <th></th>
               </tr>
             </thead>
             <tbody>
@@ -67,6 +69,9 @@ export default async function AdminAssignmentsPage() {
                   <td>{assignment.templateName ?? '—'}</td>
                   <td>{assignment.validFrom}</td>
                   <td>{assignment.validTo ?? 'Indefinite'}</td>
+                  <td>
+                    <AssignmentPrimaryToggle assignment={assignment} />
+                  </td>
                 </tr>
               ))}
             </tbody>
