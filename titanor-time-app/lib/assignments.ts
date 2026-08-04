@@ -236,3 +236,82 @@ export function isExclusionViolation(error: unknown): boolean {
     error.message.includes('ex_site_assignment_scope_date_overlap')
   );
 }
+
+export interface AssignmentListItem {
+  id: string;
+  employeeId: string;
+  employeeName: string;
+  siteId: string;
+  siteName: string;
+  workAreaId: string | null;
+  workAreaName: string | null;
+  templateVersionId: string | null;
+  templateName: string | null;
+  isPrimary: boolean;
+  validFrom: string;
+  validTo: string | null;
+  version: number;
+}
+
+export interface AssignmentListResult {
+  items: AssignmentListItem[];
+  page: number;
+  pageSize: number;
+  totalItems: number;
+  totalPages: number;
+}
+
+/**
+ * All assignments (past/current/future), not just currently-valid ones —
+ * assignment.read.all implies full visibility, same as GET /api/admin/workers
+ * listing inactive workers too. Response fields match the contract's own
+ * wording ("список с employeeName, siteName, templateName, isPrimary")
+ * plus ids/dates/version needed for linking and understanding validity —
+ * page/pageSize only, no search/sort/filter (not called out for this
+ * specific endpoint, unlike GET /api/admin/sites).
+ */
+export async function listAssignments(page: number, pageSize: number): Promise<AssignmentListResult> {
+  const [totalItems, assignments] = await Promise.all([
+    prisma.siteAssignment.count(),
+    prisma.siteAssignment.findMany({
+      orderBy: { validFrom: 'desc' },
+      skip: (page - 1) * pageSize,
+      take: pageSize,
+      select: {
+        id: true,
+        isPrimary: true,
+        validFrom: true,
+        validTo: true,
+        version: true,
+        employee: { select: { id: true, firstName: true, lastName: true } },
+        site: { select: { id: true, name: true } },
+        workArea: { select: { id: true, name: true } },
+        templateVersion: { select: { id: true, template: { select: { name: true } } } }
+      }
+    })
+  ]);
+
+  const items: AssignmentListItem[] = assignments.map((assignment) => ({
+    id: assignment.id,
+    employeeId: assignment.employee.id,
+    employeeName: `${assignment.employee.firstName} ${assignment.employee.lastName}`,
+    siteId: assignment.site.id,
+    siteName: assignment.site.name,
+    workAreaId: assignment.workArea?.id ?? null,
+    workAreaName: assignment.workArea?.name ?? null,
+    templateVersionId: assignment.templateVersion?.id ?? null,
+    templateName: assignment.templateVersion?.template.name ?? null,
+    isPrimary: assignment.isPrimary,
+    validFrom: assignment.validFrom.toISOString().slice(0, 10),
+    validTo: assignment.validTo ? assignment.validTo.toISOString().slice(0, 10) : null,
+    version: assignment.version
+  }));
+
+  return {
+    items,
+    page,
+    pageSize,
+    totalItems,
+    totalPages: Math.ceil(totalItems / pageSize)
+  };
+}
