@@ -1,6 +1,10 @@
 # Titanor Time — Implementation Status
 
-Обновлено: 2026-08-04 14:50 Europe/Helsinki
+Обновлено: 2026-08-04 15:20 Europe/Helsinki
+`GET /api/worker/timesheets/:timesheetId`, `.../draft`, `.../current-version` (ЭТАП 7 под-задача 3a,
+«Табель: read-эндпоинты») реализованы, протестированы на одноразовом PostgreSQL 16, migration
+(`timesheet.read.own` → `WORKER`) применена владельцем к `titanor-time-db-1`, `app` пересобран и
+передеплоен, `healthy`: см. §5, commit `baa84da`
 `GET /api/worker/context`, `.../assignments/current`, `.../periods/current`, `.../periods/actionable`
 (ЭТАП 7 вторая под-задача, «Кабинет работника, read-контекст») реализованы — первый живой код под
 `/api/worker/*`, протестированы на одноразовом PostgreSQL 16, три WORKER-scoped migrations применены
@@ -2266,7 +2270,8 @@ migration; добавлены только две seed-migrations (`period.creat
 `POST/GET /api/admin/foreman-assignments`, `POST .../end`, `POST/GET /api/admin/periods`,
 `GET /api/admin/periods/current`, `GET /api/admin/periods/:periodId`, `GET /api/worker/context`,
 `GET /api/worker/assignments/current`, `GET /api/worker/periods/current`,
-`GET /api/worker/periods/actionable` — уже подтверждены и сделаны).
+`GET /api/worker/periods/actionable`, `GET /api/worker/timesheets/:timesheetId`, `.../draft`,
+`.../current-version` — уже подтверждены и сделаны).
 Не запускать `app` в production и не менять CollabStudio без отдельного checkpoint владельца.
 
 **ЭТАП 7 под-задача 2 («Кабинет работника, read-контекст») реализована и задеплоена** (commit
@@ -2288,11 +2293,35 @@ migration; добавлены только две seed-migrations (`period.creat
   успешно создан на новом образе и подтверждён `healthy`+`database: connected`, `/api/worker/context`
   без cookie корректно вернул `401`, не `404`).
 
-**Следующий шаг**: ЭТАП 7, под-задача 3 из разбивки — **draft: чтение + правка дня**
-(`GET /api/worker/timesheets/:timesheetId`, `.../draft`, `.../current-version`,
-`PATCH .../days/:date`, `04_...` §9). Самая тяжёлая часть подсистемы — таблица допустимых состояний
-дня, `affectedSitePairs`, блокировки строки дня через `BEFORE ROW` триггеры (`03_...` §4.6) — вероятно
-потребует дальнейшего дробления на под-шаги (например, read-эндпоинты отдельно от `PATCH`). Не
+**Под-задача 3 разбита на 3a (read) и 3b (`PATCH`) — 3a реализована и задеплоена** (commit `baa84da`):
+`lib/worker-timesheets.ts` + `GET /api/worker/timesheets/:timesheetId`, `.../draft`,
+`.../current-version` (`04_...` §9).
+- Владение проверяется явно: чужой `timesheetId` → `403 FORBIDDEN`, не `404` (§9: не путать «чужое» с
+  «не существует»); неизвестный `timesheetId` → `404 TIMESHEET_NOT_FOUND`.
+- `.../draft` — только `Timesheet.status IN (DRAFT, RETURNED)`, иначе `409 DRAFT_NOT_EDITABLE`
+  (используется `.../current-version`).
+- `.../current-version` — работает в любом статусе, но сегодня всегда вернёт `404`, если версии
+  никогда не было (`timesheet.submit` ещё не построен — это подзадача 4, не баг). `reviewScopes`
+  всегда `[]` по той же причине, что `TimesheetReviewScope` — не подзадача сейчас, а подзадача 5:
+  модели ещё не существует, значит и ни один scope не может существовать.
+- Протестировано на одноразовом PostgreSQL 16: happy path `.../draft` (день+сегмент+перерыв верно
+  смаплены из реальных фикстур); happy path `.../current-version` — версия/день/сегмент/перерыв/
+  plannedShift вручную вставлены как фикстура (симулирует то, что `submit` будет делать позже, раз
+  самого `submit` ещё нет) — верно прочитаны; `409 DRAFT_NOT_EDITABLE` на `SUBMITTED`; кросс-worker
+  доступ → `403 FORBIDDEN`; `401` без сессии. `tsc --noEmit` чист.
+- Migration (`timesheet.read.own` → `WORKER`) применена владельцем, `app` пересобран и передеплоен,
+  `healthy`.
+
+**Следующий шаг**: ЭТАП 7, под-задача 3b — **`PATCH /api/worker/timesheets/:timesheetId/days/:date`**
+(`04_...` §9) — сама мутация дня. Затрагивает EX-04 (`ex_timesheet_draft_segment_time_overlap` →
+`409 WORK_SEGMENT_OVERLAP`), TRG-05/06 (day-state ↔ сегменты → `DAY_TYPE_CONFLICT`/
+`DAY_STATE_CONFLICT`), TRG-01 (`sourceAssignmentId`/`workAreaId`/диапазон дат → `404
+SITE_NOT_ASSIGNED`, резолвится сервисом заранее), composite FK на `TimesheetDraftPlannedShift`
+(гарантированно существует благодаря уже сделанному `period.create`), break-инварианты (`05_...`
+TRG-09/12, §5 — ещё не разобраны детально). Часть контракта (`affectedSitePairs` → пересчёт
+`TimesheetReviewProposal.status`) технически нереализуема сейчас — модель ещё не существует
+(подзадача 5); `resolvedProposals` в отклике будет честно всегда `[]` до тех пор — не заглушка, а
+факт: без `submit` предложений не бывает. Нужно дочитать §5 (Break-инварианты) перед стартом. Не
 начинать без отдельного подтверждения владельца.
 
 ## 12. Правило обновления
