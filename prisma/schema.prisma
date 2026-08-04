@@ -72,32 +72,34 @@ enum IdempotencyKeyStatus {
 }
 
 model User {
-  id                       String                        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  username                 String                        @unique @db.VarChar(64)
-  email                    String?                       @unique @db.VarChar(255)
-  passwordHash             String?                       @db.Text
-  status                   UserStatus
-  locale                   Locale
-  twoFactorEnabled         Boolean                       @default(false)
-  twoFactorSecret          String?                       @db.Text
-  employeeId               String?                       @unique @db.Uuid
-  lastLoginAt              DateTime?                     @db.Timestamptz(6)
-  createdAt                DateTime                      @default(now()) @db.Timestamptz(6)
-  updatedAt                DateTime                      @updatedAt @db.Timestamptz(6)
-  employee                 Employee?                     @relation(fields: [employeeId], references: [id], onDelete: Restrict, onUpdate: Cascade)
-  createdAbsences          Absence[]                     @relation("AbsenceCreatedBy")
-  approvedAbsences         Absence[]                     @relation("AbsenceApprovedBy")
-  assignedAssignments      SiteAssignment[]              @relation("SiteAssignmentAssignedBy")
-  defaultForemanSites      WorkSite[]                    @relation("WorkSiteDefaultForeman")
-  openedPeriods            PayrollPeriod[]               @relation("PayrollPeriodOpenedBy")
-  lockedPeriods            PayrollPeriod[]               @relation("PayrollPeriodLockedBy")
-  excludedParticipants     PayrollPeriodParticipant[]    @relation("PayrollPeriodParticipantExcludedBy")
-  createdTemplateVersions  WorkScheduleTemplateVersion[] @relation("TemplateVersionCreatedBy")
-  createdTimesheetVersions TimesheetVersion[]            @relation("TimesheetVersionCreatedBy")
-  userRoles                UserRole[]
-  userSessions             UserSession[]
-  auditEvents              AuditEvent[]
-  idempotencyKeys          IdempotencyKey[]
+  id                         String                        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  username                   String                        @unique @db.VarChar(64)
+  email                      String?                       @unique @db.VarChar(255)
+  passwordHash               String?                       @db.Text
+  status                     UserStatus
+  locale                     Locale
+  twoFactorEnabled           Boolean                       @default(false)
+  twoFactorSecret            String?                       @db.Text
+  employeeId                 String?                       @unique @db.Uuid
+  lastLoginAt                DateTime?                     @db.Timestamptz(6)
+  createdAt                  DateTime                      @default(now()) @db.Timestamptz(6)
+  updatedAt                  DateTime                      @updatedAt @db.Timestamptz(6)
+  employee                   Employee?                     @relation(fields: [employeeId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  createdAbsences            Absence[]                     @relation("AbsenceCreatedBy")
+  approvedAbsences           Absence[]                     @relation("AbsenceApprovedBy")
+  assignedAssignments        SiteAssignment[]              @relation("SiteAssignmentAssignedBy")
+  defaultForemanSites        WorkSite[]                    @relation("WorkSiteDefaultForeman")
+  foremanAssignments         ForemanAssignment[]           @relation("ForemanAssignmentForeman")
+  assignedForemanAssignments ForemanAssignment[]           @relation("ForemanAssignmentAssignedBy")
+  openedPeriods              PayrollPeriod[]               @relation("PayrollPeriodOpenedBy")
+  lockedPeriods              PayrollPeriod[]               @relation("PayrollPeriodLockedBy")
+  excludedParticipants       PayrollPeriodParticipant[]    @relation("PayrollPeriodParticipantExcludedBy")
+  createdTemplateVersions    WorkScheduleTemplateVersion[] @relation("TemplateVersionCreatedBy")
+  createdTimesheetVersions   TimesheetVersion[]            @relation("TimesheetVersionCreatedBy")
+  userRoles                  UserRole[]
+  userSessions               UserSession[]
+  auditEvents                AuditEvent[]
+  idempotencyKeys            IdempotencyKey[]
 }
 
 model Role {
@@ -238,6 +240,7 @@ model WorkSite {
   defaultForemanUser   User?                        @relation("WorkSiteDefaultForeman", fields: [defaultForemanUserId], references: [id], onDelete: SetNull, onUpdate: Cascade)
   workAreas            WorkArea[]
   siteAssignments      SiteAssignment[]
+  foremanAssignments   ForemanAssignment[]
   draftPlannedShifts   TimesheetDraftPlannedShift[]
   draftSegments        TimesheetDraftSegment[]
   plannedShifts        TimesheetPlannedShift[]
@@ -336,6 +339,23 @@ model SiteAssignment {
   @@index([siteId, validFrom, validTo])
   @@index([templateVersionId])
   @@index([assignedByUserId])
+}
+
+model ForemanAssignment {
+  id               String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  foremanUserId    String    @db.Uuid
+  siteId           String    @db.Uuid
+  isSubstitute     Boolean   @default(false)
+  validFrom        DateTime  @db.Date
+  validTo          DateTime? @db.Date
+  assignedByUserId String    @db.Uuid
+  createdAt        DateTime  @default(now()) @db.Timestamptz(6)
+  updatedAt        DateTime  @updatedAt @db.Timestamptz(6)
+  foremanUser      User      @relation("ForemanAssignmentForeman", fields: [foremanUserId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  site             WorkSite  @relation(fields: [siteId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  assignedByUser   User      @relation("ForemanAssignmentAssignedBy", fields: [assignedByUserId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+
+  @@index([siteId, validFrom, validTo])
 }
 
 model PayrollPeriod {
@@ -619,17 +639,17 @@ model BreakSegment {
 // (2026-07-31): LOGIN_FAILED for an unrecognized identifier has no resolvable User and
 // no single domain entity — entityType="AUTHENTICATION", entityId=NULL in that case.
 model AuditEvent {
-  id          String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  actorUserId String?   @db.Uuid
-  eventType   String    @db.VarChar(64)
-  entityType  String    @db.VarChar(64)
-  entityId    String?   @db.Uuid
+  id          String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  actorUserId String?  @db.Uuid
+  eventType   String   @db.VarChar(64)
+  entityType  String   @db.VarChar(64)
+  entityId    String?  @db.Uuid
   beforeValue Json?
   afterValue  Json?
-  reason      String?   @db.Text
-  requestId   String    @db.Uuid
-  createdAt   DateTime  @default(now()) @db.Timestamptz(6)
-  actor       User?     @relation(fields: [actorUserId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  reason      String?  @db.Text
+  requestId   String   @db.Uuid
+  createdAt   DateTime @default(now()) @db.Timestamptz(6)
+  actor       User?    @relation(fields: [actorUserId], references: [id], onDelete: Restrict, onUpdate: Cascade)
 
   @@index([actorUserId, createdAt(sort: Desc)])
   @@index([eventType, createdAt(sort: Desc)])
