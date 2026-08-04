@@ -1,6 +1,10 @@
 # Titanor Time — Implementation Status
 
-Обновлено: 2026-08-04 16:20 Europe/Helsinki
+Обновлено: 2026-08-04 16:50 Europe/Helsinki
+Схема `TimesheetReviewScope` (ЭТАП 7 под-задача 4, design-checkpoint перед `timesheet.submit`)
+спроектирована, показана и подтверждена владельцем, протестирована на одноразовом PostgreSQL 16
+(включая найденный и исправленный баг NULL-логики в CHECK), Prisma Client пересобран. Ждёт
+применения владельцем к `titanor-time-db-1`: commit `a9c1838`
 `PATCH /api/worker/timesheets/:timesheetId/days/:date` (ЭТАП 7 под-задача 3b) реализован —
 day-state таблица, `Absence`-обоснование non-WORK `dayType`, полная замена `segments`, резолвинг
 `sourceAssignmentId`, break-инварианты §5, EXCLUDE-backstop. Протестирован на одноразовом
@@ -2365,14 +2369,33 @@ date/DST-хелперы `lib/periods.ts` (теперь экспортирова�
 - Migration (`timesheet.draft.edit.own` → `WORKER`) применена владельцем, `app` пересобран и
   передеплоен, `healthy`.
 
-**Следующий шаг**: ЭТАП 7, под-задача 4 — **`POST /api/worker/timesheets/:timesheetId/submit`**
-(`04_...` §9). Замораживает draft в `TimesheetVersion`+`TimesheetDay`+`WorkSegment`+
-`BreakSegment`+`TimesheetPlannedShift`, вычисляет `TimesheetReviewScope` (три случая: `SITE`/
-`NON_SITE(DATA)`/`NON_SITE(EMPTY_FALLBACK)`, `03_...`§4.6) — но `TimesheetReviewScope`/`Proposal`
-пока не существуют как модели. Значит **submit сам по себе требует отдельного design-checkpoint
-по схеме** (мирроря T6.9) прежде чем писать код: нужно спроектировать `TimesheetReviewScope`+
-`TimesheetReviewProposal`, показать владельцу, получить подтверждение — только потом миграция и
-реализация `submit`. Не начинать без отдельного подтверждения владельца.
+**Схема `TimesheetReviewScope` спроектирована, подтверждена, реализована** (commit `a9c1838`):
+новая таблица + 3 enum'а (`TimesheetReviewScopeType`, `...Purpose`, `...Status`). Осознанно **без**
+`TimesheetReviewProposal` — та создаётся исключительно в транзакции `scope.return`
+(`03_...`§4.6), которой пока не существует (подзадача 5); первый сабмит (единственный достижимый
+сегодня путь, `DRAFT→SUBMITTED`) не создаёт и не резолвит ни одного предложения, поэтому у
+`Proposal` нет потребителя прямо сейчас — тот же принцип, что уже применялся для `reviewScopes:[]`/
+`resolvedProposals:[]`.
+- **Найден и исправлен реальный баг** при тестировании CHECK-constraint на одноразовом
+  PostgreSQL 16: `"scopePurpose" IN ('DATA','EMPTY_FALLBACK')` возвращает `NULL` (не `FALSE`), если
+  сам `scopePurpose` — `NULL`, а Postgres CHECK пропускает `NULL`-результат (отклоняет только явный
+  `FALSE`) — `NON_SITE`-строка с `scopePurpose=NULL` проходила бы constraint молча. Добавлен явный
+  `"scopePurpose" IS NOT NULL` guard. Сам буквальный текст предиката в `03_...`§4.6 несёт тот же
+  латентный дефект — в реальном SQL этой миграции его нет.
+- Протестировано на одноразовом PostgreSQL 16: обе ветки CHECK (включая NULL-кейс выше), обе
+  partial unique (одна `SITE`-запись на объект на версию, максимум одна `NON_SITE` на версию,
+  несколько `SITE` разных объектов в одной версии — разрешено). Prisma Client пересобран и
+  скопирован в `titanor-time-app`. `tsc --noEmit` чист. Заодно закоммичен `migration_lock.toml` —
+  существовал на диске с самого начала проекта, но никогда не был в git.
+- **Не применено к реальной БД** — ждёт владельца.
+
+**Следующий шаг**: применить миграцию `20260804160000_add_timesheet_review_scope` к
+`titanor-time-db-1`, затем — реализация самого `timesheet.submit` (замораживает draft в
+`TimesheetVersion`+`TimesheetDay`+`WorkSegment`+`BreakSegment`+`TimesheetPlannedShift`, вычисляет
+`TimesheetReviewScope` по трём случаям `SITE`/`NON_SITE(DATA)`/`NON_SITE(EMPTY_FALLBACK)` с
+carry-forward — на первом сабмите вырождается в «всё новое → `PENDING`», очищает draft-таблицы,
+аудит `TIMESHEET_SUBMITTED`). Не начинать реализацию `submit` без отдельного подтверждения
+владельца после того, как схема будет на реальной базе.
 
 ## 12. Правило обновления
 
