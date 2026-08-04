@@ -1,6 +1,6 @@
 # Titanor Time — Implementation Status
 
-Обновлено: 2026-08-04 12:19 Europe/Helsinki
+Обновлено: 2026-08-04 13:12 Europe/Helsinki
 Ветка: feature/titanor-time-foundation
 Isolated PostgreSQL config commit: `c28af00521ffef322211e2cfae840a5568dc8c03`
 Next.js app scaffold commit: `e15b203fe334fa4e2c68335f1169f78ed9c18ec9`
@@ -178,6 +178,10 @@ T6.9 второй под-шаг («Создание назначения про�
 единственная бизнес-проверка — активная роль `FOREMAN` у `foremanUserId` (`409 USER_NOT_FOREMAN`).
 Двадцать первая migration (seed `foreman_assignment.create`), применена **владельцем**, задеплоено
 на реальный `app`: commit `0b90e57`.
+T6.9 третий под-шаг («Список назначений прораба») — `GET /api/admin/foreman-assignments`, без новой
+страницы (секция «Foremen» на карточке объекта уже покрывает текущее состояние, сущность не входит
+в чек-лист `/admin/setup`). Двадцать вторая migration (seed `foreman_assignment.read.all`),
+применена **владельцем**, задеплоено на реальный `app`: commit `79d31f9`.
 Статус документа: living implementation record
 
 ## 1. Назначение документа
@@ -2191,12 +2195,11 @@ endpoint (в отличие от `POST /api/admin/sites`, где он опцио
   же одноразовая `node:22`-container команда), задеплоено на реальный `app`, регрессия чистая, реальная
   `Employee`/`AuditEvent` — по-прежнему 0 строк.
 
-Следующей отдельной задачей (строго по порядку `PROJECT_ROADMAP.md` ЭТАП 6) — **T6.9 завершение
-(Назначение прораба)**, T6.6/T6.7/T6.8 полностью закрыты, `create` сделан:
-- Оставшиеся под-задачи (по аналогии с T6.8): `GET /api/admin/foreman-assignments` (список,
-  `foreman_assignment.read.all`), затем `POST .../end` (`foreman_assignment.end`) — оба
-  permission-кода пока не засеяны. После `end` T6.9 и весь ЭТАП 6 (`PROJECT_ROADMAP.md`) закрыт
-  полностью.
+Следующей отдельной задачей (строго по порядку `PROJECT_ROADMAP.md` ЭТАП 6) — **T6.9 последний
+под-шаг (Назначение прораба)**, T6.6/T6.7/T6.8 полностью закрыты, `create`+список сделаны:
+- `POST /api/admin/foreman-assignments/:foremanAssignmentId/end` (`foreman_assignment.end`,
+  permission-код пока не засеян) — по аналогии с `assignment.end`. После него T6.9 **и весь ЭТАП 6**
+  (`PROJECT_ROADMAP.md`) закрыт полностью.
 
 Не начинать реальный admin API или UI раньше отдельного подтверждения владельца (исключения —
 `GET /api/admin/cities`, `session.revoke_all.own`, `/login`, `/admin/setup`, `POST /api/admin/sites`,
@@ -2208,7 +2211,7 @@ endpoint (в отличие от `POST /api/admin/sites`, где он опцио
 `POST /api/admin/assignments`, `/admin/assignments/new`, `GET /api/admin/assignments`,
 `/admin/assignments`, `PATCH /api/admin/assignments/:assignmentId`,
 `POST /api/admin/assignments/:assignmentId/split`, `.../promote`, `.../end`,
-`POST /api/admin/foreman-assignments` — уже подтверждены и сделаны).
+`POST/GET /api/admin/foreman-assignments` — уже подтверждены и сделаны).
 Не запускать `app` в production и не менять CollabStudio без отдельного checkpoint владельца.
 
 ## 12. Правило обновления
