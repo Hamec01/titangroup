@@ -109,3 +109,67 @@ export async function createForemanAssignment(
     updatedAt: created.updatedAt.toISOString()
   };
 }
+
+export interface ForemanAssignmentListItem {
+  id: string;
+  foremanUserId: string;
+  foremanUsername: string;
+  siteId: string;
+  siteName: string;
+  isSubstitute: boolean;
+  validFrom: string;
+  validTo: string | null;
+}
+
+export interface ForemanAssignmentListResult {
+  items: ForemanAssignmentListItem[];
+  page: number;
+  pageSize: number;
+  totalItems: number;
+  totalPages: number;
+}
+
+/**
+ * All foreman assignments (past/current/future), not just currently-valid
+ * ones — foreman_assignment.read.all implies full visibility, same as GET
+ * /api/admin/workers and GET /api/admin/assignments. page/pageSize only, no
+ * search/sort/filter — not called out for this endpoint any more than for
+ * GET /api/admin/assignments.
+ */
+export async function listForemanAssignments(page: number, pageSize: number): Promise<ForemanAssignmentListResult> {
+  const [totalItems, assignments] = await Promise.all([
+    prisma.foremanAssignment.count(),
+    prisma.foremanAssignment.findMany({
+      orderBy: { validFrom: 'desc' },
+      skip: (page - 1) * pageSize,
+      take: pageSize,
+      select: {
+        id: true,
+        isSubstitute: true,
+        validFrom: true,
+        validTo: true,
+        foremanUser: { select: { id: true, username: true } },
+        site: { select: { id: true, name: true } }
+      }
+    })
+  ]);
+
+  const items: ForemanAssignmentListItem[] = assignments.map((assignment) => ({
+    id: assignment.id,
+    foremanUserId: assignment.foremanUser.id,
+    foremanUsername: assignment.foremanUser.username,
+    siteId: assignment.site.id,
+    siteName: assignment.site.name,
+    isSubstitute: assignment.isSubstitute,
+    validFrom: formatDate(assignment.validFrom),
+    validTo: assignment.validTo ? formatDate(assignment.validTo) : null
+  }));
+
+  return {
+    items,
+    page,
+    pageSize,
+    totalItems,
+    totalPages: Math.ceil(totalItems / pageSize)
+  };
+}
