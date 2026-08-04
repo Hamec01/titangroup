@@ -11,6 +11,8 @@ export interface OverlapCheckInput {
   workAreaId: string | null;
   validFrom: Date;
   validTo: Date | null;
+  /** Excludes this assignment's own row — needed by split(), which checks the new slot before the old row (about to occupy the same site/work area, different dates) is closed. */
+  excludeAssignmentId?: string;
 }
 
 export interface OverlapCheckResult {
@@ -31,6 +33,7 @@ export async function checkOverlap(input: OverlapCheckInput): Promise<OverlapChe
       employeeId: input.employeeId,
       siteId: input.siteId,
       workAreaId: input.workAreaId,
+      ...(input.excludeAssignmentId ? { id: { not: input.excludeAssignmentId } } : {}),
       ...(input.validTo ? { validFrom: { lte: input.validTo } } : {}),
       OR: [{ validTo: null }, { validTo: { gte: input.validFrom } }]
     },
