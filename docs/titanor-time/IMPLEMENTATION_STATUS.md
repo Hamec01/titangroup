@@ -1,6 +1,11 @@
 # Titanor Time — Implementation Status
 
-Обновлено: 2026-08-04 17:05 Europe/Helsinki
+Обновлено: 2026-08-04 17:35 Europe/Helsinki
+`POST /api/worker/timesheets/:timesheetId/submit` (ЭТАП 7 под-задача 4) реализован — заморозка
+draft в версию, классификация дней, `TimesheetReviewScope` с carry-forward. Протестирован на
+одноразовом PostgreSQL 16 (SITE/NON_SITE(DATA)/EMPTY_FALLBACK, найден и исправлен баг порядка
+заморозки), migration применена владельцем, `app` пересобран и передеплоен, `healthy`: см. §5,
+commit `82af772`
 Схема `TimesheetReviewScope` (ЭТАП 7 под-задача 4, design-checkpoint перед `timesheet.submit`)
 применена владельцем к `titanor-time-db-1`, `app` пересобран (новый Prisma Client) и передеплоен,
 `healthy`: commit `a9c1838`
@@ -2389,13 +2394,39 @@ date/DST-хелперы `lib/periods.ts` (теперь экспортирова�
 - **Применено владельцем к `titanor-time-db-1`**, `app` пересобран (новый Prisma Client) и
   передеплоен, `healthy`, `/api/ready` подтверждает `database: connected`.
 
-**Следующий шаг**: применить миграцию `20260804160000_add_timesheet_review_scope` к
-`titanor-time-db-1`, затем — реализация самого `timesheet.submit` (замораживает draft в
-`TimesheetVersion`+`TimesheetDay`+`WorkSegment`+`BreakSegment`+`TimesheetPlannedShift`, вычисляет
-`TimesheetReviewScope` по трём случаям `SITE`/`NON_SITE(DATA)`/`NON_SITE(EMPTY_FALLBACK)` с
-carry-forward — на первом сабмите вырождается в «всё новое → `PENDING`», очищает draft-таблицы,
-аудит `TIMESHEET_SUBMITTED`). Не начинать реализацию `submit` без отдельного подтверждения
-владельца после того, как схема будет на реальной базе.
+**`timesheet.submit` реализован и задеплоен** (commit `82af772`): `submitWorkerTimesheet()` в
+`lib/worker-timesheets.ts` + `POST /api/worker/timesheets/:timesheetId/submit`.
+- Одна транзакция: замораживает `TimesheetDraft` в `TimesheetVersion`+`TimesheetDay`+
+  `WorkSegment`+`BreakSegment`+`TimesheetPlannedShift`; классифицирует дни по трём случаям
+  (`03_...`§4.6: SITE-данные / explicit NON_SITE-данные / пустая дефолтная строка); создаёт
+  `TimesheetReviewScope` — по одному `SITE` на объект с данными, максимум один `NON_SITE(DATA)`,
+  либо ровно один `NON_SITE(EMPTY_FALLBACK)`, если весь табель пуст; полный carry-forward против
+  предыдущей версии (каноническая проекция по assignment-группам, `SHA-256` `contentHash`) — на
+  первом сабмите вырождается в «всё новое → `PENDING`», поскольку предыдущей версии ещё нет;
+  очищает draft-таблицы (контейнер остаётся); аудит `TIMESHEET_SUBMITTED`.
+- `UNRESOLVED_PROPOSALS`/пересчёт предложений — не реализовано и не требуется: `TimesheetReviewProposal`
+  не существует (подзадача 5), значит на единственном достижимом сегодня переходе предложений
+  быть не может.
+- **Найден и исправлен реальный баг** при тестировании на одноразовом PostgreSQL 16: `WorkSegment`
+  несёт composite FK на `TimesheetPlannedShift(timesheetVersionId, date, sourceAssignmentId)` —
+  сегменты замораживались раньше плановых смен, первая же вставка сегмента упала `P2003`.
+  Исправлено порядком (planned shifts — первыми); неудачная попытка откатилась чисто (ровно 1
+  версия после повторного успешного вызова, ни одной осиротевшей строки).
+- Протестировано на одноразовом PostgreSQL 16: три сценария (`SITE` на двух объектах,
+  `NON_SITE(DATA)` через `confirmedZero`+`Absence`, полностью пустой табель →
+  `EMPTY_FALLBACK`), `contextSiteId` верно резолвится из primary-назначения; `RETURNED→SUBMITTED`
+  тоже работает; повтор на уже `SUBMITTED` → `409 INVALID_STATE_TRANSITION`; кросс-worker →
+  `403 FORBIDDEN`; неизвестный id → `404`; роль без `WORKER` → `403 FORBIDDEN`; без CSRF/сессии →
+  `403`/`401`; `AuditEvent` подтверждён прямым SQL. `tsc --noEmit` чист.
+- Migration (`timesheet.submit` → `WORKER`) применена владельцем, `app` пересобран и передеплоен,
+  `healthy`.
+
+**Следующий шаг**: ЭТАП 7, под-задача 5 — прорабская/админская проверка табеля
+(`timesheet.foreman_review`/`timesheet.scope_review.all`: `GET/POST /api/admin/review-scopes[...]`
+и аналог для `FOREMAN`, `04_...` §8). Требует **нового design-checkpoint по схеме** —
+`TimesheetReviewProposal` (создаётся только в транзакции `scope.return`) плюс, вероятно,
+`ApprovalAction`. Именно эта подзадача наконец делает `TimesheetReviewProposal` нужной —
+до сих пор она была осознанно не построена. Не начинать без отдельного подтверждения владельца.
 
 ## 12. Правило обновления
 
