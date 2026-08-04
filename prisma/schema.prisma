@@ -66,6 +66,22 @@ enum TimesheetVersionSource {
   CORRECTION
 }
 
+enum TimesheetReviewScopeType {
+  SITE
+  NON_SITE
+}
+
+enum TimesheetReviewScopePurpose {
+  DATA
+  EMPTY_FALLBACK
+}
+
+enum TimesheetReviewScopeStatus {
+  PENDING
+  APPROVED
+  RETURNED
+}
+
 enum IdempotencyKeyStatus {
   PROCESSING
   COMPLETED
@@ -96,6 +112,7 @@ model User {
   excludedParticipants       PayrollPeriodParticipant[]    @relation("PayrollPeriodParticipantExcludedBy")
   createdTemplateVersions    WorkScheduleTemplateVersion[] @relation("TemplateVersionCreatedBy")
   createdTimesheetVersions   TimesheetVersion[]            @relation("TimesheetVersionCreatedBy")
+  reviewedTimesheetScopes    TimesheetReviewScope[]        @relation("TimesheetReviewScopeReviewedBy")
   userRoles                  UserRole[]
   userSessions               UserSession[]
   auditEvents                AuditEvent[]
@@ -245,6 +262,8 @@ model WorkSite {
   draftSegments        TimesheetDraftSegment[]
   plannedShifts        TimesheetPlannedShift[]
   workSegments         WorkSegment[]
+  reviewScopes         TimesheetReviewScope[]       @relation("TimesheetReviewScopeSite")
+  reviewScopeContexts  TimesheetReviewScope[]       @relation("TimesheetReviewScopeContextSite")
 
   @@index([cityId])
   @@index([active])
@@ -540,6 +559,7 @@ model TimesheetVersion {
   days                TimesheetDay[]
   plannedShifts       TimesheetPlannedShift[]
   workSegments        WorkSegment[]
+  reviewScopes        TimesheetReviewScope[]
 
   @@unique([timesheetId, versionNumber])
   @@unique([id, employeeId])
@@ -630,6 +650,38 @@ model BreakSegment {
   workSegment   WorkSegment @relation(fields: [workSegmentId], references: [id], onDelete: Restrict, onUpdate: Cascade)
 
   @@index([workSegmentId])
+}
+
+// docs/titanor-time/03_DATA_MODEL_ERD.md §4.6 "TimesheetReviewScope" — created by
+// timesheet.submit (ЭТАП 7 sub-task 4), one per SITE with data plus at most one NON_SITE
+// (DATA or EMPTY_FALLBACK) per version. TimesheetReviewProposal (child of this, created only by
+// scope.return) is deliberately not part of this schema yet — no endpoint creates it until
+// sub-task 5 (foreman/admin review), so there is nothing to reference it.
+model TimesheetReviewScope {
+  id                 String                       @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  timesheetVersionId String                       @db.Uuid
+  scopeType          TimesheetReviewScopeType
+  scopePurpose       TimesheetReviewScopePurpose?
+  siteId             String?                      @db.Uuid
+  contextSiteId      String?                      @db.Uuid
+  status             TimesheetReviewScopeStatus
+  contentHash        String                       @db.VarChar(64)
+  carriedFromScopeId String?                      @db.Uuid
+  reviewedByUserId   String?                      @db.Uuid
+  reviewedAt         DateTime?                    @db.Timestamptz(6)
+  returnReason       String?                      @db.Text
+  createdAt          DateTime                     @default(now()) @db.Timestamptz(6)
+  updatedAt          DateTime                     @updatedAt @db.Timestamptz(6)
+  timesheetVersion   TimesheetVersion             @relation(fields: [timesheetVersionId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  site               WorkSite?                    @relation("TimesheetReviewScopeSite", fields: [siteId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  contextSite        WorkSite?                    @relation("TimesheetReviewScopeContextSite", fields: [contextSiteId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  carriedFromScope   TimesheetReviewScope?        @relation("TimesheetReviewScopeCarriedFrom", fields: [carriedFromScopeId], references: [id], onDelete: SetNull, onUpdate: Cascade)
+  carriedToScopes    TimesheetReviewScope[]       @relation("TimesheetReviewScopeCarriedFrom")
+  reviewedByUser     User?                        @relation("TimesheetReviewScopeReviewedBy", fields: [reviewedByUserId], references: [id], onDelete: SetNull, onUpdate: Cascade)
+
+  @@unique([id, timesheetVersionId])
+  @@index([timesheetVersionId])
+  @@index([siteId, status])
 }
 
 // docs/titanor-time/03_DATA_MODEL_ERD.md §4.8 — immutable, append-only (enforced by
