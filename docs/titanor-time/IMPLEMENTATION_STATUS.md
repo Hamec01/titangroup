@@ -1,6 +1,9 @@
 # Titanor Time — Implementation Status
 
-Обновлено: 2026-08-04 15:20 Europe/Helsinki
+Обновлено: 2026-08-04 15:45 Europe/Helsinki
+Fix: `createAssignment()` теперь бэкфиллит `TimesheetDraftDay`/`TimesheetDraftPlannedShift` для
+назначений, созданных после открытия периода (ранее — только upsert контейнеров, ноль строк дней) —
+найдено при проектировании ЭТАП 7 3b, без миграции (чистый код): commit `706eb75`
 `GET /api/worker/timesheets/:timesheetId`, `.../draft`, `.../current-version` (ЭТАП 7 под-задача 3a,
 «Табель: read-эндпоинты») реализованы, протестированы на одноразовом PostgreSQL 16, migration
 (`timesheet.read.own` → `WORKER`) применена владельцем к `titanor-time-db-1`, `app` пересобран и
@@ -2312,17 +2315,39 @@ migration; добавлены только две seed-migrations (`period.creat
 - Migration (`timesheet.read.own` → `WORKER`) применена владельцем, `app` пересобран и передеплоен,
   `healthy`.
 
+**Найден и исправлен пробел перед стартом 3b, задеплоен**: `createAssignment()` (T6.8) при
+пересечении с уже `OPEN`-периодом апсертил только тройку `PayrollPeriodParticipant`+
+`Timesheet(DRAFT)`+`TimesheetDraft`, но не создавал ни одной `TimesheetDraftDay` — сотрудник, впервые
+назначенный на объект после открытия периода (обычный сценарий), получал пустой draft-контейнер без
+единой строки дня, и `PATCH .../days/:date` не нашёл бы, что редактировать. Исправлено (commit
+`706eb75`): `createAssignment()` теперь бэкфиллит `TimesheetDraftDay` (оверлей `Absence(APPROVED)`,
+как у `period.create`) + `TimesheetDraftPlannedShift` для этого одного нового назначения на
+пересечении `[period.startDate..endDate] ∩ [validFrom..validTo]`, переиспользуя (не дублируя)
+date/DST-хелперы `lib/periods.ts` (теперь экспортированы). Без миграции — чистый код.
+- Протестировано на одноразовом PostgreSQL 16: назначение, созданное против уже `OPEN` периода,
+  бэкфиллит верные 5 дней с DST-корректными планами; второе пересекающееся назначение того же
+  сотрудника (другой объект) добавляет свои planned-shift строки без дублирования дней (dedup по
+  `(draftId, date)` сработал); регрессия `GET /api/admin/assignments` чистая.
+- Задеплоено на реальный `app` (`docker compose up -d --build --no-deps app`), `healthy`,
+  `/api/ready` подтверждает `database: connected`.
+
 **Следующий шаг**: ЭТАП 7, под-задача 3b — **`PATCH /api/worker/timesheets/:timesheetId/days/:date`**
 (`04_...` §9) — сама мутация дня. Затрагивает EX-04 (`ex_timesheet_draft_segment_time_overlap` →
 `409 WORK_SEGMENT_OVERLAP`), TRG-05/06 (day-state ↔ сегменты → `DAY_TYPE_CONFLICT`/
 `DAY_STATE_CONFLICT`), TRG-01 (`sourceAssignmentId`/`workAreaId`/диапазон дат → `404
 SITE_NOT_ASSIGNED`, резолвится сервисом заранее), composite FK на `TimesheetDraftPlannedShift`
-(гарантированно существует благодаря уже сделанному `period.create`), break-инварианты (`05_...`
-TRG-09/12, §5 — ещё не разобраны детально). Часть контракта (`affectedSitePairs` → пересчёт
-`TimesheetReviewProposal.status`) технически нереализуема сейчас — модель ещё не существует
-(подзадача 5); `resolvedProposals` в отклике будет честно всегда `[]` до тех пор — не заглушка, а
-факт: без `submit` предложений не бывает. Нужно дочитать §5 (Break-инварианты) перед стартом. Не
-начинать без отдельного подтверждения владельца.
+(гарантированно существует — и благодаря `period.create`, и теперь благодаря исправленному
+`createAssignment()` выше), break-инварианты (`05_...` TRG-09/EX-05, §5 «Break-инварианты» —
+дочитаны: `endAt > startAt`, перерыв целиком внутри сегмента, перерывы одного сегмента не
+пересекаются). Часть контракта (`affectedSitePairs` → пересчёт `TimesheetReviewProposal.status`)
+технически нереализуема сейчас — модель ещё не существует (подзадача 5); `resolvedProposals` в
+отклике будет честно всегда `[]` до тех пор — не заглушка, а факт: без `submit` предложений не
+бывает. Владелец подтвердил план реализации (права `timesheet.draft.edit.own`; полная замена
+`segments` при передаче поля; `sourceAssignmentId` резолвится сервером; персональный non-WORK
+`dayType` — только через `Absence(APPROVED)`; дата вне диапазона периода и некорректная форма
+перерыва — `400 VALIDATION_ERROR`; без `AuditEvent`, контракт не требует). Не начинать без
+отдельного подтверждения владельца на саму реализацию (план уже подтверждён, но это отдельный шаг —
+писать код).
 
 ## 12. Правило обновления
 
