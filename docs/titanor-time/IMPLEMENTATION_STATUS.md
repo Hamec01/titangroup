@@ -1,10 +1,9 @@
 # Titanor Time — Implementation Status
 
-Обновлено: 2026-08-04 16:50 Europe/Helsinki
+Обновлено: 2026-08-04 17:05 Europe/Helsinki
 Схема `TimesheetReviewScope` (ЭТАП 7 под-задача 4, design-checkpoint перед `timesheet.submit`)
-спроектирована, показана и подтверждена владельцем, протестирована на одноразовом PostgreSQL 16
-(включая найденный и исправленный баг NULL-логики в CHECK), Prisma Client пересобран. Ждёт
-применения владельцем к `titanor-time-db-1`: commit `a9c1838`
+применена владельцем к `titanor-time-db-1`, `app` пересобран (новый Prisma Client) и передеплоен,
+`healthy`: commit `a9c1838`
 `PATCH /api/worker/timesheets/:timesheetId/days/:date` (ЭТАП 7 под-задача 3b) реализован —
 day-state таблица, `Absence`-обоснование non-WORK `dayType`, полная замена `segments`, резолвинг
 `sourceAssignmentId`, break-инварианты §5, EXCLUDE-backstop. Протестирован на одноразовом
@@ -2387,7 +2386,8 @@ date/DST-хелперы `lib/periods.ts` (теперь экспортирова�
   несколько `SITE` разных объектов в одной версии — разрешено). Prisma Client пересобран и
   скопирован в `titanor-time-app`. `tsc --noEmit` чист. Заодно закоммичен `migration_lock.toml` —
   существовал на диске с самого начала проекта, но никогда не был в git.
-- **Не применено к реальной БД** — ждёт владельца.
+- **Применено владельцем к `titanor-time-db-1`**, `app` пересобран (новый Prisma Client) и
+  передеплоен, `healthy`, `/api/ready` подтверждает `database: connected`.
 
 **Следующий шаг**: применить миграцию `20260804160000_add_timesheet_review_scope` к
 `titanor-time-db-1`, затем — реализация самого `timesheet.submit` (замораживает draft в
