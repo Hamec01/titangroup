@@ -1,6 +1,6 @@
 # Titanor Time — Implementation Status
 
-Обновлено: 2026-08-03 18:42 Europe/Helsinki
+Обновлено: 2026-08-04 08:34 Europe/Helsinki
 Ветка: feature/titanor-time-foundation
 Isolated PostgreSQL config commit: `c28af00521ffef322211e2cfae840a5568dc8c03`
 Next.js app scaffold commit: `e15b203fe334fa4e2c68335f1169f78ed9c18ec9`
@@ -130,7 +130,7 @@ T6.7 («Assignment schema») — проверен, закрыт без изме�
 migration (не только в `05_RAW_SQL_REGISTER.md`). `ForemanAssignment` (нужна для T6.9) в схеме
 по-прежнему нет — отдельный design-checkpoint, не входит в T6.7.
 T6.8 первый под-шаг («Создание назначения») — `POST /api/admin/assignments/validate-overlap` +
-`POST /api/admin/assignments` + `/admin/assignments/new`, шестнадцатая migration (seed
+`POST /api/admin/assignments` + `/admin/assignments/new`, пятнадцатая migration (seed
 `assignment.create`), применена **владельцем**, задеплоено на реальный `app`: commit `00c8857`.
 Разблокирует `hasAssignment` в чек-листе `/admin/setup`. Список/`PATCH`/`split`/`promote`/`end`
 отложены на следующие под-задачи. **Инцидент, найден и исправлен этой же задачей**: изначальное
@@ -139,6 +139,9 @@ T6.8 первый под-шаг («Создание назначения») — 
 `PrismaClientUnknownRequestError` с сырым текстом ошибки Postgres; найдено через настоящую гонку
 из 6 параллельных запросов на одноразовом PostgreSQL 16 (без фикса — `500`; с фиксом — ровно один
 `201`, пять `409`, ноль дублирующихся строк, подтверждено прямым SQL-подсчётом).
+T6.8 второй под-шаг («Список назначений») — `GET /api/admin/assignments` + `/admin/assignments`,
+шестнадцатая migration (seed `assignment.read.all`), применена **владельцем**, задеплоено на
+реальный `app`: commit `44d685c`.
 Статус документа: living implementation record
 
 ## 1. Назначение документа
@@ -2153,10 +2156,10 @@ endpoint (в отличие от `POST /api/admin/sites`, где он опцио
   `Employee`/`AuditEvent` — по-прежнему 0 строк.
 
 Следующей отдельной задачей (строго по порядку `PROJECT_ROADMAP.md` ЭТАП 6), T6.6/T6.7 полностью
-закрыты, T6.8 начат (первый под-шаг — создание — сделан):
-- **T6.8 продолжение.** Оставшийся кусок контракта (`04_...` §6): `GET /api/admin/assignments`
-  (список), `PATCH /api/admin/assignments/:assignmentId`, `.../split`, `.../promote`, `.../end` —
-  по одному под-шагу за раз, тем же паттерном.
+закрыты, T6.8 в процессе (создание + список сделаны):
+- **T6.8 продолжение.** Оставшийся кусок контракта (`04_...` §6): `PATCH
+  /api/admin/assignments/:assignmentId`, `.../split`, `.../promote`, `.../end` — по одному
+  под-шагу за раз, тем же паттерном.
 - **T6.9 — Назначение прораба.** Требует новую модель `ForemanAssignment` — design-checkpoint с
   владельцем обязателен до migration.
 
@@ -2167,7 +2170,8 @@ endpoint (в отличие от `POST /api/admin/sites`, где он опцио
 `/admin/workers[/new|/[employeeId]]`, `GET /api/admin/sites`, `GET/PATCH /api/admin/sites/:siteId`,
 `/admin/sites`, `/admin/sites/[siteId]`, `GET/POST /api/admin/sites/:siteId/work-areas`,
 `PATCH .../work-areas/:workAreaId`, `POST /api/admin/assignments/validate-overlap`,
-`POST /api/admin/assignments`, `/admin/assignments/new` — уже подтверждены и сделаны).
+`POST /api/admin/assignments`, `/admin/assignments/new`, `GET /api/admin/assignments`,
+`/admin/assignments` — уже подтверждены и сделаны).
 Не запускать `app` в production и не менять CollabStudio без отдельного checkpoint владельца.
 
 ## 12. Правило обновления
