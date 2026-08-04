@@ -1,6 +1,11 @@
 # Titanor Time — Implementation Status
 
-Обновлено: 2026-08-04 15:45 Europe/Helsinki
+Обновлено: 2026-08-04 16:20 Europe/Helsinki
+`PATCH /api/worker/timesheets/:timesheetId/days/:date` (ЭТАП 7 под-задача 3b) реализован —
+day-state таблица, `Absence`-обоснование non-WORK `dayType`, полная замена `segments`, резолвинг
+`sourceAssignmentId`, break-инварианты §5, EXCLUDE-backstop. Протестирован на одноразовом
+PostgreSQL 16, migration (`timesheet.draft.edit.own` → `WORKER`) применена владельцем, `app`
+пересобран и передеплоен, `healthy`: см. §5, commit `a912239`
 Fix: `createAssignment()` теперь бэкфиллит `TimesheetDraftDay`/`TimesheetDraftPlannedShift` для
 назначений, созданных после открытия периода (ранее — только upsert контейнеров, ноль строк дней) —
 найдено при проектировании ЭТАП 7 3b, без миграции (чистый код): commit `706eb75`
@@ -2274,7 +2279,7 @@ migration; добавлены только две seed-migrations (`period.creat
 `GET /api/admin/periods/current`, `GET /api/admin/periods/:periodId`, `GET /api/worker/context`,
 `GET /api/worker/assignments/current`, `GET /api/worker/periods/current`,
 `GET /api/worker/periods/actionable`, `GET /api/worker/timesheets/:timesheetId`, `.../draft`,
-`.../current-version` — уже подтверждены и сделаны).
+`.../current-version`, `PATCH .../days/:date` — уже подтверждены и сделаны).
 Не запускать `app` в production и не менять CollabStudio без отдельного checkpoint владельца.
 
 **ЭТАП 7 под-задача 2 («Кабинет работника, read-контекст») реализована и задеплоена** (commit
@@ -2331,23 +2336,43 @@ date/DST-хелперы `lib/periods.ts` (теперь экспортирова�
 - Задеплоено на реальный `app` (`docker compose up -d --build --no-deps app`), `healthy`,
   `/api/ready` подтверждает `database: connected`.
 
-**Следующий шаг**: ЭТАП 7, под-задача 3b — **`PATCH /api/worker/timesheets/:timesheetId/days/:date`**
-(`04_...` §9) — сама мутация дня. Затрагивает EX-04 (`ex_timesheet_draft_segment_time_overlap` →
-`409 WORK_SEGMENT_OVERLAP`), TRG-05/06 (day-state ↔ сегменты → `DAY_TYPE_CONFLICT`/
-`DAY_STATE_CONFLICT`), TRG-01 (`sourceAssignmentId`/`workAreaId`/диапазон дат → `404
-SITE_NOT_ASSIGNED`, резолвится сервисом заранее), composite FK на `TimesheetDraftPlannedShift`
-(гарантированно существует — и благодаря `period.create`, и теперь благодаря исправленному
-`createAssignment()` выше), break-инварианты (`05_...` TRG-09/EX-05, §5 «Break-инварианты» —
-дочитаны: `endAt > startAt`, перерыв целиком внутри сегмента, перерывы одного сегмента не
-пересекаются). Часть контракта (`affectedSitePairs` → пересчёт `TimesheetReviewProposal.status`)
-технически нереализуема сейчас — модель ещё не существует (подзадача 5); `resolvedProposals` в
-отклике будет честно всегда `[]` до тех пор — не заглушка, а факт: без `submit` предложений не
-бывает. Владелец подтвердил план реализации (права `timesheet.draft.edit.own`; полная замена
-`segments` при передаче поля; `sourceAssignmentId` резолвится сервером; персональный non-WORK
-`dayType` — только через `Absence(APPROVED)`; дата вне диапазона периода и некорректная форма
-перерыва — `400 VALIDATION_ERROR`; без `AuditEvent`, контракт не требует). Не начинать без
-отдельного подтверждения владельца на саму реализацию (план уже подтверждён, но это отдельный шаг —
-писать код).
+**Под-задача 3b реализована и задеплоена** (commit `a912239`): `patchWorkerTimesheetDay()` в
+`lib/worker-timesheets.ts` + `PATCH /api/worker/timesheets/:timesheetId/days/:date`.
+- Итоговое состояние `(dayType, confirmedZero, hasSegments)` проверяется по таблице `03_...`§4.6
+  **до** любой записи в БД → `409 DAY_TYPE_CONFLICT`/`DAY_STATE_CONFLICT`. Персональный non-WORK
+  `dayType` требует `Absence(APPROVED)`, покрывающего дату → `403 DAY_TYPE_REQUIRES_ABSENCE`;
+  `PUBLIC_HOLIDAY` не имеет соответствия в `AbsenceType` вовсе — отклоняется тем же путём без
+  отдельного кейса. `segments`, при передаче, — полный финальный список (не delta по объекту);
+  `sourceAssignmentId` резолвится сервером, никогда от клиента, `404 SITE_NOT_ASSIGNED` иначе.
+- **Порядок записи важен для BEFORE ROW триггеров** (TRG-05/06): всегда удалить старые сегменты →
+  обновить день → вставить новые — ноль сегментов валиден против любой комбинации
+  `dayType`×`confirmedZero`, поэтому такой порядок не может сработать ни на одном триггере ни в
+  одном направлении перехода (доказано перебором всех переходов при проектировании).
+  Пересечение новых сегментов/перерывов и containment перерывов (§5) — сервисная
+  pre-валидация до транзакции; EX-04 (`ex_timesheet_draft_segment_time_overlap`) —
+  defense-in-depth backstop.
+- `TimesheetDraft.contentRevision` увеличивается на каждый успешный вызов безусловно (даже
+  `note`-only правку) — контракт требует этого явно.
+- `affectedSitePairs`→пересчёт `TimesheetReviewProposal.status` — не реализовано, модель не
+  существует (подзадача 5); `resolvedProposals` всегда `[]` — факт, не заглушка.
+- Протестировано на одноразовом PostgreSQL 16 (~15 запросов): полная замена сегментов
+  (добавление/удаление по объекту), `note`-only без изменения сегментов; все перечисленные выше
+  коды ошибок, включая обе оси таблицы состояний и happy path с реальным `Absence`; перерыв вне
+  сегмента/перекрывающиеся перерывы/отсутствующий `endAt` → `400`; кросс-worker → `403 FORBIDDEN`
+  (не `404`); `SUBMITTED`-табель → `409 DRAFT_NOT_EDITABLE`; дата вне периода → `400`; CSRF/сессия
+  → `403`/`401`. `contentRevision` совпал ровно с числом успешных вызовов (5 из ~15) — неудачные
+  запросы не тронули ни день, ни ревизию. `tsc --noEmit` чист.
+- Migration (`timesheet.draft.edit.own` → `WORKER`) применена владельцем, `app` пересобран и
+  передеплоен, `healthy`.
+
+**Следующий шаг**: ЭТАП 7, под-задача 4 — **`POST /api/worker/timesheets/:timesheetId/submit`**
+(`04_...` §9). Замораживает draft в `TimesheetVersion`+`TimesheetDay`+`WorkSegment`+
+`BreakSegment`+`TimesheetPlannedShift`, вычисляет `TimesheetReviewScope` (три случая: `SITE`/
+`NON_SITE(DATA)`/`NON_SITE(EMPTY_FALLBACK)`, `03_...`§4.6) — но `TimesheetReviewScope`/`Proposal`
+пока не существуют как модели. Значит **submit сам по себе требует отдельного design-checkpoint
+по схеме** (мирроря T6.9) прежде чем писать код: нужно спроектировать `TimesheetReviewScope`+
+`TimesheetReviewProposal`, показать владельцу, получить подтверждение — только потом миграция и
+реализация `submit`. Не начинать без отдельного подтверждения владельца.
 
 ## 12. Правило обновления
 
