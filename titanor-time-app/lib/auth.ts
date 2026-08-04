@@ -8,6 +8,7 @@ export interface AuthenticatedSession {
     username: string;
     locale: string;
     roles: string[];
+    employeeId: string | null;
   };
 }
 
@@ -55,7 +56,8 @@ export async function resolveAuthenticatedSession(token: string | undefined): Pr
       id: session.user.id,
       username: session.user.username,
       locale: session.user.locale,
-      roles: session.user.userRoles.map((userRole) => userRole.role.name)
+      roles: session.user.userRoles.map((userRole) => userRole.role.name),
+      employeeId: session.user.employeeId
     }
   };
 }
