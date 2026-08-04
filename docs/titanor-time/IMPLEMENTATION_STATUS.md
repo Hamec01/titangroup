@@ -1,6 +1,10 @@
 # Titanor Time — Implementation Status
 
-Обновлено: 2026-08-04 13:38 Europe/Helsinki
+Обновлено: 2026-08-04 14:10 Europe/Helsinki
+`POST/GET /api/admin/periods`, `GET .../current`, `GET .../:periodId` (ЭТАП 7 первая под-задача,
+«Открытие расчётного периода») реализованы, протестированы на одноразовом PostgreSQL 16, две
+migrations (`period.create`/`period.read.all`) применены владельцем к `titanor-time-db-1`, `app`
+пересобран и передеплоен, `healthy`: см. §5, commit `399336f`
 Ветка: feature/titanor-time-foundation
 Isolated PostgreSQL config commit: `c28af00521ffef322211e2cfae840a5568dc8c03`
 Next.js app scaffold commit: `e15b203fe334fa4e2c68335f1169f78ed9c18ec9`
@@ -2208,14 +2212,44 @@ endpoint (в отличие от `POST /api/admin/sites`, где он опцио
   `Employee`/`AuditEvent` — по-прежнему 0 строк.
 
 **`PROJECT_ROADMAP.md` ЭТАП 6 («Работники, объекты и назначения») полностью закрыт** — T6.1–T6.9
-все реализованы. Следующей отдельной задачей — **ЭТАП 7 («Учёт часов», T7.1–T7.10)** — но она **не
-начинается без отдельного подтверждения владельца**: это новый этап, а не под-шаг уже
-согласованного, и `03_DATA_MODEL_ERD.md`/`04_ADMIN_FIRST_API_CONTRACTS.md` для него описывают
-существенно бо́льшую подсистему (`TimesheetDraft`/`TimesheetDraftDay`/сегменты/версии — модели уже
-есть в frozen initial migration, но ни один endpoint ещё не построен) — первым шагом потребуется
-такой же разбор объёма, что был сделан для T6.8/T6.9 перед стартом.
+все реализованы.
 
-Не начинать реальный admin API или UI раньше отдельного подтверждения владельца (исключения —
+**ЭТАП 7 («Учёт часов») начат** — владелец подтвердил переход после явного разбора объёма: `04_...`
+§7-9 + `03_DATA_MODEL_ERD.md` §4.5-4.7 показывают, что `PROJECT_ROADMAP.md` T7.1–T7.10 (плоский
+«TimeEntry») полностью перекрыт архитектурой `Timesheet`→`TimesheetDraft`→`TimesheetVersion`→
+`TimesheetReviewScope`→`TimesheetReviewProposal` — та же ситуация, что была с ЭТАП 4. Реальная работа
+идёт по разделам `docs/titanor-time/`, не по T7.x буквально. Предложенная владельцу и подтверждённая
+разбивка: 1) открытие периода, 2) кабинет работника read-контекст, 3) draft чтение+правка дня, 4)
+отправка (`submit`, потребует отдельный design-checkpoint для ещё не существующих
+`TimesheetReviewScope`/`Proposal`), 5) прорабская очередь/approve/return, 6) коррекции и
+`period.lock`/`export`.
+
+**Первая под-задача («Открытие расчётного периода») реализована и задеплоена** (commit `399336f`):
+`lib/periods.ts` + `POST/GET /api/admin/periods`, `GET .../current`, `GET .../:periodId`. Схему менять
+не пришлось — `PayrollPeriod`/`Timesheet`/`TimesheetDraft*` уже существовали в frozen initial
+migration; добавлены только две seed-migrations (`period.create`/`period.read.all` → `ADMIN`/
+`SUPER_ADMIN`).
+- `POST` реализует шаг 1 «Жизненного цикла draft» (`03_...` §4.6) целиком: под `SELECT Employee ...
+  FOR UPDATE` (по возрастанию `id`, raw SQL — Prisma не даёт `.forUpdate()`) для каждого сотрудника с
+  `SiteAssignment`, пересекающим даты периода, — тройка `PayrollPeriodParticipant`+
+  `Timesheet(DRAFT)`+`TimesheetDraft`, `TimesheetDraftDay` на каждый календарный день периода
+  (оверлей `Absence(APPROVED)` применён до дефолта `WORK`, тот же механизм, что `absence.approve`),
+  `TimesheetDraftPlannedShift` на каждый день, реально покрытый назначением, время резолвится из
+  `WorkScheduleTemplateVersionDay` с корректной конвертацией Europe/Helsinki→UTC (DST учтён —
+  найденный и явно применённый паттерн: смещение вычисляется через `Intl.DateTimeFormat` на момент
+  конкретной даты, не константа).
+- Протестировано на одноразовом PostgreSQL 16: каскад для сотрудника с шаблоном (верные будни/DST
+  времена 08:00→05:00 UTC летом, выходные — `null`/`0`), сотрудника без шаблона (пустые планы, но
+  строки созданы), сотрудника с `Absence` (оверлей ровно на нужных датах), сотрудников без
+  пересекающегося назначения — не попали в участники; `409 PERIOD_OVERLAP` (реальный EXCLUDE
+  `ex_payroll_period_date_overlap`), `400`/`403 CSRF`/`401`/`403 FORBIDDEN` (роль `WORKER`),
+  Idempotency-Key replay без дублирования каскада, все GET-эндпоинты, `hasOpenPeriod` в
+  `/admin/setup-status` встал в `true` (закрыт последний пункт исходного admin-first чек-листа).
+  `tsc --noEmit` чист.
+- Migrations применены владельцем к `titanor-time-db-1`, `app` пересобран (`docker compose up -d
+  --build --no-deps app`) и передеплоен, `healthy`, `/api/ready` подтверждает `database: connected`.
+
+Не начинать реальный admin/worker API или UI раньше отдельного подтверждения владельца (исключения —
 `GET /api/admin/cities`, `session.revoke_all.own`, `/login`, `/admin/setup`, `POST /api/admin/sites`,
 `/admin/sites/new`, `POST /api/admin/templates`, `/admin/templates/new`, `GET/PATCH
 /api/admin/workers[/:employeeId]`, `POST /api/admin/workers[/:employeeId/deactivate]`,
@@ -2225,8 +2259,15 @@ endpoint (в отличие от `POST /api/admin/sites`, где он опцио
 `POST /api/admin/assignments`, `/admin/assignments/new`, `GET /api/admin/assignments`,
 `/admin/assignments`, `PATCH /api/admin/assignments/:assignmentId`,
 `POST /api/admin/assignments/:assignmentId/split`, `.../promote`, `.../end`,
-`POST/GET /api/admin/foreman-assignments`, `POST .../end` — уже подтверждены и сделаны).
+`POST/GET /api/admin/foreman-assignments`, `POST .../end`, `POST/GET /api/admin/periods`,
+`GET /api/admin/periods/current`, `GET /api/admin/periods/:periodId` — уже подтверждены и сделаны).
 Не запускать `app` в production и не менять CollabStudio без отдельного checkpoint владельца.
+
+**Следующий шаг**: ЭТАП 7, под-задача 2 из разбивки выше — **кабинет работника, read-контекст**:
+`GET /api/worker/context`, `GET /api/worker/assignments/current`, `GET /api/worker/periods/current`,
+`GET /api/worker/periods/actionable` (`04_...` §9). Первый живой код под `/api/worker/*` в проекте —
+`proxy.ts` его уже гейтит (аутентификация), но ни одного роута там ещё нет. Не начинать без отдельного
+подтверждения владельца.
 
 ## 12. Правило обновления
 
