@@ -1,6 +1,11 @@
 # Titanor Time — Implementation Status
 
-Обновлено: 2026-08-04 17:35 Europe/Helsinki
+Обновлено: 2026-08-04 18:10 Europe/Helsinki
+`GET/POST /api/admin/review-scopes[...]` (approve/return, ЭТАП 7 под-задача 5) реализованы — admin
+fallback проверка табеля, реинициализация draft при возврате, реальный `hasException`. Без новой
+схемы (`TimesheetReviewProposal`/`ApprovalAction` — снова отложены, нет потребителя). Протестировано
+на одноразовом PostgreSQL 16, migration применена владельцем, `app` пересобран и передеплоен,
+`healthy`: см. §5, commit `9280a88`
 `POST /api/worker/timesheets/:timesheetId/submit` (ЭТАП 7 под-задача 4) реализован — заморозка
 draft в версию, классификация дней, `TimesheetReviewScope` с carry-forward. Протестирован на
 одноразовом PostgreSQL 16 (SITE/NON_SITE(DATA)/EMPTY_FALLBACK, найден и исправлен баг порядка
@@ -2421,12 +2426,43 @@ date/DST-хелперы `lib/periods.ts` (теперь экспортирова�
 - Migration (`timesheet.submit` → `WORKER`) применена владельцем, `app` пересобран и передеплоен,
   `healthy`.
 
-**Следующий шаг**: ЭТАП 7, под-задача 5 — прорабская/админская проверка табеля
-(`timesheet.foreman_review`/`timesheet.scope_review.all`: `GET/POST /api/admin/review-scopes[...]`
-и аналог для `FOREMAN`, `04_...` §8). Требует **нового design-checkpoint по схеме** —
-`TimesheetReviewProposal` (создаётся только в транзакции `scope.return`) плюс, вероятно,
-`ApprovalAction`. Именно эта подзадача наконец делает `TimesheetReviewProposal` нужной —
-до сих пор она была осознанно не построена. Не начинать без отдельного подтверждения владельца.
+**Под-задача 5 (admin fallback часть) реализована и задеплоена** (commit `9280a88`):
+`lib/review-scopes.ts` + `GET/POST /api/admin/review-scopes[...]` (`timesheet.scope_review.all`).
+- **Новая схема не потребовалась** — при разборе оказалось, что создание `TimesheetReviewProposal`
+  внутри `scope.return` строго опционально (`proposals[]` в теле запроса необязателен), а ядро
+  approve/return (блокировка, precondition, переход статуса) от него не зависит вовсе. `proposals[]`
+  принимается контрактом, но не реализован — непустой массив явно отклоняется
+  (`400 VALIDATION_ERROR`), не игнорируется тихо. `ApprovalAction` тоже отложен — ни один `Audit:`
+  пункт `04_...` §8 на него не ссылается, везде обычный `AuditEvent`.
+- **Важный, не опциональный кусок логики**: `scope.return` реинициализирует draft из текущей
+  версии (`TimesheetDay`→`TimesheetDraftDay`, `WorkSegment`→`TimesheetDraftSegment` и т.д.),
+  идемпотентно (`TimesheetDraft.basedOnVersionId` — маркер), точный порядок операций из `03_...`
+  §4.7 (лок `Timesheet`→`TimesheetDraft`, повторная проверка precondition **после** лока, только
+  потом реинициализация и смена статуса scope). Без этого шага `PATCH .../days/:date` после
+  возврата не нашёл бы ни одного дня — тот же класс проблемы, что была найдена и исправлена в
+  `assignment.create`.
+- `hasException` в списке — реально вычисляется (агрегированные `WorkSegment` против
+  `TimesheetPlannedShift` по `(date, sourceAssignmentId)`), не хардкод.
+- Дежурный `/api/foreman/*`-путь (`timesheet.foreman_review`, только свои объекты) контрактом
+  `04_...` пока не описан конкретно (только упомянут во вводной части) — отложен как отдельная
+  будущая by-extension задача; admin fallback уже покрывает все типы scope целиком.
+- Протестировано на одноразовом PostgreSQL 16: `approve`→`FOREMAN_APPROVED` только когда все scope
+  версии одобрены; `return`→реинициализация draft подтверждена прямым чтением (все дни/сегменты
+  восстановлены); второй возврат другого scope той же версии не задублировал ни одной строки;
+  реальный dual-role пользователь (`WORKER`+`ADMIN`, одна `Employee`) — `403
+  SELF_APPROVAL_FORBIDDEN` на approve и return, самоисключение из списка (DoD) подтверждено;
+  непустые `proposals[]`/отсутствующий `returnReason` → `400`; роль без permission → `403`; без
+  CSRF/сессии → `403`/`401`. `tsc --noEmit` чист.
+- Migration (`timesheet.scope_review.all` → `ADMIN`/`SUPER_ADMIN`) применена владельцем, `app`
+  пересобран и передеплоен, `healthy`.
+
+**Следующий шаг**: не определён явно — ЭТАП 7 (`Учёт часов`) в разрезе первого вертикального
+сценария теперь замкнут целиком: назначение → открытый период → правка часов → отправка →
+admin-проверка → `FOREMAN_APPROVED`. Кандидаты на продолжение: (а) `timesheet.final_approve`
+(чистый переход в `FINAL_APPROVED`, без данных — вероятно самый простой следующий шаг);
+(б) `period.lock`/`period.export`; (в) прорабский `/api/foreman/*` UI/API by-extension;
+(г) `TimesheetReviewProposal`, когда возврату потребуются структурированные предложения. Ждать
+отдельного решения владельца о приоритете, не выбирать самостоятельно.
 
 ## 12. Правило обновления
 
