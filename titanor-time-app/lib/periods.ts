@@ -10,7 +10,7 @@ function formatDate(date: Date): string {
   return date.toISOString().slice(0, 10);
 }
 
-function enumerateDates(start: Date, end: Date): Date[] {
+export function enumerateDates(start: Date, end: Date): Date[] {
   const dates: Date[] = [];
   let cursor = start;
   while (cursor <= end) {
@@ -21,7 +21,7 @@ function enumerateDates(start: Date, end: Date): Date[] {
 }
 
 /** WorkScheduleTemplateVersionDay.weekday convention: 0=Mon..6=Sun. `date` is a UTC-midnight Date representing a Helsinki calendar day (project-wide convention), so plain getUTCDay() (0=Sun..6=Sat) is the right source, remapped. */
-function toTemplateWeekday(date: Date): number {
+export function toTemplateWeekday(date: Date): number {
   return (date.getUTCDay() + 6) % 7;
 }
 
@@ -50,7 +50,7 @@ function helsinkiOffsetMinutesAt(instant: Date): number {
  * way) into the actual UTC instant that wall-clock time falls on, correctly
  * shifted for whichever of EET/EEST applies on that date.
  */
-function helsinkiWallClockToUtc(date: Date, timeOfDay: Date): Date {
+export function helsinkiWallClockToUtc(date: Date, timeOfDay: Date): Date {
   const naiveGuess = new Date(
     Date.UTC(
       date.getUTCFullYear(),

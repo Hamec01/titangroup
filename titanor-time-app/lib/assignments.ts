@@ -1,6 +1,7 @@
 import { Prisma } from '@prisma/client';
 import { prisma } from '@/lib/prisma';
 import { createAuditEvent } from '@/lib/audit';
+import { enumerateDates, toTemplateWeekday, helsinkiWallClockToUtc } from '@/lib/periods';
 
 // docs/titanor-time/04_ADMIN_FIRST_API_CONTRACTS.md §6 (Назначения) — shared
 // by POST /api/admin/assignments/validate-overlap and POST /api/admin/assignments.
@@ -82,11 +83,18 @@ export interface CreateAssignmentResult {
  * Resolves and validates all references, then creates the SiteAssignment +
  * upserts PayrollPeriodParticipant/Timesheet(DRAFT)/TimesheetDraft container
  * rows for every OPEN period intersecting [validFrom, validTo] — the exact
- * scope 02_ROLE_PERMISSION_MATRIX.md's assignment.create row documents, no
- * more. TimesheetDraftDay generation (calendar-day plan rows) is NOT part of
- * this — that belongs to period.create/ЭТАП 7's plan-generation subsystem,
- * per 03_DATA_MODEL_ERD.md's own split between "при period.create" and "при
- * assignment.create" upserts.
+ * scope 02_ROLE_PERMISSION_MATRIX.md's assignment.create row documents.
+ *
+ * Also backfills TimesheetDraftDay (one per calendar day of the
+ * period∩assignment intersection, Absence(APPROVED) overlay applied the same
+ * way as period.create) and TimesheetDraftPlannedShift for this one new
+ * assignment across that same range — an employee assigned to a site after a
+ * period is already OPEN would otherwise get a draft container with zero day
+ * rows inside it, making PATCH .../days/:date unable to find anything to
+ * edit (found while designing ЭТАП 7 sub-task 3b, confirmed by the owner).
+ * Reuses lib/periods.ts's date/DST helpers rather than duplicating them —
+ * the algorithm is identical, just scoped to one assignment instead of every
+ * assignment of every participant.
  */
 export async function createAssignment(
   input: CreateAssignmentInput
@@ -158,7 +166,22 @@ export async function createAssignment(
         endDate: { gte: input.validFrom },
         ...(input.validTo ? { startDate: { lte: input.validTo } } : {})
       },
-      select: { id: true }
+      select: { id: true, startDate: true, endDate: true }
+    });
+
+    const templateDays = templateVersionId
+      ? await tx.workScheduleTemplateVersionDay.findMany({ where: { templateVersionId } })
+      : [];
+    const templateDayByWeekday = new Map(templateDays.map((d) => [d.weekday, d]));
+
+    const absences = await tx.absence.findMany({
+      where: {
+        employeeId: input.employeeId,
+        status: 'APPROVED',
+        endDate: { gte: input.validFrom },
+        ...(input.validTo ? { startDate: { lte: input.validTo } } : {})
+      },
+      select: { id: true, startDate: true, endDate: true, type: true }
     });
 
     for (const period of intersectingOpenPeriods) {
@@ -174,11 +197,56 @@ export async function createAssignment(
         update: {}
       });
 
-      await tx.timesheetDraft.upsert({
+      const draft = await tx.timesheetDraft.upsert({
         where: { timesheetId: timesheet.id },
         create: { timesheetId: timesheet.id, employeeId: input.employeeId },
         update: {}
       });
+
+      const intersectFrom = period.startDate > input.validFrom ? period.startDate : input.validFrom;
+      const intersectTo = input.validTo && input.validTo < period.endDate ? input.validTo : period.endDate;
+      const dates = enumerateDates(intersectFrom, intersectTo);
+
+      const existingDays = await tx.timesheetDraftDay.findMany({
+        where: { draftId: draft.id, date: { in: dates } },
+        select: { date: true }
+      });
+      const existingDayTimes = new Set(existingDays.map((d) => d.date.getTime()));
+      const missingDates = dates.filter((d) => !existingDayTimes.has(d.getTime()));
+
+      if (missingDates.length > 0) {
+        await tx.timesheetDraftDay.createMany({
+          data: missingDates.map((date) => {
+            const overlay = absences.find((a) => a.startDate <= date && a.endDate >= date);
+            return {
+              draftId: draft.id,
+              date,
+              dayType: overlay ? overlay.type : 'WORK',
+              confirmedZero: false,
+              sourceAbsenceId: overlay ? overlay.id : null
+            };
+          })
+        });
+      }
+
+      const plannedShiftRows: Prisma.TimesheetDraftPlannedShiftCreateManyInput[] = dates.map((date) => {
+        const templateDay = templateVersionId ? templateDayByWeekday.get(toTemplateWeekday(date)) : undefined;
+        const isWorking = templateDay?.isWorkingDay ?? false;
+        return {
+          draftId: draft.id,
+          employeeId: input.employeeId,
+          date,
+          siteId: input.siteId,
+          sourceAssignmentId: assignment.id,
+          templateVersionDayId: isWorking && templateDay ? templateDay.id : null,
+          plannedStartAt: isWorking && templateDay?.plannedStartTime ? helsinkiWallClockToUtc(date, templateDay.plannedStartTime) : null,
+          plannedEndAt: isWorking && templateDay?.plannedEndTime ? helsinkiWallClockToUtc(date, templateDay.plannedEndTime) : null,
+          plannedBreakMinutes: isWorking && templateDay ? templateDay.plannedBreakMinutes : 0
+        };
+      });
+      if (plannedShiftRows.length > 0) {
+        await tx.timesheetDraftPlannedShift.createMany({ data: plannedShiftRows });
+      }
     }
 
     // Same transaction as the create + period upserts above — lib/audit.ts's
