@@ -106,6 +106,15 @@ export interface SiteActiveAssignment {
   workAreaName: string | null;
 }
 
+export interface SiteForemanAssignment {
+  id: string;
+  foremanUserId: string;
+  foremanUsername: string;
+  isSubstitute: boolean;
+  validFrom: string;
+  validTo: string | null;
+}
+
 export interface SiteDetail {
   id: string;
   name: string;
@@ -113,12 +122,9 @@ export interface SiteDetail {
   address: string | null;
   description: string | null;
   active: boolean;
-  // Contract (04_...§3) specifies "foremanAssignments: []" here, but that
-  // implies a real ForemanAssignment model, which doesn't exist in the
-  // schema yet (that's T6.9's job). Returning a hardcoded empty array under
-  // that name would be a decorative fake, not real data — so this exposes
-  // the one foreman-related field that genuinely exists today instead.
-  // Revisit once ForemanAssignment is built.
+  // Separate from foremanAssignments below (real ForemanAssignment rows,
+  // T6.9) — this is WorkSite's own informational field, unrelated schema-wise
+  // (03_DATA_MODEL_ERD.md §4.3: "не источник авторизации").
   defaultForemanUserId: string | null;
   defaultForemanUsername: string | null;
   version: number;
@@ -126,6 +132,7 @@ export interface SiteDetail {
   updatedAt: string;
   workAreas: SiteWorkArea[];
   activeAssignments: SiteActiveAssignment[];
+  foremanAssignments: SiteForemanAssignment[];
 }
 
 export async function getSiteDetail(siteId: string): Promise<SiteDetail | null> {
@@ -156,6 +163,17 @@ export async function getSiteDetail(siteId: string): Promise<SiteDetail | null> 
           employee: { select: { id: true, firstName: true, lastName: true } },
           workArea: { select: { id: true, name: true } }
         }
+      },
+      foremanAssignments: {
+        where: { validFrom: { lte: today }, OR: [{ validTo: null }, { validTo: { gte: today } }] },
+        orderBy: { isSubstitute: 'asc' },
+        select: {
+          id: true,
+          isSubstitute: true,
+          validFrom: true,
+          validTo: true,
+          foremanUser: { select: { id: true, username: true } }
+        }
       }
     }
   });
@@ -183,6 +201,14 @@ export async function getSiteDetail(siteId: string): Promise<SiteDetail | null> 
       isPrimary: assignment.isPrimary,
       workAreaId: assignment.workArea?.id ?? null,
       workAreaName: assignment.workArea?.name ?? null
+    })),
+    foremanAssignments: site.foremanAssignments.map((assignment) => ({
+      id: assignment.id,
+      foremanUserId: assignment.foremanUser.id,
+      foremanUsername: assignment.foremanUser.username,
+      isSubstitute: assignment.isSubstitute,
+      validFrom: assignment.validFrom.toISOString().slice(0, 10),
+      validTo: assignment.validTo ? assignment.validTo.toISOString().slice(0, 10) : null
     }))
   };
 }

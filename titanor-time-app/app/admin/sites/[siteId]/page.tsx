@@ -3,6 +3,7 @@ import { resolveServerSession } from '@/lib/server-session';
 import { getSiteDetail } from '@/lib/sites';
 import { SiteEditForm } from './SiteEditForm';
 import { WorkAreaSection } from './WorkAreaSection';
+import { ForemanAssignmentSection } from './ForemanAssignmentSection';
 
 export const dynamic = 'force-dynamic';
 
@@ -52,6 +53,8 @@ export default async function SiteDetailPage({ params }: { params: Promise<{ sit
         </p>
 
         <WorkAreaSection siteId={site.id} workAreas={site.workAreas} />
+
+        <ForemanAssignmentSection siteId={site.id} foremanAssignments={site.foremanAssignments} />
 
         <h2>Active assignments</h2>
         {site.activeAssignments.length === 0 ? (
