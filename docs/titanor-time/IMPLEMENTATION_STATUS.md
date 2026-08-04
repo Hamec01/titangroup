@@ -1,6 +1,10 @@
 # Titanor Time — Implementation Status
 
-Обновлено: 2026-08-04 14:10 Europe/Helsinki
+Обновлено: 2026-08-04 14:50 Europe/Helsinki
+`GET /api/worker/context`, `.../assignments/current`, `.../periods/current`, `.../periods/actionable`
+(ЭТАП 7 вторая под-задача, «Кабинет работника, read-контекст») реализованы — первый живой код под
+`/api/worker/*`, протестированы на одноразовом PostgreSQL 16, три WORKER-scoped migrations применены
+владельцем к `titanor-time-db-1`, `app` пересобран и передеплоен, `healthy`: см. §5, commit `f002439`
 `POST/GET /api/admin/periods`, `GET .../current`, `GET .../:periodId` (ЭТАП 7 первая под-задача,
 «Открытие расчётного периода») реализованы, протестированы на одноразовом PostgreSQL 16, две
 migrations (`period.create`/`period.read.all`) применены владельцем к `titanor-time-db-1`, `app`
@@ -2260,14 +2264,36 @@ migration; добавлены только две seed-migrations (`period.creat
 `/admin/assignments`, `PATCH /api/admin/assignments/:assignmentId`,
 `POST /api/admin/assignments/:assignmentId/split`, `.../promote`, `.../end`,
 `POST/GET /api/admin/foreman-assignments`, `POST .../end`, `POST/GET /api/admin/periods`,
-`GET /api/admin/periods/current`, `GET /api/admin/periods/:periodId` — уже подтверждены и сделаны).
+`GET /api/admin/periods/current`, `GET /api/admin/periods/:periodId`, `GET /api/worker/context`,
+`GET /api/worker/assignments/current`, `GET /api/worker/periods/current`,
+`GET /api/worker/periods/actionable` — уже подтверждены и сделаны).
 Не запускать `app` в production и не менять CollabStudio без отдельного checkpoint владельца.
 
-**Следующий шаг**: ЭТАП 7, под-задача 2 из разбивки выше — **кабинет работника, read-контекст**:
-`GET /api/worker/context`, `GET /api/worker/assignments/current`, `GET /api/worker/periods/current`,
-`GET /api/worker/periods/actionable` (`04_...` §9). Первый живой код под `/api/worker/*` в проекте —
-`proxy.ts` его уже гейтит (аутентификация), но ни одного роута там ещё нет. Не начинать без отдельного
-подтверждения владельца.
+**ЭТАП 7 под-задача 2 («Кабинет работника, read-контекст») реализована и задеплоена** (commit
+`f002439`): `lib/worker-context.ts` + четыре `GET`-эндпоинта — первый живой код под `/api/worker/*`
+(`proxy.ts` уже гейтил этот путь аутентификацией с самого начала, но ни одного роута там не было).
+Каждый резолвит `employeeId` из сессии (`AuthenticatedSession.user.employeeId`, новое поле в
+`lib/auth.ts`), никогда из запроса; `403 NO_EMPLOYEE_PROFILE`, если у `User` сессии нет привязанного
+`Employee` — точное требование §9 верхнего уровня, не только у `/context`.
+- Протестировано на одноразовом PostgreSQL 16: работник с двумя текущими назначениями (primary+
+  secondary, с шаблоном/областью и без) — верный порядок и поля; работник без `employeeId` —
+  `403 NO_EMPLOYEE_PROFILE` на всех четырёх эндпоинтах; роль `ADMIN` без `WORKER` — `403 FORBIDDEN`
+  (права `worker.read.own`/`assignment.read.own`/`period.read.own` держит только `WORKER`, не
+  `ADMIN`/`SUPER_ADMIN` — впервые в проекте permission-seed идёт не на админские роли); без сессии —
+  `401`. `periods/current`/`periods/actionable` проверены на реальном `PayrollPeriodParticipant`+
+  `Timesheet(DRAFT)` фикстуре, покрывающей «сегодня». `tsc --noEmit` чист.
+- Три migrations (`worker.read.own`/`assignment.read.own`/`period.read.own` → `WORKER`) применены
+  владельцем к `titanor-time-db-1`, `app` пересобран и передеплоен (`docker compose` вывел шумный, но
+  не блокирующий `Conflict` на переименовании контейнера при recreate — реальный контейнер при этом
+  успешно создан на новом образе и подтверждён `healthy`+`database: connected`, `/api/worker/context`
+  без cookie корректно вернул `401`, не `404`).
+
+**Следующий шаг**: ЭТАП 7, под-задача 3 из разбивки — **draft: чтение + правка дня**
+(`GET /api/worker/timesheets/:timesheetId`, `.../draft`, `.../current-version`,
+`PATCH .../days/:date`, `04_...` §9). Самая тяжёлая часть подсистемы — таблица допустимых состояний
+дня, `affectedSitePairs`, блокировки строки дня через `BEFORE ROW` триггеры (`03_...` §4.6) — вероятно
+потребует дальнейшего дробления на под-шаги (например, read-эндпоинты отдельно от `PATCH`). Не
+начинать без отдельного подтверждения владельца.
 
 ## 12. Правило обновления
 
