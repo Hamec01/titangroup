@@ -1,6 +1,6 @@
 # Titanor Time — Implementation Status
 
-Обновлено: 2026-08-04 08:47 Europe/Helsinki
+Обновлено: 2026-08-04 08:59 Europe/Helsinki
 Ветка: feature/titanor-time-foundation
 Isolated PostgreSQL config commit: `c28af00521ffef322211e2cfae840a5568dc8c03`
 Next.js app scaffold commit: `e15b203fe334fa4e2c68335f1169f78ed9c18ec9`
@@ -147,6 +147,11 @@ T6.8 третий под-шаг («Редактирование назначен
 ASSIGNMENT_ALREADY_STARTED`, если назначение уже началось) + одноклик-переключатель primary на
 `/admin/assignments`, семнадцатая migration (seed `assignment.update`), применена **владельцем**,
 задеплоено на реальный `app`: commit `fe353af`.
+T6.8 четвёртый под-шаг («Split назначения») — `POST /api/admin/assignments/:assignmentId/split`
+(атомарно закрывает текущее назначение `validTo = effectiveFrom - 1 day` и создаёт новое с новым
+site/work area/template, `isPrimary`/`validTo` наследуются от закрываемой строки — этих полей нет в
+схеме запроса), восемнадцатая migration (seed `assignment.split`), применена **владельцем**,
+задеплоено на реальный `app`: commit `d124a35`.
 Статус документа: living implementation record
 
 ## 1. Назначение документа
@@ -2161,10 +2166,11 @@ endpoint (в отличие от `POST /api/admin/sites`, где он опцио
   `Employee`/`AuditEvent` — по-прежнему 0 строк.
 
 Следующей отдельной задачей (строго по порядку `PROJECT_ROADMAP.md` ЭТАП 6), T6.6/T6.7 полностью
-закрыты, T6.8 в процессе (создание + список + редактирование сделаны):
+закрыты, T6.8 в процессе (создание + список + редактирование + split сделаны):
 - **T6.8 продолжение.** Оставшийся кусок контракта (`04_...` §6): `POST
-  /api/admin/assignments/:assignmentId/split`, `.../promote`, `.../end` — по одному под-шагу за
-  раз, тем же паттерном.
+  /api/admin/assignments/:assignmentId/promote`, `.../end` — по одному под-шагу за раз, тем же
+  паттерном. `promote` требует advisory lock на `employeeId` (демоушен прежнего primary) — тот же
+  паттерн блокировки, что уже проверен в `bootstrap-super-admin.ts`.
 - **T6.9 — Назначение прораба.** Требует новую модель `ForemanAssignment` — design-checkpoint с
   владельцем обязателен до migration.
 
@@ -2176,7 +2182,8 @@ endpoint (в отличие от `POST /api/admin/sites`, где он опцио
 `/admin/sites`, `/admin/sites/[siteId]`, `GET/POST /api/admin/sites/:siteId/work-areas`,
 `PATCH .../work-areas/:workAreaId`, `POST /api/admin/assignments/validate-overlap`,
 `POST /api/admin/assignments`, `/admin/assignments/new`, `GET /api/admin/assignments`,
-`/admin/assignments`, `PATCH /api/admin/assignments/:assignmentId` — уже подтверждены и сделаны).
+`/admin/assignments`, `PATCH /api/admin/assignments/:assignmentId`,
+`POST /api/admin/assignments/:assignmentId/split` — уже подтверждены и сделаны).
 Не запускать `app` в production и не менять CollabStudio без отдельного checkpoint владельца.
 
 ## 12. Правило обновления
