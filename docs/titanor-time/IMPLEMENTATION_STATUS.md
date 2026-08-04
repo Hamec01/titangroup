@@ -1,6 +1,6 @@
 # Titanor Time — Implementation Status
 
-Обновлено: 2026-08-04 11:38 Europe/Helsinki
+Обновлено: 2026-08-04 12:19 Europe/Helsinki
 Ветка: feature/titanor-time-foundation
 Isolated PostgreSQL config commit: `c28af00521ffef322211e2cfae840a5568dc8c03`
 Next.js app scaffold commit: `e15b203fe334fa4e2c68335f1169f78ed9c18ec9`
@@ -171,6 +171,13 @@ T6.9 первый под-шаг («ForemanAssignment schema») — design-checkp
 разрешает несколько строк на объект, включая перекрывающиеся). Применена **владельцем**, `app`
 пересобран (полная переустановка из-за смены схемы — Prisma Client перегенерирован), задеплоено:
 commit `9716f02`. Только схема — API endpoint'ов пока нет, это следующий под-шаг.
+T6.9 второй под-шаг («Создание назначения прораба») — `POST /api/admin/foreman-assignments` +
+секция «Foremen» на `/admin/sites/[siteId]` (список текущих + форма создания), контракт
+спроектирован по аналогии с `assignment.create` и подтверждён владельцем (в `04_...` его не было).
+Без проверки `ASSIGNMENT_OVERLAP` — ERD осознанно не ограничивает перекрытия для этой сущности;
+единственная бизнес-проверка — активная роль `FOREMAN` у `foremanUserId` (`409 USER_NOT_FOREMAN`).
+Двадцать первая migration (seed `foreman_assignment.create`), применена **владельцем**, задеплоено
+на реальный `app`: commit `0b90e57`.
 Статус документа: living implementation record
 
 ## 1. Назначение документа
@@ -2184,15 +2191,12 @@ endpoint (в отличие от `POST /api/admin/sites`, где он опцио
   же одноразовая `node:22`-container команда), задеплоено на реальный `app`, регрессия чистая, реальная
   `Employee`/`AuditEvent` — по-прежнему 0 строк.
 
-Следующей отдельной задачей (строго по порядку `PROJECT_ROADMAP.md` ЭТАП 6) — **T6.9 продолжение
-(Назначение прораба)**, T6.6/T6.7/T6.8 полностью закрыты, схема `ForemanAssignment` готова:
-- `04_ADMIN_FIRST_API_CONTRACTS.md` **не описывает** admin-эндпоинты для назначения прораба (только
-  `/foreman/*` review-workflow самого прораба, явно вне первого среза) — контракт для
-  `POST /api/admin/foreman-assignments` + `GET` список + `POST .../end` спроектирован этим агентом
-  по аналогии с `assignment.*` и **подтверждён владельцем** (не взят готовым из документа).
-- Permission-коды (`02_ROLE_PERMISSION_MATRIX.md`): `foreman_assignment.create`/`.read.all`/
-  `.read.own`/`.end` — ни один пока не засеян; первая под-задача — `create` (по аналогии с T6.8:
-  сначала create, затем список, `.end` последним).
+Следующей отдельной задачей (строго по порядку `PROJECT_ROADMAP.md` ЭТАП 6) — **T6.9 завершение
+(Назначение прораба)**, T6.6/T6.7/T6.8 полностью закрыты, `create` сделан:
+- Оставшиеся под-задачи (по аналогии с T6.8): `GET /api/admin/foreman-assignments` (список,
+  `foreman_assignment.read.all`), затем `POST .../end` (`foreman_assignment.end`) — оба
+  permission-кода пока не засеяны. После `end` T6.9 и весь ЭТАП 6 (`PROJECT_ROADMAP.md`) закрыт
+  полностью.
 
 Не начинать реальный admin API или UI раньше отдельного подтверждения владельца (исключения —
 `GET /api/admin/cities`, `session.revoke_all.own`, `/login`, `/admin/setup`, `POST /api/admin/sites`,
@@ -2203,8 +2207,8 @@ endpoint (в отличие от `POST /api/admin/sites`, где он опцио
 `PATCH .../work-areas/:workAreaId`, `POST /api/admin/assignments/validate-overlap`,
 `POST /api/admin/assignments`, `/admin/assignments/new`, `GET /api/admin/assignments`,
 `/admin/assignments`, `PATCH /api/admin/assignments/:assignmentId`,
-`POST /api/admin/assignments/:assignmentId/split`, `.../promote`, `.../end` — уже подтверждены и
-сделаны).
+`POST /api/admin/assignments/:assignmentId/split`, `.../promote`, `.../end`,
+`POST /api/admin/foreman-assignments` — уже подтверждены и сделаны).
 Не запускать `app` в production и не менять CollabStudio без отдельного checkpoint владельца.
 
 ## 12. Правило обновления
