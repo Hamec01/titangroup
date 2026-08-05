@@ -1,0 +1,75 @@
+import { redirect } from 'next/navigation';
+import Link from 'next/link';
+import { resolveServerSession } from '@/lib/server-session';
+import { getPeriodDetail } from '@/lib/periods';
+
+export const dynamic = 'force-dynamic';
+
+type RouteParams = { params: Promise<{ periodId: string }> };
+
+export default async function AdminPeriodDetailPage({ params }: RouteParams) {
+  const session = await resolveServerSession();
+  if (!session) {
+    redirect('/login');
+  }
+
+  const isAdmin = session.user.roles.includes('ADMIN') || session.user.roles.includes('SUPER_ADMIN');
+  if (!isAdmin) {
+    return (
+      <main className="setup-page">
+        <p className="login-error" role="alert">
+          Access denied — this page requires the ADMIN or SUPER_ADMIN role.
+        </p>
+      </main>
+    );
+  }
+
+  const { periodId } = await params;
+  const period = await getPeriodDetail(periodId);
+
+  if (!period) {
+    return (
+      <main className="setup-page">
+        <div className="setup-card">
+          <p>No period with this id.</p>
+          <Link href="/admin/periods">Back to periods</Link>
+        </div>
+      </main>
+    );
+  }
+
+  return (
+    <main className="setup-page">
+      <div className="setup-card">
+        <h1>
+          {period.startDate} – {period.endDate}
+        </h1>
+        <p className="setup-subtitle">
+          Status: {period.status} · version {period.version}
+        </p>
+
+        <ul className="setup-list">
+          <li className="setup-item">
+            <span className="setup-label">Participants</span>
+            <span className="setup-status setup-status-pending">{period.participantsTotal}</span>
+          </li>
+          <li className="setup-item">
+            <span className="setup-label">Final approved</span>
+            <span className="setup-status setup-status-done">{period.timesheetsFinalApproved}</span>
+          </li>
+          <li className="setup-item">
+            <span className="setup-label">Still pending</span>
+            <span className="setup-status setup-status-pending">{period.timesheetsPending}</span>
+          </li>
+        </ul>
+
+        {period.lockedAt && <p className="setup-subtitle">Locked at {period.lockedAt}</p>}
+        {period.exportedAt && <p className="setup-subtitle">Exported at {period.exportedAt}</p>}
+
+        <p>
+          <Link href="/admin/periods">Back to periods</Link>
+        </p>
+      </div>
+    </main>
+  );
+}
