@@ -1,6 +1,13 @@
 # Titanor Time — Implementation Status
 
-Обновлено: 2026-08-04 20:05 Europe/Helsinki
+Обновлено: 2026-08-05 12:20 Europe/Helsinki
+`/worker/history` (все табели работника, любой статус) + `/admin/timesheets[...]`
+(final-approve/override-return) реализованы — закрывает `timesheet.final_approve` и последний
+недостающий переход ЭТАП 7 из `FOREMAN_APPROVED`. Протестировано на одноразовом PostgreSQL 16 и
+headless-browser; найденный по ходу баг оказался багом тестового seed-фикстуры, не продукта.
+Migration (3 права: `timesheet.read.all`, `timesheet.final_approve`, `timesheet.return` →
+`ADMIN`/`SUPER_ADMIN`) применена владельцем, `app` пересобран и передеплоен, `healthy`: см. §5,
+commit `fecedb1`
 `/admin/periods` (список+форма) + `/admin/periods/[periodId]` + `/admin/review-scopes[...]`
 (approve/return) реализованы — закрывает последний непроверенный чек-лист `/admin/setup`
 (`hasOpenPeriod` вёл сюда с самого начала) и даёт админу реальный UI вместо curl. Протестировано
@@ -2513,10 +2520,58 @@ admin periods/review-scopes UI) сделан без паузы на подтве
 UI на обеих сторонах (работник и админ), не только через curl: назначение → открытый период (UI)
 → ввод часов (UI) → отправка (UI) → admin-проверка approve/return (UI) → `FOREMAN_APPROVED`.
 
-**Следующий шаг**: не выбран явно владельцем. Кандидаты без явного приоритета: `timesheet.
-final_approve` (чистый переход, вероятно самый простой); `period.lock`/`period.export`;
-прорабский `/api/foreman/*` (UI+API by-extension, контрактом пока не описан); `TimesheetReviewProposal`
-(нужна, когда `scope.return` потребует структурированных предложений). Ждать решения владельца.
+**`timesheet.final_approve` + admin override-return реализованы и задеплоены** (commit `fecedb1`),
+владелец явно попросил «делай всё по порядку по roadmap» — продолжение без паузы на подтверждение
+между под-шагами:
+- `lib/worker-context.ts`: новая `listWorkerTimesheets(employeeId)` — все табели работника, любой
+  статус (не только actionable), та же форма ответа, что `listActionablePeriods`. Используется
+  и новой страницей `/worker/history`, и переписанными `/worker/periods/[periodId]` +
+  `.../hours[/[date]]` + `.../submit` — период теперь остаётся открываемым (read-only), даже когда
+  его табель вышел из «actionable» (например, `FINAL_APPROVED`). Резолвинг назначений — на дату
+  начала периода, не «сегодня» (у прошлого периода состав назначений мог измениться).
+- `lib/admin-timesheets.ts` (новый файл): `listTimesheets`, `getTimesheetCard`,
+  `finalApproveTimesheet` (чистый переход `FOREMAN_APPROVED`→`FINAL_APPROVED`, данные не меняет,
+  тело запроса должно быть пустым), `returnTimesheetOverride` (весь табель целиком, не отдельный
+  scope) — принудительно переводит **все** `TimesheetReviewScope` текущей версии в `RETURNED`
+  (включая уже `APPROVED`, сознательно ломая carry-forward — отличается от возврата одного scope,
+  `03_...`§4.7), реинициализирует draft через `reinitializeDraftFromVersion` (экспортирована из
+  `lib/review-scopes.ts` ради переиспользования), тот же порядок операций под локом
+  (`Timesheet`→`TimesheetDraft`, повторная проверка precondition после лока).
+- `GET/POST /api/admin/timesheets[...]`, `GET /api/worker/timesheets` (список), UI:
+  `/admin/timesheets` (список ожидающих final approve), `/admin/timesheets/[timesheetId]`
+  (карточка + `FinalApprovalActions` — кнопка final-approve и форма return-с-причиной на одной
+  странице, без отдельного `/approve`-роута), `/worker/history` (список всех табелей работника).
+- **Найден и исправлен баг тестовой seed-фикстуры** (не баг продукта): собственный `_test-*.ts`
+  скрипт заранее клал `TimesheetDraftDay`/`TimesheetDraftPlannedShift` в draft уже
+  `FOREMAN_APPROVED`-табеля «для полноты» — но реальный `submit()` всегда очищает эти таблицы, у
+  настоящего `FOREMAN_APPROVED`-табеля draft пуст до первого возврата. Фикстура с непустым draft
+  сталкивалась с той же строкой, которую `reinitializeDraftFromVersion` пытался вставить —
+  `P2002` на `(draftId, date, sourceAssignmentId)`. Исправлено (draft1 оставлен пустым), после
+  чего весь сценарий override-return прошёл чисто.
+- Протестировано на одноразовом PostgreSQL 16: validation (`returnReason` обязателен), успешный
+  override-return (scope→`RETURNED` с причиной и ревьюером, `Timesheet`→`RETURNED`, draft
+  реинициализирован из версии, `AuditEvent`), повторный вызов → `409`, черновик работника снова
+  редактируемый и предзаполнен данными версии. Final-approve: повторный вызов на уже
+  `FINAL_APPROVED` → `409`; непустое тело → `400`. Затем в headless-browser (Playwright,
+  `localhost`, три отдельных seed-набора): `/worker/history` показывает оба статуса
+  (`DRAFT`→«Not started», `RETURNED`→«Returned — needs your attention»), `/worker/periods/
+  [periodId]` для возвращённого периода снова показывает «Enter hours»; `/admin/timesheets` —
+  список из двух табелей; реальный клик «Final approve» → `FINAL_APPROVED` в БД, реальный клик
+  «Return whole timesheet» без причины → инлайн-ошибка без перехода, с причиной → `RETURNED` в БД
+  (оба подтверждены прямым SQL после клика, не только по факту редиректа). `tsc --noEmit` чист.
+- Migration (`timesheet.read.all`, `timesheet.final_approve`, `timesheet.return` →
+  `ADMIN`/`SUPER_ADMIN`) применена владельцем через одноразовый `node:22`-контейнер
+  (`--env-file .env.titanor-time`, без `npm install`), права подтверждены прямым SQL на
+  `titanor-time-db-1`, `app` пересобран и передеплоен, `healthy` (`db` не пересоздавалась).
+
+**Следующий шаг**: не выбран явно владельцем. Кандидаты без явного приоритета: `period.lock`
+(схема не нужна — поля `PayrollPeriod.status`/`lockedAt`/`lockedByUserId` уже есть); `period.export`
+(нужна новая схема `ExportBatch`/`ExportItem`, отложена); прорабский `/api/foreman/*` (UI+API
+by-extension, контрактом пока не описан); T7.9 — корректировка `FINAL_APPROVED`-записей (требует
+полного design-checkpoint схемы `CorrectionRequest`/`CorrectionDraft*` — обязательная пауза на
+подтверждение владельца перед любой миграцией, правило не смягчается «делай всё до конца»);
+`TimesheetReviewProposal` (нужна, когда `scope.return` потребует структурированных предложений).
+Ждать решения владельца.
 
 ## 12. Правило обновления
 
