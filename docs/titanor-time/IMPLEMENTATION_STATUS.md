@@ -1,6 +1,9 @@
 # Titanor Time — Implementation Status
 
-Обновлено: 2026-08-05 14:08 Europe/Helsinki
+Обновлено: 2026-08-05 14:23 Europe/Helsinki
+Схема `CorrectionRequest`/`CorrectionDraft*` (T7.9) применена владельцем к `titanor-time-db-1`
+(миграция `20260805150000_add_correction_schema`), все 5 таблиц подтверждены прямым SQL, `app`
+пересобран (новый Prisma Client) и передеплоен, `healthy`.
 Схема `CorrectionRequest`/`CorrectionDraft`/`CorrectionDraftDay`/`CorrectionDraftSegment`/
 `CorrectionDraftBreakSegment` (T7.9, design-checkpoint перед первой миграцией) добавлена — владелец
 явно подтвердил именно эту схему (5 таблиц из `03_DATA_MODEL_ERD.md` §4.7) и урезанный первый
