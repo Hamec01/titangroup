@@ -1,7 +1,15 @@
 # Titanor Time — Implementation Status
 
-Обновлено: 2026-08-05 13:38 Europe/Helsinki
-Прорабская очередь `/foreman/*` (T7.6-T7.8) реализована — `/foreman`, `/foreman/review[/standard|
+Обновлено: 2026-08-05 14:08 Europe/Helsinki
+Схема `CorrectionRequest`/`CorrectionDraft`/`CorrectionDraftDay`/`CorrectionDraftSegment`/
+`CorrectionDraftBreakSegment` (T7.9, design-checkpoint перед первой миграцией) добавлена — владелец
+явно подтвердил именно эту схему (5 таблиц из `03_DATA_MODEL_ERD.md` §4.7) и урезанный первый
+UI-срез (только ADMIN: request+draft.edit+approve в одном месте, WORKER/FOREMAN request-формы —
+отдельным шагом позже). Протестировано на одноразовом PostgreSQL 16 (13 сценариев: happy path целиком
+через request→draft→day→segment→break, затем каждый CHECK/EXCLUDE/триггер по отдельности, включая
+закрытие ранее явно помеченного пробела в `fn_site_assignment_dependents_guard` — не покрывал
+`CorrectionDraftSegment`). `tsc --noEmit` чист. **Ещё не применена к реальной БД** — ждёт владельца:
+commit `4f1b7b2`
 /exceptions]`, `/foreman/review/[timesheetId]` (approve/return), `/foreman/review/bulk-approve`,
 `/foreman/workers`. Закрывает `404`, куда `/login` редиректил `FOREMAN` с самого начала проекта.
 Без новой схемы — переиспользует `TimesheetReviewScope` и ядро `approveReviewScope`/
@@ -2658,15 +2666,21 @@ UI на обеих сторонах (работник и админ), не то�
   владельцем через одноразовый `node:22`-контейнер, права подтверждены прямым SQL на
   `titanor-time-db-1`, `app` пересобран и передеплоен, `healthy`.
 
-**Следующий шаг**: не выбран явно владельцем. Кандидаты без явного приоритета: `period.export`
-(нужна новая схема `ExportBatch`/`ExportItem`, отложена); T7.9 — корректировка
-`FINAL_APPROVED`-записей (схема уже полностью спроектирована в `03_DATA_MODEL_ERD.md` §4.5-4.7 —
-`CorrectionRequest`/`CorrectionDraft`/`CorrectionDraftDay`/`CorrectionDraftSegment`/
-`CorrectionDraftBreakSegment`, включая триггеры, composite FK и `canonicalCorrectionProjection()`
-— но применение всё равно требует обязательной паузы на подтверждение владельца перед первой
-миграцией по правилу design-checkpoint, которое не смягчается «делай всё до конца»/«идём по
-roadmap»); `TimesheetReviewProposal`/`propose-correction` и `ApprovalAction`/`/foreman/history`
-(та же пауза на схему). Ждать решения владельца.
+**T7.9 — схема `CorrectionRequest`/`CorrectionDraft*` спроектирована, подтверждена владельцем и
+закоммичена** (commit `4f1b7b2`), но **ещё не применена к реальной БД** — стандартный hand-off
+(владелец запускает `prisma migrate deploy` через одноразовый `node:22`-контейнер) пока не
+произошёл. Владелец также подтвердил урезанный первый UI-срез: только `ADMIN`
+(`correction.request`+`correction.draft.edit`+`correction.approve` все в одном месте на этой
+итерации), `WORKER`/`FOREMAN` request-формы (`correction.request` держат и они — `02_...` §2.9)
+отдельным шагом позже.
+
+**Следующий шаг**: применить миграцию `20260805150000_add_correction_schema` к
+`titanor-time-db-1` (ждать владельца), затем построить `lib/corrections.ts` + `/api/admin/
+corrections[...]` + `/admin/corrections` UI (request/draft.edit/submit/approve, "четыре глаза",
+`canonicalCorrectionProjection()` для `409 NO_CORRECTION_CHANGES`). После этого без выбранного
+приоритета остаются: `period.export` (нужна новая схема `ExportBatch`/`ExportItem`, отдельный
+design-checkpoint); `TimesheetReviewProposal`/`propose-correction` и `ApprovalAction`/
+`/foreman/history` (та же пауза на схему); WORKER/FOREMAN correction-request формы (после ADMIN-среза).
 
 ## 12. Правило обновления
 
