@@ -339,3 +339,147 @@ button:disabled {
   border-radius: 4px;
   padding: 4px 12px;
 }
+
+/* docs/titanor-time/01_SCREEN_MAP.md §3 — worker screens are mobile-first,
+   "крупные элементы, минимум действий": bigger touch targets and simpler
+   stacked layout than the desktop-first setup/worker-table styles above. */
+.wk-page {
+  min-height: 100dvh;
+  display: flex;
+  justify-content: center;
+  padding: 24px 16px;
+}
+
+.wk-card {
+  width: 100%;
+  max-width: 480px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: linear-gradient(180deg, rgba(16, 23, 34, 0.96), rgba(10, 14, 21, 0.96));
+  padding: 24px 20px;
+  border-radius: 6px;
+  display: grid;
+  gap: 16px;
+  align-content: start;
+}
+
+.wk-card h1 {
+  margin: 0;
+  font-size: 1.2rem;
+  letter-spacing: 0.02em;
+}
+
+.wk-section-title {
+  margin: 8px 0 0;
+  font-size: 0.85rem;
+  color: var(--text-soft);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.wk-empty {
+  color: var(--text-soft);
+  margin: 0;
+}
+
+.wk-period-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 10px;
+}
+
+.wk-period-item {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+  min-height: 56px;
+  padding: 12px 16px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 6px;
+  background: rgba(7, 11, 17, 0.5);
+  text-decoration: none;
+}
+
+.wk-period-dates {
+  font-weight: 600;
+}
+
+.wk-status-badge {
+  flex-shrink: 0;
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--text-soft);
+}
+
+.wk-status-draft {
+  color: var(--text-soft);
+}
+
+.wk-status-returned {
+  color: var(--error);
+  background: rgba(253, 164, 175, 0.14);
+}
+
+.wk-status-submitted,
+.wk-status-foreman_approved {
+  color: #86efac;
+  background: rgba(134, 239, 172, 0.12);
+}
+
+.wk-assignment-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 8px;
+}
+
+.wk-assignment-item {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 10px 12px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 6px;
+  background: rgba(7, 11, 17, 0.5);
+}
+
+.wk-assignment-site {
+  font-weight: 600;
+}
+
+.wk-assignment-detail {
+  font-size: 0.85rem;
+  color: var(--text-soft);
+}
+
+.wk-action-button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 52px;
+  border-radius: 6px;
+  background: linear-gradient(135deg, var(--accent) 0%, var(--accent-light) 100%);
+  color: var(--white);
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  text-decoration: none;
+  box-shadow: 0 14px 30px rgba(47, 94, 157, 0.35);
+}
+
+.wk-readonly-note {
+  margin: 0;
+  color: var(--text-soft);
+  font-size: 0.9rem;
+}
+
+.wk-back-link {
+  color: var(--accent-light);
+  font-size: 0.9rem;
+}
