@@ -1,6 +1,15 @@
 # Titanor Time — Implementation Status
 
-Обновлено: 2026-08-05 13:02 Europe/Helsinki
+Обновлено: 2026-08-05 13:38 Europe/Helsinki
+Прорабская очередь `/foreman/*` (T7.6-T7.8) реализована — `/foreman`, `/foreman/review[/standard|
+/exceptions]`, `/foreman/review/[timesheetId]` (approve/return), `/foreman/review/bulk-approve`,
+`/foreman/workers`. Закрывает `404`, куда `/login` редиректил `FOREMAN` с самого начала проекта.
+Без новой схемы — переиспользует `TimesheetReviewScope` и ядро `approveReviewScope`/
+`returnReviewScope` (уже построенное для admin fallback), с проверкой владения объектом поверх.
+Протестировано на одноразовом PostgreSQL 16 и headless-browser (изоляция по объекту,
+self-approval-forbidden, атомарность bulk-approve, свёрнутые чужие дни в карточке). Migration
+(4 права → `FOREMAN`) применена владельцем, `app` пересобран и передеплоен, `healthy`: см. §5,
+commit `aab1186`
 `period.lock` (T7.10, «Закрытие периода») реализован — `POST /api/admin/periods/:periodId/lock`,
 без override, требует `FINAL_APPROVED` у каждого `expected=true` участника, блокеры возвращаются в
 теле `409` для UI-списка. Схема не менялась — `PayrollPeriod.status`/`lockedAt`/`lockedByUserId` и
@@ -2604,15 +2613,60 @@ UI на обеих сторонах (работник и админ), не то�
   `node:22`-контейнер (`--env-file .env.titanor-time`), права подтверждены прямым SQL на
   `titanor-time-db-1`, `app` пересобран и передеплоен, `healthy`.
 
+**Прорабская очередь `/foreman/*` реализована и задеплоена** (commit `aab1186`), владелец
+подтвердил «да давай» — продолжение по roadmap-порядку ЭТАП 7 (T7.6-T7.8), без паузы на
+подтверждение между под-шагами (кроме самой миграции):
+- `lib/foreman-review.ts` (новый файл): `getForemanSiteIds`/`isForemanOwnScope` (текущие
+  `ForemanAssignment` прораба на дату, own-site gate для approve/return роутов),
+  `getForemanOverview`, `listForemanReviewScopes` (hasException — не колонка БД, поэтому
+  фильтруется в памяти после вычисления для всех PENDING SITE scope прораба, затем пагинация —
+  приемлемо на масштабе «scope на своих объектах», не всей компании), `getForemanTimesheetDetail`
+  (карточка табеля целиком, с чужими объектами — **свёрнутыми**, не опущенными: день без единого
+  сегмента на своих объектах помечается `collapsed:true` и не отдаёт сегменты; смешанный день
+  отдаёт только сегменты своих объектов), `listForemanWorkers`, `bulkApproveReviewScopes`
+  (валидация и запись — в одной транзакции: непрошедший scope блокирует всю пачку, не только себя).
+- **Approve/return переиспользуют существующее ядро** `approveReviewScope`/`returnReviewScope`
+  (`lib/review-scopes.ts`, уже построенное для admin fallback) — единственное новое поверх них:
+  `isForemanOwnScope`-проверка перед вызовом (`404`, а не `403`, для scope на чужом объекте — тот
+  же принцип «не подтверждать факт существования», что уже применялся в `getForemanTimesheetDetail`).
+- **Решение по правам, не буквально однозначное в матрице**: `02_ROLE_PERMISSION_MATRIX.md`
+  строка `timesheet.foreman_review` описывает precondition approve **и** return под одним кодом
+  (по аналогии с `timesheet.scope_review.all` у admin), но отдельная строка `timesheet.return`
+  явно перечисляет `FOREMAN` в держателях того же кода, что уже сеялся для admin override-return.
+  Прочитано буквально по колонке «Держатели» (как везде в этой матрице): `timesheet.foreman_review`
+  выдан только на approve, `timesheet.return` — на return (та же запись права, что и у admin,
+  просто добавлена новая `RolePermission`-строка для `FOREMAN`). Более гранулярное разделение, чем
+  у admin, но не противоречит документу — задокументировано прямо в тексте миграции.
+- Протестировано на одноразовом PostgreSQL 16 (5 работников/сценариев: обычный, с отклонением,
+  на чужом объекте, на двух объектах сразу, dual-role прораб-работник): изоляция по объекту
+  (чужой объект никогда не виден, ни в списке, ни в карточке — `404`), self-exclusion из
+  собственной очереди и `403 SELF_APPROVAL_FORBIDDEN` при прямой попытке, `hasException` только у
+  реально расходящегося scope, смешанный день корректно показывает только свой объект, day-only-
+  чужой корректно свёрнут, bulk-approve — атомарный откат при невалидном id в пачке (прямой SQL
+  подтвердил: ни одна строка не изменилась), затем успешный повтор без невалидного id,
+  `Timesheet.status → FOREMAN_APPROVED` только когда все scope версии подтверждены, `AuditEvent`
+  для approve/return/bulk (bulk — с `entityId=NULL`) подтверждён прямым SQL. Затем в
+  headless-browser (Playwright, `localhost`): реальные клики — bulk-approve через чекбоксы
+  (3 отмечены → 0 «Standard» после), return с реальной причиной с редиректом в очередь,
+  overview/split/workers-страницы. `tsc --noEmit` чист.
+- **Осознанно вне рамок**: `/foreman/review/[timesheetId]/propose-correction` (нужна
+  `TimesheetReviewProposal`) и `/foreman/history` (нужна `ApprovalAction`) — та же причина «нет
+  потребителя», что применялась к этим моделям на протяжении всего ЭТАП 7; обе требуют отдельного
+  design-checkpoint на схему, прежде чем к ним можно будет вернуться.
+- Migration (`timesheet.read.assigned`, `timesheet.foreman_review`, `timesheet.bulk_approve` →
+  `FOREMAN`; `timesheet.return` → добавлена роль `FOREMAN` к уже существующему праву) применена
+  владельцем через одноразовый `node:22`-контейнер, права подтверждены прямым SQL на
+  `titanor-time-db-1`, `app` пересобран и передеплоен, `healthy`.
+
 **Следующий шаг**: не выбран явно владельцем. Кандидаты без явного приоритета: `period.export`
-(нужна новая схема `ExportBatch`/`ExportItem`, отложена); прорабский `/api/foreman/*` (UI+API
-by-extension, контрактом пока не описан); T7.9 — корректировка `FINAL_APPROVED`-записей (схема уже
-полностью спроектирована в `03_DATA_MODEL_ERD.md` §4.5-4.7 — `CorrectionRequest`/`CorrectionDraft`/
-`CorrectionDraftDay`/`CorrectionDraftSegment`/`CorrectionDraftBreakSegment`, включая триггеры,
-composite FK и `canonicalCorrectionProjection()` — но применение всё равно требует обязательной
-паузы на подтверждение владельца перед первой миграцией по правилу design-checkpoint, которое не
-смягчается «делай всё до конца»/«идём по roadmap»); `TimesheetReviewProposal` (нужна, когда
-`scope.return` потребует структурированных предложений). Ждать решения владельца.
+(нужна новая схема `ExportBatch`/`ExportItem`, отложена); T7.9 — корректировка
+`FINAL_APPROVED`-записей (схема уже полностью спроектирована в `03_DATA_MODEL_ERD.md` §4.5-4.7 —
+`CorrectionRequest`/`CorrectionDraft`/`CorrectionDraftDay`/`CorrectionDraftSegment`/
+`CorrectionDraftBreakSegment`, включая триггеры, composite FK и `canonicalCorrectionProjection()`
+— но применение всё равно требует обязательной паузы на подтверждение владельца перед первой
+миграцией по правилу design-checkpoint, которое не смягчается «делай всё до конца»/«идём по
+roadmap»); `TimesheetReviewProposal`/`propose-correction` и `ApprovalAction`/`/foreman/history`
+(та же пауза на схему). Ждать решения владельца.
 
 ## 12. Правило обновления
 
