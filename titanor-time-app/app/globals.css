@@ -51,6 +51,72 @@ button:disabled {
   opacity: 0.6;
 }
 
+.admin-shell {
+  min-height: 100dvh;
+}
+
+.admin-header {
+  width: 100%;
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 20px 24px 14px;
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 20px;
+}
+
+.admin-brand {
+  color: var(--white);
+  font-size: 1.15rem;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  text-decoration: none;
+}
+
+.admin-identity {
+  color: var(--text-soft);
+  font-size: 0.82rem;
+  text-align: right;
+}
+
+.admin-nav {
+  border-block: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(7, 11, 17, 0.78);
+  overflow-x: auto;
+}
+
+.admin-nav-inner {
+  width: max-content;
+  min-width: 100%;
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 0 24px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.admin-nav a {
+  padding: 13px 12px;
+  color: var(--text-soft);
+  font-size: 0.88rem;
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.admin-nav a:hover,
+.admin-nav a:focus-visible {
+  color: var(--white);
+  background: rgba(82, 130, 168, 0.18);
+  outline: none;
+}
+
+.admin-content .setup-page {
+  min-height: 0;
+  padding-top: 32px;
+}
+
 .login-page {
   min-height: 100dvh;
   display: flex;
@@ -175,6 +241,16 @@ button:disabled {
 }
 
 @media (max-width: 480px) {
+  .admin-header {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 6px;
+  }
+
+  .admin-identity {
+    text-align: left;
+  }
+
   .login-card {
     padding: 24px 20px;
   }
@@ -338,6 +414,7 @@ button:disabled {
   border: 1px solid var(--accent-light);
   border-radius: 4px;
   padding: 4px 12px;
+  text-decoration: none;
 }
 
 /* docs/titanor-time/01_SCREEN_MAP.md §3 — worker screens are mobile-first,

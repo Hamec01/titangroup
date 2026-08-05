@@ -1,29 +1,26 @@
 # Titanor Time — Implementation Status
 
-Обновлено: 2026-08-05 (owner walkthrough: first vertical flow gap audit)
+Обновлено: 2026-08-05 (admin navigation and reusable setup actions)
 
-## CURRENT PRODUCT GAP — первый вертикальный сценарий нельзя считать завершённым
+## CURRENT PRODUCT GAP — onboarding всё ещё нельзя считать завершённым
 
 Во время первой ручной проверки владельцем подтверждён системный UX/flow-разрыв: `/admin/setup`
-позволяет создать первую сущность, после чего флаг становится `DONE`, ссылка исчезает и экран больше
-не даёт перейти ни к списку, ни к карточке, ни к повторному созданию. Это не ошибка владельца и не
-отсутствие данных. В `app/admin/setup/page.tsx` действие действительно рендерится только при
-`!done && item.href`; состояние `DONE` является только глобальным boolean «в БД есть хотя бы одна
+позволял создать первую сущность, после чего флаг становился `DONE`, ссылка исчезала и экран больше
+не давал перейти ни к списку, ни к карточке, ни к повторному созданию. Это не ошибка владельца и не
+отсутствие данных: состояние `DONE` является только глобальным boolean «в БД есть хотя бы одна
 строка», а не признаком завершённой настройки компании.
+
+**Первый UX-разрыв закрыт в текущей задаче:** добавлены общий защищённый admin shell и `/admin`,
+постоянное меню всех существующих разделов, `Manage` для завершённых пунктов checklist,
+`Create another` для шаблона и переход `Work area` к списку объектов, где рабочие области реально
+создаются и редактируются. Теперь уже существующие `/admin/workers`, `/admin/sites`,
+`/admin/assignments`, `/admin/periods`, `/admin/timesheets`, `/admin/review-scopes` и
+`/admin/corrections` обнаруживаются без знания скрытых URL. Production Docker build успешен.
 
 Повторная сверка `PROJECT_VISION.md`, `PROJECT_ROADMAP.md`, `01_SCREEN_MAP.md`,
 `02_ROLE_PERMISSION_MATRIX.md`, `03_DATA_MODEL_ERD.md`, `04_ADMIN_FIRST_API_CONTRACTS.md` и
 фактического дерева `titanor-time-app/app` выявила:
 
-- **Нет admin shell/navigation и нет `/admin` overview.** После логина `ADMIN`/`SUPER_ADMIN`
-  постоянно попадает на одноразовый checklist. Документы ожидают `/admin` и nav. Реальные списки
-  `/admin/workers`, `/admin/sites`, `/admin/assignments`, `/admin/periods`, `/admin/timesheets`,
-  `/admin/review-scopes`, `/admin/corrections` существуют, но из завершённого checklist не
-  обнаруживаются. Поэтому уже реализованные редактирование работника (`/admin/workers/:id`) и
-  объекта (`/admin/sites/:id`) выглядят для владельца как отсутствующие.
-- **`Work area` — отдельный тупик checklist.** При `NOT DONE` ссылка отсутствует (`href: null`), хотя
-  рабочая область реально создаётся на карточке объекта. Владелец должен вручную знать путь
-  `/admin/sites` → объект; UI его не сообщает.
 - **Шаблоны нельзя обслуживать после первого создания.** Документы помечают `/admin/templates` и
   `/admin/templates/[templateId]` как целевые list/edit экраны, но физически есть только
   `/admin/templates/new` и `GET/POST /api/admin/templates`; dynamic page/API edit отсутствуют.
@@ -43,8 +40,9 @@
 
 **Обязательный порядок исправления (отдельными маленькими задачами/коммитами):**
 
-1. Admin shell/nav: все существующие разделы доступны постоянно; `DONE` в setup получает действие
-   `Manage`, `NOT DONE` — `Create`; `Work area` ведёт к выбору/карточке объекта.
+1. **Выполнено:** admin shell/nav; все существующие разделы доступны постоянно; `DONE` в setup
+   получает действие `Manage` (для шаблона — `Create another`), `NOT DONE` — `Create`; `Work area`
+   ведёт к выбору/карточке объекта.
 2. Закрыть activation vertical slice целиком (schema design-checkpoint → migration с подтверждением
    владельца → issue code → activate → set password → первый login).
 3. Реализовать минимальный `/admin/users` для создания `FOREMAN`; затем проверить назначение
@@ -52,7 +50,7 @@
 4. Только после этого провести настоящий первый E2E тремя отдельными аккаунтами
    (`SUPER_ADMIN`/`FOREMAN`/`WORKER`) и считать onboarding готовым к пилоту.
 
-До закрытия пунктов 1–4 приложение следует считать **backend-capable, но не operator-ready**:
+До закрытия пунктов 2–4 приложение следует считать **backend-capable, но не operator-ready**:
 владелец не обязан знать или вручную вводить скрытые URL, UUID пользователей или SQL-команды.
 
 Схема `CorrectionRequest`/`CorrectionDraft*` (T7.9) применена владельцем к `titanor-time-db-1`

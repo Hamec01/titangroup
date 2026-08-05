@@ -1,3 +1,4 @@
+import { cache } from 'react';
 import { cookies } from 'next/headers';
 import { resolveAuthenticatedSession, type AuthenticatedSession } from '@/lib/auth';
 import { SESSION_COOKIE_NAME } from '@/lib/session';
@@ -10,7 +11,7 @@ import { SESSION_COOKIE_NAME } from '@/lib/session';
  * checks (e.g. /admin/setup redirecting an unauthenticated/wrong-role visitor
  * to /login) where no NextRequest is available.
  */
-export async function resolveServerSession(): Promise<AuthenticatedSession | null> {
+export const resolveServerSession = cache(async (): Promise<AuthenticatedSession | null> => {
   const store = await cookies();
   return resolveAuthenticatedSession(store.get(SESSION_COOKIE_NAME)?.value);
-}
+});
