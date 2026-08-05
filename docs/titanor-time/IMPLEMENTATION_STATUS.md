@@ -1,6 +1,60 @@
 # Titanor Time — Implementation Status
 
-Обновлено: 2026-08-05 (T7.9 ADMIN slice completed locally)
+Обновлено: 2026-08-05 (owner walkthrough: first vertical flow gap audit)
+
+## CURRENT PRODUCT GAP — первый вертикальный сценарий нельзя считать завершённым
+
+Во время первой ручной проверки владельцем подтверждён системный UX/flow-разрыв: `/admin/setup`
+позволяет создать первую сущность, после чего флаг становится `DONE`, ссылка исчезает и экран больше
+не даёт перейти ни к списку, ни к карточке, ни к повторному созданию. Это не ошибка владельца и не
+отсутствие данных. В `app/admin/setup/page.tsx` действие действительно рендерится только при
+`!done && item.href`; состояние `DONE` является только глобальным boolean «в БД есть хотя бы одна
+строка», а не признаком завершённой настройки компании.
+
+Повторная сверка `PROJECT_VISION.md`, `PROJECT_ROADMAP.md`, `01_SCREEN_MAP.md`,
+`02_ROLE_PERMISSION_MATRIX.md`, `03_DATA_MODEL_ERD.md`, `04_ADMIN_FIRST_API_CONTRACTS.md` и
+фактического дерева `titanor-time-app/app` выявила:
+
+- **Нет admin shell/navigation и нет `/admin` overview.** После логина `ADMIN`/`SUPER_ADMIN`
+  постоянно попадает на одноразовый checklist. Документы ожидают `/admin` и nav. Реальные списки
+  `/admin/workers`, `/admin/sites`, `/admin/assignments`, `/admin/periods`, `/admin/timesheets`,
+  `/admin/review-scopes`, `/admin/corrections` существуют, но из завершённого checklist не
+  обнаруживаются. Поэтому уже реализованные редактирование работника (`/admin/workers/:id`) и
+  объекта (`/admin/sites/:id`) выглядят для владельца как отсутствующие.
+- **`Work area` — отдельный тупик checklist.** При `NOT DONE` ссылка отсутствует (`href: null`), хотя
+  рабочая область реально создаётся на карточке объекта. Владелец должен вручную знать путь
+  `/admin/sites` → объект; UI его не сообщает.
+- **Шаблоны нельзя обслуживать после первого создания.** Документы помечают `/admin/templates` и
+  `/admin/templates/[templateId]` как целевые list/edit экраны, но физически есть только
+  `/admin/templates/new` и `GET/POST /api/admin/templates`; dynamic page/API edit отсутствуют.
+- **Активация работника отсутствует целиком.** `POST /api/admin/workers` создаёт
+  `User(PENDING_ACTIVATION)`, но в Prisma нет `ActivationToken`; отсутствуют
+  `POST /api/admin/workers/:employeeId/activation`, `GET /api/auth/activate`,
+  `POST /api/auth/set-initial-password`, `/activate/[token]` и `/set-password`. Карточка работника
+  показывает вычисленный текст `READY_FOR_ACTIVATION`, но кнопки и исполнимого flow нет. Поэтому
+  новый работник не может получить пароль, войти и выполнить worker-flow через настоящий UI.
+- **Нет управления системными пользователями и ролями.** Отсутствуют `/admin/users`, создание
+  `FOREMAN` и `role.assign`. UI назначения прораба уже требует ID пользователя, который заранее
+  имеет роль `FOREMAN`, но создать такого пользователя через приложение невозможно.
+- Следовательно, контрольный результат из `TITANOR_TIME_DEVELOPMENT_ROADMAP.md` — «admin создал
+  объект → зарегистрировал и назначил работника → работник активировался → вошёл → увидел
+  назначение» — **никогда не был закрыт end-to-end**. Реализованные ЭТАП 7 и T7.9 проверялись на
+  тестовых seed/fixture-пользователях и не доказывают проходимость production onboarding.
+
+**Обязательный порядок исправления (отдельными маленькими задачами/коммитами):**
+
+1. Admin shell/nav: все существующие разделы доступны постоянно; `DONE` в setup получает действие
+   `Manage`, `NOT DONE` — `Create`; `Work area` ведёт к выбору/карточке объекта.
+2. Закрыть activation vertical slice целиком (schema design-checkpoint → migration с подтверждением
+   владельца → issue code → activate → set password → первый login).
+3. Реализовать минимальный `/admin/users` для создания `FOREMAN`; затем проверить назначение
+   прораба без ручного SQL/CLI.
+4. Только после этого провести настоящий первый E2E тремя отдельными аккаунтами
+   (`SUPER_ADMIN`/`FOREMAN`/`WORKER`) и считать onboarding готовым к пилоту.
+
+До закрытия пунктов 1–4 приложение следует считать **backend-capable, но не operator-ready**:
+владелец не обязан знать или вручную вводить скрытые URL, UUID пользователей или SQL-команды.
+
 Схема `CorrectionRequest`/`CorrectionDraft*` (T7.9) применена владельцем к `titanor-time-db-1`
 (миграция `20260805150000_add_correction_schema`), все 5 таблиц подтверждены прямым SQL, `app`
 пересобран (новый Prisma Client) и передеплоен, `healthy`.
