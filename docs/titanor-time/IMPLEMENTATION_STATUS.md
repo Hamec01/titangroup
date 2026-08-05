@@ -1,6 +1,12 @@
 # Titanor Time — Implementation Status
 
-Обновлено: 2026-08-05 12:20 Europe/Helsinki
+Обновлено: 2026-08-05 13:02 Europe/Helsinki
+`period.lock` (T7.10, «Закрытие периода») реализован — `POST /api/admin/periods/:periodId/lock`,
+без override, требует `FINAL_APPROVED` у каждого `expected=true` участника, блокеры возвращаются в
+теле `409` для UI-списка. Схема не менялась — `PayrollPeriod.status`/`lockedAt`/`lockedByUserId` и
+CHECK-constraint их формы уже существовали. Протестировано на одноразовом PostgreSQL 16 и
+headless-browser. Migration (право `period.lock` → `ADMIN`/`SUPER_ADMIN`) применена владельцем,
+`app` пересобран и передеплоен, `healthy`: см. §5, commit `bba2d8c`
 `/worker/history` (все табели работника, любой статус) + `/admin/timesheets[...]`
 (final-approve/override-return) реализованы — закрывает `timesheet.final_approve` и последний
 недостающий переход ЭТАП 7 из `FOREMAN_APPROVED`. Протестировано на одноразовом PostgreSQL 16 и
@@ -2564,14 +2570,49 @@ UI на обеих сторонах (работник и админ), не то�
   (`--env-file .env.titanor-time`, без `npm install`), права подтверждены прямым SQL на
   `titanor-time-db-1`, `app` пересобран и передеплоен, `healthy` (`db` не пересоздавалась).
 
-**Следующий шаг**: не выбран явно владельцем. Кандидаты без явного приоритета: `period.lock`
-(схема не нужна — поля `PayrollPeriod.status`/`lockedAt`/`lockedByUserId` уже есть); `period.export`
+**`period.lock` реализован и задеплоен** (commit `bba2d8c`), владелец подтвердил «идём по roadmap» —
+продолжение по порядку задач ЭТАП 7 без паузы на подтверждение между под-шагами (кроме самой
+миграции — правило «агент не применяет миграции сам» не смягчается):
+- `lib/periods.ts`: новая `lockPeriod(periodId, actorUserId, requestId)`. Двухфазная проверка —
+  быстрый non-tx `findUnique` для `404`, затем `SELECT ... FOR UPDATE` на `PayrollPeriod` внутри
+  транзакции и повторная проверка `status === 'OPEN'` **после** лока (TOCTOU-safe против
+  конкурентного `final-approve`/`return`, тот же паттерн, что `returnTimesheetOverride`). Блокеры —
+  `PayrollPeriodParticipant(expected=true)`, чей `Timesheet.status !== FINAL_APPROVED`, с именем
+  работника и текущим статусом (или `null`, если у участника почему-то нет табеля).
+- `POST /api/admin/periods/:periodId/lock` — своего контракта в `04_ADMIN_FIRST_API_CONTRACTS.md`
+  §7 не было (там только create/read/current) — спроектирован по образцу `timesheet.final_approve`/
+  `return` (чистый переход состояния, без idempotency-key, без тела запроса). `ApiErrorBody`
+  дополнен опциональным `blockers[]` — аддитивное расширение общего формата ошибки, по той же
+  логике, что уже есть `fieldErrors`, нужно для DoD `01_SCREEN_MAP.md` §3 («список блокеров»).
+- UI: `LockPeriodAction.tsx` на `/admin/periods/[periodId]` — кнопка видна только при
+  `status === 'OPEN'`; при `409 NOT_ALL_FINAL_APPROVED` показывает список блокеров инлайн, без
+  перехода; при успехе — `router.refresh()` (не `push`, в отличие от `FinalApprovalActions`
+  — админ остаётся на той же карточке периода и сразу видит новый статус).
+- **Схема не менялась** — `PayrollPeriod.status`/`lockedAt`/`lockedByUserId`/`exportedAt` и
+  CHECK-constraint `ck_payroll_period_status_metadata_shape` (гарантирует атомарность связки
+  статус+метаданные на уровне БД) существовали с самой первой заморозки схемы проекта.
+- Протестировано на одноразовом PostgreSQL 16: `CSRF`/`401`/`404`; период с одним неготовым
+  участником → `409 NOT_ALL_FINAL_APPROVED` с точным списком блокеров; пустой период (без
+  участников) → лок проходит тривиально; повторный лок уже `LOCKED` периода → `409
+  INVALID_STATE_TRANSITION`; после доведения всех участников до `FINAL_APPROVED` — реальный лок
+  проходит, `AuditEvent(PERIOD_LOCKED)` подтверждён прямым SQL. Затем в headless-browser
+  (Playwright, `localhost`): реальный клик «Lock period» на заблокированном периоде показывает
+  список блокеров без перехода; после исправления данных повторный клик переводит статус в
+  `LOCKED` на той же странице (кнопка пропадает, появляется «Locked at …») — подтверждено и по
+  тексту страницы, и по скриншоту. `tsc --noEmit` чист.
+- Migration (`period.lock` → `ADMIN`/`SUPER_ADMIN`) применена владельцем через тот же одноразовый
+  `node:22`-контейнер (`--env-file .env.titanor-time`), права подтверждены прямым SQL на
+  `titanor-time-db-1`, `app` пересобран и передеплоен, `healthy`.
+
+**Следующий шаг**: не выбран явно владельцем. Кандидаты без явного приоритета: `period.export`
 (нужна новая схема `ExportBatch`/`ExportItem`, отложена); прорабский `/api/foreman/*` (UI+API
-by-extension, контрактом пока не описан); T7.9 — корректировка `FINAL_APPROVED`-записей (требует
-полного design-checkpoint схемы `CorrectionRequest`/`CorrectionDraft*` — обязательная пауза на
-подтверждение владельца перед любой миграцией, правило не смягчается «делай всё до конца»);
-`TimesheetReviewProposal` (нужна, когда `scope.return` потребует структурированных предложений).
-Ждать решения владельца.
+by-extension, контрактом пока не описан); T7.9 — корректировка `FINAL_APPROVED`-записей (схема уже
+полностью спроектирована в `03_DATA_MODEL_ERD.md` §4.5-4.7 — `CorrectionRequest`/`CorrectionDraft`/
+`CorrectionDraftDay`/`CorrectionDraftSegment`/`CorrectionDraftBreakSegment`, включая триггеры,
+composite FK и `canonicalCorrectionProjection()` — но применение всё равно требует обязательной
+паузы на подтверждение владельца перед первой миграцией по правилу design-checkpoint, которое не
+смягчается «делай всё до конца»/«идём по roadmap»); `TimesheetReviewProposal` (нужна, когда
+`scope.return` потребует структурированных предложений). Ждать решения владельца.
 
 ## 12. Правило обновления
 
