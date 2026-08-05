@@ -87,6 +87,14 @@ enum IdempotencyKeyStatus {
   COMPLETED
 }
 
+enum CorrectionRequestStatus {
+  PENDING
+  DRAFT_OPEN
+  SUBMITTED
+  APPROVED
+  REJECTED
+}
+
 model User {
   id                         String                        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   username                   String                        @unique @db.VarChar(64)
@@ -113,6 +121,9 @@ model User {
   createdTemplateVersions    WorkScheduleTemplateVersion[] @relation("TemplateVersionCreatedBy")
   createdTimesheetVersions   TimesheetVersion[]            @relation("TimesheetVersionCreatedBy")
   reviewedTimesheetScopes    TimesheetReviewScope[]        @relation("TimesheetReviewScopeReviewedBy")
+  requestedCorrections       CorrectionRequest[]           @relation("CorrectionRequestRequestedBy")
+  decidedCorrections         CorrectionRequest[]           @relation("CorrectionRequestDecidedBy")
+  openedCorrectionDrafts     CorrectionDraft[]             @relation("CorrectionDraftOpenedBy")
   userRoles                  UserRole[]
   userSessions               UserSession[]
   auditEvents                AuditEvent[]
@@ -211,25 +222,26 @@ model Employment {
 }
 
 model Absence {
-  id                  String              @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  employeeId          String              @db.Uuid
-  startDate           DateTime            @db.Date
-  endDate             DateTime            @db.Date
+  id                  String               @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  employeeId          String               @db.Uuid
+  startDate           DateTime             @db.Date
+  endDate             DateTime             @db.Date
   type                AbsenceType
   status              AbsenceStatus
-  note                String?             @db.Text
-  createdByUserId     String              @db.Uuid
-  approvedByUserId    String?             @db.Uuid
-  approvedAt          DateTime?           @db.Timestamptz(6)
+  note                String?              @db.Text
+  createdByUserId     String               @db.Uuid
+  approvedByUserId    String?              @db.Uuid
+  approvedAt          DateTime?            @db.Timestamptz(6)
   overlayAppliedDates Json?
   overlayConflicts    Json?
-  createdAt           DateTime            @default(now()) @db.Timestamptz(6)
-  updatedAt           DateTime            @updatedAt @db.Timestamptz(6)
-  employee            Employee            @relation(fields: [employeeId], references: [id], onDelete: Restrict, onUpdate: Cascade)
-  createdByUser       User                @relation("AbsenceCreatedBy", fields: [createdByUserId], references: [id], onDelete: Restrict, onUpdate: Cascade)
-  approvedByUser      User?               @relation("AbsenceApprovedBy", fields: [approvedByUserId], references: [id], onDelete: SetNull, onUpdate: Cascade)
+  createdAt           DateTime             @default(now()) @db.Timestamptz(6)
+  updatedAt           DateTime             @updatedAt @db.Timestamptz(6)
+  employee            Employee             @relation(fields: [employeeId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  createdByUser       User                 @relation("AbsenceCreatedBy", fields: [createdByUserId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  approvedByUser      User?                @relation("AbsenceApprovedBy", fields: [approvedByUserId], references: [id], onDelete: SetNull, onUpdate: Cascade)
   draftDays           TimesheetDraftDay[]
   timesheetDays       TimesheetDay[]
+  correctionDraftDays CorrectionDraftDay[]
 
   @@index([employeeId, status, startDate, endDate])
 }
@@ -243,44 +255,46 @@ model City {
 }
 
 model WorkSite {
-  id                   String                       @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  name                 String
-  cityId               String?                      @db.Uuid
-  address              String?
-  description          String?                      @db.Text
-  active               Boolean                      @default(true)
-  defaultForemanUserId String?                      @db.Uuid
-  version              Int                          @default(1)
-  createdAt            DateTime                     @default(now()) @db.Timestamptz(6)
-  updatedAt            DateTime                     @updatedAt @db.Timestamptz(6)
-  city                 City?                        @relation(fields: [cityId], references: [id], onDelete: SetNull, onUpdate: Cascade)
-  defaultForemanUser   User?                        @relation("WorkSiteDefaultForeman", fields: [defaultForemanUserId], references: [id], onDelete: SetNull, onUpdate: Cascade)
-  workAreas            WorkArea[]
-  siteAssignments      SiteAssignment[]
-  foremanAssignments   ForemanAssignment[]
-  draftPlannedShifts   TimesheetDraftPlannedShift[]
-  draftSegments        TimesheetDraftSegment[]
-  plannedShifts        TimesheetPlannedShift[]
-  workSegments         WorkSegment[]
-  reviewScopes         TimesheetReviewScope[]       @relation("TimesheetReviewScopeSite")
-  reviewScopeContexts  TimesheetReviewScope[]       @relation("TimesheetReviewScopeContextSite")
+  id                      String                       @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  name                    String
+  cityId                  String?                      @db.Uuid
+  address                 String?
+  description             String?                      @db.Text
+  active                  Boolean                      @default(true)
+  defaultForemanUserId    String?                      @db.Uuid
+  version                 Int                          @default(1)
+  createdAt               DateTime                     @default(now()) @db.Timestamptz(6)
+  updatedAt               DateTime                     @updatedAt @db.Timestamptz(6)
+  city                    City?                        @relation(fields: [cityId], references: [id], onDelete: SetNull, onUpdate: Cascade)
+  defaultForemanUser      User?                        @relation("WorkSiteDefaultForeman", fields: [defaultForemanUserId], references: [id], onDelete: SetNull, onUpdate: Cascade)
+  workAreas               WorkArea[]
+  siteAssignments         SiteAssignment[]
+  foremanAssignments      ForemanAssignment[]
+  draftPlannedShifts      TimesheetDraftPlannedShift[]
+  draftSegments           TimesheetDraftSegment[]
+  plannedShifts           TimesheetPlannedShift[]
+  workSegments            WorkSegment[]
+  reviewScopes            TimesheetReviewScope[]       @relation("TimesheetReviewScopeSite")
+  reviewScopeContexts     TimesheetReviewScope[]       @relation("TimesheetReviewScopeContextSite")
+  correctionDraftSegments CorrectionDraftSegment[]
 
   @@index([cityId])
   @@index([active])
 }
 
 model WorkArea {
-  id              String                  @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  siteId          String                  @db.Uuid
-  name            String
-  active          Boolean                 @default(true)
-  version         Int                     @default(1)
-  createdAt       DateTime                @default(now()) @db.Timestamptz(6)
-  updatedAt       DateTime                @updatedAt @db.Timestamptz(6)
-  site            WorkSite                @relation(fields: [siteId], references: [id], onDelete: Restrict, onUpdate: Cascade)
-  siteAssignments SiteAssignment[]
-  draftSegments   TimesheetDraftSegment[]
-  workSegments    WorkSegment[]
+  id                      String                   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  siteId                  String                   @db.Uuid
+  name                    String
+  active                  Boolean                  @default(true)
+  version                 Int                      @default(1)
+  createdAt               DateTime                 @default(now()) @db.Timestamptz(6)
+  updatedAt               DateTime                 @updatedAt @db.Timestamptz(6)
+  site                    WorkSite                 @relation(fields: [siteId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  siteAssignments         SiteAssignment[]
+  draftSegments           TimesheetDraftSegment[]
+  workSegments            WorkSegment[]
+  correctionDraftSegments CorrectionDraftSegment[]
 
   @@unique([siteId, name])
   @@unique([siteId, id])
@@ -330,28 +344,29 @@ model WorkScheduleTemplateVersionDay {
 }
 
 model SiteAssignment {
-  id                 String                       @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  employeeId         String                       @db.Uuid
-  siteId             String                       @db.Uuid
-  workAreaId         String?                      @db.Uuid
-  templateVersionId  String?                      @db.Uuid
-  isPrimary          Boolean
-  validFrom          DateTime                     @db.Date
-  validTo            DateTime?                    @db.Date
-  assignedByUserId   String                       @db.Uuid
-  endedReason        String?                      @db.Text
-  version            Int                          @default(1)
-  createdAt          DateTime                     @default(now()) @db.Timestamptz(6)
-  updatedAt          DateTime                     @updatedAt @db.Timestamptz(6)
-  employee           Employee                     @relation(fields: [employeeId], references: [id], onDelete: Restrict, onUpdate: Cascade)
-  site               WorkSite                     @relation(fields: [siteId], references: [id], onDelete: Restrict, onUpdate: Cascade)
-  workArea           WorkArea?                    @relation(fields: [siteId, workAreaId], references: [siteId, id], onDelete: Restrict, onUpdate: Cascade)
-  templateVersion    WorkScheduleTemplateVersion? @relation(fields: [templateVersionId], references: [id], onDelete: Restrict, onUpdate: Cascade)
-  assignedByUser     User                         @relation("SiteAssignmentAssignedBy", fields: [assignedByUserId], references: [id], onDelete: Restrict, onUpdate: Cascade)
-  draftPlannedShifts TimesheetDraftPlannedShift[]
-  draftSegments      TimesheetDraftSegment[]
-  plannedShifts      TimesheetPlannedShift[]
-  workSegments       WorkSegment[]
+  id                      String                       @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  employeeId              String                       @db.Uuid
+  siteId                  String                       @db.Uuid
+  workAreaId              String?                      @db.Uuid
+  templateVersionId       String?                      @db.Uuid
+  isPrimary               Boolean
+  validFrom               DateTime                     @db.Date
+  validTo                 DateTime?                    @db.Date
+  assignedByUserId        String                       @db.Uuid
+  endedReason             String?                      @db.Text
+  version                 Int                          @default(1)
+  createdAt               DateTime                     @default(now()) @db.Timestamptz(6)
+  updatedAt               DateTime                     @updatedAt @db.Timestamptz(6)
+  employee                Employee                     @relation(fields: [employeeId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  site                    WorkSite                     @relation(fields: [siteId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  workArea                WorkArea?                    @relation(fields: [siteId, workAreaId], references: [siteId, id], onDelete: Restrict, onUpdate: Cascade)
+  templateVersion         WorkScheduleTemplateVersion? @relation(fields: [templateVersionId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  assignedByUser          User                         @relation("SiteAssignmentAssignedBy", fields: [assignedByUserId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  draftPlannedShifts      TimesheetDraftPlannedShift[]
+  draftSegments           TimesheetDraftSegment[]
+  plannedShifts           TimesheetPlannedShift[]
+  workSegments            WorkSegment[]
+  correctionDraftSegments CorrectionDraftSegment[]
 
   @@unique([id, employeeId, siteId])
   @@index([employeeId, validFrom, validTo])
@@ -417,19 +432,20 @@ model PayrollPeriodParticipant {
 }
 
 model Timesheet {
-  id               String                   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  employeeId       String                   @db.Uuid
-  periodId         String                   @db.Uuid
-  status           TimesheetStatus
-  currentVersionId String?                  @db.Uuid
-  createdAt        DateTime                 @default(now()) @db.Timestamptz(6)
-  updatedAt        DateTime                 @updatedAt @db.Timestamptz(6)
-  employee         Employee                 @relation(fields: [employeeId], references: [id], onDelete: Restrict, onUpdate: Cascade)
-  period           PayrollPeriod            @relation(fields: [periodId], references: [id], onDelete: Restrict, onUpdate: Cascade)
-  participant      PayrollPeriodParticipant @relation(fields: [periodId, employeeId], references: [periodId, employeeId], onDelete: Restrict, onUpdate: Cascade)
-  currentVersion   TimesheetVersion?        @relation("TimesheetCurrentVersion", fields: [currentVersionId, id], references: [id, timesheetId], onDelete: Restrict, onUpdate: Cascade)
-  draft            TimesheetDraft?
-  versions         TimesheetVersion[]       @relation("TimesheetVersions")
+  id                 String                   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  employeeId         String                   @db.Uuid
+  periodId           String                   @db.Uuid
+  status             TimesheetStatus
+  currentVersionId   String?                  @db.Uuid
+  createdAt          DateTime                 @default(now()) @db.Timestamptz(6)
+  updatedAt          DateTime                 @updatedAt @db.Timestamptz(6)
+  employee           Employee                 @relation(fields: [employeeId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  period             PayrollPeriod            @relation(fields: [periodId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  participant        PayrollPeriodParticipant @relation(fields: [periodId, employeeId], references: [periodId, employeeId], onDelete: Restrict, onUpdate: Cascade)
+  currentVersion     TimesheetVersion?        @relation("TimesheetCurrentVersion", fields: [currentVersionId, id], references: [id, timesheetId], onDelete: Restrict, onUpdate: Cascade)
+  draft              TimesheetDraft?
+  versions           TimesheetVersion[]       @relation("TimesheetVersions")
+  correctionRequests CorrectionRequest[]
 
   @@unique([employeeId, periodId])
   @@unique([id, employeeId])
@@ -544,22 +560,24 @@ model TimesheetDraftBreakSegment {
 }
 
 model TimesheetVersion {
-  id                  String                  @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  timesheetId         String                  @db.Uuid
-  employeeId          String                  @db.Uuid
-  versionNumber       Int
-  source              TimesheetVersionSource
-  createdByUserId     String                  @db.Uuid
-  note                String?                 @db.Text
-  createdAt           DateTime                @default(now()) @db.Timestamptz(6)
-  timesheet           Timesheet               @relation("TimesheetVersions", fields: [timesheetId, employeeId], references: [id, employeeId], onDelete: Restrict, onUpdate: Cascade)
-  createdByUser       User                    @relation("TimesheetVersionCreatedBy", fields: [createdByUserId], references: [id], onDelete: Restrict, onUpdate: Cascade)
-  currentForTimesheet Timesheet[]             @relation("TimesheetCurrentVersion")
-  basedDrafts         TimesheetDraft[]        @relation("TimesheetDraftBaseVersion")
-  days                TimesheetDay[]
-  plannedShifts       TimesheetPlannedShift[]
-  workSegments        WorkSegment[]
-  reviewScopes        TimesheetReviewScope[]
+  id                          String                  @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  timesheetId                 String                  @db.Uuid
+  employeeId                  String                  @db.Uuid
+  versionNumber               Int
+  source                      TimesheetVersionSource
+  createdByUserId             String                  @db.Uuid
+  note                        String?                 @db.Text
+  createdAt                   DateTime                @default(now()) @db.Timestamptz(6)
+  timesheet                   Timesheet               @relation("TimesheetVersions", fields: [timesheetId, employeeId], references: [id, employeeId], onDelete: Restrict, onUpdate: Cascade)
+  createdByUser               User                    @relation("TimesheetVersionCreatedBy", fields: [createdByUserId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  currentForTimesheet         Timesheet[]             @relation("TimesheetCurrentVersion")
+  basedDrafts                 TimesheetDraft[]        @relation("TimesheetDraftBaseVersion")
+  days                        TimesheetDay[]
+  plannedShifts               TimesheetPlannedShift[]
+  workSegments                WorkSegment[]
+  reviewScopes                TimesheetReviewScope[]
+  correctionRequestsResulting CorrectionRequest[]     @relation("CorrectionRequestResultingVersion")
+  correctionDraftsBasedOn     CorrectionDraft[]       @relation("CorrectionDraftBaseVersion")
 
   @@unique([timesheetId, versionNumber])
   @@unique([id, employeeId])
@@ -707,6 +725,118 @@ model AuditEvent {
   @@index([eventType, createdAt(sort: Desc)])
   @@index([entityType, entityId, createdAt(sort: Desc)])
   @@index([createdAt(sort: Desc), id(sort: Desc)])
+}
+
+// docs/titanor-time/03_DATA_MODEL_ERD.md §4.7 "CorrectionRequest"/"CorrectionDraft*" — T7.9
+// (correction of a FINAL_APPROVED timesheet). request/draftId form a mutual 1:1 pointer pair
+// exactly as documented: CorrectionDraft.correctionRequestId is the authoritative, required,
+// unique backlink; CorrectionRequest.draftId is a nullable convenience pointer set at the same
+// time (starts NULL at PENDING, set once correction.draft.edit opens the draft). CorrectionDraft
+// has no plannedShift entity of its own (corrections compare only against basedOnVersionId, never
+// a plan, §4.5) — CorrectionDraftSegment has no plannedShift FK, unlike TimesheetDraftSegment.
+model CorrectionRequest {
+  id                 String                  @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  timesheetId        String                  @db.Uuid
+  requestedByUserId  String                  @db.Uuid
+  reason             String                  @db.Text
+  status             CorrectionRequestStatus
+  draftId            String?                 @unique @db.Uuid
+  decidedByUserId    String?                 @db.Uuid
+  decidedAt          DateTime?               @db.Timestamptz(6)
+  resultingVersionId String?                 @db.Uuid
+  approvalOverride   Boolean                 @default(false)
+  overrideReason     String?                 @db.Text
+  pendingExport      Boolean                 @default(false)
+  createdAt          DateTime                @default(now()) @db.Timestamptz(6)
+  updatedAt          DateTime                @updatedAt @db.Timestamptz(6)
+  timesheet          Timesheet               @relation(fields: [timesheetId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  requestedByUser    User                    @relation("CorrectionRequestRequestedBy", fields: [requestedByUserId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  decidedByUser      User?                   @relation("CorrectionRequestDecidedBy", fields: [decidedByUserId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  resultingVersion   TimesheetVersion?       @relation("CorrectionRequestResultingVersion", fields: [resultingVersionId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  draft              CorrectionDraft?        @relation("CorrectionRequestDraftPointer", fields: [draftId], references: [id], onDelete: SetNull, onUpdate: Cascade)
+  draftOwner         CorrectionDraft?        @relation("CorrectionDraftOwnRequest")
+
+  @@index([timesheetId, status])
+  @@index([requestedByUserId])
+  @@index([decidedByUserId])
+}
+
+model CorrectionDraft {
+  id                  String                   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  correctionRequestId String                   @unique @db.Uuid
+  employeeId          String                   @db.Uuid
+  basedOnVersionId    String                   @db.Uuid
+  openedByUserId      String                   @db.Uuid
+  createdAt           DateTime                 @default(now()) @db.Timestamptz(6)
+  submittedAt         DateTime?                @db.Timestamptz(6)
+  correctionRequest   CorrectionRequest        @relation("CorrectionDraftOwnRequest", fields: [correctionRequestId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  basedOnVersion      TimesheetVersion         @relation("CorrectionDraftBaseVersion", fields: [basedOnVersionId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  openedByUser        User                     @relation("CorrectionDraftOpenedBy", fields: [openedByUserId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  pointerFromRequest  CorrectionRequest?       @relation("CorrectionRequestDraftPointer")
+  days                CorrectionDraftDay[]
+  segments            CorrectionDraftSegment[]
+
+  @@unique([id, employeeId])
+}
+
+model CorrectionDraftDay {
+  id              String                   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  draftId         String                   @db.Uuid
+  date            DateTime                 @db.Date
+  dayType         DayType
+  confirmedZero   Boolean                  @default(false)
+  sourceAbsenceId String?                  @db.Uuid
+  note            String?                  @db.Text
+  createdAt       DateTime                 @default(now()) @db.Timestamptz(6)
+  updatedAt       DateTime                 @updatedAt @db.Timestamptz(6)
+  draft           CorrectionDraft          @relation(fields: [draftId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  sourceAbsence   Absence?                 @relation(fields: [sourceAbsenceId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  segments        CorrectionDraftSegment[]
+
+  @@unique([draftId, date])
+  @@unique([id, draftId])
+  @@unique([id, draftId, date])
+  @@unique([id, date])
+  @@index([sourceAbsenceId])
+}
+
+model CorrectionDraftSegment {
+  id                 String                        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  draftDayId         String                        @db.Uuid
+  draftId            String                        @db.Uuid
+  employeeId         String                        @db.Uuid
+  date               DateTime                      @db.Date
+  startAt            DateTime                      @db.Timestamptz(6)
+  endAt              DateTime                      @db.Timestamptz(6)
+  siteId             String                        @db.Uuid
+  workAreaId         String?                       @db.Uuid
+  sourceAssignmentId String                        @db.Uuid
+  createdAt          DateTime                      @default(now()) @db.Timestamptz(6)
+  updatedAt          DateTime                      @updatedAt @db.Timestamptz(6)
+  draftDay           CorrectionDraftDay            @relation(fields: [draftDayId, draftId, date], references: [id, draftId, date], onDelete: Cascade, onUpdate: Cascade)
+  draft              CorrectionDraft               @relation(fields: [draftId, employeeId], references: [id, employeeId], onDelete: Cascade, onUpdate: Cascade)
+  site               WorkSite                      @relation(fields: [siteId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  workArea           WorkArea?                     @relation(fields: [siteId, workAreaId], references: [siteId, id], onDelete: Restrict, onUpdate: Cascade)
+  sourceAssignment   SiteAssignment                @relation(fields: [sourceAssignmentId, employeeId, siteId], references: [id, employeeId, siteId], onDelete: Restrict, onUpdate: Cascade)
+  breaks             CorrectionDraftBreakSegment[]
+
+  @@index([draftDayId, draftId])
+  @@index([draftId, employeeId])
+  @@index([sourceAssignmentId, employeeId, siteId])
+  @@index([siteId, date])
+}
+
+model CorrectionDraftBreakSegment {
+  id             String                 @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  draftSegmentId String                 @db.Uuid
+  startAt        DateTime               @db.Timestamptz(6)
+  endAt          DateTime               @db.Timestamptz(6)
+  paid           Boolean
+  createdAt      DateTime               @default(now()) @db.Timestamptz(6)
+  updatedAt      DateTime               @updatedAt @db.Timestamptz(6)
+  draftSegment   CorrectionDraftSegment @relation(fields: [draftSegmentId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+
+  @@index([draftSegmentId])
 }
 
 // docs/titanor-time/03_DATA_MODEL_ERD.md §4.1 — one row per (actor, method, route, client-supplied
