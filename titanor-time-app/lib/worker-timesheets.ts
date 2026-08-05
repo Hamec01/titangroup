@@ -158,6 +158,7 @@ export async function getWorkerTimesheetDraft(employeeId: string, timesheetId: s
 export interface VersionDayView {
   date: string;
   dayType: string;
+  confirmedZero: boolean;
   segments: SegmentView[];
 }
 
@@ -196,6 +197,7 @@ export async function getWorkerTimesheetCurrentVersion(employeeId: string, times
         select: {
           date: true,
           dayType: true,
+          confirmedZero: true,
           segments: {
             orderBy: { startAt: 'asc' },
             select: {
@@ -227,6 +229,11 @@ export async function getWorkerTimesheetCurrentVersion(employeeId: string, times
     days: version.days.map((d) => ({
       date: formatDate(d.date),
       dayType: d.dayType,
+      // Not in 04_...§9's literal response shape for this endpoint (unlike .../draft, which does
+      // list it) — added anyway: TimesheetDay really has this column, and omitting it makes a
+      // confirmed-zero day indistinguishable from an unfilled one in the read-only view. Purely
+      // additive, no existing consumer depends on the narrower shape.
+      confirmedZero: d.confirmedZero,
       segments: d.segments.map((s) => ({
         id: s.id,
         startAt: s.startAt.toISOString(),

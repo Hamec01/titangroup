@@ -463,11 +463,14 @@ button:disabled {
   display: flex;
   align-items: center;
   justify-content: center;
+  width: 100%;
   min-height: 52px;
+  border: none;
   border-radius: 6px;
   background: linear-gradient(135deg, var(--accent) 0%, var(--accent-light) 100%);
   color: var(--white);
   font-weight: 600;
+  font-size: 1rem;
   letter-spacing: 0.02em;
   text-decoration: none;
   box-shadow: 0 14px 30px rgba(47, 94, 157, 0.35);
@@ -482,4 +485,133 @@ button:disabled {
 .wk-back-link {
   color: var(--accent-light);
   font-size: 0.9rem;
+  text-decoration: none;
+}
+
+.wk-day-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 8px;
+}
+
+.wk-day-item,
+.wk-day-item-readonly {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-height: 48px;
+  padding: 10px 14px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 6px;
+  background: rgba(7, 11, 17, 0.5);
+  text-decoration: none;
+  color: inherit;
+}
+
+.wk-day-item-readonly {
+  opacity: 0.85;
+}
+
+.wk-day-date {
+  font-weight: 600;
+}
+
+.wk-day-summary {
+  font-size: 0.85rem;
+  color: var(--text-soft);
+  text-transform: capitalize;
+}
+
+.wk-checkbox-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 44px;
+  font-size: 0.95rem;
+}
+
+.wk-checkbox-row input,
+.wk-break-paid input {
+  width: 20px;
+  height: 20px;
+}
+
+.wk-segment-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 12px;
+}
+
+.wk-segment-card {
+  display: grid;
+  gap: 10px;
+  padding: 14px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 6px;
+  background: rgba(7, 11, 17, 0.5);
+}
+
+.wk-segment-card select {
+  height: 44px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 4px;
+  background: rgba(7, 11, 17, 0.88);
+  color: var(--text);
+  padding: 0 10px;
+}
+
+.wk-time-row,
+.wk-break-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.wk-time-row input[type='time'],
+.wk-break-row input[type='time'] {
+  height: 44px;
+  min-width: 100px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 4px;
+  background: rgba(7, 11, 17, 0.88);
+  color: var(--text);
+  padding: 0 10px;
+}
+
+.wk-break-row {
+  padding-left: 12px;
+  border-left: 2px solid rgba(255, 255, 255, 0.08);
+}
+
+.wk-break-paid {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.85rem;
+  color: var(--text-soft);
+}
+
+.wk-secondary-button {
+  min-height: 44px;
+  border: 1px solid var(--accent-light);
+  border-radius: 4px;
+  background: transparent;
+  color: var(--accent-light);
+  font-weight: 600;
+  font-size: 0.9rem;
+}
+
+.wk-remove-button {
+  min-height: 40px;
+  border: 1px solid rgba(253, 164, 175, 0.4);
+  border-radius: 4px;
+  background: transparent;
+  color: var(--error);
+  font-size: 0.85rem;
+  justify-self: start;
 }
