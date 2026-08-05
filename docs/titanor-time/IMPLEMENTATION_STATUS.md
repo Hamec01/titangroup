@@ -1,6 +1,9 @@
 # Titanor Time — Implementation Status
 
-Обновлено: 2026-08-04 18:10 Europe/Helsinki
+Обновлено: 2026-08-04 18:45 Europe/Helsinki
+`/worker`, `/worker/periods`, `/worker/periods/[periodId]` реализованы — первый UI кабинета
+работника (`01_...` §3), закрывает `404` на пути, куда `/login` редиректит `WORKER` с самого
+начала. Протестировано в headless-browser (Playwright), задеплоено, без миграции: commit `b0b3ef3`
 `GET/POST /api/admin/review-scopes[...]` (approve/return, ЭТАП 7 под-задача 5) реализованы — admin
 fallback проверка табеля, реинициализация draft при возврате, реальный `hasException`. Без новой
 схемы (`TimesheetReviewProposal`/`ApprovalAction` — снова отложены, нет потребителя). Протестировано
@@ -2456,13 +2459,20 @@ date/DST-хелперы `lib/periods.ts` (теперь экспортирова�
 - Migration (`timesheet.scope_review.all` → `ADMIN`/`SUPER_ADMIN`) применена владельцем, `app`
   пересобран и передеплоен, `healthy`.
 
-**Следующий шаг**: не определён явно — ЭТАП 7 (`Учёт часов`) в разрезе первого вертикального
-сценария теперь замкнут целиком: назначение → открытый период → правка часов → отправка →
-admin-проверка → `FOREMAN_APPROVED`. Кандидаты на продолжение: (а) `timesheet.final_approve`
-(чистый переход в `FINAL_APPROVED`, без данных — вероятно самый простой следующий шаг);
-(б) `period.lock`/`period.export`; (в) прорабский `/api/foreman/*` UI/API by-extension;
-(г) `TimesheetReviewProposal`, когда возврату потребуются структурированные предложения. Ждать
-отдельного решения владельца о приоритете, не выбирать самостоятельно.
+**Найден и закрыт крупный разрыв**: владелец попросил перечитать `PROJECT_ROADMAP.md` +
+`docs/titanor-time/` целиком и сверить с деревом файлов — весь backend ЭТАП 7 (5 под-задач) был
+готов и протестирован, но **ни одной UI-страницы под `/worker/*`/`/admin/periods`/
+`/admin/review-scopes` не существовало**; `/login` редиректил `WORKER` на `/worker` с самого начала
+проекта, и это всегда давало `404`. Первый срез закрыт (commit `b0b3ef3`): `/worker`,
+`/worker/periods`, `/worker/periods/[periodId]` — см. §5 выше.
+
+**Следующий шаг**: ввод часов — `/worker/periods/[periodId]/hours` +
+`/worker/periods/[periodId]/hours/[date]` (`01_...` §3), делающий реально рабочей уже
+существующую и протестированную `PATCH /api/worker/timesheets/:timesheetId/days/:date`. После
+этого — либо `/worker/periods/[periodId]/submit` (UI над уже готовым `timesheet.submit`), либо
+`/admin/periods`/`/admin/review-scopes` UI (чтобы админ не пользовался только curl). Другие
+кандидаты без явного приоритета: `timesheet.final_approve`, `period.lock`/`period.export`,
+прорабский `/api/foreman/*`. Ждать решения владельца, не выбирать самостоятельно.
 
 ## 12. Правило обновления
 
