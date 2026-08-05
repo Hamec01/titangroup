@@ -22,7 +22,7 @@ function formatDate(date: Date): string {
  * split into two fragments that together match the plan is not an exception. Display-only, never
  * gates a precondition. NON_SITE scopes have no plan to compare against and are never flagged.
  */
-async function computeSiteScopeHasException(timesheetVersionId: string, siteId: string): Promise<boolean> {
+export async function computeSiteScopeHasException(timesheetVersionId: string, siteId: string): Promise<boolean> {
   const [segments, plannedShifts] = await Promise.all([
     prisma.workSegment.findMany({ where: { timesheetVersionId, siteId }, select: { date: true, sourceAssignmentId: true, startAt: true, endAt: true } }),
     prisma.timesheetPlannedShift.findMany({ where: { timesheetVersionId, siteId }, select: { date: true, sourceAssignmentId: true, plannedStartAt: true, plannedEndAt: true, plannedBreakMinutes: true } })
