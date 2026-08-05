@@ -1,9 +1,19 @@
 # Titanor Time — Implementation Status
 
-Обновлено: 2026-08-05 14:23 Europe/Helsinki
+Обновлено: 2026-08-05 (T7.9 ADMIN slice completed locally)
 Схема `CorrectionRequest`/`CorrectionDraft*` (T7.9) применена владельцем к `titanor-time-db-1`
 (миграция `20260805150000_add_correction_schema`), все 5 таблиц подтверждены прямым SQL, `app`
 пересобран (новый Prisma Client) и передеплоен, `healthy`.
+
+**T7.9 ADMIN-срез реализован локально:** `correction.request` с карточки `FINAL_APPROVED` табеля,
+`correction.draft.edit` (открытие, редактирование дня, submit) и `correction.approve`/reject
+в `/admin/corrections`, включая four-eyes и SUPER_ADMIN override. Добавлена DML-миграция
+`20260805160000_seed_correction_permissions` (`correction.*` → ADMIN/SUPER_ADMIN). Проверено
+на изолированном PostgreSQL 16 через API: duplicate guard, `NO_CORRECTION_CHANGES`, правка дня,
+запрет self-approve, approval вторым admin, `CORRECTION` version и сохранение override;
+`npx tsc --noEmit` и `npm run build` успешны. **Production hand-off:** владельцу применить
+только permission migration, затем пересобрать/передеплоить `app`; production БД и контейнеры
+агент не менял.
 Схема `CorrectionRequest`/`CorrectionDraft`/`CorrectionDraftDay`/`CorrectionDraftSegment`/
 `CorrectionDraftBreakSegment` (T7.9, design-checkpoint перед первой миграцией) добавлена — владелец
 явно подтвердил именно эту схему (5 таблиц из `03_DATA_MODEL_ERD.md` §4.7) и урезанный первый
@@ -11,8 +21,7 @@ UI-срез (только ADMIN: request+draft.edit+approve в одном мес
 отдельным шагом позже). Протестировано на одноразовом PostgreSQL 16 (13 сценариев: happy path целиком
 через request→draft→day→segment→break, затем каждый CHECK/EXCLUDE/триггер по отдельности, включая
 закрытие ранее явно помеченного пробела в `fn_site_assignment_dependents_guard` — не покрывал
-`CorrectionDraftSegment`). `tsc --noEmit` чист. **Ещё не применена к реальной БД** — ждёт владельца:
-commit `4f1b7b2`
+`CorrectionDraftSegment`). `tsc --noEmit` чист. Исторический checkpoint; схема впоследствии применена владельцем — см. текущую запись выше.
 /exceptions]`, `/foreman/review/[timesheetId]` (approve/return), `/foreman/review/bulk-approve`,
 `/foreman/workers`. Закрывает `404`, куда `/login` редиректил `FOREMAN` с самого начала проекта.
 Без новой схемы — переиспользует `TimesheetReviewScope` и ядро `approveReviewScope`/
@@ -2669,21 +2678,7 @@ UI на обеих сторонах (работник и админ), не то�
   владельцем через одноразовый `node:22`-контейнер, права подтверждены прямым SQL на
   `titanor-time-db-1`, `app` пересобран и передеплоен, `healthy`.
 
-**T7.9 — схема `CorrectionRequest`/`CorrectionDraft*` спроектирована, подтверждена владельцем и
-закоммичена** (commit `4f1b7b2`), но **ещё не применена к реальной БД** — стандартный hand-off
-(владелец запускает `prisma migrate deploy` через одноразовый `node:22`-контейнер) пока не
-произошёл. Владелец также подтвердил урезанный первый UI-срез: только `ADMIN`
-(`correction.request`+`correction.draft.edit`+`correction.approve` все в одном месте на этой
-итерации), `WORKER`/`FOREMAN` request-формы (`correction.request` держат и они — `02_...` §2.9)
-отдельным шагом позже.
-
-**Следующий шаг**: применить миграцию `20260805150000_add_correction_schema` к
-`titanor-time-db-1` (ждать владельца), затем построить `lib/corrections.ts` + `/api/admin/
-corrections[...]` + `/admin/corrections` UI (request/draft.edit/submit/approve, "четыре глаза",
-`canonicalCorrectionProjection()` для `409 NO_CORRECTION_CHANGES`). После этого без выбранного
-приоритета остаются: `period.export` (нужна новая схема `ExportBatch`/`ExportItem`, отдельный
-design-checkpoint); `TimesheetReviewProposal`/`propose-correction` и `ApprovalAction`/
-`/foreman/history` (та же пауза на схему); WORKER/FOREMAN correction-request формы (после ADMIN-среза).
+**T7.9 реализован в ADMIN-only срезе.** Схема применена владельцем; текущая локальная задача добавляет admin API/UI и DML-миграцию permission. После её owner-применения и deploy останутся отдельные design-gated задачи: `period.export` (нужна `ExportBatch`/`ExportItem`), `TimesheetReviewProposal`/`propose-correction`, `ApprovalAction`/`foreman/history` и WORKER/FOREMAN correction-request формы.
 
 ## 12. Правило обновления
 

@@ -1,9 +1,8 @@
 import { redirect } from 'next/navigation';
 import Link from 'next/link';
 import { resolveServerSession } from '@/lib/server-session';
-import { getTimesheetCard } from '@/lib/admin-timesheets';
-import { FinalApprovalActions } from './FinalApprovalActions';
-import { RequestCorrectionForm } from './RequestCorrectionForm';
+import { getCorrectionDetail } from '@/lib/corrections';
+import { CorrectionActions } from './CorrectionActions';
 
 export const dynamic = 'force-dynamic';
 
@@ -17,18 +16,16 @@ function formatMinutes(minutes: number): string {
   return `${h}h${m ? ` ${m}m` : ''}`;
 }
 
-type RouteParams = { params: Promise<{ timesheetId: string }> };
+type RouteParams = { params: Promise<{ correctionRequestId: string }> };
 
-// docs/titanor-time/01_SCREEN_MAP.md §2 `/admin/timesheets/[timesheetId]` — card + (when
-// FOREMAN_APPROVED) the final-approve/override-return actions folded into the same page rather
-// than a separate .../approve route, mirroring how /admin/review-scopes/[reviewScopeId] already
-// combines detail+actions.
-export default async function AdminTimesheetCardPage({ params }: RouteParams) {
+// docs/titanor-time/03_DATA_MODEL_ERD.md §4.7 T7.9 — request/draft.edit/submit/approve all folded
+// into this one page (confirmed ADMIN-only first slice), mirroring how /admin/timesheets/
+// [timesheetId] combines card+actions rather than separate routes per action.
+export default async function AdminCorrectionDetailPage({ params }: RouteParams) {
   const session = await resolveServerSession();
   if (!session) {
     redirect('/login');
   }
-
   const isAdmin = session.user.roles.includes('ADMIN') || session.user.roles.includes('SUPER_ADMIN');
   if (!isAdmin) {
     return (
@@ -40,15 +37,15 @@ export default async function AdminTimesheetCardPage({ params }: RouteParams) {
     );
   }
 
-  const { timesheetId } = await params;
-  const card = await getTimesheetCard(timesheetId);
+  const { correctionRequestId } = await params;
+  const correction = await getCorrectionDetail(correctionRequestId);
 
-  if (!card) {
+  if (!correction) {
     return (
       <main className="setup-page">
         <div className="setup-card">
-          <p>No timesheet with this id.</p>
-          <Link href="/admin/timesheets">Back to timesheets</Link>
+          <p>No correction request with this id.</p>
+          <Link href="/admin/corrections">Back to corrections</Link>
         </div>
       </main>
     );
@@ -57,23 +54,25 @@ export default async function AdminTimesheetCardPage({ params }: RouteParams) {
   return (
     <main className="setup-page">
       <div className="setup-card">
-        <h1>{card.employeeName}</h1>
+        <h1>{correction.employeeName}</h1>
         <p className="setup-subtitle">
-          Status: {card.status} {card.versionNumber ? `· version ${card.versionNumber}` : ''}
+          Status: {correction.status} · reason: {correction.reason}
         </p>
+        {correction.overrideReason ? <p className="setup-subtitle">Override reason: {correction.overrideReason}</p> : null}
 
-        {card.days.length === 0 ? (
-          <p>No submitted version yet.</p>
+        {correction.days.length === 0 ? (
+          <p>{correction.status === 'PENDING' ? 'Open the draft to start editing.' : 'No days to show.'}</p>
         ) : (
           <table className="worker-table">
             <thead>
               <tr>
                 <th>Date</th>
                 <th>Details</th>
+                {correction.status === 'DRAFT_OPEN' ? <th></th> : null}
               </tr>
             </thead>
             <tbody>
-              {card.days.map((day) => (
+              {correction.days.map((day) => (
                 <tr key={day.date}>
                   <td>{day.date}</td>
                   <td>
@@ -83,24 +82,23 @@ export default async function AdminTimesheetCardPage({ params }: RouteParams) {
                         ? day.confirmedZero
                           ? 'Confirmed 0h'
                           : '—'
-                        : `${formatMinutes(segmentMinutes(day.segments))} · ${day.segments.map((s) => s.siteName).join(', ')}`}
+                        : `${formatMinutes(segmentMinutes(day.segments))} · ${[...new Set(day.segments.map((s) => s.siteId))].length} site(s)`}
                   </td>
+                  {correction.status === 'DRAFT_OPEN' ? (
+                    <td>
+                      <Link href={`/admin/corrections/${correction.id}/days/${day.date}`}>Edit</Link>
+                    </td>
+                  ) : null}
                 </tr>
               ))}
             </tbody>
           </table>
         )}
 
-        {card.status === 'FOREMAN_APPROVED' ? (
-          <FinalApprovalActions timesheetId={card.timesheetId} />
-        ) : card.status === 'FINAL_APPROVED' ? (
-          <RequestCorrectionForm timesheetId={card.timesheetId} />
-        ) : (
-          <p className="setup-subtitle">Not awaiting final approval (status: {card.status}).</p>
-        )}
+        <CorrectionActions correctionRequestId={correction.id} status={correction.status} isSuperAdmin={session.user.roles.includes('SUPER_ADMIN')} />
 
         <p>
-          <Link href="/admin/timesheets">Back to timesheets</Link>
+          <Link href="/admin/corrections">Back to corrections</Link>
         </p>
       </div>
     </main>
