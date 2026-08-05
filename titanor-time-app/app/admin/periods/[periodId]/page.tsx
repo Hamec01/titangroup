@@ -2,6 +2,7 @@ import { redirect } from 'next/navigation';
 import Link from 'next/link';
 import { resolveServerSession } from '@/lib/server-session';
 import { getPeriodDetail } from '@/lib/periods';
+import { LockPeriodAction } from './LockPeriodAction';
 
 export const dynamic = 'force-dynamic';
 
@@ -65,6 +66,8 @@ export default async function AdminPeriodDetailPage({ params }: RouteParams) {
 
         {period.lockedAt && <p className="setup-subtitle">Locked at {period.lockedAt}</p>}
         {period.exportedAt && <p className="setup-subtitle">Exported at {period.exportedAt}</p>}
+
+        {period.status === 'OPEN' ? <LockPeriodAction periodId={period.id} /> : null}
 
         <p>
           <Link href="/admin/periods">Back to periods</Link>

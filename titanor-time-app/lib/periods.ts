@@ -309,3 +309,94 @@ export async function getCurrentPeriod(today: Date): Promise<PeriodListItem | nu
   });
   return period ? { id: period.id, startDate: formatDate(period.startDate), endDate: formatDate(period.endDate), status: period.status } : null;
 }
+
+export interface LockBlocker {
+  employeeId: string;
+  employeeName: string;
+  timesheetId: string | null;
+  status: string | null;
+}
+
+export type LockPeriodError =
+  | { code: 'NOT_FOUND' }
+  | { code: 'INVALID_STATE_TRANSITION' }
+  | { code: 'NOT_ALL_FINAL_APPROVED'; blockers: LockBlocker[] };
+
+export interface LockPeriodResult {
+  id: string;
+  status: 'LOCKED';
+  lockedAt: string;
+  lockedByUserId: string;
+}
+
+/**
+ * `period.lock` has no override (03_DATA_MODEL_ERD.md §4.5, 02_ROLE_PERMISSION_MATRIX.md §2.7):
+ * every PayrollPeriodParticipant(expected=true) must have a Timesheet at FINAL_APPROVED. Row-locks
+ * the period first, re-checks status after the lock (TOCTOU-safe against a concurrent
+ * final-approve/return finishing between the initial read and the lock), same two-phase pattern as
+ * lib/admin-timesheets.ts's returnTimesheetOverride.
+ */
+export async function lockPeriod(periodId: string, actorUserId: string, requestId: string): Promise<LockPeriodResult | LockPeriodError> {
+  const existing = await prisma.payrollPeriod.findUnique({ where: { id: periodId }, select: { status: true } });
+  if (!existing) {
+    return { code: 'NOT_FOUND' };
+  }
+  if (existing.status !== 'OPEN') {
+    return { code: 'INVALID_STATE_TRANSITION' };
+  }
+
+  const lockedAt = new Date();
+
+  const outcome = await prisma.$transaction(async (tx): Promise<'LOCKED' | 'STALE' | { code: 'NOT_ALL_FINAL_APPROVED'; blockers: LockBlocker[] }> => {
+    await tx.$queryRaw`SELECT id FROM "PayrollPeriod" WHERE id = ${periodId}::uuid FOR UPDATE`;
+    const fresh = await tx.payrollPeriod.findUniqueOrThrow({ where: { id: periodId }, select: { status: true } });
+    if (fresh.status !== 'OPEN') {
+      return 'STALE';
+    }
+
+    const participants = await tx.payrollPeriodParticipant.findMany({
+      where: { periodId, expected: true },
+      select: {
+        employeeId: true,
+        employee: { select: { firstName: true, lastName: true } },
+        timesheets: { select: { id: true, status: true } }
+      }
+    });
+
+    const blockers: LockBlocker[] = participants
+      .filter((p) => p.timesheets[0]?.status !== 'FINAL_APPROVED')
+      .map((p) => ({
+        employeeId: p.employeeId,
+        employeeName: `${p.employee.firstName} ${p.employee.lastName}`,
+        timesheetId: p.timesheets[0]?.id ?? null,
+        status: p.timesheets[0]?.status ?? null
+      }));
+
+    if (blockers.length > 0) {
+      return { code: 'NOT_ALL_FINAL_APPROVED', blockers };
+    }
+
+    await tx.payrollPeriod.update({ where: { id: periodId }, data: { status: 'LOCKED', lockedAt, lockedByUserId: actorUserId } });
+
+    await createAuditEvent(tx, {
+      actorUserId,
+      eventType: 'PERIOD_LOCKED',
+      entityType: 'PAYROLL_PERIOD',
+      entityId: periodId,
+      requestId,
+      beforeValue: { status: 'OPEN' },
+      afterValue: { status: 'LOCKED', lockedAt: lockedAt.toISOString(), lockedByUserId: actorUserId }
+    });
+
+    return 'LOCKED';
+  });
+
+  if (outcome === 'STALE') {
+    return { code: 'INVALID_STATE_TRANSITION' };
+  }
+  if (typeof outcome === 'object') {
+    return outcome;
+  }
+
+  return { id: periodId, status: 'LOCKED', lockedAt: lockedAt.toISOString(), lockedByUserId: actorUserId };
+}

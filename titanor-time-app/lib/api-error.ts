@@ -9,6 +9,10 @@ export interface ApiErrorBody {
   code: string;
   message: string;
   fieldErrors?: Record<string, string[]>;
+  // period.lock's 409 NOT_ALL_FINAL_APPROVED (01_SCREEN_MAP.md §3: "список блокеров") — which
+  // participants are still holding the lock back, so the UI can render the list without a
+  // second round-trip.
+  blockers?: { employeeId: string; employeeName: string; timesheetId: string | null; status: string | null }[];
 }
 
 // requestId is optional so existing callers keep working unchanged, but every
