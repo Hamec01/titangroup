@@ -418,7 +418,8 @@ touch target ≥ 48px), `/foreman/*` — desktop-first с поддержкой �
 - Приоритет: desktop
 - Назначение: карточка табеля — дни, интервалы, перерывы, история версий и решений
 - Данные: текущая `TimesheetVersion` + `TimesheetDay`/`WorkSegment`/`BreakSegment`/
-  `TimesheetPlannedShift` + `ApprovalAction[]`
+  `TimesheetPlannedShift` + `ApprovalAction[]`; после ЭТАП 7A — исходные Check In/Check Out,
+  геостатус каждой точки, sync-state и clock-vs-reported diff с автором/timestamp/причиной правки
 - Действия: перейти к сравнению версий, финально утвердить, вернуть с причиной
 - Состояния: loading; error
 - Откуда: `/admin/timesheets`
@@ -520,18 +521,22 @@ touch target ≥ 48px), `/foreman/*` — desktop-first с поддержкой �
 - Роли: `WORKER`
 - Приоритет: mobile (основной экран после логина, если actionable период один)
 - Назначение: показать объект(ы), рабочую область, шаблон и статус табеля этого периода — финальная
-  точка первого вертикального сценария
+  точка первого вертикального сценария; после ЭТАП 7A это также основной ежедневный clock-экран
 - Данные: активные `SiteAssignment[]` (может быть несколько, `isPrimary` — основной), `PayrollPeriod`,
-  `Timesheet.status`
-- Действия: перейти к вводу часов (если `DRAFT`/`RETURNED`) или посмотреть статус (если
-  `SUBMITTED`/`FOREMAN_APPROVED` — read-only, «ожидает проверки»)
+  `Timesheet.status`; после ЭТАП 7A — активная clock-смена, sync-state и кешированный снимок геозон
+- Действия: после ЭТАП 7A главное действие — большая `Check In` либо, при активной смене, таймер и
+  большая `Check Out`; перейти к вводу часов (если `DRAFT`/`RETURNED`) или посмотреть статус (если
+  `SUBMITTED`/`FOREMAN_APPROVED` — read-only, «ожидает проверки»). После Check Out — `Add break`,
+  ведущая в существующий редактор дня; отдельного break-таймера в первом срезе нет
 - Состояния: loading; **empty — критично**: нет ни одного активного назначения → «вам ещё не
-  назначили объект»; offline — баннер+кэш
+  назначили объект»; offline — баннер+кэш, а после ЭТАП 7A clock-событие сохраняется локально с
+  явным `waiting for sync`; GPS unavailable — clock разрешён как `GPS_NOT_VERIFIED`, не молчаливо
 - Откуда: `/worker/periods`, логин (если период один)
 - Куда: `/worker/periods/[periodId]/hours`
 - API: `GET /api/worker/timesheets/:timesheetId`, `GET /api/worker/assignments/current`
 - DoD: работник, назначенный пять минут назад, видит правильные данные без релогина;
-  `SUBMITTED`-табель показывает «ожидает проверки», не пускает редактировать
+  `SUBMITTED`-табель показывает «ожидает проверки», не пускает редактировать; после ЭТАП 7A offline
+  Check In/Check Out переживает закрытие PWA и синхронизируется ровно один раз
 
 #### `/worker/periods/[periodId]/hours` ⚪ (ввод часов — фаза 3 роадмапа)
 - Роли: `WORKER`
@@ -719,8 +724,11 @@ FOREMAN_APPROVED` только когда все scope версии подтве
 - Роли: `FOREMAN`
 - Приоритет: desktop
 - Назначение: карточка табеля — дни/интервалы только на объекте(ах) прораба, сравнение с плановым
-  снимком; если табель покрывает несколько объектов, дни на чужих объектах видны свёрнутыми
-- Данные: текущая `TimesheetVersion` + собственный `TimesheetReviewScope` прораба
+  снимком; если табель покрывает несколько объектов, дни на чужих объектах видны свёрнутыми. После
+  ЭТАП 7A показывает исходное clock-время, заявленное после ручной правки время и GPS-исключения
+  только по собственным объектам прораба
+- Данные: текущая `TimesheetVersion` + собственный `TimesheetReviewScope` прораба; после ЭТАП 7A —
+  связанные clock-события и diff без раскрытия GPS чужих объектов
 - Действия: → предложить исправление, → вернуть, → подтвердить (все — на уровне своего scope)
 - Откуда: `/foreman/review/standard`, `/foreman/review/exceptions`
 - Куда: `/foreman/review/[timesheetId]/propose-correction`, `.../return`, `.../approve`

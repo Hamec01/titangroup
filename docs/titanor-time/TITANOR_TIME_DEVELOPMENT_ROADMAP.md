@@ -158,6 +158,11 @@ docs/titanor-time/README.md
 6. Экспорт и пилот.
 7. GPS, полноценный offline-first и расширенная PWA-функциональность.
 
+**Owner priority override, 2026-08-05:** клиент утвердил Attendance Clock как основной ежедневный
+worker-flow. После activation/onboarding и базового E2E GPS snapshots + offline Check In/Check Out
+перенесены в обязательный ЭТАП 7A перед отчётами и пилотом; полный scope — `PROJECT_ROADMAP.md`.
+Остальные offline-мутации и push по-прежнему остаются поздней расширенной PWA-функциональностью.
+
 Начинаем с администратора, но НЕ создаём сначала всю административную панель.
 
 Первый вертикальный сценарий:
@@ -561,7 +566,10 @@ docs/titanor-time/README.md
 - touch targets не меньше 48 px;
 - отсутствие зависимости только от цвета или hover.
 
-GPS, полноценный offline-first и push-уведомления не входят в первый implementation slice. Однако архитектура не должна блокировать их последующее добавление.
+GPS и offline-first не входили в первоначальный implementation slice. Позднее owner-approved
+Attendance Clock выделен в ЭТАП 7A (`PROJECT_ROADMAP.md`): это точечное исключение только для
+Check In/Check Out. Push-уведомления и общий offline-first остальных мутаций остаются вне этого
+среза; архитектура не должна блокировать их последующее добавление.
 
 ## ОГРАНИЧЕНИЯ
 

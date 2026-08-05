@@ -1,6 +1,6 @@
 # Titanor Time — Implementation Status
 
-Обновлено: 2026-08-05 (admin navigation and reusable setup actions)
+Обновлено: 2026-08-05 (owner-approved Attendance Clock/GPS/offline scope)
 
 ## CURRENT PRODUCT GAP — onboarding всё ещё нельзя считать завершённым
 
@@ -49,9 +49,39 @@
    прораба без ручного SQL/CLI.
 4. Только после этого провести настоящий первый E2E тремя отдельными аккаунтами
    (`SUPER_ADMIN`/`FOREMAN`/`WORKER`) и считать onboarding готовым к пилоту.
+5. После базового E2E, но до отчётов/PWA-пилота, реализовать утверждённый клиентом ЭТАП 7A
+   (Attendance Clock + GPS snapshots + offline-first sync) отдельными design/code checkpoint.
 
 До закрытия пунктов 2–4 приложение следует считать **backend-capable, но не operator-ready**:
 владелец не обязан знать или вручную вводить скрытые URL, UUID пользователей или SQL-команды.
+
+## OWNER-APPROVED PRODUCT REQUIREMENT — ЭТАП 7A ATTENDANCE CLOCK
+
+Владелец утвердил новый основной ежедневный сценарий работника и его приоритет: после завершения
+activation/onboarding и контрольного E2E, но до отчётов и реального пилота. Подробная декомпозиция
+зафиксирована в `PROJECT_ROADMAP.md` ЭТАП 7A; это отдельный offline-first проект, а не расширение
+обычного `PATCH` дня.
+
+Зафиксированные продуктовые решения:
+
+- основной экран работника показывает большую `Check In`, затем таймер и `Check Out`;
+- GPS снимается только на этих двух событиях, постоянного tracking нет;
+- вне геозоны обычный Check In блокируется; при недоступном/неточном GPS clock разрешён с
+  `GPS_NOT_VERIFIED` и обязательной проверкой прорабом;
+- без интернета оба события атомарно сохраняются в durable outbox и позднее синхронизируются
+  идемпотентно, без дублей и молчаливой потери;
+- исходные clock-события append-only: ручная правка табеля их не перезаписывает;
+- прораб своего объекта и ADMIN/SUPER_ADMIN видят recorded time, reported time, delta, автора,
+  timestamp и причину изменения, а также GPS/sync status;
+- изменение начала/окончания/объекта требует причины; добавление ручного перерыва отображается в
+  истории, но причины не требует;
+- break timer в первом срезе не реализуется: перерыв редактируется вручную через существующий
+  экран дня, доступный по `Add break` после Check Out;
+- ручной ввод и весь текущий submit/review/approval flow сохраняются; clock не отправляет и не
+  утверждает табель автоматически.
+
+**Ещё не реализовано.** Перед Prisma/migration обязателен отдельный schema design checkpoint по
+`AGENT_RULES.md` §11; production БД этой записью не меняется.
 
 Схема `CorrectionRequest`/`CorrectionDraft*` (T7.9) применена владельцем к `titanor-time-db-1`
 (миграция `20260805150000_add_correction_schema`), все 5 таблиц подтверждены прямым SQL, `app`
