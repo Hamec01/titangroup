@@ -422,7 +422,8 @@ export async function returnReviewScope(
   return { reviewScopeId, status: 'RETURNED' };
 }
 
-async function reinitializeDraftFromVersion(tx: Prisma.TransactionClient, draftId: string, employeeId: string, versionId: string): Promise<void> {
+/** Exported for lib/admin-timesheets.ts's whole-timesheet override return (03_...§4.7) — same idempotent copy-back, just triggered without a specific reviewScopeId. */
+export async function reinitializeDraftFromVersion(tx: Prisma.TransactionClient, draftId: string, employeeId: string, versionId: string): Promise<void> {
   const plannedShifts = await tx.timesheetPlannedShift.findMany({
     where: { timesheetVersionId: versionId },
     select: { date: true, siteId: true, sourceAssignmentId: true, templateVersionDayId: true, plannedStartAt: true, plannedEndAt: true, plannedBreakMinutes: true }

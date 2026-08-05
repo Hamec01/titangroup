@@ -134,3 +134,27 @@ export async function listActionablePeriods(employeeId: string): Promise<Actiona
     timesheetStatus: t.status
   }));
 }
+
+/**
+ * All of the employee's timesheets, any status, any period status — 01_SCREEN_MAP.md §3
+ * `/worker/history` ("не только actionable"). Same shape as ActionablePeriod so the period/
+ * hours/submit detail pages can resolve a period by this broader lookup too (needed once a
+ * timesheet reaches FINAL_APPROVED and drops out of "actionable" — history still needs to open
+ * it, read-only, via the same pages).
+ */
+export async function listWorkerTimesheets(employeeId: string): Promise<ActionablePeriod[]> {
+  const timesheets = await prisma.timesheet.findMany({
+    where: { employeeId },
+    orderBy: { period: { startDate: 'desc' } },
+    select: { id: true, status: true, period: { select: { id: true, startDate: true, endDate: true, status: true } } }
+  });
+
+  return timesheets.map((t) => ({
+    id: t.period.id,
+    startDate: formatDate(t.period.startDate),
+    endDate: formatDate(t.period.endDate),
+    status: t.period.status,
+    timesheetId: t.id,
+    timesheetStatus: t.status
+  }));
+}

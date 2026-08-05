@@ -1,6 +1,6 @@
 import { redirect } from 'next/navigation';
 import { resolveServerSession } from '@/lib/server-session';
-import { listActionablePeriods, listWorkerCurrentAssignments } from '@/lib/worker-context';
+import { listWorkerTimesheets, listWorkerCurrentAssignments } from '@/lib/worker-context';
 import { getWorkerTimesheetDraft } from '@/lib/worker-timesheets';
 import DayEditor from './DayEditor';
 
@@ -26,7 +26,7 @@ export default async function WorkerDayEditorPage({ params }: RouteParams) {
   }
 
   const employeeId = session.user.employeeId;
-  const periods = await listActionablePeriods(employeeId);
+  const periods = await listWorkerTimesheets(employeeId);
   const period = periods.find((p) => p.id === periodId);
   if (!period || !EDITABLE_STATUSES.has(period.timesheetStatus)) {
     redirect(`/worker/periods/${periodId}/hours`);

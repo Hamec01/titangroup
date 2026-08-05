@@ -1,7 +1,7 @@
 import Link from 'next/link';
 import { redirect } from 'next/navigation';
 import { resolveServerSession } from '@/lib/server-session';
-import { listActionablePeriods } from '@/lib/worker-context';
+import { listWorkerTimesheets } from '@/lib/worker-context';
 import { getWorkerTimesheetDraft, getWorkerTimesheetCurrentVersion, type SegmentView } from '@/lib/worker-timesheets';
 import { prisma } from '@/lib/prisma';
 
@@ -38,7 +38,7 @@ export default async function WorkerHoursListPage({ params }: RouteParams) {
 
   const { periodId } = await params;
   const employeeId = session.user.employeeId;
-  const periods = await listActionablePeriods(employeeId);
+  const periods = await listWorkerTimesheets(employeeId);
   const period = periods.find((p) => p.id === periodId);
 
   if (!period) {

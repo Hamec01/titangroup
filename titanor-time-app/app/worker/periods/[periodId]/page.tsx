@@ -1,23 +1,24 @@
 import Link from 'next/link';
 import { redirect } from 'next/navigation';
 import { resolveServerSession } from '@/lib/server-session';
-import { listActionablePeriods, listWorkerCurrentAssignments } from '@/lib/worker-context';
-import { helsinkiToday } from '@/lib/workers';
+import { listWorkerTimesheets, listWorkerCurrentAssignments } from '@/lib/worker-context';
 
 export const dynamic = 'force-dynamic';
 
-// docs/titanor-time/01_SCREEN_MAP.md §3 `/worker/periods/[periodId]` — "финальная
-// точка первого вертикального сценария": объект(ы), рабочая область, шаблон и
-// статус табеля этого периода. Editable statuses (DRAFT/RETURNED) get an "Enter
-// hours" link to .../hours — not built yet (ЭТАП 7's next slice after this one),
-// same as this project's established precedent for a real link to a destination
-// not yet built (see IMPLEMENTATION_STATUS.md on /admin/setup's Create-links).
+// docs/titanor-time/01_SCREEN_MAP.md §3 `/worker/periods/[periodId]` — "финальная точка первого
+// вертикального сценария": объект(ы), рабочая область, шаблон и статус табеля этого периода.
+// Resolves the period via listWorkerTimesheets (all of them, not just actionable) — this page
+// doubles as /worker/history's detail target, so a period whose timesheet has left "actionable"
+// (e.g. FINAL_APPROVED, once timesheet.final_approve exists) must still open here, read-only.
+// Assignments are resolved as of the period's own start date, not "today" — a past period's
+// assignments may no longer be current.
 const EDITABLE_STATUSES = new Set(['DRAFT', 'RETURNED']);
 const STATUS_LABELS: Record<string, string> = {
   DRAFT: 'Not started',
   RETURNED: 'Returned — needs your attention',
   SUBMITTED: 'Submitted — awaiting review',
-  FOREMAN_APPROVED: 'Approved by foreman'
+  FOREMAN_APPROVED: 'Approved by foreman',
+  FINAL_APPROVED: 'Finalized'
 };
 
 type RouteParams = { params: Promise<{ periodId: string }> };
@@ -50,7 +51,7 @@ export default async function WorkerPeriodDetailPage({ params }: RouteParams) {
   const { periodId } = await params;
   const employeeId = session.user.employeeId;
 
-  const [periods, assignments] = await Promise.all([listActionablePeriods(employeeId), listWorkerCurrentAssignments(employeeId, helsinkiToday())]);
+  const periods = await listWorkerTimesheets(employeeId);
   const period = periods.find((p) => p.id === periodId);
 
   if (!period) {
@@ -65,6 +66,8 @@ export default async function WorkerPeriodDetailPage({ params }: RouteParams) {
       </main>
     );
   }
+
+  const assignments = await listWorkerCurrentAssignments(employeeId, new Date(`${period.startDate}T00:00:00.000Z`));
 
   return (
     <main className="wk-page">
@@ -97,7 +100,9 @@ export default async function WorkerPeriodDetailPage({ params }: RouteParams) {
             Enter hours
           </Link>
         ) : (
-          <p className="wk-readonly-note">Your hours are read-only while this timesheet is being reviewed.</p>
+          <Link href={`/worker/periods/${period.id}/hours`} className="wk-back-link">
+            View hours
+          </Link>
         )}
       </div>
     </main>

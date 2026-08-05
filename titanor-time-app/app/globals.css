@@ -427,7 +427,8 @@ button:disabled {
 }
 
 .wk-status-submitted,
-.wk-status-foreman_approved {
+.wk-status-foreman_approved,
+.wk-status-final_approved {
   color: #86efac;
   background: rgba(134, 239, 172, 0.12);
 }
