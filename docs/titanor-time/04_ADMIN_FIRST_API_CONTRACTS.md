@@ -660,3 +660,60 @@ Actionable = `PayrollPeriodParticipant.expected=true` + `PayrollPeriod.status=OP
   возвращает сохранённый результат без повторного overlay — `200`, не `409`.
 - Audit: `ABSENCE_APPROVED` (только при переходе `PENDING → APPROVED`, не при повторном вызове над
   `APPROVED`), отдельно `ABSENCE_OVERLAY_APPLIED` на каждую дату из `overlayAppliedDates`
+
+## 14. Системные пользователи (`FOREMAN`) — реализовано
+
+Backend-срез (`02_...`, §2.12): создание/пополнение только роли `FOREMAN`. Без UI, без выдачи
+учётных данных — `IMPLEMENTATION_STATUS.md`. `ADMIN`/`SUPER_ADMIN`-создание, `role.assign`,
+деактивация — не входят, зарезервированы `01_SCREEN_MAP.md` (`/admin/users`).
+
+#### `GET /api/admin/users`
+- Permission: `user.read`
+- Query: `page`, `pageSize`, `role` (только значение `FOREMAN` учитывается как фильтр)
+- Без `role` — только системные пользователи с текущей активной ролью `FOREMAN`, `ADMIN` или
+  `SUPER_ADMIN` (`UserRole.validFrom <= now AND (validTo IS NULL OR validTo > now)`); `WORKER`-only
+  аккаунты не включаются; дуал-роль `FOREMAN`+`WORKER` включается. `roles` в каждом элементе — полный
+  набор текущих активных ролей пользователя, не только совпавшая с фильтром.
+- Response `200`:
+```json
+{
+  "items": [{
+    "id": "uuid", "username": "j.foreman", "email": "j.foreman@example.com",
+    "status": "PENDING_ACTIVATION", "locale": "FI", "roles": ["FOREMAN"],
+    "employee": null, "createdAt": "2026-08-06T12:00:00.000Z"
+  }],
+  "page": 1, "pageSize": 20, "totalItems": 1, "totalPages": 1
+}
+```
+- Никогда не возвращает `passwordHash`, `twoFactorSecret`, данные сессий/токенов
+
+#### `POST /api/admin/users`
+- Permission: `user.create.foreman`
+- Роль никогда не принимается из тела запроса — эндпоинт физически может только создать/выдать
+  `FOREMAN`; наличие поля `role`/`roles` → `400 VALIDATION_ERROR`
+- Request, режим `STANDALONE` — новый `User` без `Employee`:
+```json
+{ "mode": "STANDALONE", "username": "j.foreman", "email": "j.foreman@example.com"?, "locale": "FI"|"EN"|"RU"? }
+```
+  `username`/`email` нормализуются как в `POST /auth/login` (`trim`+`lowercase`); `username` —
+  `^[a-z0-9._-]{3,64}$` после нормализации; `email` — валидный формат, максимум 255 символов;
+  `employeeId` в этом режиме → `400 VALIDATION_ERROR`. Атомарно: `User(status=PENDING_ACTIVATION,
+  passwordHash=null, employeeId=null)` + активная `UserRole(FOREMAN)` + `AuditEvent(USER_CREATED)`.
+  `UserActivationToken` **не выдаётся** этим вызовом (отдельный, ещё не реализованный шаг).
+- Request, режим `EXISTING_EMPLOYEE` — дуал-роль на уже существующем `User` работника:
+```json
+{ "mode": "EXISTING_EMPLOYEE", "employeeId": "uuid" }
+```
+  `username`/`email`/`locale` в этом режиме → `400 VALIDATION_ERROR`. `Employee` уже имеет `User`
+  (создан через `POST /api/admin/workers`) — второй `User` не создаётся никогда. Атомарно: активная
+  `UserRole(FOREMAN)` на существующем `User` (прежняя завершённая роль `FOREMAN`, если была, не
+  переиспользуется — создаётся новая) + `AuditEvent(FOREMAN_ROLE_GRANTED)`. `User.status` не
+  меняется: `PENDING_ACTIVATION` продолжает обычный worker-activation flow, `ACTIVE` не требует
+  токена.
+- Response `201` — тот же элемент, что в `GET` (`employee` заполнено только в `EXISTING_EMPLOYEE`)
+- Ошибки: `400 VALIDATION_ERROR`, `404 EMPLOYEE_NOT_FOUND`, `409 EMPLOYEE_USER_MISSING` (у
+  `Employee` нет `User`), `409 USER_NOT_ELIGIBLE` (`status` не `PENDING_ACTIVATION`/`ACTIVE`),
+  `409 USER_ALREADY_FOREMAN`, `409 DUPLICATE_USERNAME`, `409 DUPLICATE_EMAIL`
+- Idempotency: обязателен (`X-Requested-With: titanor-time` + `Idempotency-Key`)
+- Audit: `USER_CREATED` (`STANDALONE`, `entityType USER`) / `FOREMAN_ROLE_GRANTED`
+  (`EXISTING_EMPLOYEE`, `entityType USER_ROLE`, `entityId` — id новой `UserRole`)

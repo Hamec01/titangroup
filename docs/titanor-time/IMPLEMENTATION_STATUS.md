@@ -1,5 +1,17 @@
 # Titanor Time — Implementation Status
 
+Обновлено: 2026-08-06 14:00 Europe/Helsinki (backend vertical slice: foreman user administration)
+`GET`/`POST /api/admin/users` реализованы: список системных пользователей (`FOREMAN`/`ADMIN`/
+`SUPER_ADMIN`, включая дуал-роль `FOREMAN`+`WORKER`) и создание/пополнение только роли `FOREMAN` —
+режим `STANDALONE` (новый `User(PENDING_ACTIVATION)`) и `EXISTING_EMPLOYEE` (дуал-роль на уже
+существующем `User` работника, второй `User` не создаётся). Permissions `user.read`/
+`user.create.foreman` выданы `ADMIN`+`SUPER_ADMIN` DML-миграцией. Точный контракт —
+`04_ADMIN_FIRST_API_CONTRACTS.md` §14. Протестировано на одноразовом PostgreSQL 16 (миграции,
+оба режима, все ошибки, идемпотентность, отсутствие утечки секретов в `GET`/аудите, регрессия
+worker activation), `npx tsc --noEmit` чист, production Docker build успешен. **UI (`/admin/users`)
+и выпуск учётных данных (`UserActivationToken`-flow для standalone `FOREMAN`) ещё не реализованы —
+миграция NOT применена к production.**
+
 Обновлено: 2026-08-06 12:43 Europe/Helsinki (schema checkpoint: system user activation)
 Схема `UserActivationToken` добавлена — owner-confirmed checkpoint для первого пароля
 standalone `FOREMAN` (`/admin/users`, ещё не реализован). Отдельная таблица от уже
@@ -60,8 +72,8 @@ insert, второй `PENDING` на тот же `userId` отклонён, `USED
    migrations → issue/reissue code → QR/manual activate → set password → auto-login).
    **Production deployment выполнен 2026-08-06.**
 3. Реализовать минимальный `/admin/users` для создания `FOREMAN`; затем проверить назначение
-   прораба без ручного SQL/CLI. **Schema checkpoint для credential-части (`UserActivationToken`)
-   выполнен** (см. выше) — сама `/admin/users` API/UI и выпуск/проверка кода ещё не реализованы.
+   прораба без ручного SQL/CLI. **Backend (`GET`/`POST /api/admin/users`) выполнен** (см. выше) —
+   UI и выпуск/проверка кода (`UserActivationToken`-flow) ещё не реализованы.
 4. Только после этого провести настоящий первый E2E тремя отдельными аккаунтами
    (`SUPER_ADMIN`/`FOREMAN`/`WORKER`) и считать onboarding готовым к пилоту.
 5. После базового E2E, но до отчётов/PWA-пилота, реализовать утверждённый клиентом ЭТАП 7A
