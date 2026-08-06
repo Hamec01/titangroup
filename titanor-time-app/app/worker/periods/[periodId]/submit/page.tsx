@@ -2,7 +2,8 @@ import Link from 'next/link';
 import { redirect } from 'next/navigation';
 import { resolveServerSession } from '@/lib/server-session';
 import { listWorkerTimesheets } from '@/lib/worker-context';
-import { getWorkerTimesheetDraft } from '@/lib/worker-timesheets';
+import { getWorkerTimesheetDraft, getWorkerTimesheetSummary } from '@/lib/worker-timesheets';
+import { ReturnReasonsNotice } from '../ReturnReasonsNotice';
 import SubmitButton from './SubmitButton';
 
 export const dynamic = 'force-dynamic';
@@ -41,6 +42,8 @@ export default async function WorkerSubmitPage({ params }: RouteParams) {
   const days = 'code' in draft ? [] : draft.days;
   const workedDays = days.filter((d) => d.segments.length > 0 || d.confirmedZero || d.dayType !== 'WORK');
   const totalMinutes = days.reduce((sum, d) => sum + segmentMinutes(d.segments), 0);
+  const summary = await getWorkerTimesheetSummary(employeeId, period.timesheetId);
+  const returnReasons = 'code' in summary ? [] : summary.returnReasons;
 
   return (
     <main className="wk-page">
@@ -49,6 +52,7 @@ export default async function WorkerSubmitPage({ params }: RouteParams) {
           ← Back to hours
         </Link>
         <h1>Submit timesheet</h1>
+        <ReturnReasonsNotice status={period.timesheetStatus} reasons={returnReasons} />
         <p>
           {period.startDate} – {period.endDate}
         </p>

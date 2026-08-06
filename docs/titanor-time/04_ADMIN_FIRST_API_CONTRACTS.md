@@ -450,7 +450,28 @@ Actionable = `PayrollPeriodParticipant.expected=true` + `PayrollPeriod.status=OP
 
 #### `GET /api/worker/timesheets/:timesheetId`
 - Permission: `timesheet.read.own`
-- Response `200`: `{ "timesheetId", "periodId", "status", "currentVersionId" }`
+- Response `200`: `{ "timesheetId", "periodId", "status", "currentVersionId", "returnReasons": [...] }`
+  — `returnReasons` (реализовано после E2E-дефекта, зафиксированного `IMPLEMENTATION_STATUS.md`):
+  массив, **не** одна причина — версия может иметь больше одного `RETURNED` scope одновременно
+  (`03_...`, §4.7, «Гонка одновременных возвратов»). Только scope `currentVersionId`; после
+  resubmit (новая версия, свежие в основном `PENDING` scope) массив естественно становится пустым
+  — старые причины никогда не показываются как актуальные, но исходные строки
+  `TimesheetReviewScope` не удаляются. Каждый элемент:
+```json
+{
+  "scopeType": "SITE",
+  "scopePurpose": null,
+  "siteId": "uuid",
+  "siteName": "Kamppi Renovation",
+  "contextSiteId": null,
+  "contextSiteName": null,
+  "reason": "Please fix Tuesday's break time.",
+  "returnedAt": "2026-08-06T13:10:00.000Z"
+}
+```
+  Для `scopeType=NON_SITE`: `siteId`/`siteName` — `null`; `contextSiteId`/`contextSiteName` — снимок
+  основного объекта работника (только для группировки, `03_...` §4.7) либо оба `null`, если снимка
+  нет. Никогда не включает `reviewedByUserId` или другие внутренние поля.
 - Ошибки: `403 FORBIDDEN`, `404 TIMESHEET_NOT_FOUND`
 
 #### `GET /api/worker/timesheets/:timesheetId/draft`
@@ -468,7 +489,17 @@ Actionable = `PayrollPeriodParticipant.expected=true` + `PayrollPeriod.status=OP
   статусе табеля (в отличие от `.../draft`), это то, что видит работник, пока табель на проверке
   (`SUBMITTED`/`FOREMAN_APPROVED`) или уже закрыт (`FINAL_APPROVED`)
 - Response `200`: `{ "versionId", "versionNumber", "days": [{ "date", "dayType", "segments": [...] }],
-  "plannedShifts": [...], "reviewScopes": [{ "scopeType", "siteId", "status" }] }`
+  "plannedShifts": [...], "reviewScopes": [{ "id", "scopeType", "scopePurpose", "siteId",
+  "siteName", "contextSiteId", "contextSiteName", "status", "returnReason", "reviewedAt" }] }`
+  — `reviewScopes` реально заполнен настоящими строками `TimesheetReviewScope` **этой** версии
+  (раньше — фиктивный `[]`, вместе с устаревшим комментарием, что модель ещё не существует; оба
+  исправлены при устранении E2E-дефекта «работник не видит причину возврата»,
+  `IMPLEMENTATION_STATUS.md`). Аддитивно относительно прежней формы (`scopeType`/`siteId`/`status`
+  сохранены как есть) — добавлены `id`/`scopePurpose`/`siteName`/`contextSiteId`/`contextSiteName`/
+  `returnReason`/`reviewedAt`, чтобы worker-consumer никогда не показывал raw UUID вместо названия
+  объекта. Не отфильтровано по статусу — содержит все scope версии, включая `PENDING`/`APPROVED`;
+  фильтрацию на «только `RETURNED` с причиной» делает `returnReasons` выше на
+  `GET .../timesheets/:timesheetId`, не этот эндпоинт. Никогда не включает `reviewedByUserId`.
 - Ошибки: `403 FORBIDDEN`, `404 TIMESHEET_NOT_FOUND` (в т.ч. если версии ещё не существует — табель
   ни разу не отправлялся)
 

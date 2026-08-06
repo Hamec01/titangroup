@@ -2,6 +2,8 @@
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
+import type { ReturnReasonView } from '@/lib/worker-timesheets';
+import { ReturnReasonsNotice } from '../../ReturnReasonsNotice';
 
 // docs/titanor-time/04_ADMIN_FIRST_API_CONTRACTS.md §0 — required on every mutating request.
 const CSRF_HEADER_VALUE = 'titanor-time';
@@ -70,6 +72,8 @@ interface DayEditorProps {
   initialConfirmedZero: boolean;
   initialSegments: InitialSegment[];
   assignmentOptions: AssignmentOption[];
+  timesheetStatus: string;
+  returnReasons: ReturnReasonView[];
 }
 
 interface EditableBreak {
@@ -113,7 +117,17 @@ function describeError(code: string | undefined, fieldErrors: Record<string, str
   }
 }
 
-export default function DayEditor({ periodId, timesheetId, date, initialDayType, initialConfirmedZero, initialSegments, assignmentOptions }: DayEditorProps) {
+export default function DayEditor({
+  periodId,
+  timesheetId,
+  date,
+  initialDayType,
+  initialConfirmedZero,
+  initialSegments,
+  assignmentOptions,
+  timesheetStatus,
+  returnReasons
+}: DayEditorProps) {
   const router = useRouter();
   const [segments, setSegments] = useState<EditableSegment[]>(() =>
     initialSegments.map((s) => ({
@@ -203,6 +217,8 @@ export default function DayEditor({ periodId, timesheetId, date, initialDayType,
           ← Back
         </a>
         <h1>{date}</h1>
+
+        <ReturnReasonsNotice status={timesheetStatus} reasons={returnReasons} />
 
         {isAbsenceDay ? (
           <p className="wk-readonly-note">This day is marked as {initialDayType.replace('_', ' ').toLowerCase()}. Manage absences from your profile.</p>

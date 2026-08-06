@@ -2,8 +2,9 @@ import Link from 'next/link';
 import { redirect } from 'next/navigation';
 import { resolveServerSession } from '@/lib/server-session';
 import { listWorkerTimesheets } from '@/lib/worker-context';
-import { getWorkerTimesheetDraft, getWorkerTimesheetCurrentVersion, type SegmentView } from '@/lib/worker-timesheets';
+import { getWorkerTimesheetDraft, getWorkerTimesheetCurrentVersion, getWorkerTimesheetSummary, type SegmentView } from '@/lib/worker-timesheets';
 import { prisma } from '@/lib/prisma';
+import { ReturnReasonsNotice } from '../ReturnReasonsNotice';
 
 export const dynamic = 'force-dynamic';
 
@@ -69,6 +70,9 @@ export default async function WorkerHoursListPage({ params }: RouteParams) {
   const sites = siteIds.length > 0 ? await prisma.workSite.findMany({ where: { id: { in: siteIds } }, select: { id: true, name: true } }) : [];
   const siteNameById = new Map(sites.map((s) => [s.id, s.name]));
 
+  const summary = await getWorkerTimesheetSummary(employeeId, period.timesheetId);
+  const returnReasons = 'code' in summary ? [] : summary.returnReasons;
+
   return (
     <main className="wk-page">
       <div className="wk-card">
@@ -76,6 +80,7 @@ export default async function WorkerHoursListPage({ params }: RouteParams) {
           ← {period.startDate} – {period.endDate}
         </Link>
         <h1>Hours</h1>
+        <ReturnReasonsNotice status={period.timesheetStatus} reasons={returnReasons} />
         {!editable && <p className="wk-readonly-note">Read-only — this timesheet is being reviewed.</p>}
 
         {days.length === 0 ? (

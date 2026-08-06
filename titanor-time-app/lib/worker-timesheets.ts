@@ -28,11 +28,101 @@ async function loadOwnTimesheet(
   return { timesheet };
 }
 
+// docs/titanor-time/03_DATA_MODEL_ERD.md §4.7 — "оба returnReason ... сохраняются и видны
+// работнику одновременно": a version can have more than one RETURNED scope (two sites returned
+// almost simultaneously), so every read here is an array, never a single "the" reason.
+
+export interface CurrentVersionReviewScopeView {
+  id: string;
+  scopeType: string;
+  scopePurpose: string | null;
+  siteId: string | null;
+  siteName: string | null;
+  contextSiteId: string | null;
+  contextSiteName: string | null;
+  status: string;
+  returnReason: string | null;
+  reviewedAt: string | null;
+}
+
+/**
+ * TimesheetReviewScope rows of exactly `timesheetVersionId` — never any other version. This is
+ * what makes "old reasons don't show as current after resubmit" automatic: resubmitting creates a
+ * new TimesheetVersion (03_...§4.6) with its own fresh (mostly PENDING) scopes and a new
+ * Timesheet.currentVersionId; the previous version's now-historical RETURNED scopes are simply a
+ * different timesheetVersionId and are never selected here again — no separate "is this stale"
+ * check needed, and the old rows are never touched or deleted.
+ */
+async function loadCurrentVersionReviewScopes(timesheetVersionId: string): Promise<CurrentVersionReviewScopeView[]> {
+  const scopes = await prisma.timesheetReviewScope.findMany({
+    where: { timesheetVersionId },
+    orderBy: [{ createdAt: 'asc' }],
+    select: {
+      id: true,
+      scopeType: true,
+      scopePurpose: true,
+      siteId: true,
+      contextSiteId: true,
+      status: true,
+      returnReason: true,
+      reviewedAt: true,
+      updatedAt: true,
+      site: { select: { name: true } },
+      contextSite: { select: { name: true } }
+    }
+  });
+
+  return scopes.map((s) => ({
+    id: s.id,
+    scopeType: s.scopeType,
+    scopePurpose: s.scopePurpose,
+    siteId: s.siteId,
+    siteName: s.site?.name ?? null,
+    contextSiteId: s.contextSiteId,
+    contextSiteName: s.contextSite?.name ?? null,
+    status: s.status,
+    returnReason: s.returnReason,
+    // reviewedAt is always set together with returnReason/status=RETURNED by the review write
+    // path — updatedAt is only a defensive fallback for the timestamp, never for the reason text
+    // itself (a missing reason is never fabricated, see toReturnReasons below).
+    reviewedAt: (s.reviewedAt ?? (s.status === 'RETURNED' ? s.updatedAt : null))?.toISOString() ?? null
+  }));
+}
+
+export interface ReturnReasonView {
+  scopeType: string;
+  scopePurpose: string | null;
+  siteId: string | null;
+  siteName: string | null;
+  contextSiteId: string | null;
+  contextSiteName: string | null;
+  reason: string;
+  returnedAt: string | null;
+}
+
+/** Only scopes that are currently RETURNED with a non-null reason — never a single findFirst, so two returned SITE scopes of the same version both surface. */
+function toReturnReasons(scopes: CurrentVersionReviewScopeView[]): ReturnReasonView[] {
+  return scopes
+    .filter((s) => s.status === 'RETURNED' && s.returnReason !== null)
+    .map((s) => ({
+      scopeType: s.scopeType,
+      scopePurpose: s.scopePurpose,
+      siteId: s.siteId,
+      siteName: s.siteName,
+      contextSiteId: s.contextSiteId,
+      contextSiteName: s.contextSiteName,
+      reason: s.returnReason!,
+      returnedAt: s.reviewedAt
+    }));
+}
+
 export interface TimesheetSummary {
   timesheetId: string;
   periodId: string;
   status: string;
   currentVersionId: string | null;
+  /** RETURNED scopes of currentVersionId only — empty once resubmitted (new version, fresh scopes) or if never returned. */
+  returnReasons: ReturnReasonView[];
 }
 
 export async function getWorkerTimesheetSummary(employeeId: string, timesheetId: string): Promise<TimesheetSummary | TimesheetAccessError> {
@@ -41,7 +131,8 @@ export async function getWorkerTimesheetSummary(employeeId: string, timesheetId:
     return result.error;
   }
   const t = result.timesheet;
-  return { timesheetId: t.id, periodId: t.periodId, status: t.status, currentVersionId: t.currentVersionId };
+  const returnReasons = t.currentVersionId ? toReturnReasons(await loadCurrentVersionReviewScopes(t.currentVersionId)) : [];
+  return { timesheetId: t.id, periodId: t.periodId, status: t.status, currentVersionId: t.currentVersionId, returnReasons };
 }
 
 export interface BreakView {
@@ -167,16 +258,19 @@ export interface TimesheetCurrentVersionView {
   versionNumber: number;
   days: VersionDayView[];
   plannedShifts: PlannedShiftView[];
-  reviewScopes: { scopeType: string; siteId: string | null; status: string }[];
+  // Additive over 04_ADMIN_FIRST_API_CONTRACTS.md §9's original `{ scopeType, siteId, status }` —
+  // scopePurpose/siteName/contextSiteId/contextSiteName/returnReason/reviewedAt added so a worker-
+  // facing consumer never has to look up a site name from a bare UUID itself. All scopes of this
+  // version, any status — not filtered to RETURNED (callers filter for their own purpose; see
+  // getWorkerTimesheetSummary's returnReasons above for the RETURNED-only view).
+  reviewScopes: CurrentVersionReviewScopeView[];
 }
 
 /**
- * Available in ANY Timesheet status, unlike .../draft — but currentVersionId is only ever set
- * once timesheet.submit runs (not built yet, a later ЭТАП 7 sub-task), so this always returns
- * 404 TIMESHEET_NOT_FOUND today; that's the contract's own documented behavior for "table de
- * table has never been submitted", not a bug. `reviewScopes` is always `[]` for the same
- * reason TimesheetReviewScope doesn't exist as a model yet — no scope can exist before the
- * review subsystem does.
+ * Available in ANY Timesheet status, unlike .../draft — currentVersionId is only ever set once
+ * timesheet.submit runs, so this returns 404 TIMESHEET_NOT_FOUND for a never-submitted timesheet;
+ * that's the contract's own documented behavior, not a bug. `reviewScopes` is real
+ * TimesheetReviewScope data of this exact version (never a stale/other version's rows).
  */
 export async function getWorkerTimesheetCurrentVersion(employeeId: string, timesheetId: string): Promise<TimesheetCurrentVersionView | TimesheetAccessError> {
   const result = await loadOwnTimesheet(employeeId, timesheetId);
@@ -252,7 +346,7 @@ export async function getWorkerTimesheetCurrentVersion(employeeId: string, times
       plannedEndAt: p.plannedEndAt ? p.plannedEndAt.toISOString() : null,
       plannedBreakMinutes: p.plannedBreakMinutes
     })),
-    reviewScopes: []
+    reviewScopes: await loadCurrentVersionReviewScopes(version.id)
   };
 }
 

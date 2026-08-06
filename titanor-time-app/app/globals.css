@@ -604,6 +604,59 @@ button:disabled {
   font-size: 0.9rem;
 }
 
+.wk-return-notice {
+  border: 1px solid rgba(253, 164, 175, 0.35);
+  background: rgba(253, 164, 175, 0.08);
+  border-radius: 6px;
+  padding: 14px 16px;
+  display: grid;
+  gap: 10px;
+  max-width: 100%;
+  overflow-wrap: break-word;
+}
+
+.wk-return-notice-title {
+  margin: 0;
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: var(--error);
+}
+
+.wk-return-reason-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 10px;
+}
+
+.wk-return-reason-item {
+  display: grid;
+  gap: 4px;
+  padding: 10px 12px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 6px;
+  background: rgba(7, 11, 17, 0.5);
+  max-width: 100%;
+}
+
+.wk-return-reason-scope {
+  font-weight: 600;
+  font-size: 0.85rem;
+}
+
+.wk-return-reason-text {
+  margin: 0;
+  overflow-wrap: break-word;
+  word-break: break-word;
+  white-space: pre-wrap;
+}
+
+.wk-return-reason-time {
+  font-size: 0.78rem;
+  color: var(--text-soft);
+}
+
 .wk-back-link {
   color: var(--accent-light);
   font-size: 0.9rem;

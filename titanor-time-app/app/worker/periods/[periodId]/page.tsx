@@ -2,6 +2,8 @@ import Link from 'next/link';
 import { redirect } from 'next/navigation';
 import { resolveServerSession } from '@/lib/server-session';
 import { listWorkerTimesheets, listWorkerCurrentAssignments } from '@/lib/worker-context';
+import { getWorkerTimesheetSummary } from '@/lib/worker-timesheets';
+import { ReturnReasonsNotice } from './ReturnReasonsNotice';
 
 export const dynamic = 'force-dynamic';
 
@@ -68,6 +70,8 @@ export default async function WorkerPeriodDetailPage({ params }: RouteParams) {
   }
 
   const assignments = await listWorkerCurrentAssignments(employeeId, new Date(`${period.startDate}T00:00:00.000Z`));
+  const summary = await getWorkerTimesheetSummary(employeeId, period.timesheetId);
+  const returnReasons = 'code' in summary ? [] : summary.returnReasons;
 
   return (
     <main className="wk-page">
@@ -76,6 +80,8 @@ export default async function WorkerPeriodDetailPage({ params }: RouteParams) {
           {period.startDate} – {period.endDate}
         </h1>
         <span className={`wk-status-badge wk-status-${period.timesheetStatus.toLowerCase()}`}>{STATUS_LABELS[period.timesheetStatus] ?? period.timesheetStatus}</span>
+
+        <ReturnReasonsNotice status={period.timesheetStatus} reasons={returnReasons} />
 
         <h2 className="wk-section-title">Your assignments</h2>
         {assignments.length === 0 ? (

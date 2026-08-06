@@ -1,7 +1,7 @@
 import { redirect } from 'next/navigation';
 import { resolveServerSession } from '@/lib/server-session';
 import { listWorkerTimesheets, listWorkerCurrentAssignments } from '@/lib/worker-context';
-import { getWorkerTimesheetDraft } from '@/lib/worker-timesheets';
+import { getWorkerTimesheetDraft, getWorkerTimesheetSummary } from '@/lib/worker-timesheets';
 import DayEditor from './DayEditor';
 
 export const dynamic = 'force-dynamic';
@@ -40,6 +40,8 @@ export default async function WorkerDayEditorPage({ params }: RouteParams) {
 
   const dayDate = new Date(`${date}T00:00:00.000Z`);
   const assignments = await listWorkerCurrentAssignments(employeeId, dayDate);
+  const summary = await getWorkerTimesheetSummary(employeeId, period.timesheetId);
+  const returnReasons = 'code' in summary ? [] : summary.returnReasons;
 
   return (
     <DayEditor
@@ -50,6 +52,8 @@ export default async function WorkerDayEditorPage({ params }: RouteParams) {
       initialConfirmedZero={day?.confirmedZero ?? false}
       initialSegments={day?.segments ?? []}
       assignmentOptions={assignments.map((a) => ({ siteId: a.siteId, siteName: a.siteName, workAreaId: a.workAreaId, workAreaName: a.workAreaName }))}
+      timesheetStatus={period.timesheetStatus}
+      returnReasons={returnReasons}
     />
   );
 }

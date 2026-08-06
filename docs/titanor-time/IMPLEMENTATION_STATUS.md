@@ -1,5 +1,61 @@
 # Titanor Time — Implementation Status
 
+Обновлено: 2026-08-06 21:00 Europe/Helsinki (fix: worker не видел причину возврата табеля)
+
+**Найденный E2E-дефект** (полный локальный onboarding+timesheet E2E, отдельная задача): пройдены
+SUPER_ADMIN setup, worker activation, foreman creation, foreman assignment через selector, ввод
+часов, submit, foreman review (site-scope корректен, обязательная причина возврата на write-path
+уже была) — **дальше worker видел статус `RETURNED`, но нигде в UI/API не видел саму причину**.
+Подтверждено и кодом (`getWorkerTimesheetSummary`/`getWorkerTimesheetDraft`/
+`getWorkerTimesheetCurrentVersion` не выбирали `TimesheetReviewScope.returnReason` вовсе;
+`getWorkerTimesheetCurrentVersion` возвращал фиктивный `reviewScopes: []` с устаревшим комментарием
+«TimesheetReviewScope ещё не существует», хотя модель есть с `20260804160000_add_timesheet_review_scope`),
+и живым воспроизведением в браузере. E2E был остановлен на этом шаге — resubmit/foreman
+re-approve/final approve/negative checks/persistence/DB-verification **не проходились**.
+
+**Исправлено** (только worker read-contract + UI, без изменений Prisma schema/migrations, без
+изменений write-path review/return):
+- `GET /api/worker/timesheets/:timesheetId` (`getWorkerTimesheetSummary`) теперь возвращает
+  `returnReasons[]` — **массив**, не одна причина: версия табеля может иметь больше одного
+  `RETURNED` scope одновременно (два объекта, два прораба, `03_...`, §4.7, «Гонка одновременных
+  возвратов»). Читается только из `TimesheetReviewScope` **текущей** `timesheetVersionId` — после
+  resubmit (новая версия) массив естественно пустеет, старые причины не показываются как
+  актуальные; исходные строки в БД не удаляются, история сохраняется.
+- `GET /api/worker/timesheets/:timesheetId/current-version` (`getWorkerTimesheetCurrentVersion`)
+  больше не возвращает фиктивный `reviewScopes: []` — загружает реальные scope текущей версии,
+  аддитивно обогащённые `siteName`/`contextSiteId`/`contextSiteName`/`returnReason`/`reviewedAt`
+  (raw UUID никогда не показывается работнику вместо названия объекта; `reviewerUserId` никогда не
+  возвращается).
+- Новый переиспользуемый Server Component `ReturnReasonsNotice`
+  (`app/worker/periods/[periodId]/ReturnReasonsNotice.tsx`) — подключён на все четыре шага пути
+  исправления: `/worker/periods/[periodId]`, `.../hours`, `.../hours/[date]` (через новый пропс
+  `DayEditor`, без изменения его write-логики), `.../submit`. Показывает каждую причину полным
+  текстом (обычный React text node, не `dangerouslySetInnerHTML`), понятную подпись объекта для
+  `SITE`, «General / non-site» (+ context site, если есть) для `NON_SITE`, время возврата; при
+  `RETURNED` без причин (повреждённые/старые данные) — явный fallback-текст, причина не
+  выдумывается. Мобильная раскладка (375px) без horizontal overflow — длинный текст переносится
+  (`overflow-wrap`/`word-break`/`white-space: pre-wrap`).
+- `/worker/history` **не изменён** — список остаётся лёгким (`listWorkerTimesheets`, без
+  per-item причин); детали загружаются только на detail-страницах, как и было.
+
+Проверено на одноразовом PostgreSQL 16 (сфокусированный тест этого фикса, не полный E2E): один
+`SITE`-scope (точный текст причины + название объекта на detail/hours/day-editor/submit); два
+`SITE`-scope одной версии, возвращённые почти одновременно (обе причины и оба названия объектов
+видны, ни одна не потеряна); `NON_SITE`-scope (понятная подпись, без UUID); security (чужой worker
+не получает причины чужого табеля — ownership-проверка `loadOwnTimesheet` выполняется первой, как
+и раньше, отдельного нового запроса не создавалось); version semantics (после resubmit старые
+причины не показываются, старые `TimesheetReviewScope` остаются в БД); `GET .../current-version`
+(`reviewScopes` реально заполнен, `RETURNED`-scope содержит `reason`/`returnedAt`, только scope
+`currentVersionId`); 375px mobile — точный текст виден, horizontal overflow отсутствует. `git diff
+--check`, `npx tsc --noEmit`, `npm run build`, `docker compose -f compose.titanor-time.yaml build
+app` — чисты.
+
+**Production не менялся** — миграций в этой задаче нет (Prisma schema не трогалась), деплоя не
+было. **Полный локальный onboarding+timesheet E2E (SUPER_ADMIN→worker→foreman→timesheet→final
+approval, negative checks, restart persistence, read-only DB verification) пока не перезапускался
+— он должен быть перезапущен целиком отдельной следующей задачей**, этот фикс закрывает только
+найденный конкретный дефект и его сфокусированную проверку.
+
 Обновлено: 2026-08-06 19:30 Europe/Helsinki (security hardening: active role windows)
 Два прицельных backend-фикса перед полным E2E, без новых функций/UI/migrations:
 
