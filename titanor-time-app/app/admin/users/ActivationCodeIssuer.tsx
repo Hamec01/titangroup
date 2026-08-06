@@ -108,9 +108,23 @@ export function ActivationCodeIssuer({ userId, autoIssue = false }: { userId: st
         return;
       }
 
-      // Resolved — the next *intentional* reissue (a fresh button click, not a retry) gets a new key.
+      // A 2xx status alone isn't a resolved outcome yet — the body still has to be read and
+      // validated. If that throws (empty/truncated body despite a 2xx status), the outer catch
+      // below must still treat this as ambiguous and keep the same key, so the key is only ever
+      // cleared once the body has actually been parsed and checked.
+      const body = (await response.json()) as { activationCode?: unknown; activationExpiresAt?: unknown };
+      if (
+        typeof body.activationCode !== 'string' ||
+        body.activationCode.length === 0 ||
+        typeof body.activationExpiresAt !== 'string' ||
+        body.activationExpiresAt.length === 0
+      ) {
+        throw new Error('Malformed activation response body');
+      }
+
+      // Only now is the outcome actually known — the next *intentional* reissue (a fresh button
+      // click, not a retry) gets a new key.
       idempotencyKeyRef.current = null;
-      const body = (await response.json()) as { activationCode: string; activationExpiresAt: string };
       setIssuedCode({ code: body.activationCode, expiresAt: body.activationExpiresAt });
       const activationUrl = `${window.location.origin}/activate-account/${body.activationCode}`;
       try {
