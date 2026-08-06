@@ -109,7 +109,8 @@ relevant query + canonical body)`.
 - Permission: публичный, валидный `ActivationToken`
 - Request: `{ "token", "password" }`
 - Response `200`: тело как `POST /api/auth/login` (авто-логин)
-- Ошибки: `400 VALIDATION_ERROR`, `410 TOKEN_EXPIRED`, `410 TOKEN_USED`
+- Ошибки: `400 VALIDATION_ERROR`, `404 TOKEN_INVALID`, `409 ACCOUNT_NOT_ELIGIBLE`,
+  `410 TOKEN_EXPIRED`, `410 TOKEN_USED`, `429 RATE_LIMITED`
 - Audit: `ACCOUNT_ACTIVATED`
 
 ## 2. Города

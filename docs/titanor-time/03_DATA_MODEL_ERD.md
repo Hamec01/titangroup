@@ -196,11 +196,15 @@ NULL`.
 (`SHA-256(opaque token ≥32 байт)`, сам токен только в cookie), `authLevel enum (PASSWORD |
 MFA_VERIFIED)`, `mfaVerifiedAt`, `expiresAt`, `lastSeenAt`, `ipAddress`, `userAgent`, `revokedAt`.
 
-**ActivationToken** (mutable) — `id`, `employeeId FK`, `tokenHash` (keyed HMAC-SHA256 или
-Argon2id — короткий человекочитаемый код имеет намного меньше энтропии, чем случайный сессионный
-токен, голый SHA-256 недостаточен), `status enum (PENDING | USED | EXPIRED | REVOKED)`, `expiresAt`
-(72ч), `createdByUserId FK`, `usedAt`. Выпуск требует активный `SiteAssignment` и
-`PayrollPeriodParticipant` в открытом периоде, иначе `403 SETUP_INCOMPLETE`.
+**ActivationToken** (mutable) — `id`, `employeeId FK`, `tokenHash` (`UNIQUE`, HMAC-SHA256 с отдельным
+32-byte secret вне БД; не голый SHA-256), `status enum (PENDING | USED | EXPIRED | REVOKED)`,
+`expiresAt` (72ч), `createdByUserId FK`, `usedAt`, `createdAt`. Сырой код — 10 символов Crockford
+Base32 без I/L/O/U, отображение `XXXX-XXXX-XX`; пробелы/дефисы/регистр нормализуются до HMAC.
+Partial unique: один `PENDING` на `employeeId`; повторный выпуск атомарно переводит прежний PENDING
+в REVOKED. `USED` требует `usedAt BETWEEN createdAt AND expiresAt`, остальные статусы требуют
+`usedAt IS NULL`; `expiresAt > createdAt`. Выпуск требует `User.status=PENDING_ACTIVATION`, активные
+Employment/SiteAssignment и `PayrollPeriodParticipant(expected=true)` в открытом периоде, иначе
+`403 SETUP_INCOMPLETE`.
 
 **PasswordResetToken** (mutable) — аналогично `ActivationToken`, `userId FK → User`.
 

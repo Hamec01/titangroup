@@ -224,12 +224,17 @@ button:disabled {
 
 .login-submit {
   height: 48px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 16px;
   border: none;
   border-radius: 4px;
   background: linear-gradient(135deg, var(--accent) 0%, var(--accent-light) 100%);
   color: var(--white);
   font-weight: 600;
   letter-spacing: 0.04em;
+  text-decoration: none;
   box-shadow: 0 14px 30px rgba(47, 94, 157, 0.35);
 }
 
@@ -238,6 +243,45 @@ button:disabled {
   font-size: 0.9rem;
   text-align: center;
   margin: 0;
+}
+
+.activation-qr {
+  display: block;
+  width: 256px;
+  max-width: 100%;
+  height: auto;
+  margin: 16px 0;
+  background: #ffffff;
+}
+
+.activation-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+@media print {
+  body * {
+    visibility: hidden;
+  }
+
+  .activation-print-card,
+  .activation-print-card * {
+    visibility: visible;
+  }
+
+  .activation-print-card {
+    position: absolute;
+    inset: 0 auto auto 0;
+    color: #000000;
+    background: #ffffff;
+    padding: 24px;
+  }
+
+  .activation-print-card .activation-actions,
+  .activation-print-card .login-error {
+    display: none;
+  }
 }
 
 @media (max-width: 480px) {

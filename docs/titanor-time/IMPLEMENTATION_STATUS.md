@@ -1,6 +1,6 @@
 # Titanor Time — Implementation Status
 
-Обновлено: 2026-08-05 (owner-approved Attendance Clock/GPS/offline scope)
+Обновлено: 2026-08-06 (activation vertical slice реализован локально; production hand-off ожидает владельца)
 
 ## CURRENT PRODUCT GAP — onboarding всё ещё нельзя считать завершённым
 
@@ -24,12 +24,11 @@
 - **Шаблоны нельзя обслуживать после первого создания.** Документы помечают `/admin/templates` и
   `/admin/templates/[templateId]` как целевые list/edit экраны, но физически есть только
   `/admin/templates/new` и `GET/POST /api/admin/templates`; dynamic page/API edit отсутствуют.
-- **Активация работника отсутствует целиком.** `POST /api/admin/workers` создаёт
-  `User(PENDING_ACTIVATION)`, но в Prisma нет `ActivationToken`; отсутствуют
-  `POST /api/admin/workers/:employeeId/activation`, `GET /api/auth/activate`,
-  `POST /api/auth/set-initial-password`, `/activate/[token]` и `/set-password`. Карточка работника
-  показывает вычисленный текст `READY_FOR_ACTIVATION`, но кнопки и исполнимого flow нет. Поэтому
-  новый работник не может получить пароль, войти и выполнить worker-flow через настоящий UI.
+- **Активация работника закрыта в локальном коде этой задачи.** Добавлены `ActivationToken`,
+  permission `worker.activation.generate`, admin issue/reissue, одноразовый показ кода, локально
+  генерируемый QR/ссылка/печать, ручной ввод через `/activate`, подтверждение личности,
+  `/set-password`, атомарная установка Argon2id-пароля, роль `WORKER` и автологин. До применения
+  двух новых миграций владельцем и redeploy это ещё не доступно в production.
 - **Нет управления системными пользователями и ролями.** Отсутствуют `/admin/users`, создание
   `FOREMAN` и `role.assign`. UI назначения прораба уже требует ID пользователя, который заранее
   имеет роль `FOREMAN`, но создать такого пользователя через приложение невозможно.
@@ -43,8 +42,9 @@
 1. **Выполнено:** admin shell/nav; все существующие разделы доступны постоянно; `DONE` в setup
    получает действие `Manage` (для шаблона — `Create another`), `NOT DONE` — `Create`; `Work area`
    ведёт к выбору/карточке объекта.
-2. Закрыть activation vertical slice целиком (schema design-checkpoint → migration с подтверждением
-   владельца → issue code → activate → set password → первый login).
+2. **Выполнено локально:** activation vertical slice целиком (утверждённый schema checkpoint →
+   migrations → issue/reissue code → QR/manual activate → set password → auto-login). Production
+   deployment остаётся owner checkpoint.
 3. Реализовать минимальный `/admin/users` для создания `FOREMAN`; затем проверить назначение
    прораба без ручного SQL/CLI.
 4. Только после этого провести настоящий первый E2E тремя отдельными аккаунтами
@@ -52,7 +52,8 @@
 5. После базового E2E, но до отчётов/PWA-пилота, реализовать утверждённый клиентом ЭТАП 7A
    (Attendance Clock + GPS snapshots + offline-first sync) отдельными design/code checkpoint.
 
-До закрытия пунктов 2–4 приложение следует считать **backend-capable, но не operator-ready**:
+До production hand-off пункта 2 и закрытия пунктов 3–4 приложение следует считать
+**backend-capable, но не operator-ready**:
 владелец не обязан знать или вручную вводить скрытые URL, UUID пользователей или SQL-команды.
 
 ## OWNER-APPROVED PRODUCT REQUIREMENT — ЭТАП 7A ATTENDANCE CLOCK
@@ -2761,6 +2762,53 @@ UI на обеих сторонах (работник и админ), не то�
   `titanor-time-db-1`, `app` пересобран и передеплоен, `healthy`.
 
 **T7.9 реализован в ADMIN-only срезе.** Схема применена владельцем; текущая локальная задача добавляет admin API/UI и DML-миграцию permission. После её owner-применения и deploy останутся отдельные design-gated задачи: `period.export` (нужна `ExportBatch`/`ExportItem`), `TimesheetReviewProposal`/`propose-correction`, `ApprovalAction`/`foreman/history` и WORKER/FOREMAN correction-request формы.
+
+## 11.1 Activation vertical slice — локально завершён, production не изменён
+
+Owner-approved checkpoint реализован как один вертикальный срез:
+
+- `ActivationToken` использует детерминированный HMAC-SHA256 с отдельным 32-byte base64 secret
+  `ACTIVATION_TOKEN_HMAC_KEY`; сырой Crockford Base32 код из 10 символов не хранится plaintext в
+  `ActivationToken` и не пишется в аудит, показывается администратору ровно один раз, TTL — 72
+  часа. Обязательный idempotency replay временно хранит весь response только как существующий
+  AES-256-GCM ciphertext в `IdempotencyKey`, никогда plaintext;
+- migration `20260805170000_add_activation_token` добавляет enum/table, уникальный `tokenHash`,
+  status/expiry CHECK, partial unique index «не более одного PENDING на Employee» и RESTRICT FK;
+  `20260805171000_seed_worker_activation_permission` выдаёт `worker.activation.generate` ролям
+  `ADMIN`/`SUPER_ADMIN`;
+- выдача сериализуется `Employee FOR UPDATE`, повторная выдача делает старый PENDING код REVOKED,
+  а eligibility повторно проверяет точный `User.status=PENDING_ACTIVATION`, активный Employment,
+  текущее назначение и expected participant открытого периода;
+- публичный flow включает rate-limited `GET /api/auth/activate`, `POST
+  /api/auth/set-initial-password`, `/activate` для ручного ввода бумажного кода,
+  `/activate/[token]` для QR/deep link и `/set-password`; финальная транзакция повторно блокирует
+  token, не активирует OFFBOARDING/DEACTIVATED пользователя, создаёт WORKER role + UserSession и
+  переводит token в USED;
+- admin UI показывает disabled hint при `SETUP_INCOMPLETE`; после успешной выдачи показывает код,
+  локально (без внешнего QR-сервиса) создаёт QR со ссылкой, позволяет скопировать ссылку и
+  распечатать карточку. QR dependency загружается динамически только после выдачи;
+- security hardening в ходе review: UUID path validation до raw SQL, canonical base64 validation
+  secret, дешёвая token preflight до Argon2 против CPU abuse, единый captured timestamp для
+  expiry/usedAt, удаление сырого token из URL после успешной активации.
+
+Фактические проверки 2026-08-06:
+
+- Prisma Client regenerated; `prisma validate`, `tsc --noEmit`, `next build`, `git diff --check` —
+  exit 0;
+- новый disposable PostgreSQL 16: все 42 migrations применились с нуля, повторный migrate deploy
+  вернул `No pending migrations to apply`;
+- `_test-activation.ts`: permission seed; issue; verify; reissue/revoke; Argon2 password; ACTIVE;
+  WORKER role; UserSession; ISSUE/ACCOUNT_ACTIVATED audit; replay→TOKEN_USED; expiry→TOKEN_EXPIRED;
+  OFFBOARDING→SETUP_INCOMPLETE; две конкурентные выдачи оставляют ровно один PENDING/валидный код —
+  все проверки прошли; route-handler API checks дополнительно подтвердили `401` без session, `403`
+  для WORKER, `404` malformed UUID, `201` для ADMIN, public verify, CSRF rejection, activation cookie
+  и replay→`410`;
+- disposable container удалён автоматически. Production database/app и прочие контейнеры не
+  мигрировались, не пересобирались и не перезапускались.
+
+Production hand-off после отдельного подтверждения владельца: добавить реальный
+`ACTIVATION_TOKEN_HMAC_KEY` в локальный production env (не коммитить), применить ровно две pending
+migrations, пересобрать/перезапустить только Titanor Time app и выполнить браузерный smoke flow.
 
 ## 12. Правило обновления
 

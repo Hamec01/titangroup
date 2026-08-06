@@ -20,6 +20,13 @@ enum UserStatus {
   DEACTIVATED
 }
 
+enum ActivationTokenStatus {
+  PENDING
+  USED
+  EXPIRED
+  REVOKED
+}
+
 enum AuthLevel {
   PASSWORD
   MFA_VERIFIED
@@ -124,6 +131,7 @@ model User {
   requestedCorrections       CorrectionRequest[]           @relation("CorrectionRequestRequestedBy")
   decidedCorrections         CorrectionRequest[]           @relation("CorrectionRequestDecidedBy")
   openedCorrectionDrafts     CorrectionDraft[]             @relation("CorrectionDraftOpenedBy")
+  issuedActivationTokens     ActivationToken[]             @relation("ActivationTokenCreatedBy")
   userRoles                  UserRole[]
   userSessions               UserSession[]
   auditEvents                AuditEvent[]
@@ -190,6 +198,28 @@ model UserSession {
   @@index([expiresAt])
 }
 
+// docs/titanor-time/03_DATA_MODEL_ERD.md §4.1 "ActivationToken" — T7.9-adjacent activation
+// vertical slice. tokenHash is HMAC-SHA256(ACTIVATION_TOKEN_HMAC_KEY, normalizedCode), not
+// Argon2id — GET /api/auth/activate must find the row by a single deterministic equality
+// lookup on the code the user actually typed/scanned, which Argon2id's per-call salting
+// doesn't allow. @unique on tokenHash both enables that lookup and guards the
+// (astronomically unlikely) HMAC collision case, per owner instruction.
+model ActivationToken {
+  id              String                @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  employeeId      String                @db.Uuid
+  tokenHash       String                @unique @db.VarChar(64)
+  status          ActivationTokenStatus @default(PENDING)
+  expiresAt       DateTime              @db.Timestamptz(6)
+  createdByUserId String                @db.Uuid
+  usedAt          DateTime?             @db.Timestamptz(6)
+  createdAt       DateTime              @default(now()) @db.Timestamptz(6)
+  employee        Employee              @relation(fields: [employeeId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  createdByUser   User                  @relation("ActivationTokenCreatedBy", fields: [createdByUserId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+
+  @@index([employeeId, status])
+  @@index([expiresAt])
+}
+
 model Employee {
   id                 String                     @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   employeeNumber     String                     @unique
@@ -202,6 +232,7 @@ model Employee {
   user               User?
   employments        Employment[]
   absences           Absence[]
+  activationTokens   ActivationToken[]
   siteAssignments    SiteAssignment[]
   periodParticipants PayrollPeriodParticipant[]
   timesheets         Timesheet[]

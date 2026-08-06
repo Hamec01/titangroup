@@ -21,6 +21,96 @@ export function WorkerActions({ worker }: { worker: WorkerDetail }) {
   const [deactivateLoading, setDeactivateLoading] = useState(false);
   const [deactivateError, setDeactivateError] = useState<string | null>(null);
 
+  const [activationLoading, setActivationLoading] = useState(false);
+  const [activationError, setActivationError] = useState<string | null>(null);
+  const [issuedCode, setIssuedCode] = useState<{ code: string; expiresAt: string } | null>(null);
+  const [codeCopied, setCodeCopied] = useState(false);
+  const [linkCopied, setLinkCopied] = useState(false);
+  const [qrDataUrl, setQrDataUrl] = useState<string | null>(null);
+
+  function formatCodeForDisplay(code: string): string {
+    return `${code.slice(0, 4)}-${code.slice(4, 8)}-${code.slice(8, 10)}`;
+  }
+
+  async function handleIssueActivation(): Promise<void> {
+    if (activationLoading) {
+      return;
+    }
+    setActivationError(null);
+    setActivationLoading(true);
+
+    try {
+      const response = await fetch(`/api/admin/workers/${worker.id}/activation`, {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Requested-With': CSRF_HEADER_VALUE,
+          'Idempotency-Key': crypto.randomUUID()
+        }
+      });
+
+      if (!response.ok) {
+        const code = await parseErrorCode(response);
+        switch (code) {
+          case 'SETUP_INCOMPLETE':
+            setActivationError('This worker needs a current site assignment and an open payroll period first.');
+            break;
+          case 'WORKER_ALREADY_ACTIVE':
+            setActivationError('This worker has already activated their account.');
+            break;
+          case 'FORBIDDEN':
+            setActivationError('You no longer have permission to issue activation codes.');
+            break;
+          default:
+            setActivationError('Something went wrong. Please try again.');
+        }
+        setActivationLoading(false);
+        return;
+      }
+
+      const body = (await response.json()) as { activationCode: string; activationExpiresAt: string };
+      setIssuedCode({ code: body.activationCode, expiresAt: body.activationExpiresAt });
+      setCodeCopied(false);
+      setLinkCopied(false);
+      const activationUrl = `${window.location.origin}/activate/${body.activationCode}`;
+      try {
+        const QRCode = (await import('qrcode')).default;
+        setQrDataUrl(await QRCode.toDataURL(activationUrl, { errorCorrectionLevel: 'M', margin: 2, width: 256 }));
+      } catch {
+        setQrDataUrl(null);
+      }
+      setActivationLoading(false);
+    } catch {
+      setActivationError('Network error. Please try again.');
+      setActivationLoading(false);
+    }
+  }
+
+  async function copyActivationLink(): Promise<void> {
+    if (!issuedCode) {
+      return;
+    }
+    try {
+      await navigator.clipboard.writeText(`${window.location.origin}/activate/${issuedCode.code}`);
+      setLinkCopied(true);
+    } catch {
+      // QR and the visible code remain available when Clipboard API is unavailable.
+    }
+  }
+
+  async function copyIssuedCode(): Promise<void> {
+    if (!issuedCode) {
+      return;
+    }
+    try {
+      await navigator.clipboard.writeText(formatCodeForDisplay(issuedCode.code));
+      setCodeCopied(true);
+    } catch {
+      // Clipboard API unavailable — the code is still shown as plain text below.
+    }
+  }
+
   async function parseErrorCode(response: Response): Promise<string | undefined> {
     try {
       const body = (await response.json()) as { error?: { code?: string } };
@@ -163,6 +253,58 @@ export function WorkerActions({ worker }: { worker: WorkerDetail }) {
           {editLoading ? 'Saving…' : 'Save changes'}
         </button>
       </form>
+
+      <h2>Activation</h2>
+      {worker.activationStatus === 'READY_FOR_ACTIVATION' ? (
+        <section className={issuedCode ? 'activation-print-card' : undefined}>
+          {issuedCode ? (
+            <div>
+              <p className="login-error" role="alert">
+                This code is shown only once — write it down or copy it now. It will not be shown again.
+              </p>
+              <p>
+                <strong>{formatCodeForDisplay(issuedCode.code)}</strong>{' '}
+                <button type="button" className="login-submit" onClick={copyIssuedCode}>
+                  {codeCopied ? 'Copied' : 'Copy'}
+                </button>
+              </p>
+              <p>Expires: {new Date(issuedCode.expiresAt).toLocaleString()}</p>
+              {qrDataUrl ? (
+                // The QR is generated locally in this browser; the raw activation code is never
+                // sent to a third-party image service.
+                // eslint-disable-next-line @next/next/no-img-element
+                <img className="activation-qr" src={qrDataUrl} alt="Worker activation QR code" />
+              ) : null}
+              <div className="activation-actions">
+                <button type="button" className="login-submit" onClick={copyActivationLink}>
+                  {linkCopied ? 'Link copied' : 'Copy activation link'}
+                </button>
+                <button type="button" className="login-submit" onClick={() => window.print()}>
+                  Print code and QR
+                </button>
+              </div>
+            </div>
+          ) : (
+            <button type="button" className="login-submit" disabled={activationLoading} onClick={handleIssueActivation}>
+              {activationLoading ? 'Issuing…' : 'Issue activation code'}
+            </button>
+          )}
+          {activationError ? (
+            <p className="login-error" role="alert">
+              {activationError}
+            </p>
+          ) : null}
+        </section>
+      ) : worker.activationStatus === 'SETUP_INCOMPLETE' ? (
+        <div>
+          <button type="button" className="login-submit" disabled title="Assign the worker to a site and open a payroll period first.">
+            Issue activation code
+          </button>
+          <p>Assign the worker to a site and open a payroll period first.</p>
+        </div>
+      ) : (
+        <p>This worker has already activated their account.</p>
+      )}
 
       {worker.employment?.active ? (
         <>

@@ -125,8 +125,8 @@ export async function listWorkers(page: number, pageSize: number): Promise<Worke
 }
 
 /**
- * activationStatus is computed, not stored — ActivationToken (03_...§4.1)
- * doesn't exist in the schema yet (that's a later task, worker.activation.generate).
+ * activationStatus is computed, not stored — pending ActivationToken rows intentionally do not
+ * change readiness because issuing a replacement revokes the previous live code.
  * Mirrors the exact readiness condition 03_DATA_MODEL_ERD.md §4.1 documents
  * for issuing one: an active SiteAssignment + a PayrollPeriodParticipant
  * (expected=true) in an OPEN period — the same condition whose absence that
@@ -147,7 +147,7 @@ async function computeActivationStatus(
   // blocks *new* ones), so hasCurrentAssignment alone isn't a safe signal
   // once employment is over. Found via manual testing, not spec'd
   // explicitly — SETUP_INCOMPLETE is the closest existing label, not a new one.
-  if (!employmentActive || !hasCurrentAssignment) {
+  if (userStatus !== 'PENDING_ACTIVATION' || !employmentActive || !hasCurrentAssignment) {
     return 'SETUP_INCOMPLETE';
   }
   const openParticipant = await prisma.payrollPeriodParticipant.findFirst({
