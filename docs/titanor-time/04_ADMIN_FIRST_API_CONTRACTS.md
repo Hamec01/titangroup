@@ -725,3 +725,76 @@ Backend-срез (`02_...`, §2.12): создание/пополнение то�
 - Idempotency: обязателен (`X-Requested-With: titanor-time` + `Idempotency-Key`)
 - Audit: `USER_CREATED` (`STANDALONE`, `entityType USER`) / `FOREMAN_ROLE_GRANTED`
   (`EXISTING_EMPLOYEE`, `entityType USER_ROLE`, `entityId` — id новой `UserRole`)
+
+## 15. Credential flow standalone `FOREMAN` — реализовано
+
+Отдельная от worker activation (§1/§5) пара таблица+секрет: `UserActivationToken` (не
+`ActivationToken`), тот же секрет `ACTIVATION_TOKEN_HMAC_KEY` и те же crypto-примитивы
+(`generateActivationCode`/`normalizeActivationCode`/`hashActivationCode`/
+`formatActivationCodeForDisplay`, `lib/activation.ts`), но отдельная таблица, отдельный модуль
+(`lib/system-activation.ts`) и отдельные HTTP-роуты — worker activation (`ActivationToken`,
+`/api/auth/activate`, `/api/auth/set-initial-password`) не меняется. Применимо только к standalone
+`FOREMAN` (`User.employeeId IS NULL`) — созданному через `POST /api/admin/users`, `mode=STANDALONE`
+(§14). Без UI.
+
+#### `POST /api/admin/users/:userId/activation`
+- Permission: `user.activation.generate`
+- `userId` — строгий UUID-формат; malformed → `404 USER_NOT_FOUND` (тот же паттерн, что
+  `POST /api/admin/workers/:employeeId/activation`)
+- Eligibility (проверяется под `SELECT ... FOR UPDATE` на `User`, порядок проверок фиксирован —
+  `employeeId` раньше `status`, чтобы worker-пользователь всегда получал
+  `USER_USES_WORKER_ACTIVATION`, а не `USER_ALREADY_ACTIVE`): `User` существует; `employeeId IS
+  NULL`; `status=PENDING_ACTIVATION`; `passwordHash IS NULL`; текущая активная роль `FOREMAN`
+  (`validFrom <= now AND (validTo IS NULL OR validTo > now)`)
+- Reissue: любой оставшийся `PENDING` код того же `userId` — просроченный (`expiresAt <= now`)
+  помечается `EXPIRED`, остальные — `REVOKED`, в той же транзакции, что создание нового кода
+- Response `201`:
+```json
+{ "activationCode": "XXXX-XXXX-XX", "activationExpiresAt": "2026-08-09T12:00:00.000Z" }
+```
+  Raw-код показывается только в этом успешном response — не хранится (только HMAC в
+  `UserActivationToken.tokenHash`), не логируется, не попадает в аудит
+- Ошибки: `404 USER_NOT_FOUND`, `409 USER_ALREADY_ACTIVE`, `409 USER_USES_WORKER_ACTIVATION`
+  (`employeeId` не `NULL`), `409 ACCOUNT_NOT_ELIGIBLE` (нет текущей роли `FOREMAN`,
+  `status`≠`PENDING_ACTIVATION` или `passwordHash` уже установлен)
+- Idempotency: обязателен (`X-Requested-With: titanor-time` + `Idempotency-Key`)
+- Audit: `USER_ACTIVATION_TOKEN_ISSUED`, `entityType USER`, `entityId = userId`, `afterValue` —
+  только `{ expiresAt }`, без кода/`tokenHash`
+
+#### `GET /api/auth/activate-account?token=...`
+- Публичный, без CSRF (`GET`); rate-limit по IP — отдельный namespace от
+  `GET /api/auth/activate` (worker), не делит лимит с ним
+- Ищет только `UserActivationToken` (не `ActivationToken`)
+- `PENDING` и не истёк → `200`:
+```json
+{ "username": "j.foreman", "locale": "FI" }
+```
+- Просроченный `PENDING` атомарно помечается `EXPIRED` тем же вызовом
+- Ошибки: `410 TOKEN_EXPIRED`, `410 TOKEN_USED`, `404 TOKEN_INVALID` (`REVOKED`/неизвестный/
+  malformed — не различаются)
+- Никогда не возвращает `email`, роли, `passwordHash` или `tokenHash`
+
+#### `POST /api/auth/set-account-password`
+- Публичный, mutating — CSRF (`X-Requested-With: titanor-time`) обязателен; rate-limit по IP —
+  отдельный namespace от `POST /api/auth/set-initial-password` (worker)
+- Request: `{ "token": "...", "password": "..." }` — `password` 16–256 символов, иначе
+  `400 VALIDATION_ERROR`
+- Lock order (совпадает с issuance/reissue, чтобы не было deadlock): сначала `User FOR UPDATE`
+  (через дешёвый unlocked preflight lookup `UserActivationToken.userId` по `tokenHash`, ничего из
+  preflight не используется для решения), затем `UserActivationToken FOR UPDATE`; token
+  status/expiry и eligibility User перепроверяются под обоими локами
+- Redeem eligibility: `employeeId IS NULL`, `status=PENDING_ACTIVATION`, `passwordHash IS NULL`,
+  текущая активная роль `FOREMAN` — иначе `409 ACCOUNT_NOT_ELIGIBLE` (включая
+  `OFFBOARDING`/`DEACTIVATED` или отсутствие роли)
+- Атомарно: Argon2id `passwordHash`, `User.status → ACTIVE`, существующая активная `UserRole`
+  `FOREMAN` не создаётся повторно, `UserActivationToken.status → USED` + `usedAt`, новая
+  `UserSession`, `AuditEvent(ACCOUNT_ACTIVATED)` с `entityType USER`
+- Response `200`:
+```json
+{ "user": { "id": "uuid", "username": "j.foreman", "roles": ["FOREMAN"], "locale": "FI" } }
+```
+  cookie `tt_session` выставляется route handler'ом только после успешного commit транзакции —
+  те же флаги/TTL, что `POST /api/auth/set-initial-password` (`httpOnly`, `secure`,
+  `sameSite=lax`, `path=/`, `maxAge` = `SESSION_DURATION_MS`)
+- Ошибки: `400 VALIDATION_ERROR`, `403 CSRF_REJECTED`, `404 TOKEN_INVALID`,
+  `409 ACCOUNT_NOT_ELIGIBLE`, `410 TOKEN_EXPIRED`, `410 TOKEN_USED`, `429 RATE_LIMITED`

@@ -178,11 +178,14 @@ permission с более чем одним держателем разной о�
 
 ### 2.12 Системные пользователи и роли
 
-`GET`/`POST /api/admin/users` реализованы (backend, без UI и без выдачи учётных данных) — `04_ADMIN_FIRST_API_CONTRACTS.md` содержит точный контракт.
+`GET`/`POST /api/admin/users` и credential-flow standalone `FOREMAN` (выпуск кода, публичная проверка,
+установка первого пароля) реализованы (backend, без UI) — `04_ADMIN_FIRST_API_CONTRACTS.md` содержит
+точный контракт.
 
 | Permission | Держатели | Область | Ограничения | Причина | Аудит | Массовое |
 |---|---|---|---|---|---|---|
 | `user.create.foreman` | `ADMIN`, `SUPER_ADMIN` | вся компания | режим `STANDALONE` — создаёт новый `User(PENDING_ACTIVATION)` с активной ролью `FOREMAN`, без `Employee`; режим `EXISTING_EMPLOYEE` — добавляет активную роль `FOREMAN` уже существующему `User` привязанного `Employee` (дуал-роль `FOREMAN`+`WORKER`), второй `User` не создаётся | нет | да — `USER_CREATED` (`STANDALONE`) / `FOREMAN_ROLE_GRANTED` (`EXISTING_EMPLOYEE`) | нет |
+| `user.activation.generate` | `ADMIN`, `SUPER_ADMIN` | вся компания | выпускает/reissue одноразовый код `UserActivationToken` только для standalone `FOREMAN` (`employeeId IS NULL`, `status=PENDING_ACTIVATION`, `passwordHash IS NULL`, есть текущая активная роль `FOREMAN`); reissue отзывает предыдущий `PENDING` в той же транзакции; не выдаёт код worker-пользователю (`employeeId` не `NULL` → `USER_USES_WORKER_ACTIVATION`) | нет | да (`USER_ACTIVATION_TOKEN_ISSUED`, `afterValue` — только `expiresAt`) | нет |
 | `user.create.admin` | `SUPER_ADMIN` | вся компания | создаёт `User(role=ADMIN\|SUPER_ADMIN)` — недоступно `ADMIN` | нет | да (`USER_CREATED`) | нет |
 | `user.read` | `ADMIN`, `SUPER_ADMIN` | все системные пользователи | — | нет | нет | — |
 | `user.deactivate` | `SUPER_ADMIN` (для `ADMIN`/`SUPER_ADMIN`), `ADMIN`+`SUPER_ADMIN` (для `FOREMAN`) | — | не удаляет историю решений | да | да (`USER_DEACTIVATED`) | нет |

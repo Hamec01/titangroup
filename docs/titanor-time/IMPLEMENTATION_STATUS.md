@@ -1,5 +1,19 @@
 # Titanor Time — Implementation Status
 
+Обновлено: 2026-08-06 15:30 Europe/Helsinki (backend credential flow: foreman account activation)
+`POST /api/admin/users/:userId/activation` (permission `user.activation.generate`,
+ADMIN/SUPER_ADMIN), `GET /api/auth/activate-account`, `POST /api/auth/set-account-password`
+реализованы: ADMIN выпускает/reissue одноразовый код для standalone `FOREMAN`
+(`employeeId IS NULL`, `status=PENDING_ACTIVATION`), публичная проверка кода, установка первого
+пароля (Argon2id) переводит `User` в `ACTIVE` и создаёт auto-login `UserSession`. Отдельная от
+worker activation таблица `UserActivationToken` и модуль `lib/system-activation.ts` — `ActivationToken`
+и worker `/activate`/`/set-password` не изменены. Точный контракт — `04_ADMIN_FIRST_API_CONTRACTS.md`
+§15. Протестировано на одноразовом PostgreSQL 16 (permission seed, eligibility, reissue отзывает
+старый код, идемпотентность, verify/redeem, гонка issue/reissue/redeem не создаёт два живых токена,
+отсутствие утечки кода/hash/пароля в audit, вход созданным FOREMAN с ролью в ответе логина),
+регрессия worker activation, `npx tsc --noEmit` чист, production Docker build успешен. **UI ещё не
+реализован, миграция NOT применена к production.**
+
 Обновлено: 2026-08-06 14:00 Europe/Helsinki (backend vertical slice: foreman user administration)
 `GET`/`POST /api/admin/users` реализованы: список системных пользователей (`FOREMAN`/`ADMIN`/
 `SUPER_ADMIN`, включая дуал-роль `FOREMAN`+`WORKER`) и создание/пополнение только роли `FOREMAN` —
@@ -72,8 +86,10 @@ insert, второй `PENDING` на тот же `userId` отклонён, `USED
    migrations → issue/reissue code → QR/manual activate → set password → auto-login).
    **Production deployment выполнен 2026-08-06.**
 3. Реализовать минимальный `/admin/users` для создания `FOREMAN`; затем проверить назначение
-   прораба без ручного SQL/CLI. **Backend (`GET`/`POST /api/admin/users`) выполнен** (см. выше) —
-   UI и выпуск/проверка кода (`UserActivationToken`-flow) ещё не реализованы.
+   прораба без ручного SQL/CLI. **Backend полностью выполнен** — создание/список (`GET`/`POST
+   /api/admin/users`) и credential flow (`UserActivationToken`-flow: выпуск кода, проверка,
+   первый пароль) — см. выше. Только UI (`/admin/users`, `/activate-account`, `/set-account-password`)
+   ещё не реализован.
 4. Только после этого провести настоящий первый E2E тремя отдельными аккаунтами
    (`SUPER_ADMIN`/`FOREMAN`/`WORKER`) и считать onboarding готовым к пилоту.
 5. После базового E2E, но до отчётов/PWA-пилота, реализовать утверждённый клиентом ЭТАП 7A
