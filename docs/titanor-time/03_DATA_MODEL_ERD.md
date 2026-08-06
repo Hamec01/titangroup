@@ -78,6 +78,7 @@ erDiagram
     User ||--o| Employee : "may be linked to (any role)"
     Employee ||--o{ Employment : has
     Employee ||--o{ ActivationToken : "issued for"
+    User ||--o{ UserActivationToken : "issued for"
     User ||--o{ PasswordResetToken : "issued for"
     User ||--o{ IdempotencyKey : owns
 
@@ -205,6 +206,32 @@ Partial unique: один `PENDING` на `employeeId`; повторный вып�
 `usedAt IS NULL`; `expiresAt > createdAt`. Выпуск требует `User.status=PENDING_ACTIVATION`, активные
 Employment/SiteAssignment и `PayrollPeriodParticipant(expected=true)` в открытом периоде, иначе
 `403 SETUP_INCOMPLETE`.
+
+**UserActivationToken** (mutable) — owner-confirmed schema checkpoint для первого пароля
+системного пользователя (`FOREMAN`, создаваемого напрямую через будущий `/admin/users`, без
+`Employee`). Отдельная от `ActivationToken` таблица — не общий nullable-FK, чтобы не трогать уже
+задеплоенный worker activation flow. `id`, `userId FK → User` (целевой пользователь, `ON DELETE
+RESTRICT`, `ON UPDATE CASCADE`), `tokenHash` (`UNIQUE`, тот же формат HMAC-SHA256 и тот же секрет
+`ACTIVATION_TOKEN_HMAC_KEY`, что у `ActivationToken` — новый секрet не заводится), `status`
+(реюз `enum ActivationTokenStatus`, тот же, что у `ActivationToken` — новый enum не заводится),
+`expiresAt` (72ч), `createdByUserId FK → User` (выпустивший, `ON DELETE RESTRICT`, `ON UPDATE
+CASCADE`) — два разных FK на `User` с разными relation-именами (`UserActivationTokenTarget`,
+`UserActivationTokenCreatedBy`), `usedAt`, `createdAt`. Ограничения — та же форма, что
+`ActivationToken`: `expiresAt > createdAt`; `status = USED` требует `usedAt` не `NULL` и в
+диапазоне `[createdAt, expiresAt]`, любой другой статус требует `usedAt IS NULL`; partial unique
+`("userId") WHERE status='PENDING'` — не более одного живого кода на пользователя. Индексы:
+`(userId, status)`, `(expiresAt)`. Сырой код в БД не хранится, только HMAC. Физического удаления
+и retention-джобы пока нет (см. §9). **Выпуск/проверка/UI не реализованы этой миграцией** —
+только схема.
+
+**Важно про dual-role** (владелец поправил предыдущий checkpoint): `employeeId` **не** является
+способом создать второго `User` для одного `Employee` — `User.employeeId` уже `UNIQUE`. Работник,
+зарегистрированный через `POST /api/admin/workers`, уже имеет свой `User`. Будущий сценарий
+«сделать этого работника ещё и прорабом» — это добавление роли `FOREMAN` **существующему**
+`User` (новая строка `UserRole`, не новая строка `User`): если этот `User` ещё
+`PENDING_ACTIVATION`, он получает доступ через уже существующий worker `ActivationToken`-flow, не
+через `UserActivationToken`; если уже `ACTIVE` — новый токен ему не нужен вовсе.
+`UserActivationToken` — только для **standalone** `FOREMAN` без `Employee`.
 
 **PasswordResetToken** (mutable) — аналогично `ActivationToken`, `userId FK → User`.
 
@@ -1741,7 +1768,7 @@ UPDATE`-триггер `trg_proposal_resolved_immutable` (см. выше) физ
 |---|---|
 | `WorkSegment` / `TimesheetVersion` / `ApprovalAction` / `ExportItem` | 6 лет после окончания финансового года |
 | `UserSession.ipAddress`/`userAgent` | 90 дней после `revokedAt`/`expiresAt` |
-| `ActivationToken` / `PasswordResetToken` | удалить/обезличить через 30 дней после истечения |
+| `ActivationToken` / `UserActivationToken` / `PasswordResetToken` | удалить/обезличить через 30 дней после истечения |
 | `Employee.phone`/`User.email` уволенного сотрудника | удалить через 90 дней после `DEACTIVATED`, если нет другого основания |
 | `AuditEvent` | по классу события |
 | `IdempotencyKey` | 24 часа |

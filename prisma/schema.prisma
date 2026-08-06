@@ -103,39 +103,41 @@ enum CorrectionRequestStatus {
 }
 
 model User {
-  id                         String                        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  username                   String                        @unique @db.VarChar(64)
-  email                      String?                       @unique @db.VarChar(255)
-  passwordHash               String?                       @db.Text
-  status                     UserStatus
-  locale                     Locale
-  twoFactorEnabled           Boolean                       @default(false)
-  twoFactorSecret            String?                       @db.Text
-  employeeId                 String?                       @unique @db.Uuid
-  lastLoginAt                DateTime?                     @db.Timestamptz(6)
-  createdAt                  DateTime                      @default(now()) @db.Timestamptz(6)
-  updatedAt                  DateTime                      @updatedAt @db.Timestamptz(6)
-  employee                   Employee?                     @relation(fields: [employeeId], references: [id], onDelete: Restrict, onUpdate: Cascade)
-  createdAbsences            Absence[]                     @relation("AbsenceCreatedBy")
-  approvedAbsences           Absence[]                     @relation("AbsenceApprovedBy")
-  assignedAssignments        SiteAssignment[]              @relation("SiteAssignmentAssignedBy")
-  defaultForemanSites        WorkSite[]                    @relation("WorkSiteDefaultForeman")
-  foremanAssignments         ForemanAssignment[]           @relation("ForemanAssignmentForeman")
-  assignedForemanAssignments ForemanAssignment[]           @relation("ForemanAssignmentAssignedBy")
-  openedPeriods              PayrollPeriod[]               @relation("PayrollPeriodOpenedBy")
-  lockedPeriods              PayrollPeriod[]               @relation("PayrollPeriodLockedBy")
-  excludedParticipants       PayrollPeriodParticipant[]    @relation("PayrollPeriodParticipantExcludedBy")
-  createdTemplateVersions    WorkScheduleTemplateVersion[] @relation("TemplateVersionCreatedBy")
-  createdTimesheetVersions   TimesheetVersion[]            @relation("TimesheetVersionCreatedBy")
-  reviewedTimesheetScopes    TimesheetReviewScope[]        @relation("TimesheetReviewScopeReviewedBy")
-  requestedCorrections       CorrectionRequest[]           @relation("CorrectionRequestRequestedBy")
-  decidedCorrections         CorrectionRequest[]           @relation("CorrectionRequestDecidedBy")
-  openedCorrectionDrafts     CorrectionDraft[]             @relation("CorrectionDraftOpenedBy")
-  issuedActivationTokens     ActivationToken[]             @relation("ActivationTokenCreatedBy")
-  userRoles                  UserRole[]
-  userSessions               UserSession[]
-  auditEvents                AuditEvent[]
-  idempotencyKeys            IdempotencyKey[]
+  id                             String                        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  username                       String                        @unique @db.VarChar(64)
+  email                          String?                       @unique @db.VarChar(255)
+  passwordHash                   String?                       @db.Text
+  status                         UserStatus
+  locale                         Locale
+  twoFactorEnabled               Boolean                       @default(false)
+  twoFactorSecret                String?                       @db.Text
+  employeeId                     String?                       @unique @db.Uuid
+  lastLoginAt                    DateTime?                     @db.Timestamptz(6)
+  createdAt                      DateTime                      @default(now()) @db.Timestamptz(6)
+  updatedAt                      DateTime                      @updatedAt @db.Timestamptz(6)
+  employee                       Employee?                     @relation(fields: [employeeId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  createdAbsences                Absence[]                     @relation("AbsenceCreatedBy")
+  approvedAbsences               Absence[]                     @relation("AbsenceApprovedBy")
+  assignedAssignments            SiteAssignment[]              @relation("SiteAssignmentAssignedBy")
+  defaultForemanSites            WorkSite[]                    @relation("WorkSiteDefaultForeman")
+  foremanAssignments             ForemanAssignment[]           @relation("ForemanAssignmentForeman")
+  assignedForemanAssignments     ForemanAssignment[]           @relation("ForemanAssignmentAssignedBy")
+  openedPeriods                  PayrollPeriod[]               @relation("PayrollPeriodOpenedBy")
+  lockedPeriods                  PayrollPeriod[]               @relation("PayrollPeriodLockedBy")
+  excludedParticipants           PayrollPeriodParticipant[]    @relation("PayrollPeriodParticipantExcludedBy")
+  createdTemplateVersions        WorkScheduleTemplateVersion[] @relation("TemplateVersionCreatedBy")
+  createdTimesheetVersions       TimesheetVersion[]            @relation("TimesheetVersionCreatedBy")
+  reviewedTimesheetScopes        TimesheetReviewScope[]        @relation("TimesheetReviewScopeReviewedBy")
+  requestedCorrections           CorrectionRequest[]           @relation("CorrectionRequestRequestedBy")
+  decidedCorrections             CorrectionRequest[]           @relation("CorrectionRequestDecidedBy")
+  openedCorrectionDrafts         CorrectionDraft[]             @relation("CorrectionDraftOpenedBy")
+  issuedActivationTokens         ActivationToken[]             @relation("ActivationTokenCreatedBy")
+  receivedSystemActivationTokens UserActivationToken[]         @relation("UserActivationTokenTarget")
+  issuedSystemActivationTokens   UserActivationToken[]         @relation("UserActivationTokenCreatedBy")
+  userRoles                      UserRole[]
+  userSessions                   UserSession[]
+  auditEvents                    AuditEvent[]
+  idempotencyKeys                IdempotencyKey[]
 }
 
 model Role {
@@ -217,6 +219,30 @@ model ActivationToken {
   createdByUser   User                  @relation("ActivationTokenCreatedBy", fields: [createdByUserId], references: [id], onDelete: Restrict, onUpdate: Cascade)
 
   @@index([employeeId, status])
+  @@index([expiresAt])
+}
+
+// docs/titanor-time/03_DATA_MODEL_ERD.md §4.1 "UserActivationToken" — owner-confirmed schema
+// checkpoint for system-user (FOREMAN) first-login credentials. Deliberately a separate table
+// from ActivationToken, not a shared/nullable-FK generalization of it — ActivationToken and the
+// worker activation flow built on it are already in production and are not touched by this
+// migration. Same shape as ActivationToken (id/tokenHash/status/expiresAt/createdByUserId/usedAt/
+// createdAt), keyed by userId instead of employeeId. Reuses the existing ActivationTokenStatus
+// enum and the existing ACTIVATION_TOKEN_HMAC_KEY secret — no new enum, no new secret. tokenHash
+// stores only the HMAC-SHA256 digest; the raw code is never persisted.
+model UserActivationToken {
+  id              String                @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId          String                @db.Uuid
+  tokenHash       String                @unique @db.VarChar(64)
+  status          ActivationTokenStatus @default(PENDING)
+  expiresAt       DateTime              @db.Timestamptz(6)
+  createdByUserId String                @db.Uuid
+  usedAt          DateTime?             @db.Timestamptz(6)
+  createdAt       DateTime              @default(now()) @db.Timestamptz(6)
+  user            User                  @relation("UserActivationTokenTarget", fields: [userId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  createdByUser   User                  @relation("UserActivationTokenCreatedBy", fields: [createdByUserId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+
+  @@index([userId, status])
   @@index([expiresAt])
 }
 
