@@ -6,6 +6,7 @@ import { resolveServerSession } from '@/lib/server-session';
 const ADMIN_NAVIGATION = [
   { href: '/admin/setup', label: 'Setup' },
   { href: '/admin/workers', label: 'Workers' },
+  { href: '/admin/users', label: 'Users' },
   { href: '/admin/sites', label: 'Sites' },
   { href: '/admin/assignments', label: 'Assignments' },
   { href: '/admin/periods', label: 'Periods' },

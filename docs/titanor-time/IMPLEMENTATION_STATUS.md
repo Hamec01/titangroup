@@ -1,5 +1,26 @@
 # Titanor Time — Implementation Status
 
+Обновлено: 2026-08-06 17:00 Europe/Helsinki (UI: foreman account activation)
+`/admin/users` (список + `/admin/users/new` создание `STANDALONE`/`EXISTING_EMPLOYEE`, выпуск/reissue
+кода с QR/copy/print) и публичный flow `/activate-account` → `/activate-account/[token]` →
+`/set-account-password` реализованы — весь credential vertical slice для standalone `FOREMAN` теперь
+доступен и локально, и через UI, без миграций и без изменения backend-контрактов (кроме одной чисто
+аддитивной read-функции `listEmployeesForForemanSelect` в `lib/users.ts` для select работника).
+`/admin/users` добавлен в постоянную admin-навигацию. Raw-код активации живёт только в React state
+текущей страницы — не в `localStorage`/`sessionStorage`/console, исчезает при переходе/refresh.
+Успешная активация ведёт standalone `FOREMAN` на `/foreman`, не на `/worker`. `ForemanAssignmentSection`
+(raw UUID-поле выбора прораба) не тронут — отдельная будущая задача. Worker `/activate`/`/set-password`
+не изменены. Проверено headless-браузером (Playwright, временный скрипт, не закоммичен) на одноразовом
+PostgreSQL 16: навигация, список, standalone/dual-role создание, дубликаты username/email,
+автовыпуск+QR+copy+print, refresh скрывает код, ручной reissue отзывает старый, `ACTIVE` без
+кнопки выпуска, dual-role select без UUID в видимом тексте, unauthorized/`FOREMAN`-only блокируются,
+375px mobile layout, mismatch/`<16`/`>256` валидация пароля, успешная активация + cookie + `Continue`
+→ `/foreman`, повтор кода → `TOKEN_USED`, expired/invalid состояния, регрессия worker `/activate`+
+`/set-password`. `npx tsc --noEmit`, `npm run build`, production Docker build — все чисты.
+**Production ещё не обновлён — миграции из предыдущих задач НЕ применены к реальной БД, деплоя не
+было.** UI создания `ADMIN`/`SUPER_ADMIN`, `role.assign`, деактивации, а также замена raw UUID-поля
+в `ForemanAssignmentSection` на нормальный selector — остаются отдельными будущими задачами.
+
 Обновлено: 2026-08-06 15:30 Europe/Helsinki (backend credential flow: foreman account activation)
 `POST /api/admin/users/:userId/activation` (permission `user.activation.generate`,
 ADMIN/SUPER_ADMIN), `GET /api/auth/activate-account`, `POST /api/auth/set-account-password`
@@ -85,11 +106,11 @@ insert, второй `PENDING` на тот же `userId` отклонён, `USED
 2. **Выполнено:** activation vertical slice целиком (утверждённый schema checkpoint →
    migrations → issue/reissue code → QR/manual activate → set password → auto-login).
    **Production deployment выполнен 2026-08-06.**
-3. Реализовать минимальный `/admin/users` для создания `FOREMAN`; затем проверить назначение
-   прораба без ручного SQL/CLI. **Backend полностью выполнен** — создание/список (`GET`/`POST
-   /api/admin/users`) и credential flow (`UserActivationToken`-flow: выпуск кода, проверка,
-   первый пароль) — см. выше. Только UI (`/admin/users`, `/activate-account`, `/set-account-password`)
-   ещё не реализован.
+3. **Выполнено локально:** `/admin/users` для создания `FOREMAN` (backend + UI, включая
+   `/admin/users/new`, выпуск/reissue кода с QR/copy/print) и весь credential flow
+   (`/activate-account` → `/activate-account/[token]` → `/set-account-password`) — см. выше.
+   **Production ещё не обновлён** (миграции не применены, не задеплоено) — назначение прораба без
+   ручного SQL/CLI подтверждено только локально, не на реальном сервере.
 4. Только после этого провести настоящий первый E2E тремя отдельными аккаунтами
    (`SUPER_ADMIN`/`FOREMAN`/`WORKER`) и считать onboarding готовым к пилоту.
 5. После базового E2E, но до отчётов/PWA-пилота, реализовать утверждённый клиентом ЭТАП 7A

@@ -286,3 +286,33 @@ export async function grantForemanToExistingEmployee(employeeId: string, actorUs
 
   return outcome.code === 'GRANTED' ? outcome.result : outcome;
 }
+
+export interface ForemanSelectableEmployee {
+  id: string;
+  employeeNumber: string;
+  firstName: string;
+  lastName: string;
+  userStatus: string | null;
+}
+
+/**
+ * For the /admin/users/new "existing employee" select (app/admin/users/new/NewUserForm.tsx) — a
+ * Server Component reads this directly (project convention: no internal fetch to the app's own
+ * API). Deliberately does not filter by eligibility: an ineligible pick (already FOREMAN,
+ * OFFBOARDING/DEACTIVATED, no linked User) is still shown and just gets the exact 409/404 the
+ * POST /api/admin/users route already returns — no separate filtering logic to keep in sync.
+ */
+export async function listEmployeesForForemanSelect(): Promise<ForemanSelectableEmployee[]> {
+  const employees = await prisma.employee.findMany({
+    orderBy: [{ lastName: 'asc' }, { firstName: 'asc' }],
+    select: { id: true, employeeNumber: true, firstName: true, lastName: true, user: { select: { status: true } } }
+  });
+
+  return employees.map((employee) => ({
+    id: employee.id,
+    employeeNumber: employee.employeeNumber,
+    firstName: employee.firstName,
+    lastName: employee.lastName,
+    userStatus: employee.user?.status ?? null
+  }));
+}

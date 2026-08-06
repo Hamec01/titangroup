@@ -495,17 +495,77 @@ touch target ≥ 48px), `/foreman/*` — desktop-first с поддержкой �
 - API: `GET /api/admin/audit`
 - DoD: фильтрация по датам работает с UTC-хранением, отображение — в `Europe/Helsinki`
 
-#### `/admin/users` ⚪
-- Роли: `ADMIN` (без создания `ADMIN`/`SUPER_ADMIN`), `SUPER_ADMIN` (полный доступ)
+#### `/admin/users` 🟢 (частично — см. ⚪ ниже)
+- Роли: `ADMIN`, `SUPER_ADMIN`
 - Приоритет: desktop
 - Назначение: системные пользователи (не работники) — `ADMIN`/`SUPER_ADMIN`/`FOREMAN` учётки, роли
-- Данные: `User` + `UserRole`
-- Действия: создать `FOREMAN`, создать `ADMIN`/`SUPER_ADMIN` (только `SUPER_ADMIN`), `role.assign`
-  (только `SUPER_ADMIN`), деактивировать
-- Состояния: loading; empty; error
+- Данные: `GET /api/admin/users` — username/email/status/активные roles/связанный `Employee`
+- Действия: создать standalone `FOREMAN` или дуал-роль на существующем работнике (`/admin/users/new`);
+  выпустить/reissue одноразовый код активации (QR, copy, print) для standalone `FOREMAN`
+  в `PENDING_ACTIVATION`
+- ⚪ (не реализовано, отдельные задачи): создать `ADMIN`/`SUPER_ADMIN` (только `SUPER_ADMIN`),
+  `role.assign` (только `SUPER_ADMIN`), деактивировать
+- Состояния: loading; empty; error; raw-код показывается только один раз (React state текущей
+  страницы, не сохраняется), исчезает после перехода/refresh
 - Откуда: nav
-- API: `GET/POST /api/admin/users`, `POST /api/admin/users/:id/role`
-- DoD: `ADMIN` не может назначить роль `ADMIN`/`SUPER_ADMIN` даже прямым запросом к API
+- API: `GET/POST /api/admin/users`, `POST /api/admin/users/:userId/activation`
+- DoD: `ADMIN` не может назначить роль `ADMIN`/`SUPER_ADMIN` даже прямым запросом к API (пока
+  сам этот путь не реализован — нет способа его вызвать ни через UI, ни через покрытый API)
+
+#### `/admin/users/new` 🟢
+- Роли: `ADMIN`, `SUPER_ADMIN`
+- Приоритет: desktop
+- Назначение: два режима создания — `STANDALONE` (username/email?/locale) и `EXISTING_EMPLOYEE`
+  (select работника по имени+номеру, без отображения UUID)
+- Данные: список работников для select (имя, `employeeNumber`, статус их `User`)
+- Действия: submit; после успешного `STANDALONE` — автоматический выпуск кода активации с тем же
+  UI (QR/copy/print), что и ручной issue/reissue из списка; если выпуск не удался — явное сообщение
+  «аккаунт создан, код не выпущен», без общей ошибки создания
+- Состояния: loading; error (`VALIDATION_ERROR`, `DUPLICATE_USERNAME`, `DUPLICATE_EMAIL`,
+  `EMPLOYEE_NOT_FOUND`, `EMPLOYEE_USER_MISSING`, `USER_NOT_ELIGIBLE`, `USER_ALREADY_FOREMAN`)
+- Откуда: `/admin/users`
+- API: `POST /api/admin/users`, `POST /api/admin/users/:userId/activation`
+- DoD: дуал-роль объясняет разницу `ACTIVE` (существующий пароль) vs `PENDING_ACTIVATION`
+  (обычная worker activation) — отдельный system-код не нужен ни в одном из случаев
+
+#### `/activate-account` 🟢
+- Роли: неаутентифицированный
+- Приоритет: mobile-first
+- Назначение: ручной ввод 10-символьного кода standalone `FOREMAN` с бумаги — аналог `/activate`,
+  но ведёт на `/activate-account/[token]` (`UserActivationToken`, не `ActivationToken`)
+- Действия: нормализовать пробелы/дефисы/регистр → `/activate-account/[token]`; Back to login
+- Состояния: validation error для неверной длины/алфавита
+- Откуда: код/QR, который выдал `ADMIN` вне системы
+- Куда: `/activate-account/[token]`
+- DoD: формат `XXXX-XXXX-XX` и негруппированный код приводят к одному token
+
+#### `/activate-account/[token]` 🟢
+- Роли: неаутентифицированный, только с валидным `UserActivationToken`
+- Приоритет: mobile-first
+- Назначение: подтвердить личность (`username`) перед установкой пароля — только
+  `verifySystemActivationToken`, не worker `verifyActivationToken`
+- Данные: `username`, `locale`
+- Действия: continue → `/set-account-password`
+- Состояния: loading; error (`TOKEN_EXPIRED`, `TOKEN_USED`, `TOKEN_INVALID`, `RATE_LIMITED` —
+  каждый со своим сообщением и ссылкой на login)
+- Откуда: код/ссылка/QR от `ADMIN`
+- Куда: `/set-account-password`
+- API: `GET /api/auth/activate-account?token=...`
+- DoD: просроченный/использованный токен даёт понятную ошибку и не пускает дальше
+
+#### `/set-account-password` 🟢
+- Роли: неаутентифицированный, только с валидным `UserActivationToken`
+- Приоритет: mobile-first
+- Назначение: установить первый пароль standalone `FOREMAN`
+- Данные: требования к паролю (16–256 символов)
+- Действия: submit пароля дважды (mismatch-валидация)
+- Состояния: loading; error (валидация пароля, `TOKEN_EXPIRED`/`TOKEN_USED`/`TOKEN_INVALID`,
+  `ACCOUNT_NOT_ELIGIBLE`, `RATE_LIMITED`)
+- Откуда: `/activate-account/[token]`
+- Куда: автологин (cookie от backend) → `/foreman` — **не** `/worker`; на самом экране показывается
+  `username` с кнопкой копирования, token убирается из адресной строки
+- API: `POST /api/auth/set-account-password`
+- DoD: пароль установлен, токен переходит в `USED`, повторное использование токена невозможно
 
 #### `/admin/settings` ⚪
 - Роли: `ADMIN`, `SUPER_ADMIN`
