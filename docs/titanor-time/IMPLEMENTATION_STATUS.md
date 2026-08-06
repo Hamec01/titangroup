@@ -1,5 +1,41 @@
 # Titanor Time — Implementation Status
 
+Обновлено: 2026-08-06 19:30 Europe/Helsinki (security hardening: active role windows)
+Два прицельных backend-фикса перед полным E2E, без новых функций/UI/migrations:
+
+1. **`resolveAuthenticatedSession` (`lib/auth.ts`)** теперь применяет то же временное окно
+   активной `UserRole`, что и все остальные eligibility-проверки в проекте — `validFrom <= now
+   AND (validTo IS NULL OR validTo > now)`, а не только `validTo IS NULL`. Раньше роль с
+   `validFrom` в будущем ошибочно давала доступ немедленно, а `validTo` в будущем не отличалась
+   от `validTo=null` (не баг сам по себе, но и не то, что документировано). Роли пересчитываются
+   заново на каждый запрос — сессия не хранит застывший снимок; окончание роли действует на
+   следующем запросе уже существующей сессии, без повторного логина. `DEACTIVATED`-отказ и
+   `OFFBOARDING`-поведение не менялись.
+2. **`createForemanAssignment` (`lib/foreman-assignments.ts`)** стал полностью атомарным: раньше
+   `User.status`/`FOREMAN`-роль проверялись до транзакции, а `ForemanAssignment`+`AuditEvent`
+   создавались позже в отдельной — окно между проверкой и записью позволяло гонку. Теперь всё —
+   `SELECT ... FOR UPDATE` на целевом `User`, повторная проверка статуса, проверка текущей
+   `FOREMAN`-роли, проверка `WorkSite`, вставка `ForemanAssignment`, `AuditEvent` — одна
+   транзакция, без вложенных. Явно задокументирован остаточный пробел: блокируется только `User`,
+   не сама строка `UserRole` — сегодня это безопасно, потому что ни один существующий write-path
+   не завершает/меняет уже созданную `UserRole` (`role.assign`/`user.deactivate` не реализованы);
+   когда они появятся, эту проверку нужно будет защитить собственной блокировкой.
+   Response shape/UI/permissions не менялись.
+
+Протестировано (временный скрипт, не закоммичен, без браузера — прямой вызов route handler'ов и
+`lib/foreman-assignments.ts`): future/expired/window/open-ended роль → 403/200 корректно; роль,
+завершённая после создания сессии, отбирает доступ на следующем запросе той же сессии;
+future FOREMAN → 403 на `/api/foreman/workers`, current → 200; `DEACTIVATED`-сессия — попрежнему
+401; login regression (worker/admin/foreman); атомарность — `ACTIVE`/`PENDING_ACTIVATION` успешны
+с одним audit-событием, `OFFBOARDING`/`DEACTIVATED` → `FOREMAN_NOT_ELIGIBLE`, future/ended-роль →
+`USER_NOT_FOREMAN`, `SITE_NOT_FOUND`/`FOREMAN_NOT_FOUND` сохранены; конкурентная смена статуса
+перед получением лока на `User` — гонка воспроизведена явно (blocking-транзакция + задержка) и
+корректно отклонена; конкурентное завершение роли — воспроизведено (с оговоркой про
+задокументированный пробел выше) и корректно отклонено; rollback (искусственный FK-violation на
+`AuditEvent.actorUserId`) не оставляет строку `ForemanAssignment`; selector regression. `npx tsc
+--noEmit`, `npm run build`, production Docker build — чисты. **Production не обновлён — миграций
+в этой задаче нет вовсе (чистый code-фикс), деплоя не было.**
+
 Обновлено: 2026-08-06 18:30 Europe/Helsinki (foreman assignment selector — no more raw UUID)
 `ForemanAssignmentSection` (`/admin/sites/:siteId`) больше не требует ручного ввода `foremanUserId` —
 `<select>`, заполненный `lib/foreman-assignments.ts`'s новой `listAssignableForemen()` (username/

@@ -26,6 +26,16 @@ export interface AuthenticatedSession {
  * immediately, not just at next login attempt). OFFBOARDING is intentionally
  * not rejected here, same as at login (03_DATA_MODEL_ERD.md §4.2). On
  * success, refreshes UserSession.lastSeenAt.
+ *
+ * `roles` reflects only *currently* active UserRole rows — `validFrom <= now
+ * AND (validTo IS NULL OR validTo > now)`, the same window every other
+ * eligibility check in this app uses (lib/foreman-assignments.ts,
+ * lib/users.ts, lib/system-activation.ts) — not just `validTo IS NULL`. A
+ * role that hasn't started yet (`validFrom > now`) or has already ended
+ * (`validTo <= now`) never grants access, and an ended role stops granting
+ * access on the very next call (nothing here caches roles across requests —
+ * this function re-reads UserRole fresh every time, so a role change takes
+ * effect on the session's next request, not at next login).
  */
 export async function resolveAuthenticatedSession(token: string | undefined): Promise<AuthenticatedSession | null> {
   if (!token) {
@@ -39,7 +49,12 @@ export async function resolveAuthenticatedSession(token: string | undefined): Pr
     where: { tokenHash },
     include: {
       user: {
-        include: { userRoles: { where: { validTo: null }, include: { role: true } } }
+        include: {
+          userRoles: {
+            where: { validFrom: { lte: now }, OR: [{ validTo: null }, { validTo: { gt: now } }] },
+            include: { role: true }
+          }
+        }
       }
     }
   });

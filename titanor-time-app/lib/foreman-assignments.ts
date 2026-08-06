@@ -54,39 +54,66 @@ function formatDate(date: Date): string {
  * neither a not-yet-started nor an already-ended role counts).
  * PENDING_ACTIVATION is deliberately allowed: a foreman can be assigned to a
  * site before finishing their own account activation.
+ *
+ * Everything — the User lock, both eligibility checks, the WorkSite lookup,
+ * the ForemanAssignment insert, and the AuditEvent — runs inside one
+ * transaction (no nested `$transaction`), in that fixed order: target User
+ * FOR UPDATE first, then the read-only role/site lookups, then the insert,
+ * then the audit row. This closes the gap the previous version had (status/
+ * role checked in separate, unlocked queries *before* a second, later
+ * transaction did the insert) — a concurrent status change (or a User that
+ * stops existing, which can't happen today but would be caught the same way)
+ * between check and insert could otherwise let an assignment through for a
+ * foreman who was OFFBOARDING/DEACTIVATED by the time it committed.
+ *
+ * The User row lock does NOT also cover the UserRole read the same way —
+ * FOR UPDATE on "User" locks that one row, not "UserRole" rows. That's fine
+ * today only because no write path in this codebase ever updates or deletes
+ * an existing UserRole row: every one is created once (createStandaloneForeman,
+ * grantForemanToExistingEmployee, setInitialPassword's WORKER grant) and never
+ * mutated afterward — `role.assign` and `user.deactivate`, the only features
+ * that would ever end/revoke an existing FOREMAN role, are not implemented.
+ * So the FOREMAN-role read below cannot observe a value that a concurrent
+ * transaction is about to invalidate — there is no such transaction yet. If
+ * `role.assign`/`user.deactivate` land later and revoke UserRole rows in
+ * place, this read needs its own lock (e.g. `SELECT ... FROM "UserRole" ...
+ * FOR UPDATE` on the matching row, taken in the same User→UserRole order used
+ * here) — recorded here explicitly so that work doesn't silently reintroduce
+ * this race.
  */
 export async function createForemanAssignment(
   input: CreateForemanAssignmentInput
 ): Promise<ForemanAssignmentResult | CreateForemanAssignmentError> {
-  const foreman = await prisma.user.findUnique({ where: { id: input.foremanUserId }, select: { id: true, status: true } });
-  if (!foreman) {
-    return { code: 'FOREMAN_NOT_FOUND' };
-  }
+  const outcome = await prisma.$transaction(async (tx) => {
+    const lockedUserRows = await tx.$queryRaw<{ id: string; status: string }[]>`SELECT id, status FROM "User" WHERE id = ${input.foremanUserId}::uuid FOR UPDATE`;
+    if (lockedUserRows.length === 0) {
+      return { code: 'FOREMAN_NOT_FOUND' as const };
+    }
+    const foremanStatus = lockedUserRows[0].status;
 
-  const site = await prisma.workSite.findUnique({ where: { id: input.siteId }, select: { id: true } });
-  if (!site) {
-    return { code: 'SITE_NOT_FOUND' };
-  }
+    if (foremanStatus !== 'PENDING_ACTIVATION' && foremanStatus !== 'ACTIVE') {
+      return { code: 'FOREMAN_NOT_ELIGIBLE' as const };
+    }
 
-  if (foreman.status !== 'PENDING_ACTIVATION' && foreman.status !== 'ACTIVE') {
-    return { code: 'FOREMAN_NOT_ELIGIBLE' };
-  }
+    const now = new Date();
+    const currentForemanRole = await tx.userRole.findFirst({
+      where: {
+        userId: input.foremanUserId,
+        role: { name: 'FOREMAN' },
+        validFrom: { lte: now },
+        OR: [{ validTo: null }, { validTo: { gt: now } }]
+      },
+      select: { id: true }
+    });
+    if (!currentForemanRole) {
+      return { code: 'USER_NOT_FOREMAN' as const };
+    }
 
-  const now = new Date();
-  const currentForemanRole = await prisma.userRole.findFirst({
-    where: {
-      userId: input.foremanUserId,
-      role: { name: 'FOREMAN' },
-      validFrom: { lte: now },
-      OR: [{ validTo: null }, { validTo: { gt: now } }]
-    },
-    select: { id: true }
-  });
-  if (!currentForemanRole) {
-    return { code: 'USER_NOT_FOREMAN' };
-  }
+    const site = await tx.workSite.findUnique({ where: { id: input.siteId }, select: { id: true } });
+    if (!site) {
+      return { code: 'SITE_NOT_FOUND' as const };
+    }
 
-  const created = await prisma.$transaction(async (tx) => {
     const assignment = await tx.foremanAssignment.create({
       data: {
         foremanUserId: input.foremanUserId,
@@ -115,9 +142,14 @@ export async function createForemanAssignment(
       }
     });
 
-    return assignment;
+    return { code: 'CREATED' as const, assignment };
   });
 
+  if (outcome.code !== 'CREATED') {
+    return outcome;
+  }
+
+  const created = outcome.assignment;
   return {
     id: created.id,
     foremanUserId: created.foremanUserId,
