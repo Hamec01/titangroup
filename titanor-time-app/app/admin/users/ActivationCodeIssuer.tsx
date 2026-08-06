@@ -15,6 +15,9 @@ interface IssuedCode {
   expiresAt: string;
 }
 
+const AMBIGUOUS_MESSAGE =
+  'The result could not be confirmed. Retry to recover the same activation response. Do not use the previously displayed code.';
+
 function describeIssueError(code: string | undefined): string {
   switch (code) {
     case 'USER_NOT_FOUND':
@@ -35,6 +38,10 @@ function describeIssueError(code: string | undefined): string {
 export function ActivationCodeIssuer({ userId, autoIssue = false }: { userId: string; autoIssue?: boolean }) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // True only when the last attempt's HTTP outcome is unknown (fetch threw) — distinct from a
+  // determinate server error, since it changes what "Retry" must do (reuse the same key) and
+  // what it must never do (let the old code look valid again).
+  const [ambiguous, setAmbiguous] = useState(false);
   const [autoIssueFailed, setAutoIssueFailed] = useState(false);
   const [issuedCode, setIssuedCode] = useState<IssuedCode | null>(null);
   const [codeCopied, setCodeCopied] = useState(false);
@@ -42,13 +49,37 @@ export function ActivationCodeIssuer({ userId, autoIssue = false }: { userId: st
   const [qrDataUrl, setQrDataUrl] = useState<string | null>(null);
   const autoIssueAttempted = useRef(false);
 
+  // Holds the Idempotency-Key of the current *unresolved* issue/reissue operation. Cleared the
+  // moment the server gives a determinate answer (2xx or non-2xx) — at that point the outcome is
+  // known and a later, separately-intentional reissue must get a fresh key. Left set only when a
+  // fetch/network exception makes the outcome ambiguous, so Retry replays into the exact same
+  // request (cached response if the server already committed it) instead of risking a second
+  // issue/reissue.
+  const idempotencyKeyRef = useRef<string | null>(null);
+  const lastAttemptWasAutoRef = useRef(false);
+
   async function handleIssue(isAutoAttempt: boolean): Promise<void> {
     if (loading) {
       return;
     }
+    lastAttemptWasAutoRef.current = isAutoAttempt;
+
+    // Once any issue/reissue/retry attempt starts, the previously displayed code can no longer
+    // be guaranteed valid — the server may already have revoked it even if this attempt's own
+    // response ends up lost. Hide it immediately rather than waiting for a response.
+    setIssuedCode(null);
+    setQrDataUrl(null);
+    setCodeCopied(false);
+    setLinkCopied(false);
     setError(null);
+    setAmbiguous(false);
     setAutoIssueFailed(false);
     setLoading(true);
+
+    if (idempotencyKeyRef.current === null) {
+      idempotencyKeyRef.current = crypto.randomUUID();
+    }
+    const idempotencyKey = idempotencyKeyRef.current;
 
     try {
       const response = await fetch(`/api/admin/users/${userId}/activation`, {
@@ -57,11 +88,13 @@ export function ActivationCodeIssuer({ userId, autoIssue = false }: { userId: st
         headers: {
           'Content-Type': 'application/json',
           'X-Requested-With': CSRF_HEADER_VALUE,
-          'Idempotency-Key': crypto.randomUUID()
+          'Idempotency-Key': idempotencyKey
         }
       });
 
       if (!response.ok) {
+        // The server's answer is known — a future retry must not replay this (now resolved) key.
+        idempotencyKeyRef.current = null;
         let code: string | undefined;
         try {
           const body = (await response.json()) as { error?: { code?: string } };
@@ -75,10 +108,10 @@ export function ActivationCodeIssuer({ userId, autoIssue = false }: { userId: st
         return;
       }
 
+      // Resolved — the next *intentional* reissue (a fresh button click, not a retry) gets a new key.
+      idempotencyKeyRef.current = null;
       const body = (await response.json()) as { activationCode: string; activationExpiresAt: string };
       setIssuedCode({ code: body.activationCode, expiresAt: body.activationExpiresAt });
-      setCodeCopied(false);
-      setLinkCopied(false);
       const activationUrl = `${window.location.origin}/activate-account/${body.activationCode}`;
       try {
         const QRCode = (await import('qrcode')).default;
@@ -88,8 +121,12 @@ export function ActivationCodeIssuer({ userId, autoIssue = false }: { userId: st
       }
       setLoading(false);
     } catch {
-      setError('Network error. Please try again.');
-      setAutoIssueFailed(isAutoAttempt);
+      // fetch itself threw (network error, connection reset, etc.) — whether the server already
+      // committed the issue/reissue is unknown. Keep the same Idempotency-Key so Retry replays
+      // into the cached response instead of risking a second token, and never generate a new key
+      // until a determinate HTTP response is actually received.
+      setAmbiguous(true);
+      setError(AMBIGUOUS_MESSAGE);
       setLoading(false);
     }
   }
@@ -169,9 +206,20 @@ export function ActivationCodeIssuer({ userId, autoIssue = false }: { userId: st
           Account created, but the activation code could not be issued automatically.
         </p>
       ) : null}
-      <button type="button" className="login-submit" disabled={loading} onClick={() => handleIssue(false)}>
-        {loading ? 'Issuing…' : 'Issue / reissue activation code'}
-      </button>
+      {ambiguous ? (
+        <button
+          type="button"
+          className="login-submit"
+          disabled={loading}
+          onClick={() => handleIssue(lastAttemptWasAutoRef.current)}
+        >
+          {loading ? 'Retrying…' : 'Retry'}
+        </button>
+      ) : (
+        <button type="button" className="login-submit" disabled={loading} onClick={() => handleIssue(false)}>
+          {loading ? 'Issuing…' : 'Issue / reissue activation code'}
+        </button>
+      )}
       <p className="setup-subtitle">Reissuing revokes any previously issued code for this user.</p>
       {error ? (
         <p className="login-error" role="alert">
