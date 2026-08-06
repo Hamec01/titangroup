@@ -1,6 +1,7 @@
 import { redirect } from 'next/navigation';
 import { resolveServerSession } from '@/lib/server-session';
 import { getSiteDetail } from '@/lib/sites';
+import { listAssignableForemen } from '@/lib/foreman-assignments';
 import { SiteEditForm } from './SiteEditForm';
 import { WorkAreaSection } from './WorkAreaSection';
 import { ForemanAssignmentSection } from './ForemanAssignmentSection';
@@ -29,7 +30,7 @@ export default async function SiteDetailPage({ params }: { params: Promise<{ sit
   }
 
   const { siteId } = await params;
-  const site = await getSiteDetail(siteId);
+  const [site, assignableForemen] = await Promise.all([getSiteDetail(siteId), listAssignableForemen()]);
 
   if (!site) {
     return (
@@ -54,7 +55,7 @@ export default async function SiteDetailPage({ params }: { params: Promise<{ sit
 
         <WorkAreaSection siteId={site.id} workAreas={site.workAreas} />
 
-        <ForemanAssignmentSection siteId={site.id} foremanAssignments={site.foremanAssignments} />
+        <ForemanAssignmentSection siteId={site.id} foremanAssignments={site.foremanAssignments} assignableForemen={assignableForemen} />
 
         <h2>Active assignments</h2>
         {site.activeAssignments.length === 0 ? (

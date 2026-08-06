@@ -1,8 +1,10 @@
 'use client';
 
 import { useState, type FormEvent } from 'react';
+import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import type { SiteForemanAssignment } from '@/lib/sites';
+import type { AssignableForeman } from '@/lib/foreman-assignments';
 
 const CSRF_HEADER_VALUE = 'titanor-time';
 
@@ -11,9 +13,11 @@ function errorMessageFor(code: string | undefined): string {
     case 'VALIDATION_ERROR':
       return 'Please check the fields above.';
     case 'FOREMAN_NOT_FOUND':
-      return 'No user with that id.';
+      return 'That foreman account no longer exists.';
     case 'USER_NOT_FOREMAN':
       return 'That user does not currently hold an active FOREMAN role.';
+    case 'FOREMAN_NOT_ELIGIBLE':
+      return "That user's account status does not allow a foreman assignment (offboarded or deactivated).";
     case 'FORBIDDEN':
       return 'You no longer have permission to assign foremen.';
     default:
@@ -21,12 +25,22 @@ function errorMessageFor(code: string | undefined): string {
   }
 }
 
+// Visible label only — the underlying option value is the User UUID, never shown to the admin.
+function labelFor(foreman: AssignableForeman): string {
+  if (foreman.employee) {
+    return `${foreman.employee.firstName} ${foreman.employee.lastName} (#${foreman.employee.employeeNumber}) — ${foreman.username} — ${foreman.status}`;
+  }
+  return `${foreman.username} — ${foreman.status}`;
+}
+
 export function ForemanAssignmentSection({
   siteId,
-  foremanAssignments
+  foremanAssignments,
+  assignableForemen
 }: {
   siteId: string;
   foremanAssignments: SiteForemanAssignment[];
+  assignableForemen: AssignableForeman[];
 }) {
   const router = useRouter();
   const [foremanUserId, setForemanUserId] = useState('');
@@ -35,6 +49,9 @@ export function ForemanAssignmentSection({
   const [validTo, setValidTo] = useState('');
   const [loading, setLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+
+  const selectedForeman = assignableForemen.find((foreman) => foreman.id === foremanUserId) ?? null;
+  const hasCandidates = assignableForemen.length > 0;
 
   async function handleCreate(event: FormEvent<HTMLFormElement>): Promise<void> {
     event.preventDefault();
@@ -97,16 +114,36 @@ export function ForemanAssignmentSection({
 
       <form onSubmit={handleCreate} aria-busy={loading}>
         <div className="login-field">
-          <label htmlFor="foreman-user-id">Foreman user id (must already have the FOREMAN role)</label>
-          <input
-            id="foreman-user-id"
-            type="text"
-            required
-            disabled={loading}
-            value={foremanUserId}
-            onChange={(event) => setForemanUserId(event.target.value)}
-          />
+          <label htmlFor="foreman-select">Foreman</label>
+          {hasCandidates ? (
+            <select
+              id="foreman-select"
+              required
+              disabled={loading}
+              value={foremanUserId}
+              onChange={(event) => setForemanUserId(event.target.value)}
+            >
+              <option value="" disabled>
+                Select a foreman…
+              </option>
+              {assignableForemen.map((foreman) => (
+                <option key={foreman.id} value={foreman.id}>
+                  {labelFor(foreman)}
+                </option>
+              ))}
+            </select>
+          ) : (
+            <p>
+              No eligible foremen yet.{' '}
+              <Link href="/admin/users/new">Create or activate a foreman account first.</Link>
+            </p>
+          )}
         </div>
+        {selectedForeman?.status === 'PENDING_ACTIVATION' ? (
+          <p className="setup-subtitle">
+            This assignment will be saved now, but this foreman can only log in once their account is activated.
+          </p>
+        ) : null}
         <div className="login-field">
           <label htmlFor="foreman-valid-from">Start date</label>
           <input
@@ -145,7 +182,7 @@ export function ForemanAssignmentSection({
             {errorMessage}
           </p>
         ) : null}
-        <button className="login-submit" type="submit" disabled={loading}>
+        <button className="login-submit" type="submit" disabled={loading || !hasCandidates}>
           {loading ? 'Assigning…' : 'Assign foreman'}
         </button>
       </form>

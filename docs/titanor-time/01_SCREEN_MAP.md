@@ -248,13 +248,23 @@ touch target ≥ 48px), `/foreman/*` — desktop-first с поддержкой �
 - Роли: `ADMIN`, `SUPER_ADMIN`
 - Приоритет: desktop
 - Назначение: карточка объекта — данные, рабочие области, назначенные работники/прорабы
-- Данные: `WorkSite`, `WorkArea[]`, `SiteAssignment[]`, `ForemanAssignment[]`
-- Действия: редактировать, закрыть объект, добавить рабочую область
-- Состояния: loading; empty на вкладке «рабочие области»; error
+- Данные: `WorkSite`, `WorkArea[]`, `SiteAssignment[]`, `ForemanAssignment[]`, список кандидатов на
+  роль прораба (`listAssignableForemen()`)
+- Действия: редактировать, закрыть объект, добавить рабочую область; назначить прораба через
+  `<select>` (username/имя+`employeeNumber`, **без** UUID в видимом тексте) — только `User` с
+  текущей активной ролью `FOREMAN` (`validFrom <= now AND (validTo IS NULL OR validTo > now)`) и
+  `status IN (PENDING_ACTIVATION, ACTIVE)`; `PENDING_ACTIVATION` разрешён с явной подсказкой, что
+  войти прораб сможет только после активации своего аккаунта
+- Состояния: loading; empty на вкладке «рабочие области»; empty selector («No eligible foremen
+  yet.» + ссылка на `/admin/users/new`, submit назначения недоступен); error
 - Откуда: `/admin/sites`
-- Куда: `/admin/sites/[siteId]/work-areas`, `/admin/assignments/new?siteId=`
-- API: `GET/PATCH /api/admin/sites/:siteId`
-- DoD: закрытие объекта не удаляет существующие назначения
+- Куда: `/admin/sites/[siteId]/work-areas`, `/admin/assignments/new?siteId=`, `/admin/users/new`
+  (из empty selector)
+- API: `GET/PATCH /api/admin/sites/:siteId`, `POST /api/admin/foreman-assignments`
+- DoD: закрытие объекта не удаляет существующие назначения; selector — только UX-фильтр, сервер
+  повторно проверяет статус и текущую роль `FOREMAN` независимо от того, что показал selector
+  (`409 FOREMAN_NOT_ELIGIBLE` для `OFFBOARDING`/`DEACTIVATED`, `409 USER_NOT_FOREMAN` для
+  отсутствующей/будущей/завершённой роли)
 
 #### `/admin/sites/[siteId]/work-areas` 🟢
 - Роли: `ADMIN`, `SUPER_ADMIN`

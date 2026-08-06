@@ -186,6 +186,8 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
         return respond(404, errorBody({ code: 'SITE_NOT_FOUND', message: 'siteId does not reference an existing site.' }, requestId));
       case 'USER_NOT_FOREMAN':
         return respond(409, errorBody({ code: 'USER_NOT_FOREMAN', message: 'This user does not currently hold an active FOREMAN role.' }, requestId));
+      case 'FOREMAN_NOT_ELIGIBLE':
+        return respond(409, errorBody({ code: 'FOREMAN_NOT_ELIGIBLE', message: "This user's account status does not allow a foreman assignment (offboarded or deactivated)." }, requestId));
     }
   }
 

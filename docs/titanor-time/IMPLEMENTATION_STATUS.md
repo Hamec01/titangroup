@@ -1,5 +1,23 @@
 # Titanor Time — Implementation Status
 
+Обновлено: 2026-08-06 18:30 Europe/Helsinki (foreman assignment selector — no more raw UUID)
+`ForemanAssignmentSection` (`/admin/sites/:siteId`) больше не требует ручного ввода `foremanUserId` —
+`<select>`, заполненный `lib/foreman-assignments.ts`'s новой `listAssignableForemen()` (username/
+имя+`employeeNumber`, статус; UUID только как `option value`, никогда в видимом тексте). Дуал-роль и
+standalone `FOREMAN` — в одном списке; `PENDING_ACTIVATION` разрешён с явной подсказкой. Пустой
+selector даёт ссылку на `/admin/users/new` и блокирует submit. `createForemanAssignment()`
+одновременно исправлен: теперь дополнительно проверяет `User.status IN (PENDING_ACTIVATION,
+ACTIVE)` (`409 FOREMAN_NOT_ELIGIBLE` для `OFFBOARDING`/`DEACTIVATED`, даже если старая роль не
+отозвана) и правильное time-window текущей `FOREMAN`-роли (`validFrom <= now AND (validTo IS NULL
+OR validTo > now)` — раньше учитывался только `validTo: null`, future/ended роли ошибочно не
+отличались от текущей). Точный contract — `04_ADMIN_FIRST_API_CONTRACTS.md` §16. Prisma-схема и
+migrations не менялись. **Онбординг больше не требует от администратора ручного копирования
+UUID** — полный локальный путь (создать standalone `FOREMAN` → выпустить код → активировать →
+увидеть в selector → назначить на объект → войти под `FOREMAN` → `/foreman` видит назначенный
+объект) пройден headless-браузером на одноразовом PostgreSQL 16, без деплоя. Полный трёхролевой
+E2E (`SUPER_ADMIN`/`FOREMAN`/`WORKER` вместе, включая табели) — отдельная следующая задача (п.4
+ниже), этот шаг закрывает только сам путь назначения прораба.
+
 Обновлено: 2026-08-06 17:00 Europe/Helsinki (UI: foreman account activation)
 `/admin/users` (список + `/admin/users/new` создание `STANDALONE`/`EXISTING_EMPLOYEE`, выпуск/reissue
 кода с QR/copy/print) и публичный flow `/activate-account` → `/activate-account/[token]` →
@@ -90,9 +108,9 @@ insert, второй `PENDING` на тот же `userId` отклонён, `USED
   генерируемый QR/ссылка/печать, ручной ввод через `/activate`, подтверждение личности,
   `/set-password`, атомарная установка Argon2id-пароля, роль `WORKER` и автологин. Две миграции
   применены, Titanor Time app пересобран и production flow доступен.
-- **Нет управления системными пользователями и ролями.** Отсутствуют `/admin/users`, создание
-  `FOREMAN` и `role.assign`. UI назначения прораба уже требует ID пользователя, который заранее
-  имеет роль `FOREMAN`, но создать такого пользователя через приложение невозможно.
+- **Управление системными пользователями и ролями — частично закрыто.** `/admin/users`
+  (создание `FOREMAN`, credential flow) и selector назначения прораба (без ручного UUID) — см.
+  выше, реализованы локально. `role.assign` и создание `ADMIN`/`SUPER_ADMIN` — ещё отсутствуют.
 - Следовательно, контрольный результат из `TITANOR_TIME_DEVELOPMENT_ROADMAP.md` — «admin создал
   объект → зарегистрировал и назначил работника → работник активировался → вошёл → увидел
   назначение» — **никогда не был закрыт end-to-end**. Реализованные ЭТАП 7 и T7.9 проверялись на
@@ -106,11 +124,12 @@ insert, второй `PENDING` на тот же `userId` отклонён, `USED
 2. **Выполнено:** activation vertical slice целиком (утверждённый schema checkpoint →
    migrations → issue/reissue code → QR/manual activate → set password → auto-login).
    **Production deployment выполнен 2026-08-06.**
-3. **Выполнено локально:** `/admin/users` для создания `FOREMAN` (backend + UI, включая
-   `/admin/users/new`, выпуск/reissue кода с QR/copy/print) и весь credential flow
-   (`/activate-account` → `/activate-account/[token]` → `/set-account-password`) — см. выше.
-   **Production ещё не обновлён** (миграции не применены, не задеплоено) — назначение прораба без
-   ручного SQL/CLI подтверждено только локально, не на реальном сервере.
+3. **Выполнено локально, полностью без ручного UUID/SQL/CLI:** `/admin/users` для создания
+   `FOREMAN` (backend + UI, включая `/admin/users/new`, выпуск/reissue кода с QR/copy/print), весь
+   credential flow (`/activate-account` → `/activate-account/[token]` → `/set-account-password`),
+   и теперь selector назначения прораба на объект (`/admin/sites/:siteId`) — см. выше.
+   **Production ещё не обновлён** (миграции не применены, не задеплоено) — весь путь подтверждён
+   только локально, не на реальном сервере.
 4. Только после этого провести настоящий первый E2E тремя отдельными аккаунтами
    (`SUPER_ADMIN`/`FOREMAN`/`WORKER`) и считать onboarding готовым к пилоту.
 5. После базового E2E, но до отчётов/PWA-пилота, реализовать утверждённый клиентом ЭТАП 7A

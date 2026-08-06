@@ -798,3 +798,47 @@ Backend-срез (`02_...`, §2.12): создание/пополнение то�
   `sameSite=lax`, `path=/`, `maxAge` = `SESSION_DURATION_MS`)
 - Ошибки: `400 VALIDATION_ERROR`, `403 CSRF_REJECTED`, `404 TOKEN_INVALID`,
   `409 ACCOUNT_NOT_ELIGIBLE`, `410 TOKEN_EXPIRED`, `410 TOKEN_USED`, `429 RATE_LIMITED`
+
+## 16. Назначение прораба (`ForemanAssignment`) — selector без UUID, реализовано
+
+`/admin/sites/:siteId` выбирает прораба через `<select>` (`lib/foreman-assignments.ts`'s
+`listAssignableForemen()`), а не текстовым UUID-полем. Selector — только UX-фильтр; сервер
+(`createForemanAssignment()`, вызывается из `POST /api/admin/foreman-assignments` ниже) повторяет
+ровно те же две проверки независимо от selector'а — прямой запрос с произвольным `foremanUserId`
+не может их обойти.
+
+**Eligibility (обе проверки обязательны, порядок фиксирован — статус раньше роли, чтобы
+`OFFBOARDING`/`DEACTIVATED` с не отозванной `FOREMAN`-ролью получал `FOREMAN_NOT_ELIGIBLE`, а не
+`USER_NOT_FOREMAN`)**:
+1. `User.status IN (PENDING_ACTIVATION, ACTIVE)` — `OFFBOARDING`/`DEACTIVATED` отклоняются даже
+   при наличии роли (ничего сегодня не отзывает `FOREMAN`-роль при смене статуса).
+   `PENDING_ACTIVATION` разрешён осознанно — прораба можно назначить на объект до того, как он
+   завершит собственную активацию.
+2. Текущая (не future, не ended) роль `FOREMAN`: `validFrom <= now AND (validTo IS NULL OR
+   validTo > now)`.
+
+#### (data) `listAssignableForemen()`
+- Не HTTP-эндпоинт — Server Component (`/admin/sites/:siteId`) читает эту функцию напрямую, как
+  `listEmployeesForForemanSelect()` в `lib/users.ts`
+- Форма элемента: `{ id, username, status, employee: null | { id, employeeNumber, firstName,
+  lastName } }`
+- Тот же набор `User`, что eligibility выше отбирает для `createForemanAssignment` — включает
+  `PENDING_ACTIVATION`, исключает `OFFBOARDING`/`DEACTIVATED`/future-role/ended-role/no-role;
+  standalone `FOREMAN` присутствует в том же списке, что дуал-роль
+- Сортировка: `(employee.lastName, employee.firstName)`, если `Employee` привязан, иначе
+  `username`; `username` — вторичный ключ сортировки при совпадении
+
+#### `POST /api/admin/foreman-assignments`
+- Permission: `foreman_assignment.create` (без изменений)
+- Request/response shape не менялись: `{ "foremanUserId", "siteId", "isSubstitute"?, "validFrom",
+  "validTo"? }` → `201` с полным `ForemanAssignment`
+- Ошибки: `400 VALIDATION_ERROR`, `404 FOREMAN_NOT_FOUND`/`SITE_NOT_FOUND`,
+  `409 FOREMAN_NOT_ELIGIBLE` (status `OFFBOARDING`/`DEACTIVATED`),
+  `409 USER_NOT_FOREMAN` (нет текущей роли `FOREMAN` — включает отсутствие роли вовсе, ещё не
+  начавшуюся (`validFrom > now`) и уже завершённую (`validTo <= now`) роль)
+- Malformed/неизвестный UUID — прежнее поведение не менялось: malformed → `400
+  VALIDATION_ERROR` до похода в БД, валидный но неизвестный → `404 FOREMAN_NOT_FOUND`
+- Audit: `FOREMAN_ASSIGNMENT_CREATED` — создаётся только при успехе, в той же транзакции, что
+  `INSERT` строки `ForemanAssignment`
+- Не менялись: выбор дат, `isSubstitute`, отсутствие overlap-проверки (несколько
+  прорабов/заместителей на объект — легитимно, `03_...`, §4.4)
