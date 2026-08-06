@@ -28,6 +28,8 @@ const MAX_PAGE_SIZE = 100;
 // documented format: lowercase ASCII letters, digits, dot, underscore, hyphen, 3-64 chars.
 const USERNAME_FORMAT = /^[a-z0-9._-]{3,64}$/;
 const EMAIL_FORMAT = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+// Same pattern as every other admin route taking a path/body UUID (e.g. app/api/admin/sites/route.ts).
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const MAX_EMAIL_LENGTH = 255;
 const VALID_LOCALES: Locale[] = ['FI', 'EN', 'RU'];
 const DEFAULT_LOCALE: Locale = 'FI';
@@ -205,8 +207,8 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     }
 
     const { employeeId } = bodyObject as { employeeId?: unknown };
-    if (typeof employeeId !== 'string' || employeeId.length === 0) {
-      return respond(400, errorBody({ code: 'VALIDATION_ERROR', message: 'Invalid request body.', fieldErrors: { employeeId: ['required'] } }, requestId));
+    if (typeof employeeId !== 'string' || !UUID_PATTERN.test(employeeId)) {
+      return respond(400, errorBody({ code: 'VALIDATION_ERROR', message: 'Invalid request body.', fieldErrors: { employeeId: ['invalid'] } }, requestId));
     }
 
     const result = await grantForemanToExistingEmployee(employeeId, authenticated.user.id, requestId);
@@ -216,7 +218,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
         EMPLOYEE_NOT_FOUND: { status: 404, message: 'Employee not found.' },
         EMPLOYEE_USER_MISSING: { status: 409, message: 'Employee has no linked User.' },
         USER_NOT_ELIGIBLE: { status: 409, message: 'User status does not allow granting FOREMAN.' },
-        USER_ALREADY_FOREMAN: { status: 409, message: 'User already has an active FOREMAN role.' }
+        USER_ALREADY_FOREMAN: { status: 409, message: 'User already has an active or scheduled FOREMAN role.' }
       };
       const mapped = statusAndMessage[result.code];
       return respond(mapped.status, errorBody({ code: result.code, message: mapped.message }, requestId));

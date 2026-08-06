@@ -196,13 +196,12 @@ export type GrantForemanError =
  * Mode B ("EXISTING_EMPLOYEE"): the Employee already has a User (created by
  * POST /api/admin/workers) — this never creates a second User (User.employeeId is unique).
  * Locks the Employee row first so two concurrent grant attempts for the same employee serialize
- * (the second sees the first's new active UserRole under
- * ex_user_role_active_unique and returns USER_ALREADY_FOREMAN, not a bare P2002). A past
- * (validTo set) FOREMAN UserRole does not block a new one — history is preserved, not reused.
- * PENDING_ACTIVATION and ACTIVE are both eligible; OFFBOARDING/DEACTIVATED are not — this User
- * status is not touched by this function either way. If PENDING_ACTIVATION, the existing worker
- * ActivationToken flow (unchanged) is still how they get their first password; if ACTIVE, no
- * token is needed.
+ * (the second sees the first's new active-or-scheduled UserRole and returns USER_ALREADY_FOREMAN,
+ * not a bare P2002). A past (validTo <= now) FOREMAN UserRole does not block a new one — history
+ * is preserved, not reused. PENDING_ACTIVATION and ACTIVE are both eligible; OFFBOARDING/
+ * DEACTIVATED are not — this User status is not touched by this function either way. If
+ * PENDING_ACTIVATION, the existing worker ActivationToken flow (unchanged) is still how they get
+ * their first password; if ACTIVE, no token is needed.
  */
 export async function grantForemanToExistingEmployee(employeeId: string, actorUserId: string, requestId: string): Promise<CreatedForemanUser | GrantForemanError> {
   const outcome = await prisma.$transaction(async (tx) => {
@@ -226,7 +225,7 @@ export async function grantForemanToExistingEmployee(employeeId: string, actorUs
             status: true,
             locale: true,
             createdAt: true,
-            userRoles: { select: { validTo: true, role: { select: { name: true } } } }
+            userRoles: { select: { validFrom: true, validTo: true, role: { select: { name: true } } } }
           }
         }
       }
@@ -242,8 +241,15 @@ export async function grantForemanToExistingEmployee(employeeId: string, actorUs
     }
 
     const now = new Date();
-    const isActiveRole = (ur: { validTo: Date | null }) => ur.validTo === null || ur.validTo > now;
-    if (user.userRoles.some((ur) => ur.role.name === 'FOREMAN' && isActiveRole(ur))) {
+    // "Not yet ended" — blocks a duplicate grant whether the existing FOREMAN role is currently
+    // active (validFrom <= now) or scheduled to start later (validFrom > now); only a role that
+    // has already ended (validTo <= now) lets a new grant through.
+    const isUnended = (ur: { validTo: Date | null }) => ur.validTo === null || ur.validTo > now;
+    // "Currently active" — additionally requires validFrom <= now; used only for the roles
+    // reported back in the response, never for the duplicate guard above.
+    const isCurrentlyActive = (ur: { validFrom: Date; validTo: Date | null }) => ur.validFrom <= now && isUnended(ur);
+
+    if (user.userRoles.some((ur) => ur.role.name === 'FOREMAN' && isUnended(ur))) {
       return { code: 'USER_ALREADY_FOREMAN' as const };
     }
 
@@ -260,7 +266,7 @@ export async function grantForemanToExistingEmployee(employeeId: string, actorUs
       afterValue: { userId: user.id, employeeId: employee.id, role: 'FOREMAN' }
     });
 
-    const activeRoleNames = new Set(user.userRoles.filter(isActiveRole).map((ur) => ur.role.name));
+    const activeRoleNames = new Set(user.userRoles.filter(isCurrentlyActive).map((ur) => ur.role.name));
     activeRoleNames.add('FOREMAN');
 
     return {

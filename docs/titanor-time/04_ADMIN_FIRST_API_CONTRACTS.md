@@ -704,16 +704,24 @@ Backend-срез (`02_...`, §2.12): создание/пополнение то�
 ```json
 { "mode": "EXISTING_EMPLOYEE", "employeeId": "uuid" }
 ```
-  `username`/`email`/`locale` в этом режиме → `400 VALIDATION_ERROR`. `Employee` уже имеет `User`
-  (создан через `POST /api/admin/workers`) — второй `User` не создаётся никогда. Атомарно: активная
-  `UserRole(FOREMAN)` на существующем `User` (прежняя завершённая роль `FOREMAN`, если была, не
-  переиспользуется — создаётся новая) + `AuditEvent(FOREMAN_ROLE_GRANTED)`. `User.status` не
-  меняется: `PENDING_ACTIVATION` продолжает обычный worker-activation flow, `ACTIVE` не требует
-  токена.
-- Response `201` — тот же элемент, что в `GET` (`employee` заполнено только в `EXISTING_EMPLOYEE`)
+  `employeeId` — строгий UUID-формат (тот же `UUID_PATTERN`, что во всех остальных admin routes);
+  malformed значение (не UUID) → `400 VALIDATION_ERROR`, `fieldErrors.employeeId=["invalid"]`, не
+  доходит до БД (без этого — cast error `22P02`/`500`). `username`/`email`/`locale` в этом режиме →
+  `400 VALIDATION_ERROR`. `Employee` уже имеет `User` (создан через `POST /api/admin/workers`) —
+  второй `User` не создаётся никогда. Duplicate/reservation guard: если у `User` уже есть
+  **не завершённая** `UserRole(FOREMAN)` — `validTo IS NULL OR validTo > now` — новый grant
+  запрещён (`409 USER_ALREADY_FOREMAN`); это относится и к текущей (`validFrom <= now`), и к
+  запланированной будущей (`validFrom > now`) роли — обе считаются «active or scheduled». Только
+  уже завершённая роль (`validTo <= now`) не блокирует и не переиспользуется — создаётся новая
+  активная `UserRole(FOREMAN)` + `AuditEvent(FOREMAN_ROLE_GRANTED)`. `User.status` не меняется:
+  `PENDING_ACTIVATION` продолжает обычный worker-activation flow, `ACTIVE` не требует токена.
+- Response `201` — тот же элемент, что в `GET` (`employee` заполнено только в `EXISTING_EMPLOYEE`);
+  `roles` — только текущие роли (`validFrom <= now AND (validTo IS NULL OR validTo > now)`);
+  запланированная будущая роль не попадает в `roles`, пока не наступит её `validFrom`
 - Ошибки: `400 VALIDATION_ERROR`, `404 EMPLOYEE_NOT_FOUND`, `409 EMPLOYEE_USER_MISSING` (у
   `Employee` нет `User`), `409 USER_NOT_ELIGIBLE` (`status` не `PENDING_ACTIVATION`/`ACTIVE`),
-  `409 USER_ALREADY_FOREMAN`, `409 DUPLICATE_USERNAME`, `409 DUPLICATE_EMAIL`
+  `409 USER_ALREADY_FOREMAN` (active or scheduled `FOREMAN` role уже существует),
+  `409 DUPLICATE_USERNAME`, `409 DUPLICATE_EMAIL`
 - Idempotency: обязателен (`X-Requested-With: titanor-time` + `Idempotency-Key`)
 - Audit: `USER_CREATED` (`STANDALONE`, `entityType USER`) / `FOREMAN_ROLE_GRANTED`
   (`EXISTING_EMPLOYEE`, `entityType USER_ROLE`, `entityId` — id новой `UserRole`)
