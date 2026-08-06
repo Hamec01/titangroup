@@ -1,6 +1,6 @@
 # Titanor Time — карта экранов
 
-Версия: **5.4.1** (2026-07-23). Статус: **proposed architecture**. Источник истины для route-имён
+Версия: **5.5.0** (2026-08-06). Статус: **proposed architecture**. Источник истины для route-имён
 (используются в `02_ROLE_PERMISSION_MATRIX.md` и `04_ADMIN_FIRST_API_CONTRACTS.md`). Документ
 самодостаточен — каждый экран описан полностью.
 
@@ -13,8 +13,8 @@ touch target ≥ 48px), `/foreman/*` — desktop-first с поддержкой �
 
 **Дуал-роль**: пользователь может одновременно иметь `FOREMAN` и `WORKER` (см.
 `02_ROLE_PERMISSION_MATRIX.md`, §1) — прораб, который сам работает руками. Для такого пользователя
-`/foreman/*` и `/worker/*` оба доступны; после логина он попадает на `/foreman`, а
-`/worker/periods/[periodId]` доступен из общей навигации для ввода собственных часов. Сервер не
+`/foreman/*` и `/worker/*` оба доступны; после логина он попадает на `/foreman`, а `/worker`
+доступен из общей навигации для собственных Check In/Out и часов. Сервер не
 даёт такому пользователю утвердить/вернуть/подтвердить собственный табель
 (`403 SELF_APPROVAL_FORBIDDEN`) ни через `/foreman/*`, ни через административный fallback.
 
@@ -32,8 +32,8 @@ touch target ≥ 48px), `/foreman/*` — desktop-first с поддержкой �
 - Откуда: прямой заход, редирект с любого защищённого route без сессии, logout
 - Куда: зависит от ролей пользователя (`GET /api/auth/session` возвращает массив `roles`): есть
   `ADMIN`/`SUPER_ADMIN` → `/admin`; иначе есть `FOREMAN` → `/foreman`; только `WORKER` →
-  `/worker/periods/[periodId]` текущего actionable периода, либо `/worker/periods` (список), если
-  таких периодов несколько, либо empty state, если ни одного нет
+  `/worker` (домашний mobile-first clock; внутри показан текущий actionable период либо понятный
+  empty state)
 - API: `POST /api/auth/login`
 - DoD: rate limit после 5 попыток/15мин на аккаунт + 50/15мин на IP; `INVALID_CREDENTIALS` не
   раскрывает, что именно неверно
@@ -68,7 +68,7 @@ touch target ≥ 48px), `/foreman/*` — desktop-first с поддержкой �
 - Действия: submit пароля дважды
 - Состояния: loading; error (валидация пароля, `TOKEN_EXPIRED` если истёк между экранами)
 - Откуда: `/activate/[token]`
-- Куда: автологин → `/worker/periods/[periodId]`; на самом экране показывается `username`/employee
+- Куда: автологин → `/worker`; на самом экране показывается `username`/employee
   number с кнопкой копирования
 - API: `POST /api/auth/set-initial-password`
 - DoD: пароль установлен, токен переходит в `USED`, повторное использование токена невозможно
@@ -415,8 +415,11 @@ touch target ≥ 48px), `/foreman/*` — desktop-first с поддержкой �
 #### `/admin/timesheets` ⚪
 - Роли: `ADMIN`, `SUPER_ADMIN`
 - Приоритет: desktop
-- Назначение: список табелей с фильтром по периоду/объекту/статусу
-- Данные: `Timesheet` + `TimesheetVersion` (текущая) + `Employee`
+- Назначение: полный операционный обзор всех работников и список табелей с фильтром по
+  периоду/объекту/статусу
+- Данные: `Timesheet` + `TimesheetVersion` (текущая) + `Employee`; после ЭТАП 7A — агрегаты
+  `working now`, `finished`, `missing checkout`, `GPS/sync issue`, `draft`, `manual/auto submitted`,
+  `awaiting foreman`, `returned`, `ready for final approval`, `correction`
 - Действия: фильтр, сортировка, → карточка
 - Состояния: loading; empty; error
 - Откуда: nav, `/admin/periods/[periodId]`
@@ -449,7 +452,9 @@ touch target ≥ 48px), `/foreman/*` — desktop-first с поддержкой �
 - Состояния: loading; error
 - Откуда: `/admin/timesheets/[timesheetId]`
 - API: `GET /api/admin/timesheets/:timesheetId/versions`
-- DoD: diff корректно показывает добавленные/удалённые/изменённые интервалы
+- DoD: diff корректно показывает добавленные/удалённые/изменённые интервалы; после ЭТАП 7A рядом с
+  каждой версией видны `MANUAL`/`AUTO`, cutoff, кому и когда она отправлена, site-scope статусы и
+  исключения, блокирующие final approval
 
 #### `/admin/timesheets/[timesheetId]/approve` ⚪
 - Роли: `ADMIN`, `SUPER_ADMIN`
@@ -511,9 +516,31 @@ touch target ≥ 48px), `/foreman/*` — desktop-first с поддержкой �
 
 ## 3. Работник (`/worker/*`, mobile-first)
 
-Все экраны работника параметризованы `periodId` (и внутри — `timesheetId`, резолвится сервером из
+Ежедневная домашняя страница `/worker` не требует от работника понимать период или табель. Экраны
+кабинета параметризованы `periodId` (и внутри — `timesheetId`, резолвится сервером из
 `periodId`+сессии). Работник может иметь несколько actionable периодов одновременно — навигация
-между ними явная.
+между ними явная, но обычный Check In/Out всегда доступен с домашней страницы.
+
+#### `/worker` 🟢 (после ЭТАП 7A — основной экран после логина)
+- Роли: `WORKER`
+- Приоритет: mobile-first, 375px, touch-target ≥48px, основное действие доступно одной рукой
+- Назначение: максимально простой ежедневный clock без плотной таблицы и бухгалтерских терминов
+- Данные: имя работника, локальная дата/день/время, активные назначения и основной объект, открытая
+  clock-смена, GPS/sync-state, компактные интервалы `Today`, итог `This week`, ближайший cutoff
+- Действия: доминирующая `Check In`; при активной смене — таймер и доминирующая `Check Out`;
+  `Switch site` (атомарные Check Out старого + Check In нового); `Add break`; открыть меню
+- Меню: `Today`, `My week`, `All hours`, `Corrections`, `Profile`, `Help`, `Logout`
+- Состояния: `ready to check in`; `working`; `saved on device — waiting for sync`;
+  `GPS_NOT_VERIFIED`; `outside geofence`; `no assignment`; `missing checkout`; error. Активная смена
+  и несинхронизированное событие не теряются после закрытия/перезапуска PWA
+- Откуда: логин `WORKER`, worker-nav
+- Куда: `/worker/periods/[periodId]/hours`, `/worker/history`, `/worker/profile`
+- API: после schema checkpoint — worker clock/context/sync endpoints; существующие context,
+  assignments и timesheet endpoints переиспользуются для summary
+- DoD: при одном назначении `Check In` не требует выбора объекта; при нескольких выбор понятен до
+  старта; после нажатия пользователь сразу видит локально сохранённое состояние даже offline;
+  `Switch site` создаёт два последовательных события без пересечения; ни один warning не скрыт
+  только внутри меню
 
 #### `/worker/periods` ⚪ (список actionable периодов, точка входа при нескольких)
 - Роли: `WORKER`
@@ -529,24 +556,25 @@ touch target ≥ 48px), `/foreman/*` — desktop-first с поддержкой �
 
 #### `/worker/periods/[periodId]` 🟢
 - Роли: `WORKER`
-- Приоритет: mobile (основной экран после логина, если actionable период один)
+- Приоритет: mobile (подробный кабинет периода из `/worker` или `My week`)
 - Назначение: показать объект(ы), рабочую область, шаблон и статус табеля этого периода — финальная
-  точка первого вертикального сценария; после ЭТАП 7A это также основной ежедневный clock-экран
+  точка первого вертикального сценария; после ЭТАП 7A это подробный недельный кабинет, а не
+  ежедневный clock-экран
 - Данные: активные `SiteAssignment[]` (может быть несколько, `isPrimary` — основной), `PayrollPeriod`,
-  `Timesheet.status`; после ЭТАП 7A — активная clock-смена, sync-state и кешированный снимок геозон
-- Действия: после ЭТАП 7A главное действие — большая `Check In` либо, при активной смене, таймер и
-  большая `Check Out`; перейти к вводу часов (если `DRAFT`/`RETURNED`) или посмотреть статус (если
-  `SUBMITTED`/`FOREMAN_APPROVED` — read-only, «ожидает проверки»). После Check Out — `Add break`,
-  ведущая в существующий редактор дня; отдельного break-таймера в первом срезе нет
+  `Timesheet.status`; после ЭТАП 7A — submission source/cutoff, site-scope route и exceptions
+- Действия: перейти к вводу часов (если draft/returned/withdrawn), посмотреть immutable отправленную
+  версию и её маршрут, вручную отправить; до начала review — явно `Withdraw` в **новый** draft;
+  после возврата — исправить и переотправить; после final approval — открыть correction request
 - Состояния: loading; **empty — критично**: нет ни одного активного назначения → «вам ещё не
-  назначили объект»; offline — баннер+кэш, а после ЭТАП 7A clock-событие сохраняется локально с
-  явным `waiting for sync`; GPS unavailable — clock разрешён как `GPS_NOT_VERIFIED`, не молчаливо
-- Откуда: `/worker/periods`, логин (если период один)
+  назначили объект»; offline — просмотр последнего кэша; `manual submitted`, `auto submitted`,
+  `auto submitted with exceptions`, `awaiting foreman`, `returned`, `ready for admin`,
+  `final approved`, `correction pending`
+- Откуда: `/worker`, `/worker/periods`
 - Куда: `/worker/periods/[periodId]/hours`
 - API: `GET /api/worker/timesheets/:timesheetId`, `GET /api/worker/assignments/current`
-- DoD: работник, назначенный пять минут назад, видит правильные данные без релогина;
-  `SUBMITTED`-табель показывает «ожидает проверки», не пускает редактировать; после ЭТАП 7A offline
-  Check In/Check Out переживает закрытие PWA и синхронизируется ровно один раз
+- DoD: работник, назначенный пять минут назад, видит правильные данные без релогина; отправленная
+  версия никогда не редактируется на месте, но экран всегда объясняет доступный путь исправления и
+  показывает, кому/когда она отправлена и что ожидается дальше
 
 #### `/worker/periods/[periodId]/hours` ⚪ (ввод часов — фаза 3 роадмапа)
 - Роли: `WORKER`
@@ -563,9 +591,9 @@ touch target ≥ 48px), `/foreman/*` — desktop-first с поддержкой �
 - Куда: `/worker/periods/[periodId]/hours/[date]`
 - API: `GET /api/worker/timesheets/:timesheetId/draft` (редактируемое состояние),
   `GET /api/worker/timesheets/:timesheetId/current-version` (read-only состояние)
-- DoD: попытка редактировать в `SUBMITTED`-состоянии — UI не показывает элементы редактирования
-  вовсе, только просмотр (сервер также отклоняет `409 DRAFT_NOT_EDITABLE`, если запрошен draft
-  напрямую)
+- DoD: попытка изменить immutable `SUBMITTED`-версию на месте отклоняется; UI вместо тупика
+  предлагает разрешённый lifecycle-action: `Withdraw` до начала review, обработать `RETURNED`, либо
+  correction request после final approval. Любое исправление создаёт новую версию, старую не меняет
 
 #### `/worker/periods/[periodId]/hours/[date]` ⚪
 - Роли: `WORKER`
@@ -611,20 +639,24 @@ touch target ≥ 48px), `/foreman/*` — desktop-first с поддержкой �
 - Роли: `WORKER`
 - Приоритет: mobile
 - Назначение: подтверждение отправки табеля
-- Данные: сводка перед отправкой; если есть `OPEN`-предложения — список, submit недоступен
+- Данные: сводка перед отправкой; если есть `OPEN`-предложения — список, submit недоступен;
+  ближайший company cutoff и пояснение, что при отсутствии ручной отправки scheduler отправит
+  текущий снимок на проверку, но не утвердит его
 - Действия: `timesheet.submit`
 - Состояния: loading; error (`409 UNRESOLVED_PROPOSALS` — список дней, требующих решения, ссылка на
   каждый; `409 INVALID_STATE_TRANSITION`)
 - Откуда: `/worker/periods/[periodId]/hours`
 - Куда: `/worker/periods/[periodId]` (статус «ожидает проверки»)
 - API: `POST /api/worker/timesheets/:timesheetId/submit`
-- DoD: попытка отправить с необработанным предложением — явный список, не общая ошибка
+- DoD: попытка отправить с необработанным предложением — явный список, не общая ошибка; повторный
+  ручной submit или scheduler для уже отправленной версии не создаёт дубль
 
 #### `/worker/history` ⚪
 - Роли: `WORKER`
 - Приоритет: mobile
 - Назначение: список всех периодов работника (не только actionable) и их статус
-- Данные: `Timesheet[]` (все периоды работника)
+- Данные: `Timesheet[]` (все периоды работника) с `MANUAL`/`AUTO`, timestamp отправки и текущим
+  review/correction status
 - Действия: → детали периода
 - Состояния: loading; empty; error
 - Откуда: `/worker/periods/[periodId]`, nav
@@ -691,7 +723,8 @@ FOREMAN_APPROVED` только когда все scope версии подтве
 - Роли: `FOREMAN`
 - Приоритет: desktop + планшет
 - Назначение: обзор — сколько табелей ожидает проверки на его объектах, реальные числа
-- Данные: агрегат `Timesheet.status` по назначенным объектам
+- Данные: агрегат `Timesheet.status` по назначенным объектам; после ЭТАП 7A отдельно manual/auto,
+  GPS/sync/missing-checkout exceptions и ожидающие site-scopes
 - Действия: → очередь проверки
 - Состояния: loading; empty (нет ожидающих); error
 - Откуда: логин `FOREMAN`
@@ -711,7 +744,8 @@ FOREMAN_APPROVED` только когда все scope версии подтве
 - Куда: `/foreman/review/standard`, `/foreman/review/exceptions`, `/foreman/review/[timesheetId]`
 - API: `GET /api/foreman/review-scopes?status=PENDING`
 - DoD: работник другого объекта никогда не появляется в этом списке; собственные scope прораба
-  (если он же `WORKER`) исключены
+  (если он же `WORKER`) исключены; после ЭТАП 7A видно, отправил ли работник сам или scheduler, но
+  обе версии проходят одинаковую проверку
 
 #### `/foreman/review/standard` ⚪
 - Роли: `FOREMAN`
@@ -726,7 +760,8 @@ FOREMAN_APPROVED` только когда все scope версии подтве
 - Приоритет: desktop
 - Назначение: scope с отклонениями — требуют индивидуального просмотра, недоступны для массового
   подтверждения
-- Данные: подмножество где `hasException=true`
+- Данные: подмножество где `hasException=true`, включая `GPS_NOT_VERIFIED`, missing checkout,
+  unresolved sync conflict и auto-submit неполных данных
 - Действия: → карточка табеля
 - API: `GET /api/foreman/review-scopes?status=PENDING&hasException=true`
 
@@ -808,7 +843,8 @@ FOREMAN_APPROVED` только когда все scope версии подтве
   scope, чей `Timesheet.status` уже не `SUBMITTED` — сервер отклоняет весь запрос с точным списком
   проблемных id)
 - API: `POST /api/foreman/review-scopes/bulk-approve`
-- DoD: массовое подтверждение атомарно — либо весь пакет проходит, либо ни один
+- DoD: массовое подтверждение атомарно — либо весь пакет проходит, либо ни один; версия
+  `AUTO_SUBMITTED_WITH_EXCEPTIONS` не может попасть в bulk approve до разрешения исключений
 
 #### `/foreman/workers` ⚪
 - Роли: `FOREMAN`
@@ -838,7 +874,7 @@ flowchart TD
     D -->|успех| E{Роль}
     E -->|ADMIN/SUPER_ADMIN| F["/admin/setup или /admin"]
     E -->|FOREMAN| G["/foreman"]
-    E -->|WORKER| H["/worker/periods/[periodId]"]
+    E -->|WORKER| H["/worker — Today / Check In-Out"]
     D -->|забыл пароль| I["/reset-password/request"]
     I --> J["/reset-password/[token]"]
     J --> D
@@ -856,22 +892,30 @@ flowchart LR
     S6 --> S7["код активации выдан"]
     S7 --> S8["/activate/token → /set-password"]
     S8 --> S9["/login"]
-    S9 --> S10["/worker/periods/periodId — видит объект, область, шаблон, период"]
+    S9 --> S10["/worker — видит объект и готов к Check In"]
 ```
 
 ### 5.3 Ежедневный цикл работника
 
 ```mermaid
 flowchart TD
-    W1["/worker/periods/periodId"] --> W2["/worker/periods/periodId/hours/date"]
-    W2 --> W3["/worker/periods/periodId — обзор"]
-    W3 --> W4["/worker/periods/periodId/submit"]
-    W4 -->|UNRESOLVED_PROPOSALS| W2
-    W4 -->|foreman/admin возвращает| W5["/worker/history/timesheetId — видит расхождение"]
-    W5 -->|принять предложение| W5b["proposal ACCEPTED в draft"]
-    W5b --> W4
-    W5 -->|исправить самому| W2
-    W4 -->|все scope APPROVED| W6["FOREMAN_APPROVED"]
+    W1["/worker — Today"] --> W2["Check In + GPS snapshot"]
+    W2 --> W3["WORKING — timer"]
+    W3 -->|Switch site| W4["Check Out A + Check In B"]
+    W3 -->|конец дня| W5["Check Out + GPS snapshot"]
+    W4 --> W5
+    W5 --> W6["Today / My week — recorded time"]
+    W6 -->|нужно уточнить| W7["hours/date — reported time + reason"]
+    W7 --> W6
+    W6 -->|manual submit| W8["immutable version, source MANUAL"]
+    W6 -->|cutoff, не отправил| W9["immutable version, source AUTO"]
+    W9 -->|есть проблемы| W10["AUTO_SUBMITTED_WITH_EXCEPTIONS"]
+    W8 --> W11["site-scopes → foreman/admin review"]
+    W9 --> W11
+    W10 --> W11
+    W11 -->|return| W12["новый draft + before/after"]
+    W12 --> W6
+    W11 -->|все scope approved| W13["READY FOR ADMIN → FINAL_APPROVED"]
 ```
 
 ### 5.4 Проверка → финальное утверждение (включая административный fallback)
