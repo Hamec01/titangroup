@@ -1,6 +1,6 @@
 # Titanor Time — Implementation Status
 
-Обновлено: 2026-08-06 (activation vertical slice реализован локально; production hand-off ожидает владельца)
+Обновлено: 2026-08-06 (activation vertical slice реализован, проверен и задеплоен в production)
 
 ## CURRENT PRODUCT GAP — onboarding всё ещё нельзя считать завершённым
 
@@ -24,11 +24,11 @@
 - **Шаблоны нельзя обслуживать после первого создания.** Документы помечают `/admin/templates` и
   `/admin/templates/[templateId]` как целевые list/edit экраны, но физически есть только
   `/admin/templates/new` и `GET/POST /api/admin/templates`; dynamic page/API edit отсутствуют.
-- **Активация работника закрыта в локальном коде этой задачи.** Добавлены `ActivationToken`,
+- **Активация работника закрыта и задеплоена.** Добавлены `ActivationToken`,
   permission `worker.activation.generate`, admin issue/reissue, одноразовый показ кода, локально
   генерируемый QR/ссылка/печать, ручной ввод через `/activate`, подтверждение личности,
-  `/set-password`, атомарная установка Argon2id-пароля, роль `WORKER` и автологин. До применения
-  двух новых миграций владельцем и redeploy это ещё не доступно в production.
+  `/set-password`, атомарная установка Argon2id-пароля, роль `WORKER` и автологин. Две миграции
+  применены, Titanor Time app пересобран и production flow доступен.
 - **Нет управления системными пользователями и ролями.** Отсутствуют `/admin/users`, создание
   `FOREMAN` и `role.assign`. UI назначения прораба уже требует ID пользователя, который заранее
   имеет роль `FOREMAN`, но создать такого пользователя через приложение невозможно.
@@ -42,9 +42,9 @@
 1. **Выполнено:** admin shell/nav; все существующие разделы доступны постоянно; `DONE` в setup
    получает действие `Manage` (для шаблона — `Create another`), `NOT DONE` — `Create`; `Work area`
    ведёт к выбору/карточке объекта.
-2. **Выполнено локально:** activation vertical slice целиком (утверждённый schema checkpoint →
-   migrations → issue/reissue code → QR/manual activate → set password → auto-login). Production
-   deployment остаётся owner checkpoint.
+2. **Выполнено:** activation vertical slice целиком (утверждённый schema checkpoint →
+   migrations → issue/reissue code → QR/manual activate → set password → auto-login).
+   **Production deployment выполнен 2026-08-06.**
 3. Реализовать минимальный `/admin/users` для создания `FOREMAN`; затем проверить назначение
    прораба без ручного SQL/CLI.
 4. Только после этого провести настоящий первый E2E тремя отдельными аккаунтами
@@ -52,8 +52,8 @@
 5. После базового E2E, но до отчётов/PWA-пилота, реализовать утверждённый клиентом ЭТАП 7A
    (Attendance Clock + GPS snapshots + offline-first sync) отдельными design/code checkpoint.
 
-До production hand-off пункта 2 и закрытия пунктов 3–4 приложение следует считать
-**backend-capable, но не operator-ready**:
+До закрытия пунктов 3–4 приложение следует считать **backend-capable, но ещё не полностью
+operator-ready**:
 владелец не обязан знать или вручную вводить скрытые URL, UUID пользователей или SQL-команды.
 
 ## OWNER-APPROVED PRODUCT REQUIREMENT — ЭТАП 7A ATTENDANCE CLOCK
@@ -2763,7 +2763,7 @@ UI на обеих сторонах (работник и админ), не то�
 
 **T7.9 реализован в ADMIN-only срезе.** Схема применена владельцем; текущая локальная задача добавляет admin API/UI и DML-миграцию permission. После её owner-применения и deploy останутся отдельные design-gated задачи: `period.export` (нужна `ExportBatch`/`ExportItem`), `TimesheetReviewProposal`/`propose-correction`, `ApprovalAction`/`foreman/history` и WORKER/FOREMAN correction-request формы.
 
-## 11.1 Activation vertical slice — локально завершён, production не изменён
+## 11.1 Activation vertical slice — реализован и задеплоен
 
 Owner-approved checkpoint реализован как один вертикальный срез:
 
@@ -2803,12 +2803,33 @@ Owner-approved checkpoint реализован как один вертикал�
   все проверки прошли; route-handler API checks дополнительно подтвердили `401` без session, `403`
   для WORKER, `404` malformed UUID, `201` для ADMIN, public verify, CSRF rejection, activation cookie
   и replay→`410`;
-- disposable container удалён автоматически. Production database/app и прочие контейнеры не
-  мигрировались, не пересобирались и не перезапускались.
+- disposable container удалён автоматически; на этой стадии production database/app ещё не
+  менялись.
 
-Production hand-off после отдельного подтверждения владельца: добавить реальный
-`ACTIVATION_TOKEN_HMAC_KEY` в локальный production env (не коммитить), применить ровно две pending
-migrations, пересобрать/перезапустить только Titanor Time app и выполнить браузерный smoke flow.
+Production hand-off выполнен после явного подтверждения владельца 2026-08-06:
+
+- перед migration создан backup `backups/titanor-time-pre-activation-20260806.dump` (191869 bytes,
+  mode 600); `pg_restore --list` и полный restore в отдельный disposable PostgreSQL 16 прошли,
+  восстановлено 40 finished migrations и 38 application tables, контейнер удалён;
+- `ACTIVATION_TOKEN_HMAC_KEY` сгенерирован как 32 random bytes, canonical base64, добавлен только в
+  ignored `.env.titanor-time` без вывода значения; mode env-файла остался 600; Compose config
+  validation прошла;
+- применены только `20260805170000_add_activation_token` и
+  `20260805171000_seed_worker_activation_permission`; повторный deploy — `No pending migrations`;
+  production catalog: 42 finished migrations, `ActivationToken` table, 2 CHECK, partial unique
+  index, permission holders ровно `ADMIN,SUPER_ADMIN`, до первого реального выпуска token rows=0;
+- образ из commit `c630595` собран с Prisma Client 6.19.0 и успешным Next.js 16.2.12 production
+  build; пересоздан только `titanor-time-app-1` (`--no-deps`), DB не перезапускалась;
+- post-deploy: app healthy/restarts=0; `/api/health` 200, `/api/ready` 200, `/activate` 200,
+  invalid `/api/auth/activate` 404; headless Chromium mobile smoke подтвердил heading/input/button,
+  видимую client validation и отсутствие console/page errors;
+- `titanor-time-db-1`, `collab-studio-app-1`, `collab-studio-postgres-1`, `titanorgroup-web-1`
+  сохранили прежние StartedAt и restart count 0.
+
+Незафиксированный activation-блокер отсутствует. `npm audit` во время сборки по-прежнему сообщает
+6 high advisories в существующем Next/Prisma dependency tree; автоматический `npm audit fix` не
+запускался, поскольку upgrade зависимостей — отдельная проверяемая задача, не часть deployment
+activation.
 
 ## 12. Правило обновления
 
