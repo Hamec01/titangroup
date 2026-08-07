@@ -21,6 +21,18 @@ export function WorkerActions({ worker }: { worker: WorkerDetail }) {
   const [deactivateLoading, setDeactivateLoading] = useState(false);
   const [deactivateError, setDeactivateError] = useState<string | null>(null);
 
+  const [showRegenerateConfirm, setShowRegenerateConfirm] = useState(false);
+  const [regenerateLoading, setRegenerateLoading] = useState(false);
+  const [regenerateError, setRegenerateError] = useState<string | null>(null);
+  const [regenerateResult, setRegenerateResult] = useState<{ username: string; changed: boolean } | null>(null);
+  const [usernameCopied, setUsernameCopied] = useState(false);
+
+  const currentUsername = regenerateResult?.username ?? worker.username;
+  // Covers both a still-numeric username and a stale base from a since-renamed Employee
+  // (lib/workers.ts's WorkerDetail.recommendedUsernameBase) — hidden once a regenerate just
+  // succeeded so the button doesn't reappear before router.refresh() lands the new username.
+  const needsFriendlyLogin = !regenerateResult && !worker.username.startsWith(worker.recommendedUsernameBase);
+
   const [activationLoading, setActivationLoading] = useState(false);
   const [activationError, setActivationError] = useState<string | null>(null);
   const [issuedCode, setIssuedCode] = useState<{ code: string; expiresAt: string } | null>(null);
@@ -108,6 +120,57 @@ export function WorkerActions({ worker }: { worker: WorkerDetail }) {
       setCodeCopied(true);
     } catch {
       // Clipboard API unavailable — the code is still shown as plain text below.
+    }
+  }
+
+  async function copyUsername(): Promise<void> {
+    try {
+      await navigator.clipboard.writeText(currentUsername);
+      setUsernameCopied(true);
+    } catch {
+      // Clipboard API unavailable — the username is still shown as plain text.
+    }
+  }
+
+  async function handleRegenerateUsername(): Promise<void> {
+    if (regenerateLoading) {
+      return;
+    }
+    setRegenerateError(null);
+    setRegenerateLoading(true);
+
+    try {
+      const response = await fetch(`/api/admin/workers/${worker.id}/regenerate-username`, {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json', 'X-Requested-With': CSRF_HEADER_VALUE }
+      });
+
+      if (!response.ok) {
+        const code = await parseErrorCode(response);
+        switch (code) {
+          case 'WORKER_NOT_FOUND':
+            setRegenerateError('This worker no longer exists.');
+            break;
+          case 'FORBIDDEN':
+            setRegenerateError('You no longer have permission to change worker logins.');
+            break;
+          default:
+            setRegenerateError('Something went wrong. Please try again.');
+        }
+        setRegenerateLoading(false);
+        return;
+      }
+
+      const body = (await response.json()) as { username: string; changed: boolean };
+      setRegenerateResult({ username: body.username, changed: body.changed });
+      setUsernameCopied(false);
+      setShowRegenerateConfirm(false);
+      setRegenerateLoading(false);
+      router.refresh();
+    } catch {
+      setRegenerateError('Network error. Please try again.');
+      setRegenerateLoading(false);
     }
   }
 
@@ -254,6 +317,51 @@ export function WorkerActions({ worker }: { worker: WorkerDetail }) {
         </button>
       </form>
 
+      <h2>Login</h2>
+      <p>
+        Login username: <strong>{currentUsername}</strong>{' '}
+        <button type="button" className="login-submit" onClick={copyUsername}>
+          {usernameCopied ? 'Copied' : 'Copy'}
+        </button>
+      </p>
+      {regenerateResult ? (
+        <p role="status">
+          {regenerateResult.changed
+            ? "The login username was updated. The worker's password and current sessions remain valid."
+            : 'This worker already has the current friendly login — nothing changed.'}
+        </p>
+      ) : null}
+      {needsFriendlyLogin ? (
+        !showRegenerateConfirm ? (
+          <button type="button" className="login-submit" onClick={() => setShowRegenerateConfirm(true)}>
+            Generate friendly login
+          </button>
+        ) : (
+          <div>
+            <p role="alert">
+              The worker must use the new username for future logins. Their password and current sessions will
+              remain valid.
+            </p>
+            <button type="button" className="login-submit" disabled={regenerateLoading} onClick={handleRegenerateUsername}>
+              {regenerateLoading ? 'Generating…' : 'Confirm'}
+            </button>
+            <button
+              type="button"
+              className="login-submit"
+              disabled={regenerateLoading}
+              onClick={() => setShowRegenerateConfirm(false)}
+            >
+              Cancel
+            </button>
+          </div>
+        )
+      ) : null}
+      {regenerateError ? (
+        <p className="login-error" role="alert">
+          {regenerateError}
+        </p>
+      ) : null}
+
       <h2>Activation</h2>
       {worker.activationStatus === 'READY_FOR_ACTIVATION' ? (
         <section className={issuedCode ? 'activation-print-card' : undefined}>
@@ -261,6 +369,9 @@ export function WorkerActions({ worker }: { worker: WorkerDetail }) {
             <div>
               <p className="login-error" role="alert">
                 This code is shown only once — write it down or copy it now. It will not be shown again.
+              </p>
+              <p>
+                Login username: <strong>{worker.username}</strong>
               </p>
               <p>
                 <strong>{formatCodeForDisplay(issuedCode.code)}</strong>{' '}

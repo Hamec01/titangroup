@@ -84,10 +84,13 @@ export async function PATCH(request: NextRequest, { params }: RouteParams): Prom
   }
 
   // Partial update: only fields actually present in the body are validated
-  // and written. employeeNumber is deliberately not editable here — it's
-  // User.username 1:1 (see POST /api/admin/workers/route.ts), and this
+  // and written. employeeNumber is not editable here — it's a separate HR
+  // identifier from User.username (lib/worker-usernames.ts), and this
   // endpoint's own error list (404/409 VERSION_CONFLICT/400) has no
-  // DUPLICATE_EMPLOYEE_NUMBER case, unlike creation.
+  // DUPLICATE_EMPLOYEE_NUMBER case, unlike creation. Editing firstName/lastName here
+  // deliberately does NOT touch User.username — renaming the login is a separate,
+  // explicit action (POST .../regenerate-username), never an automatic side effect
+  // of correcting a name.
   const data: Prisma.EmployeeUpdateInput = {};
 
   if (firstName !== undefined) {

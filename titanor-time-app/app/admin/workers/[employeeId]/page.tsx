@@ -55,7 +55,8 @@ export default async function WorkerDetailPage({ params }: { params: Promise<{ e
           {worker.firstName} {worker.lastName}
         </h1>
         <p className="setup-subtitle">
-          #{worker.employeeNumber} · {worker.employment?.active ? 'Active employment' : 'Employment ended'} ·{' '}
+          Employee number: {worker.employeeNumber} · Login username: {worker.username} ·{' '}
+          {worker.employment?.active ? 'Active employment' : 'Employment ended'} ·{' '}
           {ACTIVATION_STATUS_LABEL[worker.activationStatus]}
         </p>
 

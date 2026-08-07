@@ -248,27 +248,39 @@ relevant query + canonical body)`.
 
 ## 5. Работники
 
+**`username` — логин, независим от `employeeNumber`** (см. `03_DATA_MODEL_ERD.md` §4.1/§4.2,
+`lib/worker-usernames.ts`). Генерируется при создании (`lastName`+первая буква `firstName`,
+транслитерация+коллизионный суффикс), возвращается аддитивно во всех эндпоинтах ниже. Смена
+логина у уже существующего Worker'а — только через отдельный явный
+`POST .../regenerate-username`.
+
 #### `GET /api/admin/workers`
 - Permission: `worker.read.all`
 - Response `200`:
 ```json
 { "items": [{ "id": "uuid", "employeeNumber": "1042", "firstName": "Juha", "lastName": "Korhonen",
-  "active": true, "currentAssignments": [{ "siteId": "uuid", "siteName": "Kamppi Renovation",
-  "isPrimary": true }] }], "page": 1, "pageSize": 20, "totalItems": 1, "totalPages": 1 }
+  "username": "korhonenj", "active": true, "currentAssignments": [{ "siteId": "uuid",
+  "siteName": "Kamppi Renovation", "isPrimary": true }] }], "page": 1, "pageSize": 20,
+  "totalItems": 1, "totalPages": 1 }
 ```
 
 #### `POST /api/admin/workers`
 - Permission: `worker.create`
 - Request: `{ "firstName", "lastName", "phone"?, "employeeNumber"? }`
-- Response `201`: `{ "employee": {...}, "userId", "userStatus": "PENDING_ACTIVATION" }` — не
-  возвращает код активации
-- Ошибки: `400 VALIDATION_ERROR`, `409 DUPLICATE_EMPLOYEE_NUMBER`
+- Response `201`: `{ "employee": {...}, "userId", "username", "userStatus": "PENDING_ACTIVATION" }`
+  — не возвращает код активации; `username` сгенерирован из `firstName`/`lastName`, **не** равен
+  `employeeNumber`
+- Ошибки: `400 VALIDATION_ERROR`, `409 DUPLICATE_EMPLOYEE_NUMBER`, `409 USERNAME_CONFLICT`
+  (крайне редкий — реальная гонка на уровне DB UNIQUE после advisory-lock; безопасно повторить
+  запрос)
 - Idempotency: обязателен
-- Audit: `WORKER_CREATED`
+- Audit: `WORKER_CREATED` (аддитивно содержит `username`)
 
 #### `GET /api/admin/workers/:employeeId`
 - Permission: `worker.read.all`
-- Response `200`: `Employee`+`Employment`+`currentAssignments: []`+`activationStatus`
+- Response `200`: `Employee`+`Employment`+`currentAssignments: []`+`activationStatus`+`username`+
+  `recommendedUsernameBase` (чистая функция от текущих `firstName`/`lastName` — подсказка для UI,
+  не гарантированно свободна в БД)
 - Ошибки: `404 WORKER_NOT_FOUND`
 
 #### `PATCH /api/admin/workers/:employeeId`
@@ -276,6 +288,25 @@ relevant query + canonical body)`.
 - Request: `{ "version", ...частичные поля }`
 - Ошибки: `404`, `409 VERSION_CONFLICT`, `400 VALIDATION_ERROR`
 - Audit: `WORKER_UPDATED`
+- **Не меняет `username`**, даже если `firstName`/`lastName` меняются — смена логина только через
+  `POST .../regenerate-username` ниже
+
+#### `POST /api/admin/workers/:employeeId/regenerate-username`
+- Permission: `worker.update`
+- CSRF: обязателен (`X-Requested-With`, см. §0)
+- Явная замена текущего `username` на дружелюбный, вычисленный из **текущих**
+  `firstName`/`lastName` (та же коллизионная политика, что при создании). Никогда не вызывается
+  автоматически (ни `PATCH`, ни миграцией). Не трогает `passwordHash`, токены активации, роли,
+  сессии, `employeeId`/`employeeNumber` — существующая сессия и текущий пароль продолжают
+  работать под новым логином; старый логин перестаёт работать сразу после смены.
+- Request: без тела
+- Response `200`: `{ "employeeId", "previousUsername", "username", "changed" }` — если текущий
+  `username` уже равен вычисленному, `changed: false` и `previousUsername === username`, без
+  записи `AuditEvent`
+- Ошибки: `401 NOT_AUTHENTICATED`, `403 CSRF_REJECTED`/`FORBIDDEN`, `404 WORKER_NOT_FOUND`, `409`
+  на неразрешимый конфликт логина (без частичного обновления)
+- Audit: `WORKER_USERNAME_CHANGED` (только при реальном изменении) — `before`/`after` содержат
+  `employeeId`/`previousUsername`/`username`, без секретов
 
 #### `POST /api/admin/workers/:employeeId/deactivate`
 - Permission: `worker.deactivate`

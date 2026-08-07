@@ -185,6 +185,40 @@ erDiagram
 | `lastLoginAt` | timestamptz | да | |
 | `createdAt`, `updatedAt` | timestamptz | нет | |
 
+**`User.username` для Worker — независим от `Employee.employeeNumber`.** До этой задачи
+`username` при создании Worker'а совпадал с `employeeNumber` (неудобный числовой логин,
+например `1000`) — эта схема **superseded**, см. отметку в `IMPLEMENTATION_STATUS.md`.
+Начиная с `feat(time): generate friendly worker usernames`, `POST /api/admin/workers` генерирует
+дружелюбный логин через `lib/worker-usernames.ts`:
+
+- **База**: `lastName` (полностью транслитерированный) + первая буква транслитерированного
+  `firstName`, канонически lowercase. Пример (владелец подтвердил): `Anton Evtushenko →
+  evtushenkoa` (регистр логина не важен при входе — `Evtushenkoa` тоже работает, см.
+  `app/api/auth/login/route.ts`, identifier нормализуется в lowercase перед поиском).
+- **Нормализация**: Unicode NFKD-декомпозиция → удаление диакритики (блок U+0300–U+036F) →
+  lowercase → каждый символ: кириллица — по таблице транслитерации ниже; `a-z0-9` — как есть;
+  всё остальное (пробелы, дефисы, апострофы, неподдерживаемые скрипты) — **отбрасывается**, не
+  заменяется разделителем. Примеры: `Änne Mäkinen → makinena`; `Антон Евтушенко → evtushenkoa`;
+  `John O'Connor → oconnorj`.
+- **Таблица транслитерации кириллицы** (практическая, не ISO-9 — короче и привычнее для логина):
+  `а=a б=b в=v г=g д=d е=e ё=e ж=zh з=z и=i й=i к=k л=l м=m н=n о=o п=p р=r с=s т=t у=u ф=f х=kh
+  ц=ts ч=ch ш=sh щ=shch ъ=(отброшена) ы=y ь=(отброшена) э=e ю=yu я=ya`.
+- **Пустой результат не допускается**: если имя не транслитерируется в непустую строку (только
+  пунктуация/неподдерживаемый скрипт), база — литерал `worker` (не `employeeNumber` — это
+  разные, несвязанные поля), далее по обычной коллизионной политике (`worker`, `worker2`, ...).
+- **Максимум 64 символа** (`User.username varchar(64)`), суффикс коллизии учитывается в лимите
+  (база усекается при необходимости).
+- **Коллизии**: первый занявший базу получает её без суффикса, далее `base2`, `base3`, ... —
+  никогда случайное значение, никогда UUID. Проверяется по **всем** `User.username`, не только
+  `WORKER` (например, самостоятельно созданный `FOREMAN` с логином `evtushenkoa` вытесняет
+  Worker'а с тем же именем на `evtushenkoa2`). Race-safety — `pg_advisory_xact_lock` по базе
+  (не случайно совпадающая с проектной конвенцией в `lib/periods.ts`/`lib/review-scopes.ts`/
+  `lib/activation.ts`), DB UNIQUE-constraint остаётся последней линией защиты.
+- **Смена логина у уже созданного Worker'а — только явным действием администратора**
+  (`POST /api/admin/workers/:employeeId/regenerate-username`, §4.2/`04_ADMIN_FIRST_API_CONTRACTS.md`
+  §5), никогда автоматически при исправлении имени (`PATCH`) и никогда миграцией — уже активные
+  Worker'ы **не переименовываются** пакетно, чтобы никто не потерял привычный логин.
+
 **Role**, **Permission**, **RolePermission** (seed) — коды перечислены полностью в
 `02_ROLE_PERMISSION_MATRIX.md`.
 
@@ -265,7 +299,9 @@ Unique: `(actorUserId, httpMethod, routeTemplate, idempotencyKey)` — **без 
 ### 4.2 Работники
 
 **Employee** (mutable) — `id`, `employeeNumber` (unique), `firstName`, `lastName`, `phone`,
-`version int`, `createdAt`, `updatedAt`.
+`version int`, `createdAt`, `updatedAt`. `employeeNumber` — отдельный HR-идентификатор, **не
+связан** с `User.username` (см. §4.1 выше) — правка `firstName`/`lastName` через `PATCH` не
+меняет логин.
 
 **Employment** (mutable)
 

@@ -1,4 +1,6 @@
 import { prisma } from '@/lib/prisma';
+import { createAuditEvent } from '@/lib/audit';
+import { generateWorkerUsernameBase, reserveWorkerUsername } from '@/lib/worker-usernames';
 
 // docs/titanor-time/04_ADMIN_FIRST_API_CONTRACTS.md §5 (worker endpoints) —
 // shared by the API routes and the /admin/workers* Server Component pages,
@@ -15,6 +17,8 @@ export interface WorkerListItem {
   employeeNumber: string;
   firstName: string;
   lastName: string;
+  /** Login username — independent of employeeNumber (lib/worker-usernames.ts). */
+  username: string;
   active: boolean;
   currentAssignments: CurrentAssignment[];
 }
@@ -46,6 +50,15 @@ export interface WorkerDetail {
   } | null;
   currentAssignments: CurrentAssignment[];
   activationStatus: ActivationStatus;
+  /** Login username — independent of employeeNumber (lib/worker-usernames.ts). */
+  username: string;
+  /**
+   * Pure `generateWorkerUsernameBase(firstName, lastName)` for the *current* name — cheap UI hint
+   * only, not a DB-checked candidate. The UI shows "Generate friendly login" when `username`
+   * doesn't start with this (covers both a still-numeric username and a stale base from a
+   * since-renamed Employee); it does not claim `recommendedUsernameBase` itself is collision-free.
+   */
+  recommendedUsernameBase: string;
 }
 
 /**
@@ -97,6 +110,7 @@ export async function listWorkers(page: number, pageSize: number): Promise<Worke
         employeeNumber: true,
         firstName: true,
         lastName: true,
+        user: { select: { username: true } },
         employments: { where: { active: true }, select: { id: true }, take: 1 },
         siteAssignments: {
           where: currentAssignmentWhere(today),
@@ -111,6 +125,7 @@ export async function listWorkers(page: number, pageSize: number): Promise<Worke
     employeeNumber: employee.employeeNumber,
     firstName: employee.firstName,
     lastName: employee.lastName,
+    username: employee.user?.username ?? '',
     active: employee.employments.length > 0,
     currentAssignments: employee.siteAssignments.map(mapAssignment)
   }));
@@ -172,7 +187,7 @@ export async function getWorkerDetail(employeeId: string): Promise<WorkerDetail 
       version: true,
       createdAt: true,
       updatedAt: true,
-      user: { select: { status: true } },
+      user: { select: { status: true, username: true } },
       // Registration (POST /api/admin/workers) creates exactly one Employment
       // row today — most-recent-first tolerates a future rehire flow that
       // adds a second row without this query needing to change.
@@ -220,6 +235,66 @@ export async function getWorkerDetail(employeeId: string): Promise<WorkerDetail 
         }
       : null,
     currentAssignments,
-    activationStatus
+    activationStatus,
+    username: employee.user?.username ?? '',
+    recommendedUsernameBase: generateWorkerUsernameBase(employee.firstName, employee.lastName)
   };
+}
+
+export type RegenerateWorkerUsernameResult =
+  | { code: 'WORKER_NOT_FOUND' }
+  | { employeeId: string; previousUsername: string; username: string; changed: boolean };
+
+/**
+ * docs/titanor-time/04_ADMIN_FIRST_API_CONTRACTS.md §5 — POST
+ * /api/admin/workers/:employeeId/regenerate-username. Explicit, admin-triggered replacement of a
+ * Worker's login username with the one lib/worker-usernames.ts would generate from their
+ * *current* Employee.firstName/lastName — never run automatically by PATCH (firstName/lastName
+ * edits) or by any migration. `SELECT "User" ... FOR UPDATE` on the target row makes a double
+ * click / concurrent call safe: the second caller sees the already-updated username, recomputes
+ * the same candidate, finds it already current, and returns changed:false without a second
+ * AuditEvent — see reserveWorkerUsername's `excludeUserId` for why the check doesn't count the
+ * target's own current row as a collision against itself. Only `User.username` is ever written
+ * here — passwordHash, activation tokens, roles, sessions, and Employee.employeeId/employeeNumber
+ * are untouched, so a currently-valid session (keyed by userId, docs/titanor-time/
+ * 03_DATA_MODEL_ERD.md §4.1) and the existing password keep working under the new username.
+ */
+export async function regenerateWorkerUsername(employeeId: string, actorUserId: string, requestId: string): Promise<RegenerateWorkerUsernameResult> {
+  return prisma.$transaction(async (tx) => {
+    const employee = await tx.employee.findUnique({
+      where: { id: employeeId },
+      select: { firstName: true, lastName: true, user: { select: { id: true } } }
+    });
+    if (!employee || !employee.user) {
+      return { code: 'WORKER_NOT_FOUND' } as const;
+    }
+    const userId = employee.user.id;
+
+    const lockedRows = await tx.$queryRaw<{ username: string }[]>`SELECT username FROM "User" WHERE id = ${userId}::uuid FOR UPDATE`;
+    if (lockedRows.length === 0) {
+      return { code: 'WORKER_NOT_FOUND' } as const;
+    }
+    const previousUsername = lockedRows[0].username;
+
+    const base = generateWorkerUsernameBase(employee.firstName, employee.lastName);
+    const candidate = await reserveWorkerUsername(tx, base, userId);
+
+    if (candidate === previousUsername) {
+      return { employeeId, previousUsername, username: previousUsername, changed: false };
+    }
+
+    await tx.user.update({ where: { id: userId }, data: { username: candidate } });
+
+    await createAuditEvent(tx, {
+      actorUserId,
+      eventType: 'WORKER_USERNAME_CHANGED',
+      entityType: 'EMPLOYEE',
+      entityId: employeeId,
+      requestId,
+      beforeValue: { employeeId, previousUsername },
+      afterValue: { employeeId, username: candidate }
+    });
+
+    return { employeeId, previousUsername, username: candidate, changed: true };
+  });
 }

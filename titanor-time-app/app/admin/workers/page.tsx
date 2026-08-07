@@ -45,6 +45,7 @@ export default async function AdminWorkersPage() {
               <tr>
                 <th>#</th>
                 <th>Name</th>
+                <th>Login username</th>
                 <th>Status</th>
                 <th>Current assignment</th>
               </tr>
@@ -58,6 +59,7 @@ export default async function AdminWorkersPage() {
                       {worker.firstName} {worker.lastName}
                     </Link>
                   </td>
+                  <td>{worker.username}</td>
                   <td>{worker.active ? 'Active' : 'Inactive'}</td>
                   <td>
                     {worker.currentAssignments.length === 0

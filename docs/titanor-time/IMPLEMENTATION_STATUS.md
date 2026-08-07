@@ -2815,6 +2815,10 @@ locale=FI)`+`Employment(active=true, startDate=сегодня)`, `ActivationToke
 /api/admin/workers`, и в `POST /auth/login` контракта). `Idempotency-Key` обязателен для этого
 endpoint (в отличие от `POST /api/admin/sites`, где он опционален) — контракт прямо говорит
 «обязателен». Commit `95e2f74`.
+  - **[SUPERSEDED]** «он же становится `User.username`» — верно только на момент T6.3. С
+    `feat(time): generate friendly worker usernames` `username` генерируется отдельно из
+    `firstName`/`lastName` (`lib/worker-usernames.ts`) и больше не равен `employeeNumber` для
+    новых Worker'ов; см. соответствующую запись ниже и `03_DATA_MODEL_ERD.md` §4.1.
 - Race-safety генерации `employeeNumber` — не advisory lock (как у единственного `SUPER_ADMIN` в
   `bootstrap-super-admin.ts`), а просто DB `UNIQUE`-ограничение: коллизия ловится как `P2002` и
   превращается в штатный `409 DUPLICATE_EMPLOYEE_NUMBER` — осознанно более лёгкое решение, т.к. цена
@@ -2853,6 +2857,10 @@ endpoint (в отличие от `POST /api/admin/sites`, где он опцио
   1:1 с T6.3, а список ошибок контракта для этого endpoint не включает конфликт employeeNumber).
   Optimistic locking через `version`, атомарный compare-and-swap (`Employee.updateMany`), апдейт+audit
   в одной транзакции.
+  - **[SUPERSEDED]** «это `User.username` 1:1 с T6.3» — см. запись про
+    `feat(time): generate friendly worker usernames` ниже: `employeeNumber` и `username` теперь
+    независимы; `PATCH` по-прежнему не трогает `username` (это осталось верным), но не потому что
+    они совпадают — смена логина вынесена в отдельный явный endpoint.
 - `deactivate` реализует правило `03_...` §4.2 целиком: `Employment.active=false`+`endDate`+`reason`
   всегда; `User.status=DEACTIVATED`+отзыв всех `UserSession`, если у работника нет ожидающего
   (`expected=true`) `PayrollPeriodParticipant` в `OPEN`-периоде без `FINAL_APPROVED` табеля (в том числе
@@ -3329,6 +3337,93 @@ Production hand-off выполнен после явного подтвержд�
 6 high advisories в существующем Next/Prisma dependency tree; автоматический `npm audit fix` не
 запускался, поскольку upgrade зависимостей — отдельная проверяемая задача, не часть deployment
 activation.
+
+## 11.2 Дружелюбный логин Worker'а (`feat(time): generate friendly worker usernames`) — реализован
+
+Заменяет неудобный числовой `username = employeeNumber` (T6.3, **[SUPERSEDED]**-отметки выше) на
+`lastName`+первую букву `firstName`, независимо от `employeeNumber`. Новый файл
+`lib/worker-usernames.ts`: `generateWorkerUsernameBase` (чистая функция, NFKD-декомпозиция →
+удаление диакритики U+0300–U+036F → lowercase → кириллица по таблице/`a-z0-9`/отброшено, fallback
+`worker` на пустой результат) + `reserveWorkerUsername` (коллизии `base`/`base2`/`base3`... по
+**всем** `User.username`, `pg_advisory_xact_lock(hashtext('worker_username:'+base))` для
+race-safety, `excludeUserId` для корректного «уже правильный логин» в regenerate). `POST
+/api/admin/workers` (`app/api/admin/workers/route.ts`) переключён на эту генерацию вместо
+`employeeNumber.toLowerCase()`; `P2002` теперь различает `username` от `employeeNumber` по
+`error.meta.target` (`409 USERNAME_CONFLICT` вместо ложного `DUPLICATE_EMPLOYEE_NUMBER`). Новый
+endpoint `POST /api/admin/workers/:employeeId/regenerate-username`
+(`app/api/admin/workers/[employeeId]/regenerate-username/route.ts`, permission `worker.update`,
+CSRF обязателен) — реализация в `lib/workers.ts` (`regenerateWorkerUsername`): `SELECT "User" ...
+FOR UPDATE` на целевую строку, пересчёт кандидата от текущих `firstName`/`lastName`, `changed:
+false` без нового `AuditEvent`, если кандидат уже совпадает с текущим `username`; при реальном
+изменении — `AuditEvent(WORKER_USERNAME_CHANGED)` с `before/after={employeeId,
+previousUsername/username}`, без секретов. `PATCH /api/admin/workers/:employeeId` — без изменений
+логики, только исправлен устаревший комментарий про `employeeNumber=username` 1:1. UI
+(`WorkerActions.tsx`): новая секция «Login» — текущий username + Copy; кнопка «Generate friendly
+login», видимая только когда `username` не начинается с `recommendedUsernameBase`
+(`lib/workers.ts`'s `WorkerDetail`); подтверждение точным текстом владельца («The worker must use
+the new username for future logins…») перед вызовом; карточка выдачи кода активации теперь
+дополнительно показывает `username`. `/admin/workers` — колонка «Login username»; `/admin/workers/
+[employeeId]` — метки «Employee number»/«Login username» в подзаголовке. Схема/permissions не
+менялись — новых migrations нет.
+
+Фактические проверки на одноразовом PostgreSQL 16 + отдельном контейнере приложения (`docker
+network create` изолированная сеть, без host-порта у `db`, отдельно от `titanor-time-db-1`):
+
+- все 48 существующих migrations применились с нуля без ошибок (подтверждает отсутствие новой
+  migration для этой задачи); `prisma validate`, `tsc --noEmit`, `next build` (через `docker build
+  -f titanor-time-app/Dockerfile .`), `docker compose -f compose.titanor-time.yaml build app`, `git
+  diff --check` — все чисто;
+- **Группа A** (базовые примеры): `Anton Evtushenko→evtushenkoa`, `Egor Evtushenko→evtushenkoe`,
+  `Änne Mäkinen→makinena`, `Антон Евтушенко→evtushenkoa` (до коллизии), `John O'Connor→oconnorj`,
+  `Mary-Jane Watson-Smith→watsonsmithm` (дефисы отброшены без остатка), имя длиной 115+115
+  символов → username усечён до ровно 58 символов (`64-6`, запас на суффикс), имя из одних emoji
+  → `worker` (непустой fallback) — все прошли;
+- **Группа B** (коллизии): третий «Anton Evtushenko» → `evtushenkoa3` (второй уже занял
+  `evtushenkoa2` в группе A); отдельно созданный standalone `FOREMAN` с username `sidorovi`
+  занимает базу раньше Worker'а «Ivan Sidorov» → Worker получил `sidorovi2`; **истинная
+  конкурентность** — 5 параллельных `POST /api/admin/workers` с одинаковым именем (`Race{1..5}
+  Samename`, явные разные `employeeNumber`, чтобы изолировать именно username-гонку) → все 5
+  успешны (`201`), usernames `samenamer`/`samenamer2`/`samenamer3`/`samenamer4`/`samenamer5` —
+  различны, без `500`, без потерянного работника; прямой SQL подтвердил `Employee`=`Employment`=
+  `AuditEvent(WORKER_CREATED)`=18 (все успешные создания сессии), 0 дублей `username` во всей
+  таблице `User`;
+- **Группа C**: `GET`/`POST` возвращают `username` рядом с `employeeNumber`; полный цикл
+  активации — `POST .../activation` → `GET /api/auth/activate` → `POST
+  /api/auth/set-initial-password` вернул `username: "evtushenkoa"` (тот же, что при создании);
+  логин прошёл и как `evtushenkoa`, и как `Evtushenkoa` (регистронезависимость через существующую
+  нормализацию `login/route.ts`, без изменений там);
+  - **Группа D** (числовой Worker → regenerate через UI/endpoint): фикстура подготовлена как
+  разрешено заданием — Worker создан обычным `POST` (`employeeNumber=2000`, username сгенерирован
+  как `testovi`), затем `username` установлен прямым SQL в `2000` (симуляция старой,
+  уже-неактуальной схемы) до полной активации (реальный пароль, реальная `UserSession`). После
+  `POST .../regenerate-username`: `employeeNumber` остался `2000`; `username` стал `testovi`;
+  `passwordHash`/`UserRole`/статус `ACTIVE` не изменились (прямой SQL до/после); обе существующие
+  `UserSession` не отозваны, сессия, залогиненная под `2000` ДО смены, осталась рабочей и
+  показывает новый `username` в `/api/auth/session`; логин `2000` → `401 INVALID_CREDENTIALS`;
+  логин `testovi` с тем же паролем → `200`; повторный вызов `regenerate-username` →
+  `changed:false`, ровно один `AuditEvent(WORKER_USERNAME_CHANGED)` в базе (не два). Тот же поток
+  повторён кликами в headless Chromium (Playwright): «Generate friendly login» → диалог с точным
+  текстом → «Confirm» → «The login username was updated…» с новым username и Copy — без
+  console/page errors, mobile (375×812) и desktop;
+- **Группа E** (безопасность): `403 CSRF_REJECTED` без заголовка, `401 NOT_AUTHENTICATED` без
+  сессии, `403 FORBIDDEN` под ролью `WORKER` (permission `worker.update` — только `ADMIN`/
+  `SUPER_ADMIN` по матрице, `FOREMAN` не проверялся отдельно — идентичный код пути); malformed
+  UUID → `500` — не регрессия, идентичное поведение уже было у соседних `GET`/`PATCH`/`deactivate`
+  на этом же ресурсе до этой задачи, не в скоупе; корректный, но несуществующий UUID → чистый `404
+  WORKER_NOT_FOUND`; логи приложения проверены на отсутствие `password`/`argon2`/`secret`;
+- **Группа F** (регрессия): `Idempotency-Key` точный повтор → тот же `employee.id`+`username`;
+  явный `employeeNumber` конфликт → всё ещё `409 DUPLICATE_EMPLOYEE_NUMBER` (не переклассифицирован
+  как `USERNAME_CONFLICT` — подтверждает, что различение по `error.meta.target` реально работает
+  на Prisma 6.19.0+Postgres 16, не только в рассуждении); `PATCH` смены `firstName`/`lastName` не
+  тронул `username` (остался `potenti`), хотя `recommendedUsernameBase` в ответе `GET` обновился
+  до нового имени; повторная выдача кода уже-активному Worker'у → `409 WORKER_ALREADY_ACTIVE`
+  (не изменилось); standalone `FOREMAN` создание (`POST /api/admin/users`, `mode=STANDALONE`)
+  работает без изменений.
+- Одноразовые контейнеры/сеть/образ (`titanor-time-app-test`, `titanor-time-test-db`,
+  `titanor-time-test-net`) удалены после проверки; тестовые cookies/env-файлы со сгенерированными
+  тестовыми секретами удалены. `titanor-time-app-1`/`titanor-time-db-1` не пересобирались и не
+  перезапускались (`RestartCount=0`, тот же `StartedAt`, что и до задачи); production Worker
+  `1000` (если существует в реальной базе) не переименовывался — миграции не запускались.
 
 ## 12. Правило обновления
 

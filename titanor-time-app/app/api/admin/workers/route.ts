@@ -15,6 +15,7 @@ import {
   type IdempotencyIdentity
 } from '@/lib/idempotency';
 import { listWorkers } from '@/lib/workers';
+import { generateWorkerUsernameBase, reserveWorkerUsername } from '@/lib/worker-usernames';
 
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
@@ -25,9 +26,9 @@ const ROUTE_TEMPLATE = '/api/admin/workers';
 const DEFAULT_PAGE_SIZE = 20;
 const MAX_PAGE_SIZE = 100;
 // Not specified by the contract — pragmatic bounds, same style as
-// MAX_NAME_LENGTH in app/api/admin/sites/route.ts. employeeNumber is capped
-// at 64 to fit User.username (@db.VarChar(64)), since it becomes the
-// worker's login username 1:1 (see below).
+// MAX_NAME_LENGTH in app/api/admin/sites/route.ts. employeeNumber is a separate HR identifier,
+// independent of User.username (see lib/worker-usernames.ts) — its own cap here is just a
+// pragmatic bound, no longer tied to the 64-char username column.
 const MAX_NAME_LENGTH = 128;
 const MAX_PHONE_LENGTH = 32;
 const MAX_EMPLOYEE_NUMBER_LENGTH = 64;
@@ -196,12 +197,11 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
         finalEmployeeNumber = String(rows[0].next);
       }
 
-      // Worker logs in with employeeNumber as username (matches the
-      // GET /api/admin/workers and POST /auth/login examples in
-      // 04_ADMIN_FIRST_API_CONTRACTS.md, both using "1042"). Normalized the
-      // same way login's identifier is (lowercase) for consistency, even
-      // though employeeNumber is usually digits-only.
-      const username = finalEmployeeNumber.toLowerCase();
+      // Friendly login, independent of employeeNumber (lib/worker-usernames.ts) — lastName + the
+      // first letter of firstName, canonical lowercase, collision-suffixed race-safely under an
+      // advisory lock scoped to the candidate base.
+      const usernameBase = generateWorkerUsernameBase(trimmedFirstName, trimmedLastName);
+      const username = await reserveWorkerUsername(tx, usernameBase);
 
       const employee = await tx.employee.create({
         data: {
@@ -242,11 +242,12 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
           firstName: employee.firstName,
           lastName: employee.lastName,
           userId: user.id,
+          username: user.username,
           userStatus: user.status
         }
       });
 
-      return { employee, userId: user.id, userStatus: user.status };
+      return { employee, userId: user.id, username: user.username, userStatus: user.status };
     });
 
     return respond(201, {
@@ -261,14 +262,24 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
         updatedAt: created.employee.updatedAt.toISOString()
       },
       userId: created.userId,
+      username: created.username,
       userStatus: created.userStatus
     });
   } catch (error) {
+    // The DB's own UNIQUE constraints remain the last-resort safety net behind
+    // reserveWorkerUsername's advisory-lock-based collision avoidance — distinguish which column
+    // actually collided instead of always blaming employeeNumber, so a genuine username race
+    // (should be exceedingly rare given the lock) is never misreported as DUPLICATE_EMPLOYEE_NUMBER.
     if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
+      const target = error.meta?.target;
+      const targetText = Array.isArray(target) ? target.join(',') : String(target ?? '');
+      if (targetText.includes('username') && !targetText.includes('employeeNumber')) {
+        return respond(409, errorBody({ code: 'USERNAME_CONFLICT', message: 'The generated username is already in use — please retry.' }, requestId));
+      }
       return respond(
         409,
         errorBody(
-          { code: 'DUPLICATE_EMPLOYEE_NUMBER', message: 'employeeNumber (or the username derived from it) is already in use.' },
+          { code: 'DUPLICATE_EMPLOYEE_NUMBER', message: 'employeeNumber is already in use.' },
           requestId
         )
       );

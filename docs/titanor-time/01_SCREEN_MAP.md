@@ -161,8 +161,9 @@ touch target ≥ 48px), `/foreman/*` — desktop-first с поддержкой �
 - Роли: `ADMIN`, `SUPER_ADMIN`
 - Приоритет: desktop (таблица), читаемо на планшете
 - Назначение: список работников с поиском/фильтром/пагинацией
-- Данные: `Employee` + `Employment.active` + `currentAssignments[]` (массив); индикатор отсутствия
-  `isPrimary` среди активных назначений
+- Данные: `Employee` + `Employment.active` + `currentAssignments[]` (массив); `username` (Login
+  username — отдельная колонка, независим от `employeeNumber`, см. `03_DATA_MODEL_ERD.md` §4.1);
+  индикатор отсутствия `isPrimary` среди активных назначений
 - Действия: поиск по имени/employee number, фильтр по активности/объекту, сортировка, → создать,
   → карточка
 - Состояния: loading (skeleton rows); empty (CTA «создать первого»); error
@@ -182,26 +183,33 @@ touch target ≥ 48px), `/foreman/*` — desktop-first с поддержкой �
 - Откуда: `/admin/workers`, `/admin/setup`
 - Куда: `/admin/workers/[employeeId]` (профиль без кода — следующий шаг: назначить на объект)
 - API: `POST /api/admin/workers`
-- DoD: после создания работник виден в списке без какого-либо кода активации на экране
+- DoD: после создания работник виден в списке без какого-либо кода активации на экране; логин
+  (`username`), сгенерированный из имени/фамилии (`lastName`+первая буква `firstName`,
+  `lib/worker-usernames.ts`), отдельно от employee number — виден в карточке работника
 
 #### `/admin/workers/[employeeId]` 🟢
 - Роли: `ADMIN`, `SUPER_ADMIN`
 - Приоритет: desktop
 - Назначение: карточка работника — профиль, текущие назначения, история табелей, действия
-- Данные: `Employee`, `Employment`, `currentAssignments[]` (массив), последние `Timesheet`,
+- Данные: `Employee` (метка «Employee number»), `username` (метка «Login username», отдельно от
+  employee number), `Employment`, `currentAssignments[]` (массив), последние `Timesheet`,
   `activationStatus`
 - Действия: редактировать; деактивировать (с причиной — переводит в `OFFBOARDING` или
   `DEACTIVATED` по правилу отработанных периодов); назначить на объект
   (→ `/admin/assignments/new?employeeId=`); выдать код активации (доступно только при
   `readyForActivation`, иначе кнопка неактивна с подсказкой «сначала назначьте объект и откройте
-  период»)
+  период»); **«Generate friendly login»** — показывается, только если текущий `username` не
+  дружелюбный (числовой либо не соответствует текущему имени); перед сменой у уже активного
+  работника — подтверждение («The worker must use the new username for future logins. Their
+  password and current sessions will remain valid.»); не переиздаёт код активации; логин не
+  меняется автоматически ни правкой имени, ни миграцией
 - Состояния: loading; error (404, если employeeId не существует); нет отдельного empty
 - Откуда: `/admin/workers`
 - Куда: `/admin/assignments/new`, `/admin/timesheets/[timesheetId]`
 - API: `GET/PATCH /api/admin/workers/:employeeId`, `GET .../setup-preview`, `POST .../deactivate`,
-  `POST .../activation`
+  `POST .../activation`, `POST .../regenerate-username`
 - DoD: код активации показывается ровно один раз, сразу после вызова; не хранится и не показывается
-  повторно
+  повторно; карточка активации (печать/QR) также показывает `username` рядом с кодом
 
 #### `/admin/absences` ⚪ (later phase — permission-контракт полный, route/API — следующая фаза)
 - Роли: `ADMIN`, `SUPER_ADMIN`
