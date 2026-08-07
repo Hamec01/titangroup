@@ -1,6 +1,122 @@
 # Titanor Time — Implementation Status
 
-Обновлено: 2026-08-07 Europe/Helsinki (feat: template selection workflow)
+Обновлено: 2026-08-07 Europe/Helsinki (feat: version work schedule templates)
+
+**Второй срез управления шаблонами**: `PATCH /api/admin/templates/:templateId` + UI-редактирование
+`/admin/templates/[templateId]`. Редактирование **никогда** не переписывает существующую
+`WorkScheduleTemplateVersion` — каждое реальное изменение создаёт новую immutable-версию. Prisma
+schema не менялась.
+
+**Migration**: `20260807120000_seed_template_update_permission` — чистое DML, тот же паттерн, что
+`20260807090000_seed_template_read_all_permission`: сеет `template.update`, выдаёт
+`ADMIN`+`SUPER_ADMIN`. Применена и проверена на одноразовом PostgreSQL 16 (`migrate deploy` →
+applied, повторный `migrate deploy` → «No pending migrations») — **к production не применялась**.
+
+**Реализовано**:
+- `lib/templates.ts` — `validateTemplateDays`/`parseTemplateTimeToDate`/`TEMPLATE_MAX_NAME_LENGTH`/
+  `TEMPLATE_MAX_DESCRIPTION_LENGTH` вынесены из `POST`-route как общая валидация/formatting,
+  используются и `POST`, и `PATCH` — правила day/time-инвариантов никогда не расходятся между
+  ними. Новая `updateTemplate()` — единственная транзакция для `PATCH`: `SELECT
+  "WorkScheduleTemplate" ... FOR UPDATE` (тот же паттерн, что `lib/periods.ts`/
+  `lib/review-scopes.ts`/`lib/activation.ts`) → перечитывает максимальный `versionNumber` под
+  локом → сверяет `expectedVersionNumber` → при совпадении: metadata (если передана) → новая
+  `WorkScheduleTemplateVersion` (`versionNumber+1`) → её 7 `WorkScheduleTemplateVersionDay` (из
+  `days`, если переданы, иначе — точная копия дней предыдущей версии) → `TEMPLATE_UPDATED`
+  `AuditEvent` — одной атомарной транзакцией. Genuine no-op (после разрешения непереданных полей
+  итоговые metadata+все 7 дней байт-в-байт совпадают с текущей версией) — не создаёт ни версию, ни
+  audit, возвращает `200` с текущими данными.
+- `PATCH /api/admin/templates/:templateId` (`app/api/admin/templates/[templateId]/route.ts`) —
+  permission `template.update`, CSRF обязателен; `expectedVersionNumber` обязателен; хотя бы одно
+  из `name`/`description`/`days` обязательно; `days`, если передан, — те же 7-day инварианты, что
+  `POST`; malformed/неизвестный `templateId` → `404 TEMPLATE_NOT_FOUND` (без `500`);
+  `expectedVersionNumber` не совпадает с текущим максимальным → `409 VERSION_CONFLICT`; `active` —
+  read-only, `PATCH` его не принимает (deactivate/reactivate — нет утверждённого контракта, не
+  реализовано).
+- `app/api/admin/templates/route.ts` (`POST`) — переиспользует те же экспорты `lib/templates.ts`
+  вместо локальных дублирующих `validateDays`/`parseTimeToDate` (убрана дупликация).
+- `app/admin/templates/TemplateDaysEditor.tsx` (новый, общий client-компонент) — рендер 7 строк
+  дней + `defaultTemplateDays`/`templateDaysFromDetail`/`toggleTemplateWorkingDay`/
+  `updateTemplateDay`/`templateDaysToRequestPayload`; переиспользуется и `NewTemplateForm`
+  (создание), и новым `EditTemplateForm` (редактирование) — UX и правила дней никогда не
+  расходятся между двумя формами.
+- `app/admin/templates/[templateId]/EditTemplateForm.tsx` (новый) — секция «Edit schedule» на
+  карточке шаблона: предзаполнена `name`/`description`/7 дней текущей версии; submit отправляет
+  `expectedVersionNumber` текущей версии (читается из props при каждом рендере, не из
+  застывшего локального стейта — после успешного сохранения `router.refresh()` подтягивает новый
+  номер версии для следующего сохранения); после успеха показывает новый номер версии; `409
+  VERSION_CONFLICT` — понятное сообщение + явная кнопка «Reload» (не автоматический `router.
+  refresh()` — черновик правок пользователя не теряется тихо); inline field-level ошибки; double-
+  submit блокируется тем же `loading`-guard, что и везде в проекте; текст «Saving creates a new
+  version. Existing assignments remain on their recorded version until changed or split.» —
+  явно объясняет snapshot semantics. Read-only карточка (Server Component) рендерится
+  безусловно и не скрывается/не подменяется секцией редактирования.
+- `app/admin/templates/[templateId]/page.tsx` — read-only 7-day таблица (`.worker-table-scroll`)
+  всегда видна; `EditTemplateForm` подключена отдельной секцией ниже.
+- `app/admin/templates/new/NewTemplateForm.tsx` — рефакторинг на общий `TemplateDaysEditor` (без
+  изменения поведения/контракта `POST`).
+
+**Snapshot semantics** (явно, §4.5): новая `WorkScheduleTemplateVersion` применяется только к
+*новым* `SiteAssignment` (создаваемым после неё с тем же `templateId`) — существующие
+`SiteAssignment` продолжают ссылаться на свой прежний `templateVersionId` бессрочно; уже созданные
+`TimesheetDraftPlannedShift`/`TimesheetPlannedShift` не меняются `PATCH`'ем никогда (эта операция
+их вообще не касается — не входит в её транзакцию); перевод уже начавшегося назначения на новую
+версию — исключительно через существующий `assignment.split` с `effectiveFrom` (не изменялся в
+этой задаче, уже полностью поддерживал `templateId`→latest version), никогда массовым скрытым
+`UPDATE`.
+
+**Проверено на одноразовом PostgreSQL 16** (миграции с нуля, повторный `migrate deploy` → no
+pending, отдельный production build instance, всё через реальный UI/API):
+- **A (basic versioning)**: Template A создан через UI (defaults 09:00–17:00, 30мин перерыв) →
+  через `EditTemplateForm` изменён перерыв понедельника 30→45 → версия 2 создана (новый
+  `currentVersionId`) → read-only DB подтверждает: `WorkScheduleTemplateVersionDay` версии 1 для
+  понедельника **физически осталась** `plannedBreakMinutes=30`.
+- **B (metadata-only)**: `PATCH` с одним только `name` (без `days`) → версия 3; все 7 дней версии
+  3 байт-в-байт совпадают с версией 2 (скопированы, не выдуманы).
+- **C (no-op)**: структурно пустой `PATCH` (только `expectedVersionNumber`) → `400
+  VALIDATION_ERROR`; `PATCH` с полностью идентичными `name`/`description`/`days` → `200`, версия
+  осталась 3, `currentVersionId` не изменился — ни новая версия, ни `AuditEvent` не созданы
+  (подтверждено read-only DB: ровно 4 `TEMPLATE_UPDATED` на весь сценарий A/B/D-победитель/доп.
+  правка перед E, не больше).
+- **D (конкуренция)**: два **настоящих параллельных** `PATCH` (`Promise.all`, реальный HTTP,
+  оба `expectedVersionNumber=3`) — ровно один вернул `200` (версия 4), второй — `409
+  VERSION_CONFLICT`; после — ровно версия 4 (не 5); DB подтверждает: ровно 5 версий всего на
+  шаблон (1–5, без пропусков/дублей) к концу сценария, metadata проигравшего запроса не
+  применилась, `AuditEvent` для проигравшего не создан.
+- **E (assignment snapshot)**: Assignment A создан на версии 4 (`templateVersionId` записан) →
+  шаблон обновлён до версии 5 → Assignment A **в БД** продолжает ссылаться на версию 4
+  (не изменился); новый Assignment B (тот же `templateId`) получил версию 5 (latest); `POST
+  .../assignments/:id/split` создал новую строку на версии 5, закрыв старую (`validTo` выставлен)
+  — старая строка **в БД** осталась на версии 4, не изменившись ни в чём другом.
+- **F (security)**: `ADMIN`/`SUPER_ADMIN` — успешно (A-E); `WORKER`/standalone `FOREMAN` — `403`;
+  без сессии — `401`; без `X-Requested-With` — `403 CSRF_REJECTED`; malformed `templateId` (не
+  UUID-shaped строка) — `404 TEMPLATE_NOT_FOUND`, не `500`; некорректные `days` (1 запись вместо
+  7) — `400`, DB подтверждает: партиальной версии 6 не появилось.
+- **G (audit)**: read-only DB — ровно 4 `TEMPLATE_UPDATED` на весь прогон (v1→2, v2→3, v3→4, v4→5),
+  каждый содержит `entityId`=id шаблона + `beforeValue.versionNumber`/`afterValue.versionNumber`/
+  изменённые metadata; ни один из 20 проверенных `AuditEvent` (весь прогон) не содержит password/
+  passwordHash/tokenHash/session/cookie; ни один отклонённый (`400`/`401`/`403`/`404`/`409`), ни
+  no-op, ни проигравший конкурентный запрос не создал лишний `AuditEvent`.
+- **Регрессия**: `POST /api/admin/templates` (Template B) — работает; `GET` список/карточка —
+  корректны, без raw UUID; `/admin/assignments/new` селектор — работает; матчащие плану часы после
+  всех версионных изменений (проверено на назначении, прошедшем через версии 4→5→split) всё ещё
+  попадают в `hasException=false` (стандартная очередь прораба), не в exceptions.
+- **Browser**: 375px и десктоп — `Edit schedule` секция и read-only карточка без page-level
+  horizontal overflow; native required-валидация; double-submit блокируется (проверено через
+  перехват сетевых запросов — ровно один `PATCH` на два быстрых клика); никаких hydration/runtime
+  ошибок в консоли; read-only карточка остаётся видна и корректна без дополнительной мутации после
+  сохранения.
+
+**Технические проверки**: `git diff --check`, `npx prisma validate`, `npx tsc --noEmit`,
+`npm run build`, `docker compose -f compose.titanor-time.yaml build app` — чисты (тестовый Docker
+tag `latest` удалён после проверки).
+
+**Production не менялся** — новая локальная DML-миграция применена и проверена только на
+одноразовом PostgreSQL 16; к production `titanor-time-db-1` она **не применялась**,
+production-контейнеры не перезапускались (`titanor-time-app-1`/`titanor-time-db-1` оставались
+healthy до/после, проверено read-only).
+
+**Не реализовано в этом срезе (сознательно)**: deactivate/reactivate шаблона (`active` остаётся
+read-only — нет утверждённого контракта); список версий/история версий как отдельный UI-экран.
 
 **Закрыт подтверждённый полным E2E gap** (см. запись «Full foundation E2E PASS» ниже, где было
 явно отмечено: «foreman находит табель в... `/foreman/review/exceptions`, т.к. `SiteAssignment`

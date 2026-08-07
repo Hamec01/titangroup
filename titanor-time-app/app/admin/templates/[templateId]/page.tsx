@@ -2,17 +2,18 @@ import Link from 'next/link';
 import { redirect } from 'next/navigation';
 import { resolveServerSession } from '@/lib/server-session';
 import { getTemplateDetail } from '@/lib/templates';
+import { WEEKDAY_LABELS } from '../TemplateDaysEditor';
+import { EditTemplateForm } from './EditTemplateForm';
 
 export const dynamic = 'force-dynamic';
 
-// docs/titanor-time/03_DATA_MODEL_ERD.md §4.5 — weekday 0=Mon..6=Sun, same convention as
-// app/admin/templates/new/NewTemplateForm.tsx.
-const WEEKDAY_LABELS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
-
 type RouteParams = { params: Promise<{ templateId: string }> };
 
-// docs/titanor-time/01_SCREEN_MAP.md — /admin/templates/[templateId], read-only card of the
-// current version's 7 days. Editing (creates a new version via PATCH) is a separate future slice.
+// docs/titanor-time/01_SCREEN_MAP.md — /admin/templates/[templateId]. The read-only card of the
+// current version's 7 days always renders (Server Component, no JS required); EditTemplateForm
+// below it is the separate client-side mutation path — saving there creates a new immutable
+// WorkScheduleTemplateVersion (docs/titanor-time/03_DATA_MODEL_ERD.md §4.5), never rewrites this
+// one, so the read-only card above never needs to hide itself while editing.
 export default async function AdminTemplateDetailPage({ params }: RouteParams) {
   const session = await resolveServerSession();
   if (!session) {
@@ -79,6 +80,8 @@ export default async function AdminTemplateDetailPage({ params }: RouteParams) {
             </tbody>
           </table>
         </div>
+
+        <EditTemplateForm template={template} />
 
         <p>
           <Link href="/admin/templates">Back to templates</Link>

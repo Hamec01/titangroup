@@ -116,10 +116,16 @@ permission с более чем одним держателем разной о�
 
 ### 2.6 Рабочие шаблоны
 
-`template.read.all` засеян и реализован: `GET /api/admin/templates` (список, текущая версия каждого
-шаблона) + `GET /api/admin/templates/:templateId` (карточка, только текущая версия) +
-`/admin/templates`/`/admin/templates/[templateId]` (read-only UI). `template.update`/`PATCH` (новая
-immutable версия) — не реализован, отдельная следующая задача.
+`template.read.all` и `template.update` засеяны и реализованы: `GET /api/admin/templates` (список,
+текущая версия каждого шаблона) + `GET /api/admin/templates/:templateId` (карточка, только текущая
+версия) + `PATCH /api/admin/templates/:templateId` (создаёт новую immutable версию — `SELECT ...
+FOR UPDATE` на родительской строке `WorkScheduleTemplate` серилизует конкурентные `PATCH`, сравнение
+`expectedVersionNumber` происходит уже под локом) + `/admin/templates`/`/admin/templates/[templateId]`
+(список + карточка с секцией «Edit schedule»). Snapshot semantics (§4.5): новая версия применяется
+только к новым `SiteAssignment`; уже существующие продолжают ссылаться на прежний
+`templateVersionId`; перевод уже начавшегося назначения на новую версию — исключительно через
+`assignment.split`, не массовым обновлением. Поле `active` в этом срезе read-only (deactivate/
+reactivate шаблона — нет утверждённого контракта).
 
 | Permission | Держатели | Область | Ограничения | Причина | Аудит | Массовое |
 |---|---|---|---|---|---|---|

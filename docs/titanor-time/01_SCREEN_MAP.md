@@ -347,21 +347,29 @@ touch target ≥ 48px), `/foreman/*` — desktop-first с поддержкой �
 - Куда: `/admin/templates/[templateId]`
 - API: `POST /api/admin/templates`
 
-#### `/admin/templates/[templateId]` 🟢 частично реализовано (read-only)
+#### `/admin/templates/[templateId]` 🟢 реализовано (read-only карточка + редактирование)
 - Роли: `ADMIN`, `SUPER_ADMIN`
 - Приоритет: desktop
-- Назначение (целевое): редактирование шаблона — те же 7 строк; сохранение создаёт новую immutable
-  версию, не переписывает текущую — UI выглядит как редактирование «одного шаблона»,
-  версионирование спрятано за API. **В этой задаче реализована только read-only карточка** текущей
-  версии (7 строк дней, без формы сохранения) — `PATCH`/редактирование, создающее версию 2+, —
-  отдельная следующая задача.
+- Назначение: read-only карточка текущей версии (7 строк дней) + секция «Edit schedule» —
+  редактирование создаёт новую immutable версию, **никогда не переписывает текущую**; UI выглядит
+  как редактирование «одного шаблона», версионирование спрятано за API. Read-only карточка
+  рендерится Server Component'ом и всегда доступна независимо от JS/состояния формы редактирования
+  — секция редактирования не подменяет и не скрывает её.
 - Данные: `days[7]` текущей версии, `name`/`description`/`active`/`currentVersionNumber`
-- Действия (целевые, не в этой задаче): сохранить (создаёт новую версию)
-- Состояния: loading; empty/error (`404 TEMPLATE_NOT_FOUND`, в т.ч. malformed UUID — без `500`)
+- Действия: «Edit schedule» → предзаполненная форма (те же 7 строк, что `NewTemplateForm`,
+  переиспользуемый `TemplateDaysEditor`) → submit отправляет `expectedVersionNumber` текущей
+  версии → создаёт версию N+1 → показывает новый номер версии. Поле `active` **read-only** в этом
+  срезе (deactivate/reactivate — нет утверждённого контракта, не реализовано)
+- Состояния: loading; empty/error (`404 TEMPLATE_NOT_FOUND`, в т.ч. malformed UUID — без `500`);
+  `409 VERSION_CONFLICT` — понятное сообщение + кнопка «Reload» (не автоматический refresh —
+  черновик правок пользователя не должен тихо потеряться); inline field-level ошибки валидации;
+  double-submit блокируется (`loading`-guard); 375px — без page-level horizontal overflow
+  (`.worker-table-scroll` на read-only таблице; сама форма редактирования — обычная колонка полей)
 - Откуда: `/admin/templates`
-- API: `GET /api/admin/templates/:templateId` (реализовано); `PATCH` — не реализовано
-- DoD (целевое, для будущей `PATCH`-задачи): изменение шаблона не переписывает данные уже прошедших
-  периодов — старые назначения продолжают ссылаться на прежнюю версию шаблона
+- API: `GET /api/admin/templates/:templateId`, `PATCH /api/admin/templates/:templateId`
+- DoD: сохранение не переписывает данные уже прошедших периодов — старые назначения продолжают
+  ссылаться на прежнюю версию шаблона (snapshot semantics, §4.5); переход уже начавшегося
+  назначения на новую версию — через `assignment.split`, не через эту форму
 
 #### `/admin/periods` 🟢
 - Роли: `ADMIN`, `SUPER_ADMIN`

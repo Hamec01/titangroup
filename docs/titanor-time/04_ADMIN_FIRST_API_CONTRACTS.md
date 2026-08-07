@@ -212,10 +212,39 @@ relevant query + canonical body)`.
 
 #### `PATCH /api/admin/templates/:templateId`
 - Permission: `template.update`
-- Request: `{ "expectedVersionNumber", "name"?, "days"? }`
-- Ошибки: `404`, `409 VERSION_CONFLICT`, `400 VALIDATION_ERROR`
-- Audit: `TEMPLATE_UPDATED`
-- **Не реализовано** — отдельная следующая задача (см. `IMPLEMENTATION_STATUS.md`)
+- CSRF обязателен (как везде в §0)
+- Request: `{ "expectedVersionNumber": 1, "name"?: "Standard schedule", "description"?: "text"|null,
+  "days"?: [7 × {weekday, isWorkingDay, plannedStartTime?, plannedEndTime?, plannedBreakMinutes}] }`
+  — `expectedVersionNumber` обязателен; хотя бы одно из `name`/`description`/`days` обязательно
+  присутствовать в теле; `days`, если передан, — те же 7-day инварианты, что `POST` (общая
+  валидация/formatting — `validateTemplateDays`/`parseTemplateTimeToDate` в `lib/templates.ts`,
+  не дублируется между `POST` и `PATCH`)
+- Response `200`: `{ "id", "name", "description", "active", "currentVersionId",
+  "currentVersionNumber", "days" }`
+- Ошибки: `404 TEMPLATE_NOT_FOUND` (неизвестный или malformed `templateId` — без `500`),
+  `409 VERSION_CONFLICT` (`expectedVersionNumber` не совпадает с текущим максимальным
+  `versionNumber` — проверяется под `SELECT ... FOR UPDATE` на строке `WorkScheduleTemplate`, что
+  делает конкурентные `PATCH` безопасными: ровно один создаёт новую версию, остальные получают
+  `409`, версия «через одну» не появляется), `403 FORBIDDEN`, `403 CSRF_REJECTED`,
+  `400 VALIDATION_ERROR`
+- **Транзакция**: лочит `WorkScheduleTemplate` (`FOR UPDATE`) → перечитывает максимальный
+  `versionNumber` → сверяет `expectedVersionNumber` → при совпадении: (если переданы) обновляет
+  `name`/`description` шаблона, создаёт новую `WorkScheduleTemplateVersion` (`versionNumber+1`),
+  создаёт её 7 `WorkScheduleTemplateVersionDay` (из `days`, если переданы, иначе — точная копия
+  дней предыдущей версии), пишет `TEMPLATE_UPDATED` — одной атомарной транзакцией, всё откатывается
+  при любой ошибке
+- **No-op**: если после разрешения (`name`/`description`/`days`, не переданные в запросе, берутся
+  из текущего состояния) итоговые metadata и все 7 дней совпадают с текущей версией байт-в-байт —
+  новая версия и `AuditEvent` **не создаются**, ответ `200` с текущими (неизменными) данными
+- **Snapshot semantics** (§4.5): существующие `SiteAssignment.templateVersionId` не меняются этим
+  эндпоинтом никогда; новая версия становится «текущей» только для *новых* назначений/периодов;
+  перевод уже начавшегося назначения на новую версию — `POST
+  /api/admin/assignments/:assignmentId/split`, не эта операция
+- `active` — read-only в этом срезе, `PATCH` его не принимает
+- Audit: `TEMPLATE_UPDATED` (`beforeValue`/`afterValue` содержат `versionNumber`/`name`/
+  `description`; никогда cookies/passwords/session/token) — только для реально изменившего запроса;
+  отклонённый (`400`/`403`/`404`/`409`) и проигравший конкурентный запрос не создают audit
+- Реализовано: 🟢
 
 ## 5. Работники
 
