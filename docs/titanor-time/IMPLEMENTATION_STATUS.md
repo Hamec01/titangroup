@@ -3408,9 +3408,11 @@ network create` изолированная сеть, без host-порта у `
 - **Группа E** (безопасность): `403 CSRF_REJECTED` без заголовка, `401 NOT_AUTHENTICATED` без
   сессии, `403 FORBIDDEN` под ролью `WORKER` (permission `worker.update` — только `ADMIN`/
   `SUPER_ADMIN` по матрице, `FOREMAN` не проверялся отдельно — идентичный код пути); malformed
-  UUID → `500` — не регрессия, идентичное поведение уже было у соседних `GET`/`PATCH`/`deactivate`
-  на этом же ресурсе до этой задачи, не в скоупе; корректный, но несуществующий UUID → чистый `404
-  WORKER_NOT_FOUND`; логи приложения проверены на отсутствие `password`/`argon2`/`secret`;
+  UUID → `500` на момент этой задачи (не регрессия — идентичное поведение уже было у соседних
+  `GET`/`PATCH`/`deactivate` на этом же ресурсе; **закрыто отдельным фиксом**
+  `fix(time): validate worker username target`, см. запись ниже; `.../activation` уже был защищён
+  своим собственным `UUID_PATTERN` до этой задачи); корректный, но несуществующий UUID → чистый
+  `404 WORKER_NOT_FOUND`; логи приложения проверены на отсутствие `password`/`argon2`/`secret`;
 - **Группа F** (регрессия): `Idempotency-Key` точный повтор → тот же `employee.id`+`username`;
   явный `employeeNumber` конфликт → всё ещё `409 DUPLICATE_EMPLOYEE_NUMBER` (не переклассифицирован
   как `USERNAME_CONFLICT` — подтверждает, что различение по `error.meta.target` реально работает
@@ -3424,6 +3426,31 @@ network create` изолированная сеть, без host-порта у `
   тестовыми секретами удалены. `titanor-time-app-1`/`titanor-time-db-1` не пересобирались и не
   перезапускались (`RestartCount=0`, тот же `StartedAt`, что и до задачи); production Worker
   `1000` (если существует в реальной базе) не переименовывался — миграции не запускались.
+
+### Фикс: malformed UUID на `regenerate-username` (`fix(time): validate worker username target`)
+
+`POST /api/admin/workers/:employeeId/regenerate-username` передавал `employeeId` прямо в
+`regenerateWorkerUsername()` без предварительной проверки формата — malformed значение (`abc`,
+обрезанный UUID, не-hex символы) доходило до Prisma `WHERE id = ...::uuid` и падало
+неперехваченной ошибкой (`500`) вместо документированного `404 WORKER_NOT_FOUND`. Исправлено тем
+же `UUID_PATTERN`, что уже используется в соседних admin routes (буквально скопирован из
+`.../workers/[employeeId]/activation/route.ts`) — проверка вставлена **после** CSRF/auth/permission
+и **до** вызова lib-функции, так что неаутентифицированный или не-`ADMIN` запрос не может
+использовать эндпоинт как UUID-oracle (проверка формата недостижима без прохождения всех gate
+выше). Только этот один route изменён — `GET`/`PATCH /api/admin/workers/:employeeId` и `.../
+deactivate` сохраняют тот же pre-existing `500` на malformed UUID, что и раньше (не в скоупе этого
+фикса).
+
+Проверено на том же одноразовом PostgreSQL 16 (пересобранный с нуля, все 48 migrations): `abc`,
+пустая строка, обрезанный UUID, UUID-длины строка с не-hex символами → все `404
+WORKER_NOT_FOUND`, ни одного `500`; корректный, но несуществующий UUID → тот же `404
+WORKER_NOT_FOUND`; ни один malformed-запрос не создал `AuditEvent` и не изменил `User.username`
+(прямой SQL до/после — 0 новых строк); обычный regenerate на существующем Worker'е и повторный
+вызов (`changed:false`) — не нарушены; `401`/`403 CSRF_REJECTED`/`403 FORBIDDEN` (роль `WORKER`)
+для malformed UUID возвращаются раньше проверки формата (порядок gate не менялся) — подтверждено
+прямыми запросами без сессии/CSRF/с ролью `WORKER`. `tsc --noEmit`/`next build`/`docker compose
+build app`/`git diff --check` — чисто. Схема/migrations не менялись (48 без изменений);
+`titanor-time-app-1`/`titanor-time-db-1` не пересобирались.
 
 ## 12. Правило обновления
 

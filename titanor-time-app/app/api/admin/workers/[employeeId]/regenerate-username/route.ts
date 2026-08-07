@@ -13,6 +13,10 @@ export const revalidate = 0;
 // Explicit admin action only — never invoked by PATCH /api/admin/workers/:employeeId or by any
 // migration (see lib/workers.ts's regenerateWorkerUsername docstring).
 const REQUIRED_CSRF_HEADER_VALUE = 'titanor-time';
+// Same pattern as the sibling .../activation/route.ts — rejects a malformed employeeId (e.g.
+// "abc") before it ever reaches Prisma's uuid-typed WHERE clause, which would otherwise throw and
+// surface as an uncaught 500 instead of the documented 404 WORKER_NOT_FOUND.
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 function errorBody(body: ApiErrorBody, requestId: string): { error: ApiErrorBody & { requestId: string } } {
   return { error: { ...body, requestId } };
@@ -37,6 +41,9 @@ export async function POST(request: NextRequest, { params }: RouteParams): Promi
   }
 
   const { employeeId } = await params;
+  if (!UUID_PATTERN.test(employeeId)) {
+    return jsonError(404, { code: 'WORKER_NOT_FOUND', message: 'No worker with this id.' }, requestId);
+  }
 
   const result = await regenerateWorkerUsername(employeeId, authenticated.user.id, requestId);
 
