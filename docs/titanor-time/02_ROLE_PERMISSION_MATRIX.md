@@ -116,6 +116,11 @@ permission с более чем одним держателем разной о�
 
 ### 2.6 Рабочие шаблоны
 
+`template.read.all` засеян и реализован: `GET /api/admin/templates` (список, текущая версия каждого
+шаблона) + `GET /api/admin/templates/:templateId` (карточка, только текущая версия) +
+`/admin/templates`/`/admin/templates/[templateId]` (read-only UI). `template.update`/`PATCH` (новая
+immutable версия) — не реализован, отдельная следующая задача.
+
 | Permission | Держатели | Область | Ограничения | Причина | Аудит | Массовое |
 |---|---|---|---|---|---|---|
 | `template.create` | `ADMIN`, `SUPER_ADMIN` | вся компания | создаёт `WorkScheduleTemplate`+первую версию | нет | да | нет |

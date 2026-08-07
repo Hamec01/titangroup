@@ -9,8 +9,7 @@ export const dynamic = 'force-dynamic';
 // first vertical scenario, "не декоративный dashboard" — every item below is
 // a plain done/not-done flag from getSetupStatus(), no counts, no invented
 // numbers. Items link only to real routes: work areas are managed within a
-// site, while templates currently support creating another template but do
-// not yet have a separate list screen.
+// site; templates have their own list at /admin/templates.
 interface ChecklistItem {
   key: keyof SetupStatus;
   label: string;
@@ -27,8 +26,7 @@ const CHECKLIST: ChecklistItem[] = [
     key: 'hasTemplate',
     label: 'Work schedule template',
     createHref: '/admin/templates/new',
-    doneHref: '/admin/templates/new',
-    doneActionLabel: 'Create another'
+    doneHref: '/admin/templates'
   },
   { key: 'hasWorker', label: 'Worker', createHref: '/admin/workers/new', doneHref: '/admin/workers' },
   {

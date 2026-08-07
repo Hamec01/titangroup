@@ -179,7 +179,17 @@ relevant query + canonical body)`.
 
 #### `GET /api/admin/templates`
 - Permission: `template.read.all`
-- Response `200`: список `{ id, name, active, currentVersionNumber, workingDaysCount }`
+- Query: `page`, `pageSize` (default 20, max 100) — общий пагинационный конвеншен §0
+- Response `200`:
+```json
+{ "items": [{ "id": "uuid", "name": "Standard Week", "description": null, "active": true,
+  "currentVersionId": "uuid", "currentVersionNumber": 1, "workingDaysCount": 5 }],
+  "page": 1, "pageSize": 20, "totalItems": 1, "totalPages": 1 }
+```
+- `currentVersion*` — версия с максимальным `versionNumber` для шаблона (одна дополнительная
+  batched-запрос на relation, не N+1 в коде); `workingDaysCount` — количество дней текущей версии с
+  `isWorkingDay=true`. `createdByUserId` не возвращается — внутренняя техническая деталь.
+- Реализовано: 🟢 (read-only срез; `PATCH` — §ниже, отдельная будущая задача)
 
 #### `POST /api/admin/templates`
 - Permission: `template.create`
@@ -191,14 +201,21 @@ relevant query + canonical body)`.
 
 #### `GET /api/admin/templates/:templateId`
 - Permission: `template.read.all`
-- Response `200`: `{ "id", "name", "active", "currentVersionId", "currentVersionNumber", "days" }`
-- Ошибки: `404 TEMPLATE_NOT_FOUND`
+- Response `200`: `{ "id", "name", "description", "active", "currentVersionId",
+  "currentVersionNumber", "days": [{weekday, isWorkingDay, plannedStartTime, plannedEndTime,
+  plannedBreakMinutes}] }` — только текущая версия; время в формате `"HH:MM"` (тот же формат, что
+  принимает `POST`)
+- Ошибки: `404 TEMPLATE_NOT_FOUND` (в т.ч. для синтаксически некорректного UUID — path-параметр
+  проверяется regex-ом до похода в БД, чтобы не дать Postgres бросить `22P02` на `uuid`-каст, что
+  иначе всплыло бы как `500`)
+- Реализовано: 🟢
 
 #### `PATCH /api/admin/templates/:templateId`
 - Permission: `template.update`
 - Request: `{ "expectedVersionNumber", "name"?, "days"? }`
 - Ошибки: `404`, `409 VERSION_CONFLICT`, `400 VALIDATION_ERROR`
 - Audit: `TEMPLATE_UPDATED`
+- **Не реализовано** — отдельная следующая задача (см. `IMPLEMENTATION_STATUS.md`)
 
 ## 5. Работники
 

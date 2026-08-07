@@ -8,6 +8,7 @@ const ADMIN_NAVIGATION = [
   { href: '/admin/workers', label: 'Workers' },
   { href: '/admin/users', label: 'Users' },
   { href: '/admin/sites', label: 'Sites' },
+  { href: '/admin/templates', label: 'Templates' },
   { href: '/admin/assignments', label: 'Assignments' },
   { href: '/admin/periods', label: 'Periods' },
   { href: '/admin/timesheets', label: 'Timesheets' },

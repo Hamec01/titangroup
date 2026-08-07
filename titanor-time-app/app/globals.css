@@ -379,6 +379,10 @@ button:disabled {
   max-width: 960px;
 }
 
+.worker-table-scroll {
+  overflow-x: auto;
+}
+
 .worker-table {
   width: 100%;
   border-collapse: collapse;

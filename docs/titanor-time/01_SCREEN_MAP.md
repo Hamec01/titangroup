@@ -140,8 +140,8 @@ touch target ≥ 48px), `/foreman/*` — desktop-first с поддержкой �
 - Действия: переход к созданию недостающей сущности
 - Состояния: loading; каждый шаг — «сделано»/«не сделано», без вымышленных чисел
 - Откуда: первый вход `ADMIN`, когда чек-лист не завершён; далее из nav
-- Куда: `/admin/sites/new`, `/admin/templates/new`, `/admin/workers/new`, `/admin/assignments/new`,
-  `/admin/periods`
+- Куда: `/admin/sites/new`, `/admin/templates/new` (не done) / `/admin/templates` (done),
+  `/admin/workers/new`, `/admin/assignments/new`, `/admin/periods`
 - API: `GET /api/admin/setup-status`
 - DoD: точно отражает БД, не кэширует «выполнено» после деактивации сущности
 
@@ -294,10 +294,14 @@ touch target ≥ 48px), `/foreman/*` — desktop-first с поддержкой �
 - Приоритет: desktop
 - Назначение: назначить работника на объект/область/шаблон. Несколько активных назначений
   одновременно — легитимный сценарий (работа на двух объектах в разные часы одного дня)
-- Данные: выбор `Employee`, `WorkSite`, `WorkArea` (опц.), `WorkScheduleTemplate`, `validFrom`,
-  `isPrimary` (по умолчанию `true`, если первое назначение работника на пересекающийся диапазон дат)
+- Данные: выбор `Employee`, `WorkSite`, `WorkArea` (опц.), `WorkScheduleTemplate` (опц., только
+  `active=true`, label = имя + версия, без UUID в подписи; ровно один активный шаблон —
+  автовыбор; явный вариант «No schedule template» с поясняющим текстом про schedule exception),
+  `validFrom`, `isPrimary` (по умолчанию `true`, если первое назначение работника на
+  пересекающийся диапазон дат)
 - Действия: submit; предпросмотр конфликта перед submit
-- Состояния: loading; error (`ASSIGNMENT_OVERLAP` — только для дубликата на тот же объект+область)
+- Состояния: loading; error (`ASSIGNMENT_OVERLAP` — только для дубликата на тот же объект+область;
+  `TEMPLATE_NOT_FOUND`)
 - Откуда: `/admin/assignments`, `/admin/workers/[employeeId]`, `/admin/sites/[siteId]`
 - Куда: `/admin/assignments`
 - API: `POST /api/admin/assignments/validate-overlap`, `POST /api/admin/assignments`
@@ -318,14 +322,16 @@ touch target ≥ 48px), `/foreman/*` — desktop-first с поддержкой �
 - DoD: обе строки видны в истории назначений; прошлые дни продолжают ссылаться на старую версию
   шаблона
 
-#### `/admin/templates` 🟢
+#### `/admin/templates` 🟢 реализовано
 - Роли: `ADMIN`, `SUPER_ADMIN`
 - Приоритет: desktop
-- Назначение: список рабочих шаблонов
-- Данные: `WorkScheduleTemplate` + краткое расписание по дням недели
+- Назначение: список рабочих шаблонов (активные и неактивные)
+- Данные: `WorkScheduleTemplate` — имя, `description`, `active`, текущая версия, количество рабочих
+  дней текущей версии
 - Действия: → создать, → карточка
-- Состояния: loading; empty (CTA создать); error
-- Откуда: nav, `/admin/setup`
+- Состояния: loading (Server Component — рендерится после резолва данных); empty («No templates
+  yet.», ссылка создать); error (недостаточно прав — «Access denied»)
+- Откуда: nav, `/admin/setup` (Done → сюда, не на `.../new`)
 - Куда: `/admin/templates/new`, `/admin/templates/[templateId]`
 - API: `GET /api/admin/templates`
 
@@ -341,19 +347,21 @@ touch target ≥ 48px), `/foreman/*` — desktop-first с поддержкой �
 - Куда: `/admin/templates/[templateId]`
 - API: `POST /api/admin/templates`
 
-#### `/admin/templates/[templateId]` 🟢
+#### `/admin/templates/[templateId]` 🟢 частично реализовано (read-only)
 - Роли: `ADMIN`, `SUPER_ADMIN`
 - Приоритет: desktop
-- Назначение: редактирование шаблона — те же 7 строк; сохранение создаёт новую immutable версию, не
-  переписывает текущую — UI выглядит как редактирование «одного шаблона», версионирование спрятано
-  за API
-- Данные: `days[7]` текущей версии
-- Действия: сохранить (создаёт новую версию)
-- Состояния: loading; error (та же валидация; `409 VERSION_CONFLICT`)
+- Назначение (целевое): редактирование шаблона — те же 7 строк; сохранение создаёт новую immutable
+  версию, не переписывает текущую — UI выглядит как редактирование «одного шаблона»,
+  версионирование спрятано за API. **В этой задаче реализована только read-only карточка** текущей
+  версии (7 строк дней, без формы сохранения) — `PATCH`/редактирование, создающее версию 2+, —
+  отдельная следующая задача.
+- Данные: `days[7]` текущей версии, `name`/`description`/`active`/`currentVersionNumber`
+- Действия (целевые, не в этой задаче): сохранить (создаёт новую версию)
+- Состояния: loading; empty/error (`404 TEMPLATE_NOT_FOUND`, в т.ч. malformed UUID — без `500`)
 - Откуда: `/admin/templates`
-- API: `GET/PATCH /api/admin/templates/:templateId`
-- DoD: изменение шаблона не переписывает данные уже прошедших периодов — старые назначения
-  продолжают ссылаться на прежнюю версию шаблона
+- API: `GET /api/admin/templates/:templateId` (реализовано); `PATCH` — не реализовано
+- DoD (целевое, для будущей `PATCH`-задачи): изменение шаблона не переписывает данные уже прошедших
+  периодов — старые назначения продолжают ссылаться на прежнюю версию шаблона
 
 #### `/admin/periods` 🟢
 - Роли: `ADMIN`, `SUPER_ADMIN`

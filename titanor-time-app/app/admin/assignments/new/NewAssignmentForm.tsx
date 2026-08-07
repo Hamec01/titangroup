@@ -22,15 +22,24 @@ interface WorkAreaOption {
   name: string;
 }
 
+interface TemplateOption {
+  id: string;
+  active: boolean;
+  name: string;
+  currentVersionNumber: number | null;
+}
+
 export function NewAssignmentForm() {
   const router = useRouter();
   const [workers, setWorkers] = useState<WorkerOption[]>([]);
   const [sites, setSites] = useState<SiteOption[]>([]);
   const [workAreas, setWorkAreas] = useState<WorkAreaOption[]>([]);
+  const [templates, setTemplates] = useState<TemplateOption[]>([]);
 
   const [employeeId, setEmployeeId] = useState('');
   const [siteId, setSiteId] = useState('');
   const [workAreaId, setWorkAreaId] = useState('');
+  const [templateId, setTemplateId] = useState('');
   const [validFrom, setValidFrom] = useState('');
   const [validTo, setValidTo] = useState('');
   const [isPrimary, setIsPrimary] = useState(false);
@@ -60,6 +69,24 @@ export function NewAssignmentForm() {
       })
       .catch(() => {
         // Same as above — the site dropdown just stays empty.
+      });
+    // Independent of siteId — a template is a global entity, not scoped to a site, so this fetch
+    // fires once alongside workers/sites and is never re-triggered by the site/work-area effect
+    // below, which is what keeps a template selection from being reset by changing Site/Work area.
+    fetch('/api/admin/templates?pageSize=100', { credentials: 'same-origin' })
+      .then((response) => (response.ok ? response.json() : { items: [] }))
+      .then((body: { items?: TemplateOption[] }) => {
+        if (cancelled) {
+          return;
+        }
+        const activeTemplates = (body.items ?? []).filter((t) => t.active);
+        setTemplates(activeTemplates);
+        if (activeTemplates.length === 1) {
+          setTemplateId(activeTemplates[0].id);
+        }
+      })
+      .catch(() => {
+        // Template is optional — a failed fetch just leaves the dropdown at "No schedule template".
       });
     return () => {
       cancelled = true;
@@ -104,6 +131,7 @@ export function NewAssignmentForm() {
       employeeId,
       siteId,
       workAreaId: workAreaId || undefined,
+      templateId: templateId || undefined,
       validFrom,
       validTo: validTo || undefined,
       isPrimary
@@ -164,6 +192,9 @@ export function NewAssignmentForm() {
             break;
           case 'WORK_AREA_NOT_FOUND':
             setErrorMessage('Selected work area no longer exists on this site.');
+            break;
+          case 'TEMPLATE_NOT_FOUND':
+            setErrorMessage('Selected work schedule template no longer exists.');
             break;
           case 'EMPLOYEE_NOT_ACTIVE':
             setErrorMessage('This worker is not active — reactivate them first.');
@@ -244,6 +275,24 @@ export function NewAssignmentForm() {
             </option>
           ))}
         </select>
+      </div>
+
+      <div className="login-field">
+        <label htmlFor="assignment-template">Work schedule template</label>
+        <select
+          id="assignment-template"
+          disabled={loading}
+          value={templateId}
+          onChange={(event) => setTemplateId(event.target.value)}
+        >
+          <option value="">No schedule template</option>
+          {templates.map((template) => (
+            <option key={template.id} value={template.id}>
+              {template.name} (v{template.currentVersionNumber ?? '—'})
+            </option>
+          ))}
+        </select>
+        <p className="setup-subtitle">Without a template, this assignment&apos;s worked hours will be treated as a schedule exception during foreman review.</p>
       </div>
 
       <div className="login-field">

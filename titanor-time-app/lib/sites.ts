@@ -104,6 +104,7 @@ export interface SiteActiveAssignment {
   isPrimary: boolean;
   workAreaId: string | null;
   workAreaName: string | null;
+  templateName: string | null;
 }
 
 export interface SiteForemanAssignment {
@@ -161,7 +162,8 @@ export async function getSiteDetail(siteId: string): Promise<SiteDetail | null> 
         select: {
           isPrimary: true,
           employee: { select: { id: true, firstName: true, lastName: true } },
-          workArea: { select: { id: true, name: true } }
+          workArea: { select: { id: true, name: true } },
+          templateVersion: { select: { template: { select: { name: true } } } }
         }
       },
       foremanAssignments: {
@@ -200,7 +202,8 @@ export async function getSiteDetail(siteId: string): Promise<SiteDetail | null> 
       employeeName: `${assignment.employee.firstName} ${assignment.employee.lastName}`,
       isPrimary: assignment.isPrimary,
       workAreaId: assignment.workArea?.id ?? null,
-      workAreaName: assignment.workArea?.name ?? null
+      workAreaName: assignment.workArea?.name ?? null,
+      templateName: assignment.templateVersion?.template.name ?? null
     })),
     foremanAssignments: site.foremanAssignments.map((assignment) => ({
       id: assignment.id,

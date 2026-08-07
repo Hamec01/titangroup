@@ -68,6 +68,7 @@ export default async function SiteDetailPage({ params }: { params: Promise<{ sit
                   {assignment.employeeName}
                   {assignment.isPrimary ? ' (primary)' : ''}
                   {assignment.workAreaName ? ` — ${assignment.workAreaName}` : ''}
+                  {assignment.templateName ? ` — ${assignment.templateName}` : ''}
                 </span>
               </li>
             ))}

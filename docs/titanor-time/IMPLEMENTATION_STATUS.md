@@ -1,5 +1,94 @@
 # Titanor Time — Implementation Status
 
+Обновлено: 2026-08-07 Europe/Helsinki (feat: template selection workflow)
+
+**Закрыт подтверждённый полным E2E gap** (см. запись «Full foundation E2E PASS» ниже, где было
+явно отмечено: «foreman находит табель в... `/foreman/review/exceptions`, т.к. `SiteAssignment`
+создаётся через UI без `templateId`» — форма `/admin/assignments/new` не давала выбрать шаблон, хотя
+`POST /api/admin/assignments` его уже принимал; `/admin/templates`/`/admin/templates/[templateId]`
+были задокументированы в `01_SCREEN_MAP.md`, но физически отсутствовали). Отдельный read/selection
+срез — Prisma schema не менялась, `PATCH`/edit шаблона (новая immutable версия) не реализован,
+остаётся следующей отдельной задачей.
+
+**Migration**: `20260807090000_seed_template_read_all_permission` — чистое DML (без изменений
+schema), тот же паттерн, что `20260801013520_seed_template_create_permission`: сеет
+`template.read.all`, выдаёт `ADMIN`+`SUPER_ADMIN`. Применена и проверена на одноразовом
+PostgreSQL 16 в рамках этой задачи — **к production не применялась**.
+
+**Реализовано**:
+- `lib/templates.ts` (новый) — `listTemplates()`/`getTemplateDetail()`; «текущая версия» — строка с
+  максимальным `versionNumber`, получена через `orderBy+take:1` на relation `versions` (Prisma
+  батчит это в одну дополнительную запрос, не N+1 в коде); `workingDaysCount` — через
+  `_count.days` с `where: {isWorkingDay: true}`, без выборки самих строк дней на списке.
+- `GET /api/admin/templates` (`app/api/admin/templates/route.ts`) — permission `template.read.all`,
+  `{items:[{id,name,description,active,currentVersionId,currentVersionNumber,workingDaysCount}],
+  page,pageSize,totalItems,totalPages}`, `createdByUserId` не возвращается.
+- `GET /api/admin/templates/:templateId` (новый файл, `[templateId]/route.ts`) — тот же permission,
+  `{id,name,description,active,currentVersionId,currentVersionNumber,days:[...]}` только текущей
+  версии, время `"HH:MM"` (тот же формат, что принимает `POST`); path-параметр проверяется regex-ом
+  UUID **до** похода в БД — malformed UUID → `404 TEMPLATE_NOT_FOUND`, не Prisma-cast/`500`;
+  неизвестный валидный UUID — тоже `404 TEMPLATE_NOT_FOUND`.
+- `/admin/templates` (новая страница) — read-only список, `Create template` → `.../new`, empty-state
+  «No templates yet.», access-denied как везде в `/admin/*`.
+- `/admin/templates/[templateId]` (новая страница) — read-only карточка текущей версии: имя,
+  `description`, active/inactive, номер версии, 7 строк дней (день недели, рабочий/нет, начало,
+  конец, перерыв). Никакой формы сохранения — это следующая отдельная задача.
+- `Templates` добавлен в постоянную admin-навигацию (`app/admin/layout.tsx`), между `Sites` и
+  `Assignments`.
+- `/admin/setup`: DONE-состояние строки «Work schedule template» теперь ведёт в `/admin/templates`
+  (было — `.../new` с меткой «Create another»); устаревший комментарий про отсутствие list-экрана
+  удалён.
+- `/admin/assignments/new` (`NewAssignmentForm.tsx`) — новый select «Work schedule template»:
+  грузит `GET /api/admin/templates?pageSize=100`, показывает только `active=true`, label = имя +
+  `(vN)`, значение — `templateId` (UUID никогда не отображается вместо названия); ровно один
+  активный шаблон — автовыбор; несколько — выбирает администратор; явный вариант
+  «No schedule template» с поясняющим текстом про schedule exception; смена Site/Work area не
+  затрагивает этот select (отдельный `useEffect`, без зависимости от `siteId`); `templateId`
+  включается в `POST /api/admin/assignments`; `TEMPLATE_NOT_FOUND` обрабатывается предметно.
+  **Backend не менялся** — `POST /api/admin/assignments`/`lib/assignments.ts`'s `createAssignment()`
+  уже полностью поддерживали `templateId` (резолвят `latestVersion` сами, эндпоинт принимает только
+  `templateId`, никогда `templateVersionId` от браузера) — недостающим был только UI-селектор и
+  read-эндпоинты для его данных.
+- `lib/sites.ts`/`/admin/sites/[siteId]`: `SiteActiveAssignment.templateName` добавлен аддитивно —
+  карточка объекта теперь показывает имя шаблона у активных назначений, если он есть
+  (`/admin/assignments`'s `templateName` уже существовал раньше и не менялся).
+
+**Проверено на одноразовом PostgreSQL 16** (миграции с нуля, отдельный production build instance,
+всё через реальный UI/API): Template A + Template B созданы через UI, оба видны в
+`/admin/templates`, обе карточки показывают правильные 7 дней; `Templates` в постоянном меню;
+`/admin/setup` Manage → список; `/admin/assignments/new` показывает оба шаблона по именам без UUID;
+assignment с Template A сохраняет `templateVersionId` актуальной версии Template A (проверено в БД);
+открытие периода после создания такого назначения создаёт `TimesheetPlannedShift` из шаблона; worker
+вводит часы, совпадающие с планом; после submit табель попадает в `/foreman/review/standard`, не в
+`exceptions` (закрывает исходный gap); assignment без шаблона по-прежнему разрешён и, как и раньше,
+ожидаемо попадает в `exceptions`; `GET .../templates/:id` с несуществующим UUID → `404
+TEMPLATE_NOT_FOUND`; malformed UUID (не UUID-shaped строка) → `404`, не `500`; inactive template не
+выбирается в UI-селекторе (отфильтрован клиентом); `ADMIN`/`SUPER_ADMIN` имеют доступ к обоим
+эндпоинтам, `WORKER`/`FOREMAN` → `403`; неаутентифицированный запрос → `401`; N+1 не обнаружен
+(список из нескольких шаблонов — фиксированное число запросов, не растущее с количеством строк).
+Browser: 375px и десктоп, без hydration/runtime ошибок в консоли. Найдена и исправлена
+mobile-only регрессия самой этой задачи (не существовавшая до неё): 5-колоночная таблица дней на
+`/admin/templates/[templateId]` (и, с достаточно длинными именами, список `/admin/templates`) не
+влезала в 375px — `document.documentElement.scrollWidth` был 414+ вместо 375. Другие admin-таблицы
+(`/admin/sites`, `/admin/workers`, `/admin/assignments`, `/admin/periods`) не переполнялись даже при
+том же 375px. Исправлено новым классом `.worker-table-scroll` (`overflow-x: auto` на обёртке,
+тот же паттерн, что уже использует `.admin-nav`) вокруг `<table className="worker-table">` на обеих
+новых страницах — переисправлено и перепроверено после фикса на чистом одноразовом Postgres 16
+(оба фокусных прогона — функциональный и mobile/desktop — зелёные после этого изменения).
+
+**Технические проверки**: `git diff --check`, `npx prisma validate`, `npx tsc --noEmit`,
+`npm run build`, `docker compose -f compose.titanor-time.yaml build app` — чисты (тестовый Docker
+tag `latest` удалён после проверки, production image/container не затронуты).
+
+**Production не менялся** — новая локальная DML-миграция применена и проверена только на
+одноразовом PostgreSQL 16 в рамках этой задачи; к production `titanor-time-db-1` она **не
+применялась**, production-контейнеры не перезапускались.
+
+**Дальше — отдельной задачей**: `PATCH /api/admin/templates/:templateId` + форма редактирования
+(создаёт новую immutable версию, не переписывает текущую) — та функциональность, что
+`01_SCREEN_MAP.md` целевым образом описывает для `/admin/templates/[templateId]`, но которая не
+входит в этот read/selection срез.
+
 Обновлено: 2026-08-07 Europe/Helsinki — **Full foundation E2E PASS**
 
 Полный локальный onboarding+timesheet E2E (тот, что был остановлен и дал FAIL 2026-08-06, затем
@@ -148,10 +237,11 @@ re-approve/final approve/negative checks/persistence/DB-verification **не пр
 app` — чисты.
 
 **Production не менялся** — миграций в этой задаче нет (Prisma schema не трогалась), деплоя не
-было. **Полный локальный onboarding+timesheet E2E (SUPER_ADMIN→worker→foreman→timesheet→final
-approval, negative checks, restart persistence, read-only DB verification) пока не перезапускался
-— он должен быть перезапущен целиком отдельной следующей задачей**, этот фикс закрывает только
-найденный конкретный дефект и его сфокусированную проверку.
+было. **Обновление 2026-08-07**: полный локальный onboarding+timesheet E2E (SUPER_ADMIN→worker→
+foreman→timesheet→final approval, negative checks, restart persistence, read-only DB verification)
+был перезапущен целиком отдельной задачей и **пройден полностью — PASS, commit `94ef28b`** (запись
+в самом верху этого файла); на момент этой записи (2026-08-06 21:00) он ещё не был перезапущен —
+формулировка ниже отражает состояние на тот момент, не текущее.
 
 Обновлено: 2026-08-06 19:30 Europe/Helsinki (security hardening: active role windows)
 Два прицельных backend-фикса перед полным E2E, без новых функций/UI/migrations:
