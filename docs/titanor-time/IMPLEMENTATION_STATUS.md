@@ -1,5 +1,102 @@
 # Titanor Time — Implementation Status
 
+Обновлено: 2026-08-07 Europe/Helsinki — **Full foundation E2E PASS**
+
+Полный локальный onboarding+timesheet E2E (тот, что был остановлен и дал FAIL 2026-08-06, затем
+закрыт точечным фиксом «worker не видел причину возврата табеля» ниже) **перезапущен целиком с нуля
+и пройден полностью**, отдельной задачей, на одноразовом production build + одноразовом
+PostgreSQL 16, отдельный app instance (порт 3521), отдельная disposable БД — production
+(`titanor-time-app-1`/`titanor-time-db-1`) не трогался (проверено read-only `/api/health`+
+`/api/ready` до и после, контейнеры оставались healthy на всём протяжении).
+
+**Пройденный маршрут** (всё через настоящий браузер/HTTP API работающего production build, ни одна
+business-сущность не вставлена SQL/Prisma напрямую; SUPER_ADMIN — только штатным
+`bootstrap-super-admin` через настоящий PTY):
+SUPER_ADMIN bootstrap → login + проверка постоянного меню (Setup/Workers/Users/Sites/
+Assignments/Periods/Timesheets/Review/Corrections) → Site A (+ Work area) и Site B (изоляция) через
+UI, каждая сущность повторно открыта через меню, а не только через create-redirect → work schedule
+template (создание через UI; список/деталь для template — известный, ранее задокументированный
+пробел, не новый дефект) → Worker → assignment Worker→Site A primary → open period → `/admin/setup`
+чек-лист: все обязательные пункты Done, City — не done, помечен как optional → выпуск кода
+активации worker (QR — локальный data URL, copy/print есть, raw-код не в localStorage и не виден
+после refresh) → активация через `/activate` (ручной код) → `/set-password` → auto-login + redirect
+`/worker` → повторное использование кода отклонено → worker не имеет доступа к `/admin/*`/`/foreman`
+→ standalone FOREMAN через `/admin/users/new` (auto-issue: QR/copy/print) → `/activate-account` →
+`/set-account-password` → `/foreman` → повторное использование кода отклонено → foreman не имеет
+доступа к `/admin/*` → назначение foreman на Site A через selector по username (без единого ручного
+UUID; сами option-labels никогда не сырой UUID) → foreman видит Site A и работника, никогда Site B →
+worker вводит часы на 2 дня (обычный интервал + интервал с перерывом), данные сохраняются между
+перезагрузками страницы → submit → status=SUBMITTED, hours read-only, PATCH после submit — `409
+DRAFT_NOT_EDITABLE`, создана Version 1, draft физически очищен → foreman находит табель в своей
+очереди (в данном сценарии — `/foreman/review/exceptions`, т.к. `SiteAssignment` создаётся через UI
+без `templateId` — форма `/admin/assignments/new` этого поля не предлагает, хотя `POST
+/api/admin/assignments` его принимает; из-за этого `computeSiteScopeHasException` корректно
+считает 0 запланированных минут ≠ отработанным — это существующий, отдельный, уже
+задокументированный geп UI/API, не блокирующий дефект этой задачи) → возврат без причины отклонён
+и клиентом, и API (`400 VALIDATION_ERROR`) → возврат с точной уникальной причиной → worker видит
+точный текст причины, название Site A (не UUID), время возврата, без дополнительного клика на всех
+четырёх страницах (`/worker/periods/[periodId]`, `.../hours`, `.../hours/[date]`, `.../submit`) →
+375px mobile: без horizontal overflow, длинный текст переносится, UUID не виден → browser console:
+ни одной hydration-warning/ошибки за весь прогон (включая форматирование времени возврата в
+`ReturnReasonsNotice`) → worker исправляет день (перерыв 30→60 мин), Version 1 не меняется, причина
+остаётся видна на confirmation до повторной отправки → resubmit → status=SUBMITTED снова, создана
+Version 2, `returnReasons: []` для новой текущей версии, старая причина больше не показывается как
+актуальная на всех 4 страницах, старый `RETURNED` scope и причина остаются в БД как история →
+foreman видит новую текущую версию (version 2) в очереди, approve → повторное действие на stale
+scope V1 отклонено (`409 STALE_REVIEW_SCOPE`) → timesheet → FOREMAN_APPROVED только после разрешения
+всех scope текущей версии, worker видит read-only «Approved by foreman» → SUPER_ADMIN видит табель в
+`/admin/timesheets`, карточка показывает worker/период/актуальные часы version 2/статус → Final
+approve → status=FINAL_APPROVED, исчез из очереди ожидания, повторный final-approve отклонён (`409`),
+Version 1/2 не изменены → worker видит «Finalized», часы полностью read-only, доступен в
+`/worker/history`.
+
+**Admin visibility**: worker/назначение/период/актуальные часы version 2/маршрут статусов
+SUBMITTED→RETURNED→SUBMITTED→FOREMAN_APPROVED→FINAL_APPROVED — всё подтверждено через доступные
+карточки (`/admin/workers/:id`, `/admin/assignments`, `/admin/periods/:id`, `/admin/timesheets`,
+`/admin/timesheets/:id?status=FINAL_APPROVED`) без придумывания новой audit-timeline функции.
+
+**Negative checks** (все пройдены): неаутентифицированный `GET /api/worker/timesheets/:id` → `401`;
+worker/foreman на `/admin/*` → «Access denied»; второй worker (Site B) не видит Site A/причину
+worker1, не может прочитать чужой `timesheetId` (`403`, без утечки текста причины в теле ошибки);
+foreman (только Site A) не видит Site B/второго worker даже после его создания; пустая
+`returnReason` отклонена и клиентом, и API; stale review scope отклонён (`409`); PATCH дня после
+SUBMITTED/FOREMAN_APPROVED/FINAL_APPROVED — `409`; reused activation tokens (worker и foreman) —
+отклонены; final-approve в неправильном статусе — `409`; `POST /api/admin/sites` без
+`X-Requested-With` → `403 CSRF_REJECTED`, ни одна сущность не создана; ни один UI не потребовал
+ручного ввода UUID.
+
+**Persistence/restart**: disposable app instance перезапущен (новый процесс, тот же одноразовый
+Postgres — контейнер перезапущен через `docker restart`, без пересоздания, volume/данные не
+удалялись); после перезапуска — `/api/ready` healthy; SUPER_ADMIN/FOREMAN/Worker логинятся заново
+успешно; FINAL_APPROVED табель доступен worker в history, «Finalized», часы read-only;
+`current-version`/`returnReasons` через реальный API — versionNumber=2, пусто для текущей версии
+(история — ниже); admin-карточка всё ещё показывает FINAL_APPROVED/version 2, без кнопки Final
+approve повторно.
+
+**Read-only DB verification** (после завершения UI/API-потока): User=4, Employee=2, Employment=2 —
+ровно ожидаемое число для этого сценария; роли SUPER_ADMIN/WORKER/FOREMAN корректны, все ACTIVE;
+standalone FOREMAN — `employeeId=null`; worker `User` привязан к правильному `Employee`;
+`ActivationToken`/`UserActivationToken` — по одному на аккаунт, `status=USED`, `tokenHash` — hex
+digest (не сырой код); все `passwordHash` — настоящий Argon2, не plaintext; Site A/Site B/WorkArea/
+template/assignments — без дублей; `ForemanAssignment` — только на Site A; `PayrollPeriod` — OPEN;
+`Timesheet` — FINAL_APPROVED; ровно 2 `TimesheetVersion`; Version 1 содержит исходный перерыв
+(30 мин, не изменён); Version 2 — исправленный (60 мин); `currentVersionId` → Version 2; scope
+Version 1 — `RETURNED` с сохранённой причиной (история); scope Version 2 — `APPROVED`; draft — 0
+редактируемых сегментов; `AuditEvent` содержит `TIMESHEET_SUBMITTED`/`TIMESHEET_RETURNED`
+(на `TimesheetReviewScope`)/`FOREMAN_APPROVED`/`FINAL_APPROVED`; ни в одном `AuditEvent` (26 строк
+проверено) не найдено password/passwordHash/tokenHash/session/cookie; CSRF-отклонённая попытка
+создать сайт не оставила частичной строки.
+
+Технические проверки после E2E: `git diff --check`, `npx tsc --noEmit`, `npx prisma validate`,
+`npm run build`, `docker compose -f compose.titanor-time.yaml build app` — все чисты; тестовый
+Docker-образ и его временный тег `latest` удалены после проверки, production image/container не
+затронуты. Никаких изменений кода в этой задаче — только этот docs-commit; disposable окружение
+(контейнер, app instance, playwright, все временные scripts, все secrets в scratch) полностью
+удалено.
+
+**Дальше — отдельной задачей**: Attendance Clock (Check In/Out) и offline geolocation — следующая
+функция, этим E2E не затрагивалась и не проверялась.
+
 Обновлено: 2026-08-06 21:00 Europe/Helsinki (fix: worker не видел причину возврата табеля)
 
 **Найденный E2E-дефект** (полный локальный onboarding+timesheet E2E, отдельная задача): пройдены
