@@ -731,12 +731,27 @@ ALTER TABLE "ClockEventLocation"
   CHECK ("latitude" BETWEEN -90 AND 90 AND "longitude" BETWEEN -180 AND 180);
 
 -- ck_user_system_shape — §2.2 (issue 7): SYSTEM-user shape guaranteed at the DB level,
--- not only by seed convention.
+-- not only by seed convention. Fixed per 2026-08-12 review (SYSTEM identity race, follow-up to
+-- item A of the previous fix): the original predicate only constrained the SYSTEM branch's own
+-- shape and said nothing about the reserved username 'system.scheduler' itself — a HUMAN row
+-- could freely hold any case-variant of it (User.username's plain UNIQUE index is case-sensitive,
+-- so 'System.Scheduler' does not collide with 'system.scheduler'). The preflight guard only runs
+-- once, before any T7A DDL; it cannot see a HUMAN row inserted *after* it ran, whether that insert
+-- lands before this ALTER TABLE commits (blocking the migration, since the ALTER itself would then
+-- reject the pre-existing violating row) or after (in which case only this CHECK — not the
+-- preflight, not UNIQUE(username) — stands between a case-variant HUMAN and the reserved identity).
+-- New predicate reserves 'system.scheduler' case-insensitively for the SYSTEM row and nowhere
+-- else: no HUMAN may hold any case-variant of it, the SYSTEM row must hold the exact lowercase
+-- form (not merely case-insensitively equal to it — renaming SYSTEM to 'System.Scheduler' is
+-- itself now rejected), and the pre-existing SYSTEM shape fields (employeeId/passwordHash/status)
+-- are unchanged. Still exactly one CHECK — this ALTERs the existing ck_user_system_shape predicate
+-- in place, no new constraint is added.
 ALTER TABLE "User"
   ADD CONSTRAINT "ck_user_system_shape"
   CHECK (
-    "userKind" = 'HUMAN' OR
-    ("employeeId" IS NULL AND "passwordHash" IS NULL AND "status" = 'DEACTIVATED')
+    ("userKind" = 'HUMAN' AND lower("username") <> 'system.scheduler')
+    OR
+    ("userKind" = 'SYSTEM' AND "username" = 'system.scheduler' AND "employeeId" IS NULL AND "passwordHash" IS NULL AND "status" = 'DEACTIVATED')
   );
 
 -- ---------------------------------------------------------------------------

@@ -764,9 +764,24 @@ ALTER TABLE "Timesheet" ADD CONSTRAINT "Timesheet_id_employeeId_periodId_key"
   UNIQUE ("id", "employeeId", "periodId");
 
 -- User: форма SYSTEM-пользователя гарантирована на уровне БД, не только seed-конвенцией (issue 7).
+-- **`[2026-08-12 review fix — SYSTEM identity race]`**: исходный предикат ограничивал только форму
+-- SYSTEM-ветки и ничего не говорил про зарезервированный username `system.scheduler` сам по себе —
+-- HUMAN мог свободно занять любой case-вариант (`User.username` — обычный UNIQUE, регистрозависимый,
+-- поэтому `System.Scheduler` не конфликтует с `system.scheduler`). Preflight-проверка (§13) выполняется
+-- только один раз, до T7A DDL — она не видит HUMAN-строку, вставленную ПОСЛЕ её выполнения, ни в
+-- случае коллизии до commit миграции (тогда сам этот ALTER TABLE отклонит миграцию из-за уже
+-- нарушающей CHECK строки), ни после (тогда единственная защита от case-variant HUMAN — этот CHECK,
+-- не preflight и не UNIQUE(username)). Новый предикат резервирует `system.scheduler`
+-- регистронезависимо только за SYSTEM-строкой: ни один HUMAN не может занять любой case-вариант;
+-- SYSTEM обязан иметь точный (нижний регистр) username, попытка переименовать SYSTEM отклоняется тем
+-- же CHECK; SYSTEM-форма (employeeId/passwordHash/status) не изменилась. Один и тот же CHECK
+-- constraint, число CHECK не меняется.
 ALTER TABLE "User" ADD CONSTRAINT "ck_user_system_shape"
-  CHECK ("userKind" = 'HUMAN' OR
-         ("employeeId" IS NULL AND "passwordHash" IS NULL AND "status" = 'DEACTIVATED'));
+  CHECK (
+    ("userKind" = 'HUMAN' AND lower("username") <> 'system.scheduler')
+    OR
+    ("userKind" = 'SYSTEM' AND "username" = 'system.scheduler' AND "employeeId" IS NULL AND "passwordHash" IS NULL AND "status" = 'DEACTIVATED')
+  );
 
 -- User: не более одного SYSTEM-пользователя когда-либо (issue 7) — partial unique index на
 -- константном выражении, тот же приём, что singleton CompanyAttendancePolicy, без лишней колонки.
@@ -3974,6 +3989,22 @@ lower(username) = lower('system.scheduler')`: если строка найден
 таблица/enum/колонка не создаётся, существующий `HUMAN`-пользователь не изменяется. Это делает
 failure-path атомарным по построению (guard — буквально первый statement файла, поэтому откатывать
 после сбоя нечего), независимо от того, оборачивает ли Prisma весь `migration.sql` в транзакцию.
+
+**`[2026-08-12 review fix — SYSTEM identity race]` Остаточная гонка после preflight, закрытая
+предикатом `ck_user_system_shape` (не отдельным guard'ом)**: preflight выполняется один раз и не
+видит `HUMAN`-строку, вставленную конкурентно ПОСЛЕ его выполнения — ни точный `username`, ни
+case-вариант (`User.username` — обычный регистрозависимый `UNIQUE`, `System.Scheduler` физически не
+конфликтует с `system.scheduler`). Закрывает это не preflight, а сам `ck_user_system_shape`,
+предикат которого (§2.2) резервирует `system.scheduler` регистронезависимо только за SYSTEM-строкой:
+`("userKind"='HUMAN' AND lower(username)<>'system.scheduler') OR ("userKind"='SYSTEM' AND
+username='system.scheduler' AND ...)`. Если конкурентный case-variant `HUMAN` успел закоммититься до
+того, как `ALTER TABLE "User" ADD CONSTRAINT "ck_user_system_shape"` выполняется в этой же
+транзакции — `ALTER TABLE` физически отклоняет миграцию (существующая строка уже нарушает новый
+CHECK), явная транзакция откатывает весь T7A DDL, применённый до этой точки. Если конкурентный
+`INSERT` происходит уже ПОСЛЕ commit миграции — сам CHECK отклоняет его напрямую. При любом порядке
+выполнения ни при каком стечении обстоятельств не может одновременно существовать `HUMAN`-строка с
+`lower(username)='system.scheduler'` и `SYSTEM`-строка — constraint делает эти два состояния
+взаимоисключающими структурно, не только по соглашению seed-кода.
 
 **Требования, обеспеченные структурно**:
 

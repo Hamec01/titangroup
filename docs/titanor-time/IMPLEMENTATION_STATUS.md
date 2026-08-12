@@ -1,6 +1,73 @@
 # Titanor Time — Implementation Status
 
-Обновлено: 2026-08-12 Europe/Helsinki (fix: make attendance migration atomic — audit-closeout)
+Обновлено: 2026-08-12 Europe/Helsinki (fix: reserve system scheduler identity)
+
+**T7A schema-foundation slice — закрытие последнего SYSTEM identity race, тот же slice.**
+Продолжение review-fix (`9416e26`) — audit-closeout закрыл гонку между preflight-проверкой и
+конкурентной вставкой ТОЧНО совпадающего username, но `User.username @unique` — обычный
+case-sensitive индекс. Оставался непроверенный сценарий: preflight не находит коллизию → после
+него конкурентно вставляется HUMAN с username в ДРУГОМ регистре (`System.Scheduler`) → SYSTEM seed
+(`system.scheduler`, ровно нижний регистр) не конфликтует с этим индексом → миграция могла успешно
+завершиться, оставив ОДНОВРЕМЕННО HUMAN `System.Scheduler` и SYSTEM `system.scheduler` — нарушение
+уже обещанной case-insensitive гарантии резервирования идентичности. Locking slice (§15)
+по-прежнему **не начат**.
+
+**Исправление.** Существующий `CHECK ck_user_system_shape` (CK-34) расширен на месте — не новый
+constraint, не новая миграция (миграция всё ещё не применена ни к одной постоянной базе, правка
+in-place разрешена). Новый предикат:
+```sql
+CHECK (
+  ("userKind" = 'HUMAN' AND lower("username") <> 'system.scheduler')
+  OR
+  ("userKind" = 'SYSTEM' AND "username" = 'system.scheduler'
+   AND "employeeId" IS NULL AND "passwordHash" IS NULL AND "status" = 'DEACTIVATED')
+)
+```
+Теперь ни один HUMAN не может держать `system.scheduler` ни в каком регистре, а SYSTEM обязан иметь
+ровно этот username (переименование или смена `userKind` на HUMAN с сохранением username —
+запрещены тем же CHECK). Количество CHECK constraints не изменилось — **15**, как и было.
+Закрывает оба возможных порядка гонки: если конкурентная вставка происходит ДО того, как миграция
+меняет `"User"` — `ALTER TABLE ... ADD CONSTRAINT` в конце транзакции проверяет все существующие
+строки и откатывает ВСЮ T7A DDL, если находит нарушителя (найдена эмпирически: PostgreSQL
+валидирует `CHECK` против всех строк на момент `ADD CONSTRAINT`, а не только новых). Если
+конкурентная вставка происходит ПОСЛЕ коммита миграции — сам `CHECK` отклоняет её напрямую.
+`ux_user_single_system` (UX-03) оставлен без изменений; отмечено, что на практике для повторной
+попытки вставить второй SYSTEM-ряд первым срабатывает `User_username_key` (т.к. CK-34 теперь
+допускает только один буквальный username для SYSTEM), `ux_user_single_system` остаётся защитой
+в глубину для форм строки, не исключённых CK-34.
+
+Проверено на новом одноразовом PostgreSQL 16 (24 обязательных пункта): Suite A (1–4) — 48 baseline
+migrations + T7A с нуля, ровно один SYSTEM User с username `system.scheduler`, повторный
+`migrate deploy` → No pending migrations, `migrate status` → up to date. Suite B (5–6) —
+pre-existing коллизия HUMAN `system.scheduler` и HUMAN `System.Scheduler` перед миграцией — оба
+атомарно отклонены `SYSTEM_SCHEDULER_USERNAME_OCCUPIED`, 0 T7A DDL, HUMAN-строка не изменена.
+Suite C (7–14) — 10/10 PASS: INSERT HUMAN `system.scheduler`/`System.Scheduler`/`SYSTEM.SCHEDULER`
+после успешной миграции все отклонены CHECK; обычный HUMAN username проходит; UPDATE SYSTEM
+username (в том числе на case-вариант самого себя) отклонено; UPDATE SYSTEM `userKind`→HUMAN с
+тем же username отклонено; SYSTEM password/status/username shape guards подтверждены; второй
+SYSTEM отклонён (в реальности `User_username_key`, задокументировано честно в UX-03). Suite D
+(15–16) — РЕАЛЬНЫЕ два конкурентных psql-соединения (не симуляция), FIFO-оркестрация: (а) exact-case
+`system.scheduler` конкурентно после preflight — Session B (INSERT) успевает первой, Session A
+(остаток DDL) падает на `check constraint "ck_user_system_shape" ... is violated by some row`,
+read-only проверка после — 0 T7A-таблиц/enum/колонок/constraint, ровно одна строка
+`lower(username)=lower('system.scheduler')` (HUMAN-строка Session B, не тронута); (б) тот же
+сценарий с case-вариантом `System.Scheduler` — идентичный результат: миграция откатилась целиком,
+выжила ровно одна строка с этим lower-username, она HUMAN, SYSTEM-строки нет. Оба случая
+демонстрируют одну и ту же реальную гонку — единственное окно, где она вообще возможна, это до
+первого DDL-затрагивания `"User"` (после этого PostgreSQL держит `ACCESS EXCLUSIVE` на `"User"` до
+конца транзакции, что эмпирически обнаружено при первой попытке теста — конкурентный `INSERT`
+заблокировался на этом локе и потребовал пересборки сценария с более ранней точкой разреза DDL).
+Regression (17–24): все 16 composite FK negative + 12 nullable positive tests, coordinate bounds,
+`id`/`createdAt` immutability — без регрессий; `prisma validate`/generate, `npx tsc --noEmit`,
+`npm run build`, `docker compose -f compose.titanor-time.yaml build app`, `git diff --check` — все
+зелёные.
+
+Docker image safety: production `titanor-time-app-1`/`titanor-time-db-1` подтверждены неизменными
+(тот же image ID/`StartedAt`/`RestartCount` до и после сборки). Тега `titanor-time-app:latest` не
+было и до задачи — после проверки тестовый образ удалён полностью, без создания тега, которого не
+существовало изначально.
+
+Production/API/UI/offline sync/locking — не затронуты этой правкой, ни в каком виде.
 
 **T7A schema-foundation slice — audit-closeout правка, тот же slice.** Продолжение review-fix
 (`eed7d1b`) — три оставшиеся проблемы найдены и исправлены; locking slice (§15) по-прежнему **не

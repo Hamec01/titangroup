@@ -1053,6 +1053,15 @@ needs to roll back. `CompanyAttendancePolicy`'s seed keeps its `ON CONFLICT ("si
 unchanged — see the migration's own inline comment for why that case is benign (brand-new table, no
 pre-existing unrelated data can occupy it).
 
+**This one-shot guard does not by itself close a concurrent-insert race** (fixed per 2026-08-12
+review, SYSTEM identity race): it only sees rows that exist at the moment it runs, not a `HUMAN`
+row — exact-case or any case-variant — inserted by a concurrent connection after it has already
+passed. CK-34 (`ck_user_system_shape`, §11.1 below) is what actually closes that window: its
+predicate reserves `system.scheduler` case-insensitively for the SYSTEM row for the lifetime of the
+table, not just at migration time, so a late-arriving colliding `HUMAN` row is rejected by the
+`ALTER TABLE ... ADD CONSTRAINT` itself (if it landed before that statement, rolling back the whole
+transaction) or by the CHECK directly (if it lands after the migration has committed).
+
 ### 11.1 CHECK constraint register (CK-22 .. CK-36)
 
 ### CK-22 `ck_clock_event_device_sequence_pairing`
@@ -1161,14 +1170,31 @@ pre-existing unrelated data can occupy it).
 ### CK-34 `ck_user_system_shape`
 
 - Table: `User`
-- Predicate:
+- Predicate (**fixed per 2026-08-12 review — SYSTEM identity race**; same constraint, in-place
+  predicate change, CHECK count unchanged at 15):
   ```sql
-  "userKind" = 'HUMAN' OR
-  ("employeeId" IS NULL AND "passwordHash" IS NULL AND "status" = 'DEACTIVATED')
+  ("userKind" = 'HUMAN' AND lower("username") <> 'system.scheduler')
+  OR
+  ("userKind" = 'SYSTEM' AND "username" = 'system.scheduler' AND "employeeId" IS NULL AND "passwordHash" IS NULL AND "status" = 'DEACTIVATED')
   ```
-- Source: §2.2 (issue 7).
+- Source: §2.2 (issue 7); username-reservation clause added §2.2/§13, 2026-08-12 review.
+- Why: the original predicate only shaped the SYSTEM branch and said nothing about the reserved
+  username itself. `User.username`'s plain `UNIQUE` index is case-sensitive, so a `HUMAN` row could
+  hold `System.Scheduler` (or any other case-variant) without colliding with the SYSTEM row's exact
+  `system.scheduler`. The one-shot preflight guard (before any T7A DDL — see the migration's own
+  header comment, and §13) cannot see a `HUMAN` row inserted concurrently *after* it ran. This CHECK
+  is what actually closes that residual window: it reserves `system.scheduler` case-insensitively
+  for the SYSTEM row and nowhere else, requires the SYSTEM row's username to be the exact lowercase
+  form (blocking a rename away from it too), and leaves the rest of the SYSTEM shape (employeeId/
+  passwordHash/status) unchanged.
 - Documentation synchronization: SYNCED.
-- Minimum negative test: `INSERT User` with `userKind='SYSTEM'` and `passwordHash` set — expect `23514`.
+- Minimum negative tests:
+  - `INSERT User` with `userKind='SYSTEM'` and `passwordHash` set — expect `23514` (pre-existing).
+  - `INSERT User` with `userKind='HUMAN'`, `username='system.scheduler'` — expect `23514`.
+  - Same with `username='System.Scheduler'` and `username='SYSTEM.SCHEDULER'` — expect `23514` for both.
+  - `UPDATE "User" SET username='someone.else' WHERE "userKind"='SYSTEM'` — expect `23514` (SYSTEM cannot be renamed).
+  - `UPDATE "User" SET "userKind"='HUMAN' WHERE username='system.scheduler'` (username left unchanged) — expect `23514` (SYSTEM cannot become HUMAN while still holding the reserved username).
+  - Positive: ordinary `HUMAN` usernames insert/update freely; the SYSTEM row itself is untouched by the new clause (still satisfies its own branch).
 
 ### CK-35 `ck_geofence_version_coordinates`
 
@@ -1210,10 +1236,20 @@ own nullability (UX-01, UX-02), or an expression index on a constant (UX-03).
 ### UX-03 `ux_user_single_system`
 
 - Table: `User`
-- Index: `((true)) WHERE "userKind" = 'SYSTEM'`
+- Index: `((true)) WHERE "userKind" = 'SYSTEM'` — **unchanged** by the 2026-08-12 SYSTEM identity race
+  fix (task explicitly required this index stay as-is; only CK-34's predicate changed).
 - Source: §2.2 (issue 7) — same singleton trick as `CompanyAttendancePolicy`, without an extra column.
 - Documentation synchronization: SYNCED.
 - Minimum negative test: `INSERT User (userKind, ...)` a second `SYSTEM` row — expect `23505`.
+- **Note (2026-08-12)**: since CK-34's predicate now requires every `SYSTEM` row's `username` to be
+  the exact literal `'system.scheduler'`, a second `SYSTEM`-shaped row also always collides with the
+  plain `User_username_key` unique constraint first in practice (verified empirically — Postgres
+  reports `duplicate key value violates unique constraint "User_username_key"` for this exact case,
+  not `ux_user_single_system`). This index remains in place unchanged as defense-in-depth for any
+  row shape not already excluded by CK-34 (e.g. if a future change ever allowed more than one
+  literal SYSTEM username) — the actual current-day invariant "at most one SYSTEM row" is now
+  enforced redundantly by both `User_username_key` and `ux_user_single_system` together, not by
+  `ux_user_single_system` in isolation.
 
 ### 11.3 Composite foreign key register (FK-01 .. FK-16)
 
