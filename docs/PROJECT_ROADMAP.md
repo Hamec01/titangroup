@@ -492,15 +492,39 @@ assigned by
 контрольного E2E текущего табеля, но **до отчётов, PWA-пилота и недельной обкатки**. Это отдельный
 проект, который осознанно расширяет прежнее ограничение T8.8 для событий Check In/Check Out.
 
-## T7A.1 — Design checkpoint
+## T7A.1 — Design checkpoint — **ЗАВЕРШЕНО, утверждено владельцем 2026-08-12**
 
-До migration отдельно утвердить сущности, поля, связи, ограничения, индексы, retention и правила
-удаления для геозон, открытой смены, неизменяемых clock-событий, offline outbox/idempotency, связи
-с `TimesheetDraftSegment`, источника отправки (`MANUAL`/`AUTO`), исключений автоотправки и
-company-level расписания cutoff/reminder. Не добавлять открытый интервал непосредственно в
-`TimesheetDraftSegment`: существующая модель требует одновременно `startAt` и `endAt`. Точные
-названия новых enum/полей не фиксировать до checkpoint; UI-статусы ниже описывают продуктовый
-смысл, а не готовую Prisma-схему.
+Полный самодостаточный документ:
+[`docs/titanor-time/T7A_1_ATTENDANCE_CLOCK_DESIGN.md`](./titanor-time/T7A_1_ATTENDANCE_CLOCK_DESIGN.md)
+(revision 3.2.5, утверждена владельцем). Сущности, поля, связи, ограничения, индексы, retention и
+правила удаления для геозон, открытой смены, неизменяемых clock-событий, offline outbox/idempotency,
+связи с `TimesheetDraftSegment`, источника отправки (`MANUAL`/`AUTO`), исключений автоотправки и
+company-level расписания cutoff/reminder — утверждены целиком, включая полные SQL-инварианты,
+crash/retry/concurrency сценарии и тесты №1–128. Открытый интервал не добавлен непосредственно в
+`TimesheetDraftSegment` (существующая модель по-прежнему требует одновременно `startAt` и `endAt`) —
+offline-факт живёт в отдельных новых T7A-таблицах.
+
+**Owner decisions при утверждении**: raw GPS retention — 90 дней как provisional development default,
+значение изменяемо без переделки модели; legal/privacy review и формулировка согласия работника
+обязательны до production-пилота (T7A.10), но **не блокируют** schema foundation/T7A.2; отдельная
+сложная страница для conflict/sequence-аномалий в первом пилоте не нужна — минимальный список/секция
+войдёт в операционный обзор T7A.9, `FOREMAN` raw payload не получает.
+
+Prisma-схема, migration, API и UI по этому checkpoint **ещё не созданы** — утверждение архитектуры
+есть decision checkpoint, не начало реализации.
+
+**Утверждённый порядок дальнейшей реализации** (каждый — отдельный slice/коммит, не одна задача):
+
+```text
+schema foundation → locking fixes → geofence admin → online clock backend →
+worker mobile UI → materialization → offline sync → exception review →
+auto-submit → full E2E
+```
+
+Соответствие подзадачам ниже: schema foundation/locking fixes — новый первый шаг перед T7A.2 (см.
+`docs/titanor-time/IMPLEMENTATION_STATUS.md`); geofence admin = T7A.2; online clock backend = T7A.4/
+T7A.6 (backend); worker mobile UI = T7A.3; materialization = T7A.4 (materializer); offline sync =
+T7A.5; exception review = T7A.6 (resolution)/T7A.9; auto-submit = T7A.7; full E2E = T7A.10.
 
 ## T7A.2 — Геозона объекта
 

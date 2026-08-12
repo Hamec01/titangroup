@@ -1,5 +1,33 @@
 # Titanor Time — Implementation Status
 
+Обновлено: 2026-08-12 20:50 Europe/Helsinki (docs: approve attendance clock design — T7A.1 closed)
+
+**T7A.1 Design Checkpoint — ЗАВЕРШЁН и утверждён владельцем 2026-08-12.** Полный самодостаточный
+архитектурный документ (revision 3.2.5, addenda 3.1–3.2.5, тесты №1–128) сохранён в
+`docs/titanor-time/T7A_1_ATTENDANCE_CLOCK_DESIGN.md` — единственный источник истины для будущей
+Prisma-схемы/API/UI геозон, открытой смены, неизменяемых clock-событий, offline outbox/idempotency,
+materialization в `TimesheetDraftSegment`, source `MANUAL`/`AUTO`, исключений автоотправки и
+company-level cutoff/reminder расписания. `PROJECT_ROADMAP.md` (T7A.1) обновлён с той же ссылкой и
+утверждённым порядком дальнейшей реализации.
+
+Owner decisions при утверждении: raw GPS retention — 90 дней provisional development default,
+legal/privacy review до production-пилота обязателен, но **не блокирует** schema foundation/T7A.2;
+conflict/sequence-аномалии — без отдельной сложной страницы в первом пилоте, минимальный список для
+`ADMIN`/`SUPER_ADMIN` войдёт в операционный обзор T7A.9, `FOREMAN` raw payload не получает; тест №121
+исправлен (при неуспешном Switch Site старая смена остаётся **открытой** на старом сайте, не
+закрытой).
+
+**Реализации Attendance Clock всё ещё нет.** Этот docs-коммит — единственное изменение: `prisma/
+schema.prisma`, migrations, API, UI и любой application-код не создавались и не менялись; production
+(`titanor-time-db-1`, `titanor-time-app-1`, любые контейнеры) не затронут; deploy не выполнялся.
+
+**Следующая задача — отдельный schema-foundation slice** (не geofence/API/UI напрямую): точный объём
+зафиксирован в `T7A_1_ATTENDANCE_CLOCK_DESIGN.md` §16 п.1 — 13 новых таблиц, 9 additive-колонок на 7
+pre-T7A моделях + 6 additive-колонок на собственных T7A-таблицах, 15 composite FK, 14 `CREATE
+TRIGGER`-биндингов, singleton-seed `CompanyAttendancePolicy`, seed `SYSTEM`-пользователя — тестируется
+миграцией на одноразовом PostgreSQL 16 по паттерну `05_RAW_SQL_REGISTER.md`, прежде чем geofence
+admin/online clock backend/worker mobile UI получат хоть один API/UI endpoint.
+
 Обновлено: 2026-08-07 Europe/Helsinki (feat: version work schedule templates)
 
 **Второй срез управления шаблонами**: `PATCH /api/admin/templates/:templateId` + UI-редактирование
@@ -577,11 +605,14 @@ operator-ready**:
   offline-синхронизация и последующее исправление создают новый draft/version с before/after,
   причиной, автором и временем; после final approval действует формальный correction flow.
 
-**Ещё не реализовано.** Перед Prisma/migration обязателен отдельный schema design checkpoint по
+**[SUPERSEDED — см. запись 2026-08-12 в самом верху файла]** На момент этой записи design checkpoint
+ещё не существовал. Перед Prisma/migration обязателен отдельный schema design checkpoint по
 геозонам, clock-событиям/open shift, offline sync, materialization в draft, submission source,
 исключениям и scheduler policy согласно `AGENT_RULES.md` §11. Точные enum/поля ещё не утверждены;
 `AUTO_SUBMITTED_WITH_EXCEPTIONS` выше — продуктовый UI-термин. Production БД этой записью не
-меняется.
+меняется. **Design checkpoint T7A.1 завершён и утверждён владельцем 2026-08-12** —
+`docs/titanor-time/T7A_1_ATTENDANCE_CLOCK_DESIGN.md`; Prisma-схема/migration всё ещё не созданы,
+следующая задача — отдельный schema-foundation slice (см. запись в верху файла).
 
 Схема `CorrectionRequest`/`CorrectionDraft*` (T7.9) применена владельцем к `titanor-time-db-1`
 (миграция `20260805150000_add_correction_schema`), все 5 таблиц подтверждены прямым SQL, `app`
