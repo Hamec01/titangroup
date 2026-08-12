@@ -102,6 +102,123 @@ enum CorrectionRequestStatus {
   REJECTED
 }
 
+// docs/titanor-time/T7A_1_ATTENDANCE_CLOCK_DESIGN.md §3 — Attendance Clock enums (T7A.1 schema
+// foundation slice). Four deliberately separate axes per §3: raw device fact, server-derived
+// decision, existing review status (untouched), UI label (never stored). Identifier text for
+// P0001 trigger exceptions below follows the project's stable-uppercase-identifier convention
+// (05_RAW_SQL_REGISTER.md §7), not the lowercase snake_case message text used in the design
+// document's own SQL listings — see docs/titanor-time/05_RAW_SQL_REGISTER.md for the mapping.
+enum ClockOperationType {
+  CHECK_IN
+  CHECK_OUT
+}
+
+enum GpsVerificationState {
+  VERIFIED_INSIDE
+  VERIFIED_OUTSIDE
+  NOT_VERIFIED
+}
+
+enum GpsUnavailableReason {
+  PERMISSION_DENIED
+  TIMEOUT
+  POSITION_UNAVAILABLE
+  LOW_ACCURACY
+}
+
+enum ClockEventProcessingState {
+  ACCEPTED
+  NEEDS_REVIEW
+}
+
+enum SubmissionChannel {
+  ONLINE
+  OFFLINE_SYNC
+}
+
+enum ClockShiftMaterializationState {
+  PENDING
+  MATERIALIZED
+}
+
+enum ClockShiftFragmentProjectionState {
+  PENDING
+  SETTLED
+}
+
+enum ClockShiftAdjustmentType {
+  EDITED
+  REMOVED
+  RESTORED_TO_RECORDED
+}
+
+enum ClockEventConflictType {
+  CLIENT_EVENT_ID_REUSED
+  DEVICE_SEQUENCE_REUSED
+}
+
+enum DeviceEventReceiptOutcome {
+  ACCEPTED
+  REJECTED_TERMINAL
+}
+
+enum UserKind {
+  HUMAN
+  SYSTEM
+}
+
+enum TimesheetReturnReason {
+  HUMAN_REVIEW_RETURN
+  SYSTEM_LATE_SYNC_REOPEN
+}
+
+enum AttendanceExceptionType {
+  GPS_NOT_VERIFIED
+  OUTSIDE_GEOFENCE_CHECKOUT
+  SITE_MISMATCH_CHECKOUT
+  DOUBLE_CHECK_IN
+  CHECKOUT_WITHOUT_OPEN_SHIFT
+  STALE_ASSIGNMENT
+  GEOFENCE_VERSION_MISMATCH
+  LATE_SYNC_AFTER_SUBMIT
+  MISSING_CHECKOUT_AT_CUTOFF
+  EXCESSIVE_CLOCK_SKEW
+  CHECKOUT_CHRONOLOGY_ANOMALY
+  EXCESSIVE_SHIFT_DURATION
+  PERIOD_BOUNDARY_SPAN
+  OVERLAPPING_SHIFT
+}
+
+enum AttendanceExceptionStatus {
+  OPEN
+  RESOLVED
+  DISMISSED
+}
+
+// Not used by any column in this schema-foundation slice — no resolution endpoint exists yet
+// (§12 is out of scope). Declared here only because §3 lists it as part of the approved enum
+// set; the future resolution API (§11/§12) will validate request bodies against these values.
+enum AttendanceExceptionResolutionAction {
+  DISMISS
+  ACKNOWLEDGE_AS_VALID
+  PAIR_ORPHAN_EVENTS
+  CONFIRM_SOURCE_ASSIGNMENT
+  REASON_EDIT
+  FORCE_CLOSE_OPEN_SHIFT
+}
+
+enum SubmissionSource {
+  MANUAL
+  AUTO
+}
+
+enum AutoSubmissionResult {
+  SUBMITTED_CLEAN
+  SUBMITTED_WITH_EXCEPTIONS
+  SKIPPED_ALREADY_SUBMITTED
+  SKIPPED_NOT_ACTIONABLE
+}
+
 model User {
   id                             String                        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   username                       String                        @unique @db.VarChar(64)
@@ -113,6 +230,7 @@ model User {
   twoFactorSecret                String?                       @db.Text
   employeeId                     String?                       @unique @db.Uuid
   lastLoginAt                    DateTime?                     @db.Timestamptz(6)
+  userKind                       UserKind                      @default(HUMAN)
   createdAt                      DateTime                      @default(now()) @db.Timestamptz(6)
   updatedAt                      DateTime                      @updatedAt @db.Timestamptz(6)
   employee                       Employee?                     @relation(fields: [employeeId], references: [id], onDelete: Restrict, onUpdate: Cascade)
@@ -138,6 +256,11 @@ model User {
   userSessions                   UserSession[]
   auditEvents                    AuditEvent[]
   idempotencyKeys                IdempotencyKey[]
+  createdGeofenceVersions        WorkSiteGeofenceVersion[]     @relation("GeofenceVersionCreatedBy")
+  clockShiftAdjustments          ClockShiftAdjustment[]        @relation("ClockShiftAdjustmentChangedBy")
+  forceClosedClockShifts         ClockShift[]                  @relation("ClockShiftForceClosedBy")
+  resolvedAttendanceExceptions   AttendanceException[]         @relation("AttendanceExceptionResolvedBy")
+  updatedAttendancePolicies      CompanyAttendancePolicy[]     @relation("CompanyAttendancePolicyUpdatedBy")
 }
 
 model Role {
@@ -247,21 +370,27 @@ model UserActivationToken {
 }
 
 model Employee {
-  id                 String                     @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  employeeNumber     String                     @unique
-  firstName          String
-  lastName           String
-  phone              String?
-  version            Int                        @default(1)
-  createdAt          DateTime                   @default(now()) @db.Timestamptz(6)
-  updatedAt          DateTime                   @updatedAt @db.Timestamptz(6)
-  user               User?
-  employments        Employment[]
-  absences           Absence[]
-  activationTokens   ActivationToken[]
-  siteAssignments    SiteAssignment[]
-  periodParticipants PayrollPeriodParticipant[]
-  timesheets         Timesheet[]
+  id                    String                     @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  employeeNumber        String                     @unique
+  firstName             String
+  lastName              String
+  phone                 String?
+  version               Int                        @default(1)
+  createdAt             DateTime                   @default(now()) @db.Timestamptz(6)
+  updatedAt             DateTime                   @updatedAt @db.Timestamptz(6)
+  user                  User?
+  employments           Employment[]
+  absences              Absence[]
+  activationTokens      ActivationToken[]
+  siteAssignments       SiteAssignment[]
+  periodParticipants    PayrollPeriodParticipant[]
+  timesheets            Timesheet[]
+  deviceInstallations   WorkerDeviceInstallation[]
+  clockEvents           ClockEvent[]
+  openShift             EmployeeOpenShift?
+  clockShifts           ClockShift[]
+  attendanceExceptions  AttendanceException[]
+  clockEventIdConflicts ClockEventIdConflict[]
 }
 
 model Employment {
@@ -312,28 +441,37 @@ model City {
 }
 
 model WorkSite {
-  id                      String                       @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  name                    String
-  cityId                  String?                      @db.Uuid
-  address                 String?
-  description             String?                      @db.Text
-  active                  Boolean                      @default(true)
-  defaultForemanUserId    String?                      @db.Uuid
-  version                 Int                          @default(1)
-  createdAt               DateTime                     @default(now()) @db.Timestamptz(6)
-  updatedAt               DateTime                     @updatedAt @db.Timestamptz(6)
-  city                    City?                        @relation(fields: [cityId], references: [id], onDelete: SetNull, onUpdate: Cascade)
-  defaultForemanUser      User?                        @relation("WorkSiteDefaultForeman", fields: [defaultForemanUserId], references: [id], onDelete: SetNull, onUpdate: Cascade)
-  workAreas               WorkArea[]
-  siteAssignments         SiteAssignment[]
-  foremanAssignments      ForemanAssignment[]
-  draftPlannedShifts      TimesheetDraftPlannedShift[]
-  draftSegments           TimesheetDraftSegment[]
-  plannedShifts           TimesheetPlannedShift[]
-  workSegments            WorkSegment[]
-  reviewScopes            TimesheetReviewScope[]       @relation("TimesheetReviewScopeSite")
-  reviewScopeContexts     TimesheetReviewScope[]       @relation("TimesheetReviewScopeContextSite")
-  correctionDraftSegments CorrectionDraftSegment[]
+  id                       String                       @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  name                     String
+  cityId                   String?                      @db.Uuid
+  address                  String?
+  description              String?                      @db.Text
+  active                   Boolean                      @default(true)
+  defaultForemanUserId     String?                      @db.Uuid
+  version                  Int                          @default(1)
+  currentGeofenceVersionId String?                      @db.Uuid
+  createdAt                DateTime                     @default(now()) @db.Timestamptz(6)
+  updatedAt                DateTime                     @updatedAt @db.Timestamptz(6)
+  city                     City?                        @relation(fields: [cityId], references: [id], onDelete: SetNull, onUpdate: Cascade)
+  defaultForemanUser       User?                        @relation("WorkSiteDefaultForeman", fields: [defaultForemanUserId], references: [id], onDelete: SetNull, onUpdate: Cascade)
+  currentGeofenceVersion   WorkSiteGeofenceVersion?     @relation("WorkSiteCurrentGeofence", fields: [id, currentGeofenceVersionId], references: [siteId, id], onDelete: Restrict, onUpdate: Cascade)
+  workAreas                WorkArea[]
+  siteAssignments          SiteAssignment[]
+  foremanAssignments       ForemanAssignment[]
+  draftPlannedShifts       TimesheetDraftPlannedShift[]
+  draftSegments            TimesheetDraftSegment[]
+  plannedShifts            TimesheetPlannedShift[]
+  workSegments             WorkSegment[]
+  reviewScopes             TimesheetReviewScope[]       @relation("TimesheetReviewScopeSite")
+  reviewScopeContexts      TimesheetReviewScope[]       @relation("TimesheetReviewScopeContextSite")
+  correctionDraftSegments  CorrectionDraftSegment[]
+  geofenceVersions         WorkSiteGeofenceVersion[]    @relation("WorkSiteGeofenceVersions")
+  clockEvents              ClockEvent[]                 @relation("ClockEventSite")
+  assumedClockEvents       ClockEvent[]                 @relation("ClockEventAssumedSite")
+  employeeOpenShifts       EmployeeOpenShift[]
+  clockShifts              ClockShift[]
+  clockShiftFragments      ClockShiftFragment[]
+  attendanceExceptions     AttendanceException[]
 
   @@index([cityId])
   @@index([active])
@@ -352,6 +490,10 @@ model WorkArea {
   draftSegments           TimesheetDraftSegment[]
   workSegments            WorkSegment[]
   correctionDraftSegments CorrectionDraftSegment[]
+  clockEvents             ClockEvent[]
+  employeeOpenShifts      EmployeeOpenShift[]
+  clockShifts             ClockShift[]
+  clockShiftFragments     ClockShiftFragment[]
 
   @@unique([siteId, name])
   @@unique([siteId, id])
@@ -424,6 +566,11 @@ model SiteAssignment {
   plannedShifts           TimesheetPlannedShift[]
   workSegments            WorkSegment[]
   correctionDraftSegments CorrectionDraftSegment[]
+  clockEvents             ClockEvent[]
+  employeeOpenShifts      EmployeeOpenShift[]
+  clockShifts             ClockShift[]
+  clockShiftFragments     ClockShiftFragment[]
+  clockShiftAdjustments   ClockShiftAdjustment[]
 
   @@unique([id, employeeId, siteId])
   @@index([employeeId, validFrom, validTo])
@@ -450,21 +597,23 @@ model ForemanAssignment {
 }
 
 model PayrollPeriod {
-  id             String                     @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  startDate      DateTime                   @db.Date
-  endDate        DateTime                   @db.Date
-  status         PayrollPeriodStatus
-  openedByUserId String                     @db.Uuid
-  lockedAt       DateTime?                  @db.Timestamptz(6)
-  lockedByUserId String?                    @db.Uuid
-  exportedAt     DateTime?                  @db.Timestamptz(6)
-  version        Int                        @default(1)
-  createdAt      DateTime                   @default(now()) @db.Timestamptz(6)
-  updatedAt      DateTime                   @updatedAt @db.Timestamptz(6)
-  openedByUser   User                       @relation("PayrollPeriodOpenedBy", fields: [openedByUserId], references: [id], onDelete: Restrict, onUpdate: Cascade)
-  lockedByUser   User?                      @relation("PayrollPeriodLockedBy", fields: [lockedByUserId], references: [id], onDelete: SetNull, onUpdate: Cascade)
-  participants   PayrollPeriodParticipant[]
-  timesheets     Timesheet[]
+  id                   String                     @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  startDate            DateTime                   @db.Date
+  endDate              DateTime                   @db.Date
+  status               PayrollPeriodStatus
+  openedByUserId       String                     @db.Uuid
+  lockedAt             DateTime?                  @db.Timestamptz(6)
+  lockedByUserId       String?                    @db.Uuid
+  exportedAt           DateTime?                  @db.Timestamptz(6)
+  version              Int                        @default(1)
+  createdAt            DateTime                   @default(now()) @db.Timestamptz(6)
+  updatedAt            DateTime                   @updatedAt @db.Timestamptz(6)
+  openedByUser         User                       @relation("PayrollPeriodOpenedBy", fields: [openedByUserId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  lockedByUser         User?                      @relation("PayrollPeriodLockedBy", fields: [lockedByUserId], references: [id], onDelete: SetNull, onUpdate: Cascade)
+  participants         PayrollPeriodParticipant[]
+  timesheets           Timesheet[]
+  clockShiftFragments  ClockShiftFragment[]
+  attendanceExceptions AttendanceException[]
 
   @@index([status, startDate, endDate])
 }
@@ -489,23 +638,30 @@ model PayrollPeriodParticipant {
 }
 
 model Timesheet {
-  id                 String                   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  employeeId         String                   @db.Uuid
-  periodId           String                   @db.Uuid
-  status             TimesheetStatus
-  currentVersionId   String?                  @db.Uuid
-  createdAt          DateTime                 @default(now()) @db.Timestamptz(6)
-  updatedAt          DateTime                 @updatedAt @db.Timestamptz(6)
-  employee           Employee                 @relation(fields: [employeeId], references: [id], onDelete: Restrict, onUpdate: Cascade)
-  period             PayrollPeriod            @relation(fields: [periodId], references: [id], onDelete: Restrict, onUpdate: Cascade)
-  participant        PayrollPeriodParticipant @relation(fields: [periodId, employeeId], references: [periodId, employeeId], onDelete: Restrict, onUpdate: Cascade)
-  currentVersion     TimesheetVersion?        @relation("TimesheetCurrentVersion", fields: [currentVersionId, id], references: [id, timesheetId], onDelete: Restrict, onUpdate: Cascade)
-  draft              TimesheetDraft?
-  versions           TimesheetVersion[]       @relation("TimesheetVersions")
-  correctionRequests CorrectionRequest[]
+  id                     String                   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  employeeId             String                   @db.Uuid
+  periodId               String                   @db.Uuid
+  status                 TimesheetStatus
+  currentVersionId       String?                  @db.Uuid
+  lastReturnedReason     TimesheetReturnReason?
+  systemReopenGeneration Int                      @default(0)
+  systemReopenAt         DateTime?                @db.Timestamptz(6)
+  createdAt              DateTime                 @default(now()) @db.Timestamptz(6)
+  updatedAt              DateTime                 @updatedAt @db.Timestamptz(6)
+  employee               Employee                 @relation(fields: [employeeId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  period                 PayrollPeriod            @relation(fields: [periodId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  participant            PayrollPeriodParticipant @relation(fields: [periodId, employeeId], references: [periodId, employeeId], onDelete: Restrict, onUpdate: Cascade)
+  currentVersion         TimesheetVersion?        @relation("TimesheetCurrentVersion", fields: [currentVersionId, id], references: [id, timesheetId], onDelete: Restrict, onUpdate: Cascade)
+  draft                  TimesheetDraft?
+  versions               TimesheetVersion[]       @relation("TimesheetVersions")
+  correctionRequests     CorrectionRequest[]
+  clockShiftFragments    ClockShiftFragment[]
+  attendanceExceptions   AttendanceException[]
+  autoSubmissionAttempts AutoSubmissionAttempt[]
 
   @@unique([employeeId, periodId])
   @@unique([id, employeeId])
+  @@unique([id, employeeId, periodId])
   @@index([periodId, status])
   @@index([currentVersionId])
 }
@@ -576,26 +732,29 @@ model TimesheetDraftPlannedShift {
 }
 
 model TimesheetDraftSegment {
-  id                 String                       @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  draftDayId         String                       @db.Uuid
-  draftId            String                       @db.Uuid
-  employeeId         String                       @db.Uuid
-  date               DateTime                     @db.Date
-  startAt            DateTime                     @db.Timestamptz(6)
-  endAt              DateTime                     @db.Timestamptz(6)
-  siteId             String                       @db.Uuid
-  workAreaId         String?                      @db.Uuid
-  sourceAssignmentId String                       @db.Uuid
-  createdAt          DateTime                     @default(now()) @db.Timestamptz(6)
-  updatedAt          DateTime                     @updatedAt @db.Timestamptz(6)
-  draftDay           TimesheetDraftDay            @relation(fields: [draftDayId, draftId, date], references: [id, draftId, date], onDelete: Cascade, onUpdate: Cascade)
-  draft              TimesheetDraft               @relation(fields: [draftId, employeeId], references: [id, employeeId], onDelete: Cascade, onUpdate: Cascade)
-  site               WorkSite                     @relation(fields: [siteId], references: [id], onDelete: Restrict, onUpdate: Cascade)
-  workArea           WorkArea?                    @relation(fields: [siteId, workAreaId], references: [siteId, id], onDelete: Restrict, onUpdate: Cascade)
-  sourceAssignment   SiteAssignment               @relation(fields: [sourceAssignmentId, employeeId, siteId], references: [id, employeeId, siteId], onDelete: Restrict, onUpdate: Cascade)
-  plannedShift       TimesheetDraftPlannedShift   @relation("DraftSegmentPlannedShift", fields: [draftId, date, sourceAssignmentId], references: [draftId, date, sourceAssignmentId], onDelete: Restrict, onUpdate: Cascade)
-  breaks             TimesheetDraftBreakSegment[]
+  id                         String                       @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  draftDayId                 String                       @db.Uuid
+  draftId                    String                       @db.Uuid
+  employeeId                 String                       @db.Uuid
+  date                       DateTime                     @db.Date
+  startAt                    DateTime                     @db.Timestamptz(6)
+  endAt                      DateTime                     @db.Timestamptz(6)
+  siteId                     String                       @db.Uuid
+  workAreaId                 String?                      @db.Uuid
+  sourceAssignmentId         String                       @db.Uuid
+  originClockShiftFragmentId String?                      @db.Uuid
+  createdAt                  DateTime                     @default(now()) @db.Timestamptz(6)
+  updatedAt                  DateTime                     @updatedAt @db.Timestamptz(6)
+  draftDay                   TimesheetDraftDay            @relation(fields: [draftDayId, draftId, date], references: [id, draftId, date], onDelete: Cascade, onUpdate: Cascade)
+  draft                      TimesheetDraft               @relation(fields: [draftId, employeeId], references: [id, employeeId], onDelete: Cascade, onUpdate: Cascade)
+  site                       WorkSite                     @relation(fields: [siteId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  workArea                   WorkArea?                    @relation(fields: [siteId, workAreaId], references: [siteId, id], onDelete: Restrict, onUpdate: Cascade)
+  sourceAssignment           SiteAssignment               @relation(fields: [sourceAssignmentId, employeeId, siteId], references: [id, employeeId, siteId], onDelete: Restrict, onUpdate: Cascade)
+  plannedShift               TimesheetDraftPlannedShift   @relation("DraftSegmentPlannedShift", fields: [draftId, date, sourceAssignmentId], references: [draftId, date, sourceAssignmentId], onDelete: Restrict, onUpdate: Cascade)
+  originClockShiftFragment   ClockShiftFragment?          @relation("TimesheetDraftSegmentOrigin", fields: [originClockShiftFragmentId, employeeId], references: [id, employeeId], onDelete: Restrict, onUpdate: Cascade)
+  breaks                     TimesheetDraftBreakSegment[]
 
+  @@unique([originClockShiftFragmentId, employeeId])
   @@index([draftDayId, draftId])
   @@index([draftId, employeeId])
   @@index([draftId, date, sourceAssignmentId])
@@ -624,6 +783,7 @@ model TimesheetVersion {
   source                      TimesheetVersionSource
   createdByUserId             String                  @db.Uuid
   note                        String?                 @db.Text
+  submissionSource            SubmissionSource        @default(MANUAL)
   createdAt                   DateTime                @default(now()) @db.Timestamptz(6)
   timesheet                   Timesheet               @relation("TimesheetVersions", fields: [timesheetId, employeeId], references: [id, employeeId], onDelete: Restrict, onUpdate: Cascade)
   createdByUser               User                    @relation("TimesheetVersionCreatedBy", fields: [createdByUserId], references: [id], onDelete: Restrict, onUpdate: Cascade)
@@ -635,6 +795,7 @@ model TimesheetVersion {
   reviewScopes                TimesheetReviewScope[]
   correctionRequestsResulting CorrectionRequest[]     @relation("CorrectionRequestResultingVersion")
   correctionDraftsBasedOn     CorrectionDraft[]       @relation("CorrectionDraftBaseVersion")
+  autoSubmissionAttempts      AutoSubmissionAttempt[]
 
   @@unique([timesheetId, versionNumber])
   @@unique([id, employeeId])
@@ -688,31 +849,34 @@ model TimesheetPlannedShift {
 }
 
 model WorkSegment {
-  id                 String                @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  timesheetDayId     String                @db.Uuid
-  timesheetVersionId String                @db.Uuid
-  employeeId         String                @db.Uuid
-  date               DateTime              @db.Date
-  startAt            DateTime              @db.Timestamptz(6)
-  endAt              DateTime              @db.Timestamptz(6)
-  siteId             String                @db.Uuid
-  workAreaId         String?               @db.Uuid
-  sourceAssignmentId String                @db.Uuid
-  crossesMidnight    Boolean
-  createdAt          DateTime              @default(now()) @db.Timestamptz(6)
-  timesheetDay       TimesheetDay          @relation(fields: [timesheetDayId, timesheetVersionId, date], references: [id, timesheetVersionId, date], onDelete: Restrict, onUpdate: Cascade)
-  timesheetVersion   TimesheetVersion      @relation(fields: [timesheetVersionId, employeeId], references: [id, employeeId], onDelete: Restrict, onUpdate: Cascade)
-  site               WorkSite              @relation(fields: [siteId], references: [id], onDelete: Restrict, onUpdate: Cascade)
-  workArea           WorkArea?             @relation(fields: [siteId, workAreaId], references: [siteId, id], onDelete: Restrict, onUpdate: Cascade)
-  sourceAssignment   SiteAssignment        @relation(fields: [sourceAssignmentId, employeeId, siteId], references: [id, employeeId, siteId], onDelete: Restrict, onUpdate: Cascade)
-  plannedShift       TimesheetPlannedShift @relation("WorkSegmentPlannedShift", fields: [timesheetVersionId, date, sourceAssignmentId], references: [timesheetVersionId, date, sourceAssignmentId], onDelete: Restrict, onUpdate: Cascade)
-  breaks             BreakSegment[]
+  id                         String                @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  timesheetDayId             String                @db.Uuid
+  timesheetVersionId         String                @db.Uuid
+  employeeId                 String                @db.Uuid
+  date                       DateTime              @db.Date
+  startAt                    DateTime              @db.Timestamptz(6)
+  endAt                      DateTime              @db.Timestamptz(6)
+  siteId                     String                @db.Uuid
+  workAreaId                 String?               @db.Uuid
+  sourceAssignmentId         String                @db.Uuid
+  crossesMidnight            Boolean
+  originClockShiftFragmentId String?               @db.Uuid
+  createdAt                  DateTime              @default(now()) @db.Timestamptz(6)
+  timesheetDay               TimesheetDay          @relation(fields: [timesheetDayId, timesheetVersionId, date], references: [id, timesheetVersionId, date], onDelete: Restrict, onUpdate: Cascade)
+  timesheetVersion           TimesheetVersion      @relation(fields: [timesheetVersionId, employeeId], references: [id, employeeId], onDelete: Restrict, onUpdate: Cascade)
+  site                       WorkSite              @relation(fields: [siteId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  workArea                   WorkArea?             @relation(fields: [siteId, workAreaId], references: [siteId, id], onDelete: Restrict, onUpdate: Cascade)
+  sourceAssignment           SiteAssignment        @relation(fields: [sourceAssignmentId, employeeId, siteId], references: [id, employeeId, siteId], onDelete: Restrict, onUpdate: Cascade)
+  plannedShift               TimesheetPlannedShift @relation("WorkSegmentPlannedShift", fields: [timesheetVersionId, date, sourceAssignmentId], references: [timesheetVersionId, date, sourceAssignmentId], onDelete: Restrict, onUpdate: Cascade)
+  originClockShiftFragment   ClockShiftFragment?   @relation("WorkSegmentOrigin", fields: [originClockShiftFragmentId, employeeId], references: [id, employeeId], onDelete: Restrict, onUpdate: Cascade)
+  breaks                     BreakSegment[]
 
   @@index([timesheetDayId, timesheetVersionId])
   @@index([timesheetVersionId, employeeId])
   @@index([timesheetVersionId, date, sourceAssignmentId])
   @@index([sourceAssignmentId, employeeId, siteId])
   @@index([siteId, date])
+  @@index([originClockShiftFragmentId])
 }
 
 model BreakSegment {
@@ -858,29 +1022,32 @@ model CorrectionDraftDay {
 }
 
 model CorrectionDraftSegment {
-  id                 String                        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  draftDayId         String                        @db.Uuid
-  draftId            String                        @db.Uuid
-  employeeId         String                        @db.Uuid
-  date               DateTime                      @db.Date
-  startAt            DateTime                      @db.Timestamptz(6)
-  endAt              DateTime                      @db.Timestamptz(6)
-  siteId             String                        @db.Uuid
-  workAreaId         String?                       @db.Uuid
-  sourceAssignmentId String                        @db.Uuid
-  createdAt          DateTime                      @default(now()) @db.Timestamptz(6)
-  updatedAt          DateTime                      @updatedAt @db.Timestamptz(6)
-  draftDay           CorrectionDraftDay            @relation(fields: [draftDayId, draftId, date], references: [id, draftId, date], onDelete: Cascade, onUpdate: Cascade)
-  draft              CorrectionDraft               @relation(fields: [draftId, employeeId], references: [id, employeeId], onDelete: Cascade, onUpdate: Cascade)
-  site               WorkSite                      @relation(fields: [siteId], references: [id], onDelete: Restrict, onUpdate: Cascade)
-  workArea           WorkArea?                     @relation(fields: [siteId, workAreaId], references: [siteId, id], onDelete: Restrict, onUpdate: Cascade)
-  sourceAssignment   SiteAssignment                @relation(fields: [sourceAssignmentId, employeeId, siteId], references: [id, employeeId, siteId], onDelete: Restrict, onUpdate: Cascade)
-  breaks             CorrectionDraftBreakSegment[]
+  id                         String                        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  draftDayId                 String                        @db.Uuid
+  draftId                    String                        @db.Uuid
+  employeeId                 String                        @db.Uuid
+  date                       DateTime                      @db.Date
+  startAt                    DateTime                      @db.Timestamptz(6)
+  endAt                      DateTime                      @db.Timestamptz(6)
+  siteId                     String                        @db.Uuid
+  workAreaId                 String?                       @db.Uuid
+  sourceAssignmentId         String                        @db.Uuid
+  originClockShiftFragmentId String?                       @db.Uuid
+  createdAt                  DateTime                      @default(now()) @db.Timestamptz(6)
+  updatedAt                  DateTime                      @updatedAt @db.Timestamptz(6)
+  draftDay                   CorrectionDraftDay            @relation(fields: [draftDayId, draftId, date], references: [id, draftId, date], onDelete: Cascade, onUpdate: Cascade)
+  draft                      CorrectionDraft               @relation(fields: [draftId, employeeId], references: [id, employeeId], onDelete: Cascade, onUpdate: Cascade)
+  site                       WorkSite                      @relation(fields: [siteId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  workArea                   WorkArea?                     @relation(fields: [siteId, workAreaId], references: [siteId, id], onDelete: Restrict, onUpdate: Cascade)
+  sourceAssignment           SiteAssignment                @relation(fields: [sourceAssignmentId, employeeId, siteId], references: [id, employeeId, siteId], onDelete: Restrict, onUpdate: Cascade)
+  originClockShiftFragment   ClockShiftFragment?           @relation("CorrectionDraftSegmentOrigin", fields: [originClockShiftFragmentId, employeeId], references: [id, employeeId], onDelete: Restrict, onUpdate: Cascade)
+  breaks                     CorrectionDraftBreakSegment[]
 
   @@index([draftDayId, draftId])
   @@index([draftId, employeeId])
   @@index([sourceAssignmentId, employeeId, siteId])
   @@index([siteId, date])
+  @@index([originClockShiftFragmentId])
 }
 
 model CorrectionDraftBreakSegment {
@@ -915,4 +1082,318 @@ model IdempotencyKey {
   actor                 User                 @relation(fields: [actorUserId], references: [id], onDelete: Restrict, onUpdate: Cascade)
 
   @@unique([actorUserId, httpMethod, routeTemplate, idempotencyKey])
+}
+
+// ============================================================================
+// T7A.1 Attendance Clock — schema foundation slice.
+// docs/titanor-time/T7A_1_ATTENDANCE_CLOCK_DESIGN.md §2.1 (entities 1-13), §3 (enums, above),
+// §4.1 (raw-SQL triggers — see migration.sql Section B and docs/titanor-time/05_RAW_SQL_REGISTER.md).
+// No API/UI/offline-sync/materializer/scheduler code reads or writes these tables yet.
+// ============================================================================
+
+// §2.1 п.1 — immutable, editing a geofence creates a new version, never rewrites the old one.
+model WorkSiteGeofenceVersion {
+  id              String       @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  siteId          String       @db.Uuid
+  versionNumber   Int
+  latitude        Decimal      @db.Decimal(8, 6)
+  longitude       Decimal      @db.Decimal(9, 6)
+  radiusMeters    Int
+  createdByUserId String       @db.Uuid
+  createdAt       DateTime     @default(now()) @db.Timestamptz(6)
+  site            WorkSite     @relation("WorkSiteGeofenceVersions", fields: [siteId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  createdByUser   User         @relation("GeofenceVersionCreatedBy", fields: [createdByUserId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  currentForSite  WorkSite[]   @relation("WorkSiteCurrentGeofence")
+  clockEvents     ClockEvent[]
+
+  @@unique([siteId, versionNumber])
+  @@unique([siteId, id])
+}
+
+// §2.1 п.2 — mutable, advisory. id is client-generated (not server dbgenerated).
+model WorkerDeviceInstallation {
+  id                    String                 @id @db.Uuid
+  employeeId            String                 @db.Uuid
+  userAgent             String?                @db.Text
+  platform              String?                @db.VarChar(32)
+  installedAt           DateTime               @default(now()) @db.Timestamptz(6)
+  lastSeenAt            DateTime               @db.Timestamptz(6)
+  revokedAt             DateTime?              @db.Timestamptz(6)
+  lastProcessedSequence BigInt                 @default(0)
+  createdAt             DateTime               @default(now()) @db.Timestamptz(6)
+  employee              Employee               @relation(fields: [employeeId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  clockEvents           ClockEvent[]
+  clockEventIdConflicts ClockEventIdConflict[]
+  deviceEventReceipts   DeviceEventReceipt[]
+
+  @@unique([id, employeeId])
+}
+
+// §2.1 п.3 — immutable, append-only. id is client-generated (idempotency key for the event itself).
+model ClockEvent {
+  id                   String                    @id @db.Uuid
+  groupId              String?                   @db.Uuid
+  employeeId           String                    @db.Uuid
+  deviceInstallationId String?                   @db.Uuid
+  deviceSequence       BigInt?
+  operationType        ClockOperationType
+  siteId               String                    @db.Uuid
+  assumedSiteId        String?                   @db.Uuid
+  workAreaId           String?                   @db.Uuid
+  sourceAssignmentId   String?                   @db.Uuid
+  clientCapturedAt     DateTime                  @db.Timestamptz(6)
+  capturedOffline      Boolean
+  serverReceivedAt     DateTime                  @default(now()) @db.Timestamptz(6)
+  effectiveAt          DateTime                  @db.Timestamptz(6)
+  clockSkewMs          BigInt?
+  gpsAccuracyMeters    Decimal?                  @db.Decimal(6, 1)
+  geofenceVersionId    String?                   @db.Uuid
+  gpsVerification      GpsVerificationState
+  gpsUnavailableReason GpsUnavailableReason?
+  processingState      ClockEventProcessingState
+  channel              SubmissionChannel
+  payloadHash          String                    @db.VarChar(64)
+  requestId            String                    @db.Uuid
+  createdAt            DateTime                  @default(now()) @db.Timestamptz(6)
+  employee             Employee                  @relation(fields: [employeeId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  deviceInstallation   WorkerDeviceInstallation? @relation(fields: [deviceInstallationId, employeeId], references: [id, employeeId], onDelete: Restrict, onUpdate: Cascade)
+  site                 WorkSite                  @relation("ClockEventSite", fields: [siteId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  assumedSite          WorkSite?                 @relation("ClockEventAssumedSite", fields: [assumedSiteId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  workArea             WorkArea?                 @relation(fields: [siteId, workAreaId], references: [siteId, id], onDelete: Restrict, onUpdate: Cascade)
+  sourceAssignment     SiteAssignment?           @relation(fields: [sourceAssignmentId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  geofenceVersion      WorkSiteGeofenceVersion?  @relation(fields: [siteId, geofenceVersionId], references: [siteId, id], onDelete: Restrict, onUpdate: Cascade)
+  openedShift          EmployeeOpenShift?
+  checkInForShift      ClockShift?               @relation("ClockShiftCheckIn")
+  checkOutForShift     ClockShift?               @relation("ClockShiftCheckOut")
+  location             ClockEventLocation?
+  attendanceExceptions AttendanceException[]
+  deviceEventReceipts  DeviceEventReceipt[]
+
+  @@unique([deviceInstallationId, deviceSequence])
+  @@unique([id, deviceInstallationId, employeeId, deviceSequence])
+  @@index([employeeId, serverReceivedAt])
+  @@index([siteId, serverReceivedAt])
+  @@index([processingState])
+  @@index([groupId])
+}
+
+// §2.1 п.4 — immutable until 90-day retention delete. Sole holder of raw GPS coordinates (§4.3).
+model ClockEventLocation {
+  clockEventId String     @id @db.Uuid
+  latitude     Decimal    @db.Decimal(8, 6)
+  longitude    Decimal    @db.Decimal(9, 6)
+  createdAt    DateTime   @default(now()) @db.Timestamptz(6)
+  clockEvent   ClockEvent @relation(fields: [clockEventId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+}
+
+// §2.1 п.5 — mutable, exactly 0 or 1 row per Employee (employeeId is the PK, not a separate id).
+model EmployeeOpenShift {
+  employeeId           String          @id @db.Uuid
+  id                   String          @unique @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  openedByClockEventId String          @unique @db.Uuid
+  siteId               String          @db.Uuid
+  workAreaId           String?         @db.Uuid
+  sourceAssignmentId   String?         @db.Uuid
+  openedAt             DateTime        @db.Timestamptz(6)
+  updatedAt            DateTime        @updatedAt @db.Timestamptz(6)
+  employee             Employee        @relation(fields: [employeeId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  openedByClockEvent   ClockEvent      @relation(fields: [openedByClockEventId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  site                 WorkSite        @relation(fields: [siteId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  workArea             WorkArea?       @relation(fields: [workAreaId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  sourceAssignment     SiteAssignment? @relation(fields: [sourceAssignmentId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+}
+
+// §2.1 п.6 — immutable with two narrow named exceptions (materializationState, sourceAssignmentId)
+// plus the FORCE_CLOSE_OPEN_SHIFT path (checkOutEventId stays NULL forever for that row).
+model ClockShift {
+  id                                 String                         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  employeeId                         String                         @db.Uuid
+  checkInEventId                     String                         @unique @db.Uuid
+  checkOutEventId                    String?                        @unique @db.Uuid
+  siteId                             String                         @db.Uuid
+  workAreaId                         String?                        @db.Uuid
+  sourceAssignmentId                 String?                        @db.Uuid
+  recordedStartAt                    DateTime                       @db.Timestamptz(6)
+  recordedEndAt                      DateTime                       @db.Timestamptz(6)
+  endAtProvisional                   Boolean                        @default(false)
+  forceClosedByUserId                String?                        @db.Uuid
+  forceClosedReason                  String?                        @db.Text
+  forceClosedAt                      DateTime?                      @db.Timestamptz(6)
+  materializationState               ClockShiftMaterializationState @default(PENDING)
+  createdAt                          DateTime                       @default(now()) @db.Timestamptz(6)
+  employee                           Employee                       @relation(fields: [employeeId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  checkInEvent                       ClockEvent                     @relation("ClockShiftCheckIn", fields: [checkInEventId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  checkOutEvent                      ClockEvent?                    @relation("ClockShiftCheckOut", fields: [checkOutEventId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  site                               WorkSite                       @relation(fields: [siteId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  workArea                           WorkArea?                      @relation(fields: [workAreaId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  sourceAssignment                   SiteAssignment?                @relation(fields: [sourceAssignmentId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  forceClosedByUser                  User?                          @relation("ClockShiftForceClosedBy", fields: [forceClosedByUserId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  fragments                          ClockShiftFragment[]
+  attendanceExceptionsAsShift        AttendanceException[]          @relation("AttendanceExceptionClockShift")
+  attendanceExceptionsAsRelatedShift AttendanceException[]          @relation("AttendanceExceptionRelatedClockShift")
+
+  @@unique([id, employeeId])
+}
+
+// §2.1 п.7 — immutable, single sourceAssignmentId exception. Generalizes SOLE/FIRST_PART/SECOND_PART
+// into "however many fragments a shift needs" (fragmentIndex 0..N-1, coverage-checked, §4.1).
+model ClockShiftFragment {
+  id                            String                            @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  clockShiftId                  String                            @db.Uuid
+  employeeId                    String                            @db.Uuid
+  fragmentIndex                 Int
+  payrollPeriodId               String                            @db.Uuid
+  timesheetId                   String                            @db.Uuid
+  date                          DateTime                          @db.Date
+  recordedStartAt               DateTime                          @db.Timestamptz(6)
+  recordedEndAt                 DateTime                          @db.Timestamptz(6)
+  siteId                        String                            @db.Uuid
+  workAreaId                    String?                           @db.Uuid
+  sourceAssignmentId            String?                           @db.Uuid
+  reportedProjectionState       ClockShiftFragmentProjectionState @default(PENDING)
+  createdAt                     DateTime                          @default(now()) @db.Timestamptz(6)
+  clockShift                    ClockShift                        @relation(fields: [clockShiftId, employeeId], references: [id, employeeId], onDelete: Restrict, onUpdate: Cascade)
+  payrollPeriod                 PayrollPeriod                     @relation(fields: [payrollPeriodId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  timesheet                     Timesheet                         @relation(fields: [timesheetId, employeeId, payrollPeriodId], references: [id, employeeId, periodId], onDelete: Restrict, onUpdate: Cascade)
+  site                          WorkSite                          @relation(fields: [siteId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  workArea                      WorkArea?                         @relation(fields: [siteId, workAreaId], references: [siteId, id], onDelete: Restrict, onUpdate: Cascade)
+  sourceAssignment              SiteAssignment?                   @relation(fields: [sourceAssignmentId, employeeId, siteId], references: [id, employeeId, siteId], onDelete: Restrict, onUpdate: Cascade)
+  clockShiftAdjustments         ClockShiftAdjustment[]
+  attendanceExceptions          AttendanceException[]
+  timesheetDraftSegmentOrigin   TimesheetDraftSegment?            @relation("TimesheetDraftSegmentOrigin")
+  workSegmentOrigins            WorkSegment[]                     @relation("WorkSegmentOrigin")
+  correctionDraftSegmentOrigins CorrectionDraftSegment[]          @relation("CorrectionDraftSegmentOrigin")
+
+  @@unique([clockShiftId, fragmentIndex])
+  @@unique([id, employeeId])
+  @@unique([id, clockShiftId, employeeId])
+}
+
+// §2.1 п.8 — truly immutable, append-only history of edits to a fragment's reported interval.
+model ClockShiftAdjustment {
+  id                       String                   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  clockShiftFragmentId     String                   @db.Uuid
+  clockShiftId             String                   @db.Uuid
+  employeeId               String                   @db.Uuid
+  changeType               ClockShiftAdjustmentType
+  changedByUserId          String                   @db.Uuid
+  beforeStartAt            DateTime?                @db.Timestamptz(6)
+  afterStartAt             DateTime?                @db.Timestamptz(6)
+  beforeEndAt              DateTime?                @db.Timestamptz(6)
+  afterEndAt               DateTime?                @db.Timestamptz(6)
+  beforeSiteId             String?                  @db.Uuid
+  afterSiteId              String?                  @db.Uuid
+  beforeWorkAreaId         String?                  @db.Uuid
+  afterWorkAreaId          String?                  @db.Uuid
+  beforeSourceAssignmentId String?                  @db.Uuid
+  afterSourceAssignmentId  String?                  @db.Uuid
+  reason                   String                   @db.Text
+  changedAt                DateTime                 @default(now()) @db.Timestamptz(6)
+  requestId                String                   @db.Uuid
+  clockShiftFragment       ClockShiftFragment       @relation(fields: [clockShiftFragmentId, clockShiftId, employeeId], references: [id, clockShiftId, employeeId], onDelete: Restrict, onUpdate: Cascade)
+  changedByUser            User                     @relation("ClockShiftAdjustmentChangedBy", fields: [changedByUserId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  afterSourceAssignment    SiteAssignment?          @relation(fields: [afterSourceAssignmentId, employeeId, afterSiteId], references: [id, employeeId, siteId], onDelete: Restrict, onUpdate: Cascade)
+}
+
+// §2.1 п.9 — mutable (status/resolved*). One row = one payroll period; a shift spanning multiple
+// periods gets multiple rows tied together by clockShiftId.
+model AttendanceException {
+  id                   String                    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  type                 AttendanceExceptionType
+  employeeId           String                    @db.Uuid
+  timesheetId          String?                   @db.Uuid
+  payrollPeriodId      String?                   @db.Uuid
+  occurredAt           DateTime                  @db.Timestamptz(6)
+  siteId               String?                   @db.Uuid
+  clockEventId         String?                   @db.Uuid
+  clockShiftId         String?                   @db.Uuid
+  clockShiftFragmentId String?                   @db.Uuid
+  relatedClockShiftId  String?                   @db.Uuid
+  status               AttendanceExceptionStatus @default(OPEN)
+  detail               Json?
+  resolvedByUserId     String?                   @db.Uuid
+  resolvedAt           DateTime?                 @db.Timestamptz(6)
+  resolutionNote       String?                   @db.Text
+  overlapEndedAt       DateTime?                 @db.Timestamptz(6)
+  createdAt            DateTime                  @default(now()) @db.Timestamptz(6)
+  employee             Employee                  @relation(fields: [employeeId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  timesheet            Timesheet?                @relation(fields: [timesheetId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  payrollPeriod        PayrollPeriod?            @relation(fields: [payrollPeriodId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  site                 WorkSite?                 @relation(fields: [siteId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  clockEvent           ClockEvent?               @relation(fields: [clockEventId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  clockShift           ClockShift?               @relation("AttendanceExceptionClockShift", fields: [clockShiftId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  relatedClockShift    ClockShift?               @relation("AttendanceExceptionRelatedClockShift", fields: [relatedClockShiftId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  clockShiftFragment   ClockShiftFragment?       @relation(fields: [clockShiftFragmentId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  resolvedByUser       User?                     @relation("AttendanceExceptionResolvedBy", fields: [resolvedByUserId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+
+  @@index([siteId, status])
+  @@index([employeeId, status])
+  @@index([type, status])
+  @@index([payrollPeriodId, status])
+}
+
+// §2.1 п.10 — append-only, sanitized (never carries raw GPS coordinates, §4.3, ck_conflict_payload_no_gps_coordinates).
+model ClockEventIdConflict {
+  id                          String                    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  conflictType                ClockEventConflictType
+  clientEventId               String                    @db.Uuid
+  employeeId                  String                    @db.Uuid
+  deviceInstallationId        String?                   @db.Uuid
+  sanitizedConflictingPayload Json
+  conflictingPayloadHash      String                    @db.VarChar(64)
+  requestId                   String                    @db.Uuid
+  createdAt                   DateTime                  @default(now()) @db.Timestamptz(6)
+  employee                    Employee                  @relation(fields: [employeeId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  deviceInstallation          WorkerDeviceInstallation? @relation(fields: [deviceInstallationId, employeeId], references: [id, employeeId], onDelete: Restrict, onUpdate: Cascade)
+
+  @@index([clientEventId])
+  @@index([employeeId, createdAt])
+}
+
+// §2.1 п.11 — mutable, singleton (singleton column + CHECK + UNIQUE, §4.4). Seeded by this migration.
+model CompanyAttendancePolicy {
+  id                          String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  singleton                   Boolean  @unique @default(true)
+  timezone                    String   @default("Europe/Helsinki") @db.VarChar(64)
+  cutoffDaysAfterPeriodEnd    Int      @default(0)
+  cutoffTime                  DateTime @default(dbgenerated("'23:59:00'::time")) @db.Time(0)
+  systemReopenDebounceMinutes Int      @default(30)
+  maxShiftDurationHours       Int      @default(16)
+  updatedByUserId             String?  @db.Uuid
+  updatedAt                   DateTime @updatedAt @db.Timestamptz(6)
+  createdAt                   DateTime @default(now()) @db.Timestamptz(6)
+  updatedByUser               User?    @relation("CompanyAttendancePolicyUpdatedBy", fields: [updatedByUserId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+}
+
+// §2.1 п.12 — append-only. Identity is (timesheetId, systemReopenGeneration), not cutoffAt.
+model AutoSubmissionAttempt {
+  id                     String               @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  timesheetId            String               @db.Uuid
+  cutoffAt               DateTime             @db.Timestamptz(6)
+  systemReopenGeneration Int
+  result                 AutoSubmissionResult
+  resultingVersionId     String?              @db.Uuid
+  createdAt              DateTime             @default(now()) @db.Timestamptz(6)
+  timesheet              Timesheet            @relation(fields: [timesheetId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  resultingVersion       TimesheetVersion?    @relation(fields: [resultingVersionId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+
+  @@unique([timesheetId, systemReopenGeneration])
+}
+
+// §2.1 п.13 — immutable, append-only. Sole source of truth for one device's FIFO processing ledger.
+model DeviceEventReceipt {
+  id                   String                    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  deviceInstallationId String                    @db.Uuid
+  employeeId           String                    @db.Uuid
+  deviceSequence       BigInt
+  clientEventId        String                    @db.Uuid
+  outcome              DeviceEventReceiptOutcome
+  clockEventId         String?                   @db.Uuid
+  rejectionCode        String?                   @db.VarChar(64)
+  payloadHash          String                    @db.VarChar(64)
+  createdAt            DateTime                  @default(now()) @db.Timestamptz(6)
+  deviceInstallation   WorkerDeviceInstallation  @relation(fields: [deviceInstallationId, employeeId], references: [id, employeeId], onDelete: Restrict, onUpdate: Cascade)
+  clockEvent           ClockEvent?               @relation(fields: [clockEventId, deviceInstallationId, employeeId, deviceSequence], references: [id, deviceInstallationId, employeeId, deviceSequence], onDelete: Restrict, onUpdate: Cascade)
+
+  @@unique([deviceInstallationId, deviceSequence])
 }

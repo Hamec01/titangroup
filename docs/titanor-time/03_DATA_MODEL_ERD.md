@@ -1688,6 +1688,71 @@ true`. Повторный `export.create` для уже `EXPORTED` период�
 `int`). Категории — сервисная функция от `WorkSegment`/`BreakSegment`/`TimesheetDay` в `Europe/
 Helsinki`, вычисляется на момент экспорта; TES-правила не зашиты в схему.
 
+### 4.9 Attendance Clock (T7A) — schema foundation implemented, API/UI/offline sync not yet
+
+Source of truth for this area is a separate, owner-approved design document —
+`T7A_1_ATTENDANCE_CLOCK_DESIGN.md` — not this file's own 5.4.1 "proposed architecture" track. This
+subsection is a compact index only; full field lists, immutability contracts, trigger SQL, GPS/
+geofence algorithm, offline-sync protocol, and materialization algorithm live in that document.
+Implemented by `prisma/migrations/20260812000000_add_attendance_clock_schema_foundation` (schema
+only — see `docs/titanor-time/IMPLEMENTATION_STATUS.md` for what is and isn't built on top of it).
+
+Thirteen new tables, raw device facts flowing down to payroll-period-scoped projections:
+
+- **`WorkSiteGeofenceVersion`** (immutable) — one versioned lat/lon/radius circle per `WorkSite`;
+  editing a geofence creates a new version, never rewrites the old one. `WorkSite.
+  currentGeofenceVersionId` points at the active one (composite FK ties it to the same site).
+- **`WorkerDeviceInstallation`** (mutable, advisory) — client-generated `id`, one row per installed
+  PWA instance, `lastProcessedSequence` is the FIFO high-water mark for that device (§9.11 in the
+  design doc).
+- **`ClockEvent`** (immutable, append-only) — the only raw fact table; client-generated `id` is the
+  idempotency key. Carries GPS verification state but never raw coordinates.
+- **`ClockEventLocation`** (immutable until 90-day retention delete) — the *only* table holding raw
+  `latitude`/`longitude`; 1:1 with `ClockEvent`, created only when a real GPS reading exists.
+- **`EmployeeOpenShift`** (mutable, 0-or-1 row per `Employee`, PK = `employeeId`) — the live "currently
+  clocked in" pointer; source of truth for site/area/assignment at Check Out time.
+- **`ClockShift`** (immutable with two narrow named exceptions — `materializationState`,
+  `sourceAssignmentId`) — one row per Check-In/Check-Out pair (or `FORCE_CLOSE_OPEN_SHIFT`, which
+  leaves `checkOutEventId` NULL forever for that row).
+- **`ClockShiftFragment`** (immutable, one narrow exception — `sourceAssignmentId`) — a shift split
+  into its payroll-period-scoped pieces (`fragmentIndex` 0..N-1, DB-enforced contiguous coverage);
+  `reportedProjectionState` tracks PENDING→SETTLED per fragment, independent of shift-wide
+  `materializationState`.
+- **`ClockShiftAdjustment`** (truly immutable, append-only) — edit history for a fragment's reported
+  interval (`EDITED`/`REMOVED`/`RESTORED_TO_RECORDED`), always carries a `reason`.
+- **`AttendanceException`** (mutable — `status`/`resolved*`) — one row per payroll period per
+  occurrence; 14 types (§3 of the design doc), including `OVERLAPPING_SHIFT` with a
+  canonical-at-insert `(clockShiftId, relatedClockShiftId)` pair.
+- **`ClockEventIdConflict`** (append-only, sanitized) — forensic log for reused client event ids /
+  device sequence numbers; `sanitizedConflictingPayload` is DB-guaranteed never to contain GPS
+  coordinates.
+- **`CompanyAttendancePolicy`** (mutable, singleton) — one row, seeded by the migration
+  (`maxShiftDurationHours=16`, `systemReopenDebounceMinutes=30`, `timezone` frozen to
+  `Europe/Helsinki`).
+- **`AutoSubmissionAttempt`** (append-only) — one row per `(timesheetId, systemReopenGeneration)`
+  auto-submit attempt at cutoff.
+- **`DeviceEventReceipt`** (immutable, append-only) — the FIFO ledger for one device's
+  `deviceSequence` stream; every sequence number gets exactly one receipt, `ACCEPTED` or
+  `REJECTED_TERMINAL`, so one bad event never blocks a device forever.
+
+Nine additive columns on seven pre-existing models (no existing column changed): `WorkSite.
+currentGeofenceVersionId`, `TimesheetVersion.submissionSource`, `TimesheetDraftSegment.
+originClockShiftFragmentId` (unique — at most one draft segment per fragment),
+`WorkSegment.originClockShiftFragmentId` (not unique — resubmits may freeze the same fragment into
+several versions), `CorrectionDraftSegment.originClockShiftFragmentId`, `Timesheet.
+lastReturnedReason`/`systemReopenGeneration`/`systemReopenAt`, `User.userKind` (`HUMAN`/`SYSTEM`
+structural discriminator — exactly one `SYSTEM` row ever exists, seeded by this migration as
+`system.scheduler`).
+
+Sixteen composite foreign keys enforce cross-owner referential integrity throughout this area (e.g.
+a `ClockEvent` cannot reference a `WorkerDeviceInstallation` belonging to a different employee, or a
+`WorkSite`'s active geofence version belonging to a different site) — full register in
+`docs/titanor-time/05_RAW_SQL_REGISTER.md` §11.3.
+
+Not yet built on this foundation: geofence admin API/UI, Check In/Check Out endpoints, `/worker`
+clock UI, IndexedDB offline outbox, sync/materialization/exception-resolution/auto-submit service
+code. See `docs/titanor-time/IMPLEMENTATION_STATUS.md`.
+
 ## 5. Break-инварианты (применимо к `BreakSegment`, `TimesheetDraftBreakSegment`,
 `CorrectionDraftBreakSegment` и `proposedSegments[].breaks`)
 

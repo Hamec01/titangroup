@@ -1009,3 +1009,361 @@ CorrectionRequest.approvalOverride CHECK: +1
 ```
 
 Current totals exclude CorrectionDraftSegment, correction-layer equivalents, and future review-layer physical objects.
+
+---
+
+## 11. T7A.1 Attendance Clock — schema foundation slice
+
+```text
+Status: ACTIVE
+Scope: prisma/migrations/20260812000000_add_attendance_clock_schema_foundation
+Authority: docs/titanor-time/T7A_1_ATTENDANCE_CLOCK_DESIGN.md (owner-approved 2026-08-12)
+Prisma version: 6.19.0
+PostgreSQL target: 16
+```
+
+This section is additive to, and does not modify, Sections 1–10 above (Status: FROZEN, pre-T7A
+foundation). All totals in Section 10 remain as stated for the pre-T7A object set; this section's
+own totals (§11.7) cover only objects introduced by the T7A.1 schema-foundation migration.
+
+**Exception-identifier convention note**: `T7A_1_ATTENDANCE_CLOCK_DESIGN.md` §4.1's own SQL listings
+use lowercase snake_case `RAISE EXCEPTION` message text (e.g. `'clock_event_immutable'`,
+`'clock_shift_fragment_coverage_gap_or_overlap: %'` with interpolated detail). This migration instead
+applies §7's existing stable-uppercase-identifier contract (the same one FN-01..FN-11 already use,
+and the same one this register's own "Legacy documentation incompatibility" table already applies to
+retrofit other lowercase text in this repo's docs) — e.g. `'clock_event_immutable'` →
+`CLOCK_EVENT_IMMUTABLE`, and the two-message coverage-check pair
+`'clock_shift_fragment_coverage_gap_or_overlap: %'` / interpolated shift id →
+`CLOCK_SHIFT_FRAGMENT_COVERAGE_GAP_OR_OVERLAP` (identifier only, no interpolated detail — matching
+the existing FN-01..FN-11 convention of bare identifiers with no dynamic content). No table, column,
+condition, or trigger binding differs from the design document — only the RAISE EXCEPTION identifier
+text.
+
+### 11.1 CHECK constraint register (CK-22 .. CK-34)
+
+### CK-22 `ck_clock_event_device_sequence_pairing`
+
+- Table: `ClockEvent`
+- Predicate:
+  ```sql
+  ("deviceInstallationId" IS NULL) = ("deviceSequence" IS NULL)
+  ```
+- Source: `T7A_1_ATTENDANCE_CLOCK_DESIGN.md` §2.1 п.3.
+- Documentation synchronization: SYNCED.
+- Minimum negative test: `INSERT ClockEvent` with `deviceSequence` set and `deviceInstallationId` NULL — expect `23514`.
+
+### CK-23 `ck_clock_shift_recorded_interval`
+
+- Table: `ClockShift`
+- Predicate: `"recordedEndAt" > "recordedStartAt"`
+- Source: §2.1 п.6.
+- Documentation synchronization: SYNCED.
+- Minimum negative test: `INSERT ClockShift` with `recordedEndAt <= recordedStartAt` — expect `23514`.
+
+### CK-24 `ck_clock_shift_close_mechanism`
+
+- Table: `ClockShift`
+- Predicate: exactly one of `{checkOutEventId set, forceClosed* all set}` — see §2.1 п.6 for the full form.
+- Source: §2.1 п.6.
+- Documentation synchronization: SYNCED.
+- Minimum negative test: `INSERT ClockShift` with both `checkOutEventId` and `forceClosedByUserId` set — expect `23514`.
+
+### CK-25 `ck_clock_shift_fragment_recorded_interval`
+
+- Table: `ClockShiftFragment`
+- Predicate: `"recordedEndAt" > "recordedStartAt"`
+- Source: §2.1 п.7.
+- Documentation synchronization: SYNCED.
+- Minimum negative test: `INSERT ClockShiftFragment` with `recordedEndAt <= recordedStartAt` — expect `23514`.
+
+### CK-26 `ck_clock_shift_adjustment_after_shape`
+
+- Table: `ClockShiftAdjustment`
+- Predicate: `afterX IS NULL` iff `changeType='REMOVED'`; all three `afterStartAt`/`afterEndAt`/`afterSiteId` set for `EDITED`/`RESTORED_TO_RECORDED` — see §2.1 п.8.
+- Source: §2.1 п.8.
+- Documentation synchronization: SYNCED.
+- Minimum negative test: `INSERT ClockShiftAdjustment` with `changeType='EDITED'` and `afterStartAt IS NULL` — expect `23514`.
+
+### CK-27 `ck_attendance_exception_overlap_shape`
+
+- Table: `AttendanceException`
+- Predicate: `relatedClockShiftId`/`overlapEndedAt` populated (and `relatedClockShiftId != clockShiftId`) iff `type='OVERLAPPING_SHIFT'` — see §2.1 п.9 (issue 7).
+- Source: §2.1 п.9.
+- Documentation synchronization: SYNCED.
+- Minimum negative test: `INSERT AttendanceException` with `type='OVERLAPPING_SHIFT'` and `relatedClockShiftId = clockShiftId` — expect `23514`.
+
+### CK-28 `ck_attendance_exception_open_no_overlap_end`
+
+- Table: `AttendanceException`
+- Predicate: `"status" != 'OPEN' OR "overlapEndedAt" IS NULL`
+- Source: §2.1 п.9 (issue 7).
+- Documentation synchronization: SYNCED.
+- Minimum negative test: `INSERT AttendanceException` with `status='OPEN'` and `overlapEndedAt` set — expect `23514`.
+
+### CK-29 `ck_conflict_payload_no_gps_coordinates`
+
+- Table: `ClockEventIdConflict`
+- Predicate:
+  ```sql
+  "sanitizedConflictingPayload" #> '{gps,latitude}'  IS NULL AND
+  "sanitizedConflictingPayload" #> '{gps,longitude}' IS NULL
+  ```
+- Source: §4.1 (issue 7), §4.3 — defense-in-depth behind the shared sanitization function.
+- Documentation synchronization: SYNCED.
+- Minimum negative test: `INSERT ClockEventIdConflict` with `sanitizedConflictingPayload={"gps":{"latitude":60,"longitude":24}}` — expect `23514`.
+
+### CK-30 `ck_company_attendance_policy_singleton`
+
+- Table: `CompanyAttendancePolicy`
+- Predicate: `"singleton" = true`
+- Source: §2.1 п.11, §4.4.
+- Documentation synchronization: SYNCED.
+- Minimum negative test: `INSERT CompanyAttendancePolicy (singleton) VALUES (false)` — expect `23514`.
+
+### CK-31 `ck_company_attendance_policy_timezone_frozen`
+
+- Table: `CompanyAttendancePolicy`
+- Predicate: `"timezone" = 'Europe/Helsinki'`
+- Source: §2.1 п.11 ("заморожено намеренно, §17.4").
+- Documentation synchronization: SYNCED.
+- Minimum negative test: `UPDATE CompanyAttendancePolicy SET timezone='UTC'` — expect `23514`.
+
+### CK-32 `ck_device_event_receipt_outcome_shape`
+
+- Table: `DeviceEventReceipt`
+- Predicate: `outcome='ACCEPTED'` iff `clockEventId` set and `rejectionCode` NULL; `outcome='REJECTED_TERMINAL'` iff the reverse.
+- Source: §2.1 п.13.
+- Documentation synchronization: SYNCED.
+- Minimum negative test: `INSERT DeviceEventReceipt` with `outcome='ACCEPTED'` and `clockEventId IS NULL` — expect `23514`.
+
+### CK-33 `ck_geofence_version_radius`
+
+- Table: `WorkSiteGeofenceVersion`
+- Predicate: `"radiusMeters" > 0 AND "radiusMeters" <= 2000`
+- Source: §2.1 п.1.
+- Documentation synchronization: SYNCED.
+- Minimum negative test: `INSERT WorkSiteGeofenceVersion` with `radiusMeters=5000` — expect `23514`.
+
+### CK-34 `ck_user_system_shape`
+
+- Table: `User`
+- Predicate:
+  ```sql
+  "userKind" = 'HUMAN' OR
+  ("employeeId" IS NULL AND "passwordHash" IS NULL AND "status" = 'DEACTIVATED')
+  ```
+- Source: §2.2 (issue 7).
+- Documentation synchronization: SYNCED.
+- Minimum negative test: `INSERT User` with `userKind='SYSTEM'` and `passwordHash` set — expect `23514`.
+
+### 11.2 Partial / expression unique index register (UX-01 .. UX-03)
+
+Not expressible via Prisma `@@unique` — filtered by a column other than the indexed columns'
+own nullability (UX-01, UX-02), or an expression index on a constant (UX-03).
+
+### UX-01 `ux_attendance_exception_missing_checkout_dedup`
+
+- Table: `AttendanceException`
+- Index: `("clockEventId", "payrollPeriodId") WHERE "type" = 'MISSING_CHECKOUT_AT_CUTOFF'`
+- Source: §2.1 п.9 [3.1] (issue 3).
+- Documentation synchronization: SYNCED.
+- Minimum negative test: two `INSERT`s with the same `(clockEventId, payrollPeriodId)` and `type='MISSING_CHECKOUT_AT_CUTOFF'` — second expects `23505`.
+
+### UX-02 `ux_attendance_exception_overlap_pair_open`
+
+- Table: `AttendanceException`
+- Index: `("clockShiftId", "relatedClockShiftId") WHERE "type" = 'OVERLAPPING_SHIFT' AND "status" = 'OPEN'`
+- Source: §2.1 п.9 [3.2.3] (issue 5). Canonicalization (`clockShiftId := LEAST(A,B)`, `relatedClockShiftId := GREATEST(A,B)`) happens in service code at `INSERT` time (§9.1a), not in this index.
+- Documentation synchronization: SYNCED.
+- Minimum negative test: two `OPEN` rows for the same unordered pair — second expects `23505`. Positive: resolving the first (`status != 'OPEN'`) allows a new `OPEN` row for the same pair; historical `RESOLVED`/`DISMISSED` rows for the same pair coexist freely (verified empirically, disposable PostgreSQL 16).
+
+### UX-03 `ux_user_single_system`
+
+- Table: `User`
+- Index: `((true)) WHERE "userKind" = 'SYSTEM'`
+- Source: §2.2 (issue 7) — same singleton trick as `CompanyAttendancePolicy`, without an extra column.
+- Documentation synchronization: SYNCED.
+- Minimum negative test: `INSERT User (userKind, ...)` a second `SYSTEM` row — expect `23505`.
+
+### 11.3 Composite foreign key register (FK-01 .. FK-16)
+
+Not previously a tracked category in this register (Sections 1–10 treat composite FKs as
+Prisma-native and out of this document's scope). T7A introduces the first explicit register for
+this category since referential cross-owner integrity is a first-class architectural property of
+the design (§2.1, §2.2), not an incidental detail.
+
+| ID | Table | Columns | References | Source |
+|---|---|---|---|---|
+| FK-01 | `ClockEvent` | `(deviceInstallationId, employeeId)` | `WorkerDeviceInstallation(id, employeeId)` | §2.1 п.3 |
+| FK-02 | `ClockEvent` | `(siteId, workAreaId)` | `WorkArea(siteId, id)` | §2.1 п.3 (inline field annotation) |
+| FK-03 | `ClockEvent` | `(siteId, geofenceVersionId)` | `WorkSiteGeofenceVersion(siteId, id)` | §2.1 п.3 |
+| FK-04 | `ClockShiftFragment` | `(clockShiftId, employeeId)` | `ClockShift(id, employeeId)` | §2.1 п.7 |
+| FK-05 | `ClockShiftFragment` | `(timesheetId, employeeId, payrollPeriodId)` | `Timesheet(id, employeeId, periodId)` | §2.1 п.7 |
+| FK-06 | `ClockShiftFragment` | `(siteId, workAreaId)` | `WorkArea(siteId, id)` | §2.1 п.7 |
+| FK-07 | `ClockShiftFragment` | `(sourceAssignmentId, employeeId, siteId)` | `SiteAssignment(id, employeeId, siteId)` | §2.1 п.7 |
+| FK-08 | `ClockShiftAdjustment` | `(clockShiftFragmentId, clockShiftId, employeeId)` | `ClockShiftFragment(id, clockShiftId, employeeId)` | §2.1 п.8 |
+| FK-09 | `ClockShiftAdjustment` | `(afterSourceAssignmentId, employeeId, afterSiteId)` | `SiteAssignment(id, employeeId, siteId)` | §2.1 п.8 |
+| FK-10 | `ClockEventIdConflict` | `(deviceInstallationId, employeeId)` | `WorkerDeviceInstallation(id, employeeId)` | §2.1 п.10 |
+| FK-11 | `DeviceEventReceipt` | `(deviceInstallationId, employeeId)` | `WorkerDeviceInstallation(id, employeeId)` | §2.1 п.13 |
+| FK-12 | `DeviceEventReceipt` | `(clockEventId, deviceInstallationId, employeeId, deviceSequence)` | `ClockEvent(id, deviceInstallationId, employeeId, deviceSequence)` | §2.1 п.13 |
+| FK-13 | `WorkSite` | `(id, currentGeofenceVersionId)` | `WorkSiteGeofenceVersion(siteId, id)` | §2.2 |
+| FK-14 | `TimesheetDraftSegment` | `(originClockShiftFragmentId, employeeId)` | `ClockShiftFragment(id, employeeId)` | §2.2 |
+| FK-15 | `WorkSegment` | `(originClockShiftFragmentId, employeeId)` | `ClockShiftFragment(id, employeeId)` | §2.2 |
+| FK-16 | `CorrectionDraftSegment` | `(originClockShiftFragmentId, employeeId)` | `ClockShiftFragment(id, employeeId)` | §2.2 |
+
+**Reconciliation note**: the design document's own §Финал aggregate tally states "15 composite FK
+всего" (`ClockEvent×2`, omitting FK-02 above). That tally's own text documents a history of being
+miscounted and corrected across revisions (3.2.4's count was itself called out as "частичный,
+несогласованный" and fixed by issue 6). §2.1 п.3's per-field table, by contrast, explicitly and
+precisely annotates `ClockEvent.workAreaId` as `FK (siteId, workAreaId) → WorkArea(siteId, id) MATCH
+SIMPLE` inline — the same explicit, deliberate form used for the other two `ClockEvent` composite
+FKs the aggregate tally does count. This register implements all 16 composite FKs the per-field
+tables specify, including FK-02, on the grounds that the more granular, explicitly-annotated source
+takes precedence over a summary arithmetic block with a documented history of undercounting, and
+that implementing *more* cross-owner referential protection than a summary total states is
+consistent with (not a reduction of) the design's own stated intent for these constraints — see the
+project's schema-foundation implementation report for the full reasoning. Flagged here rather than
+silently reconciled so a future owner review of `T7A_1_ATTENDANCE_CLOCK_DESIGN.md` can decide whether
+to correct the doc's own aggregate tally instead.
+
+All 16 use `MATCH SIMPLE` (PostgreSQL's default for multi-column FKs) — a row is exempt from the
+check whenever any one of its referencing columns is `NULL`, which is the documented intent for the
+still-resolving fields these composite FKs cover (e.g. `ClockEvent.sourceAssignmentId` before
+resolution). Minimum negative test per row above: insert/update the referencing table with a value
+combination that exists in the target table under a *different* owner key (device/site/employee) —
+expect `23503`. All 16 verified empirically on disposable PostgreSQL 16 (5 explicit cross-owner
+negative-test cases spanning FK-01, FK-02, FK-08, FK-11, FK-12, FK-13, FK-14; the remainder follow
+the identical `MATCH SIMPLE` mechanism).
+
+### 11.4 Trigger function register (FN-12 .. FN-22)
+
+### FN-12 `fn_clock_event_immutable`
+
+- Tables: `ClockEvent`, `DeviceEventReceipt`, `AutoSubmissionAttempt` (same function, reused verbatim across all three — design document explicitly specifies this reuse, §4.1).
+- Behavior: unconditional `RAISE EXCEPTION` on any invocation — full `UPDATE`/`DELETE` ban.
+- Stable exception identifier: `CLOCK_EVENT_IMMUTABLE`.
+- Row-lock contract: N/A (unconditional).
+- Source: §4.1.
+
+### FN-13 `fn_geofence_version_immutable`
+
+- Table: `WorkSiteGeofenceVersion`.
+- Behavior: unconditional ban.
+- Stable exception identifier: `GEOFENCE_VERSION_IMMUTABLE`.
+- Source: §4.1.
+
+### FN-14 `fn_clock_event_conflict_immutable`
+
+- Table: `ClockEventIdConflict`.
+- Behavior: unconditional ban.
+- Stable exception identifier: `CLOCK_EVENT_CONFLICT_IMMUTABLE`.
+- Source: §4.1.
+
+### FN-15 `fn_clock_shift_adjustment_immutable`
+
+- Table: `ClockShiftAdjustment`.
+- Behavior: unconditional ban.
+- Stable exception identifier: `CLOCK_SHIFT_ADJUSTMENT_IMMUTABLE`.
+- Source: §4.1.
+
+### FN-16 `fn_clock_shift_immutable`
+
+- Table: `ClockShift`.
+- Behavior: narrow contract — rejects any change to a fixed field list; rejects `materializationState MATERIALIZED→PENDING`; gates `PENDING→MATERIALIZED` on all fragments existing with `sourceAssignmentId` resolved and `reportedProjectionState='SETTLED'`; rejects a second `sourceAssignmentId` change once resolved.
+- Stable exception identifiers: `CLOCK_SHIFT_IMMUTABLE_FIELD_CHANGED`, `CLOCK_SHIFT_MATERIALIZATION_STATE_CANNOT_REVERT`, `CLOCK_SHIFT_FRAGMENTS_MISSING`, `CLOCK_SHIFT_FRAGMENT_NOT_SETTLED`, `CLOCK_SHIFT_SOURCE_ASSIGNMENT_ALREADY_RESOLVED`.
+- Source: §4.1.
+
+### FN-17 `fn_clock_shift_no_delete`
+
+- Tables: `ClockShift`, `ClockShiftFragment` (same function, reused verbatim — design document explicitly specifies this reuse, §4.1).
+- Behavior: unconditional `DELETE` ban.
+- Stable exception identifier: `CLOCK_SHIFT_NO_DELETE`.
+- Source: §4.1.
+
+### FN-18 `fn_clock_shift_fragment_immutable`
+
+- Table: `ClockShiftFragment`.
+- Behavior: same narrow-contract shape as FN-16 for its own fixed field list and `sourceAssignmentId`; one-way `reportedProjectionState PENDING→SETTLED` gated on the same `TimesheetDraftSegment`/`FINAL_APPROVED` prerequisite the service layer uses (§9.4 step 8f/8g); rejects `SETTLED→PENDING`.
+- Stable exception identifiers: `CLOCK_SHIFT_FRAGMENT_IMMUTABLE_FIELD_CHANGED`, `CLOCK_SHIFT_FRAGMENT_SOURCE_ASSIGNMENT_ALREADY_RESOLVED`, `CLOCK_SHIFT_FRAGMENT_PROJECTION_STATE_CANNOT_REVERT`, `CLOCK_SHIFT_FRAGMENT_SETTLED_WITHOUT_SOURCE_ASSIGNMENT`, `CLOCK_SHIFT_FRAGMENT_SETTLED_WITHOUT_PREREQUISITE`.
+- Source: §4.1 (3.2.4, 3.2.5 issue 4).
+
+### FN-19 `fn_clock_shift_fragment_coverage_check`
+
+- Table: `ClockShiftFragment`.
+- Behavior: `STATEMENT`-level, `REFERENCING NEW TABLE AS new_rows` transition-table check — dense `0..N-1` `fragmentIndex`, contiguous `recordedStartAt`/`recordedEndAt`, first fragment starts at shift start, last ends at shift end.
+- Stable exception identifiers: `CLOCK_SHIFT_FRAGMENT_COVERAGE_GAP_OR_OVERLAP`, `CLOCK_SHIFT_FRAGMENT_COVERAGE_START_MISMATCH`, `CLOCK_SHIFT_FRAGMENT_COVERAGE_END_MISMATCH`.
+- Row-lock contract: none needed — the design relies on the materializer always inserting all of a shift's fragments in one `INSERT ... VALUES (...), (...)` statement inside one transaction (§2.1 п.7); no `DEFERRABLE` required.
+- Source: §2.1 п.7.
+
+### FN-20 `fn_clock_event_location_no_update`
+
+- Table: `ClockEventLocation`.
+- Behavior: unconditional `UPDATE` ban.
+- Stable exception identifier: `CLOCK_EVENT_LOCATION_NO_UPDATE`.
+- Source: §4.1 [3.1] (issue 7).
+
+### FN-21 `fn_clock_event_location_retention_delete_guard`
+
+- Table: `ClockEventLocation`.
+- Behavior: `DELETE` rejected while `createdAt >= now() - interval '90 days'`.
+- Stable exception identifier: `CLOCK_EVENT_LOCATION_RETENTION_WINDOW_NOT_ELAPSED`.
+- Source: §4.1 [3.1] (issue 7), §4.3.
+
+### FN-22 `fn_company_attendance_policy_no_delete`
+
+- Table: `CompanyAttendancePolicy`.
+- Behavior: unconditional `DELETE` ban (field `UPDATE`s remain allowed — admin-editable policy, not a historical fact).
+- Stable exception identifier: `COMPANY_ATTENDANCE_POLICY_NO_DELETE`.
+- Source: §4.1 [3.1] (issue 7).
+
+### 11.5 Trigger instance register (TRG-14 .. TRG-27)
+
+| ID | Table | Trigger | Function | Timing/Events |
+|---|---|---|---|---|
+| TRG-14 | `ClockEvent` | `trg_clock_event_immutable` | FN-12 | `BEFORE UPDATE OR DELETE` |
+| TRG-15 | `DeviceEventReceipt` | `trg_device_event_receipt_immutable` | FN-12 | `BEFORE UPDATE OR DELETE` |
+| TRG-16 | `AutoSubmissionAttempt` | `trg_auto_submission_attempt_immutable` | FN-12 | `BEFORE UPDATE OR DELETE` |
+| TRG-17 | `WorkSiteGeofenceVersion` | `trg_geofence_version_immutable` | FN-13 | `BEFORE UPDATE OR DELETE` |
+| TRG-18 | `ClockEventIdConflict` | `trg_clock_event_conflict_immutable` | FN-14 | `BEFORE UPDATE OR DELETE` |
+| TRG-19 | `ClockShiftAdjustment` | `trg_clock_shift_adjustment_immutable` | FN-15 | `BEFORE UPDATE OR DELETE` |
+| TRG-20 | `ClockShift` | `trg_clock_shift_immutable` | FN-16 | `BEFORE UPDATE` |
+| TRG-21 | `ClockShift` | `trg_clock_shift_no_delete` | FN-17 | `BEFORE DELETE` |
+| TRG-22 | `ClockShiftFragment` | `trg_clock_shift_fragment_immutable` | FN-18 | `BEFORE UPDATE` |
+| TRG-23 | `ClockShiftFragment` | `trg_clock_shift_fragment_no_delete` | FN-17 | `BEFORE DELETE` |
+| TRG-24 | `ClockShiftFragment` | `trg_clock_shift_fragment_coverage_check` | FN-19 | `AFTER INSERT ... FOR EACH STATEMENT` |
+| TRG-25 | `ClockEventLocation` | `trg_clock_event_location_no_update` | FN-20 | `BEFORE UPDATE` |
+| TRG-26 | `ClockEventLocation` | `trg_clock_event_location_retention_delete_guard` | FN-21 | `BEFORE DELETE` |
+| TRG-27 | `CompanyAttendancePolicy` | `trg_company_attendance_policy_no_delete` | FN-22 | `BEFORE DELETE` |
+
+14 bindings total, matching `T7A_1_ATTENDANCE_CLOCK_DESIGN.md` §Финал's own count exactly (`ClockEventLocation×2, AutoSubmissionAttempt×1, CompanyAttendancePolicy×1, ClockEventIdConflict×1, ClockEvent×1, WorkSiteGeofenceVersion×1, ClockShiftAdjustment×1, ClockShift×2, ClockShiftFragment×3, DeviceEventReceipt×1`). Verified empirically: 14 non-internal triggers exist on the 13 T7A tables (disposable PostgreSQL 16, `pg_trigger` introspection), each with at least one positive and one negative runtime test (§11.6).
+
+### 11.6 Test register (T7A obligations — executed, not merely specified)
+
+Unlike Section 9 above (obligations only), every object in this section (§11.1–§11.5) has already
+been exercised on a disposable PostgreSQL 16 instance as part of the schema-foundation
+implementation: one positive and one negative case per CHECK, one positive and one negative case
+per trigger contract (including the coverage gap/overlap/valid-cover triple, the
+`reportedProjectionState` PENDING→SETTLED-without-prerequisite / with-prerequisite /
+`FINAL_APPROVED`-exemption / SETTLED→PENDING-revert quadruple, and the retention-window
+before/after pair), one dedup/second-row case per partial or expression unique index (including the
+`ux_attendance_exception_overlap_pair_open` resolved-then-reopened and historical-rows-coexist
+cases), and one cross-owner rejection case for a representative sample of the composite FK set
+(§11.3). Seed idempotency (`system.scheduler` User row, `CompanyAttendancePolicy` singleton row) was
+verified by re-running both seed `INSERT ... ON CONFLICT DO NOTHING` statements a second time against
+an already-migrated database and confirming row counts stayed at 1.
+
+### 11.7 Arithmetic assertions (T7A additions only)
+
+```text
+T7A.1 SCHEMA-FOUNDATION RAW-SQL TOTALS (additive to Section 10 pre-T7A totals)
+New tables: 13
+New columns on 7 pre-T7A models: 9
+New columns on T7A's own tables (accumulated across design revisions): 6
+CHECK constraints: 13 (CK-22..CK-34)
+Partial/expression unique indexes: 3 (UX-01..UX-03)
+Composite foreign keys: 16 (FK-01..FK-16) — see §11.3 reconciliation note (design doc's own
+  aggregate tally states 15; this register implements the full per-field-table set)
+Trigger functions: 11 (FN-12..FN-22)
+Trigger instances: 14 (TRG-14..TRG-27)
+New PostgreSQL extensions: 0
+```

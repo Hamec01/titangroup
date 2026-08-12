@@ -1,5 +1,44 @@
 # Titanor Time — Implementation Status
 
+Обновлено: 2026-08-12 Europe/Helsinki (feat: add attendance clock schema foundation)
+
+**T7A.1 schema-foundation slice реализован.** Точный объём из `T7A_1_ATTENDANCE_CLOCK_DESIGN.md`
+§16 п.1: 13 новых таблиц (`WorkSiteGeofenceVersion`, `WorkerDeviceInstallation`, `ClockEvent`,
+`ClockEventLocation`, `EmployeeOpenShift`, `ClockShift`, `ClockShiftFragment`,
+`ClockShiftAdjustment`, `AttendanceException`, `ClockEventIdConflict`, `CompanyAttendancePolicy`,
+`AutoSubmissionAttempt`, `DeviceEventReceipt`); 9 additive-колонок на 7 pre-T7A моделях (`WorkSite`,
+`TimesheetVersion`, `TimesheetDraftSegment`, `WorkSegment`, `CorrectionDraftSegment`×1 каждая,
+`Timesheet`×3, `User`×1); 6 additive-колонок, накопленных 3.1–3.2.4, на собственных T7A-таблицах; все
+enum из §3; 16 composite FK (design doc's own §Финал aggregate states 15 — `ClockEvent×2`; this
+implementation follows §2.1 п.3's own explicit per-field inline annotation for `ClockEvent.
+workAreaId`, which the aggregate tally omits — see `05_RAW_SQL_REGISTER.md` §11.3 reconciliation
+note for the full reasoning); 14 `CREATE TRIGGER`-биндингов (11 функций); singleton-seed
+`CompanyAttendancePolicy`; idempotent seed `SYSTEM`-пользователя (`system.scheduler`).
+
+Migration: `prisma/migrations/20260812000000_add_attendance_clock_schema_foundation`. Применена и
+проверена на одноразовом PostgreSQL 16 (48 существующих миграций с нуля + эта; повторный
+`migrate deploy` → "No pending migrations"; `migrate status` → up to date; `prisma validate`,
+Prisma Client generation, `tsc --noEmit`, `npm run build`, `docker compose -f
+compose.titanor-time.yaml build app` все зелёные). Полный набор обязательных DB-инвариантов
+(immutability-триггеры — позитивный и негативный тест на каждый; coverage gap/overlap/valid;
+`reportedProjectionState` PENDING→SETTLED с prerequisite/без/`FINAL_APPROVED`-exemption,
+SETTLED→PENDING запрещён; `ClockEventLocation` retention; `CompanyAttendancePolicy`/`SYSTEM User`
+singleton; composite FK cross-owner rejection; `AttendanceException` canonical overlap pair;
+`ClockEventIdConflict` GPS-exclusion) выполнен на disposable Postgres и прошёл. Disposable-окружение
+(контейнер, сеть, docker image tag `titanor-time-app:latest`, временные скрипты) удалено после
+проверки. **Production (`titanor-time-db-1`, `titanor-time-app-1`) не тронут, миграция к нему не
+применялась, контейнеры не перезапускались.**
+
+**Attendance API/UI/offline sync всё ещё не реализованы.** Этот коммит — только schema/migration/seed
+слой: geofence admin API/UI, Check In/Check Out endpoints, `/worker` clock UI, IndexedDB outbox,
+sync/materialization/exception-resolution/auto-submit сервисный код не созданы. Raw SQL register —
+`docs/titanor-time/05_RAW_SQL_REGISTER.md` §11. ERD-индекс — `docs/titanor-time/03_DATA_MODEL_ERD.md`
+§4.9.
+
+**Следующая отдельная задача — locking-доработки существующего кода** (`T7A_1_ATTENDANCE_CLOCK_
+DESIGN.md` §15) — не новая функциональность, а дисциплина блокировок в уже существующем коде,
+необходимая перед geofence admin/online clock backend/worker mobile UI.
+
 Обновлено: 2026-08-12 20:50 Europe/Helsinki (docs: approve attendance clock design — T7A.1 closed)
 
 **T7A.1 Design Checkpoint — ЗАВЕРШЁН и утверждён владельцем 2026-08-12.** Полный самодостаточный
