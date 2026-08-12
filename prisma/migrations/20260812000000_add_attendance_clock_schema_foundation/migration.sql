@@ -1,3 +1,30 @@
+-- ============================================================================
+-- Preflight — SYSTEM actor username collision guard. Fixed per 2026-08-12 review (item 2).
+--
+-- Deliberately the FIRST statement in this migration, before any T7A DDL (CREATE TYPE/TABLE,
+-- ALTER TABLE ADD COLUMN) runs. This is what makes the failure path atomic: if this check raises,
+-- nothing else in the file has executed yet, so the database is left in exactly its pre-migration
+-- state — no T7A table, enum, column, or seed row, and no mutation of the pre-existing "User" row
+-- that triggered the failure. This does not depend on Prisma wrapping migration.sql in a
+-- transaction (Postgres DDL is transactional and Prisma does wrap it for this provider, but
+-- placing the guard first makes the atomicity property hold by construction regardless).
+--
+-- "userKind" does not exist yet at this point (its ALTER TABLE runs later, in Section A) — this
+-- check is deliberately username-only, case-insensitive, matching the exact scenarios required:
+-- a HUMAN row already holding 'system.scheduler' (or any case-variant, e.g. 'System.Scheduler')
+-- must fail the whole migration with a stable, greppable identifier, not be silently reused or
+-- silently ignored. The stable identifier follows the project's uppercase P0001 convention
+-- (05_RAW_SQL_REGISTER.md §7) — SYSTEM_SCHEDULER_USERNAME_OCCUPIED, not the ck_user_system_shape/
+-- ck_* naming pattern, since this is a trigger-less preflight raised via a plain DO block, not a
+-- CHECK constraint or a table trigger.
+-- ============================================================================
+DO $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM "User" WHERE lower("username") = lower('system.scheduler')) THEN
+    RAISE EXCEPTION 'SYSTEM_SCHEDULER_USERNAME_OCCUPIED' USING ERRCODE = 'P0001';
+  END IF;
+END $$;
+
 -- CreateEnum
 CREATE TYPE "ClockOperationType" AS ENUM ('CHECK_IN', 'CHECK_OUT');
 
@@ -662,6 +689,20 @@ ALTER TABLE "WorkSiteGeofenceVersion"
   ADD CONSTRAINT "ck_geofence_version_radius"
   CHECK ("radiusMeters" > 0 AND "radiusMeters" <= 2000);
 
+-- ck_geofence_version_coordinates — §2.1 п.1: latitude/longitude range, previously only a table
+-- comment ("−90.000000…90.000000" / "−180.000000…180.000000"), not a DB-level guarantee. Fixed
+-- per 2026-08-12 review (item 4) — coordinate bounds now enforced the same way radiusMeters
+-- already was.
+ALTER TABLE "WorkSiteGeofenceVersion"
+  ADD CONSTRAINT "ck_geofence_version_coordinates"
+  CHECK ("latitude" BETWEEN -90 AND 90 AND "longitude" BETWEEN -180 AND 180);
+
+-- ck_clock_event_location_coordinates — §2.1 п.4: same bound as ck_geofence_version_coordinates,
+-- on the other table that stores raw coordinates (§4.3 — these are the only two).
+ALTER TABLE "ClockEventLocation"
+  ADD CONSTRAINT "ck_clock_event_location_coordinates"
+  CHECK ("latitude" BETWEEN -90 AND 90 AND "longitude" BETWEEN -180 AND 180);
+
 -- ck_user_system_shape — §2.2 (issue 7): SYSTEM-user shape guaranteed at the DB level,
 -- not only by seed convention.
 ALTER TABLE "User"
@@ -766,7 +807,9 @@ CREATE TRIGGER trg_clock_shift_adjustment_immutable
 -- predicate as the service layer (§9.4 step 9) at the DB level.
 CREATE OR REPLACE FUNCTION fn_clock_shift_immutable() RETURNS trigger AS $$
 BEGIN
-  IF OLD."recordedStartAt" IS DISTINCT FROM NEW."recordedStartAt"
+  IF OLD."id"               IS DISTINCT FROM NEW."id"
+     OR OLD."createdAt"     IS DISTINCT FROM NEW."createdAt"
+     OR OLD."recordedStartAt" IS DISTINCT FROM NEW."recordedStartAt"
      OR OLD."recordedEndAt"   IS DISTINCT FROM NEW."recordedEndAt"
      OR OLD."siteId"          IS DISTINCT FROM NEW."siteId"
      OR OLD."workAreaId"      IS DISTINCT FROM NEW."workAreaId"
@@ -825,7 +868,9 @@ CREATE TRIGGER trg_clock_shift_no_delete
 -- with its PENDING->SETTLED prerequisite check ([3.2.5], issue 4).
 CREATE OR REPLACE FUNCTION fn_clock_shift_fragment_immutable() RETURNS trigger AS $$
 BEGIN
-  IF OLD."recordedStartAt" IS DISTINCT FROM NEW."recordedStartAt"
+  IF OLD."id"               IS DISTINCT FROM NEW."id"
+     OR OLD."createdAt"     IS DISTINCT FROM NEW."createdAt"
+     OR OLD."recordedStartAt" IS DISTINCT FROM NEW."recordedStartAt"
      OR OLD."recordedEndAt"   IS DISTINCT FROM NEW."recordedEndAt"
      OR OLD."siteId"          IS DISTINCT FROM NEW."siteId"
      OR OLD."workAreaId"      IS DISTINCT FROM NEW."workAreaId"
@@ -973,14 +1018,25 @@ CREATE TRIGGER trg_company_attendance_policy_no_delete
   FOR EACH ROW EXECUTE FUNCTION fn_company_attendance_policy_no_delete();
 
 -- ---------------------------------------------------------------------------
--- Seeds — §2.1 п.11 (CompanyAttendancePolicy singleton), §13 (SYSTEM actor). Both
--- idempotent via ON CONFLICT on their respective UNIQUE columns — re-running this
--- migration never creates a second row of either.
+-- Seeds — §2.1 п.11 (CompanyAttendancePolicy singleton), §13 (SYSTEM actor).
+--
+-- The SYSTEM user seed does NOT use ON CONFLICT DO NOTHING (fixed per 2026-08-12 review, item 2):
+-- a bare ON CONFLICT ("username") DO NOTHING would silently succeed if a pre-existing HUMAN row
+-- already happens to hold the username 'system.scheduler' — the migration would report success
+-- while the SYSTEM-actor invariant (§13) silently fails to hold (zero SYSTEM users created). The
+-- preflight check at the very top of this file (before any T7A DDL) fails the whole migration
+-- loudly instead, with a stable identifier, and never mutates a pre-existing HUMAN row. Because
+-- that preflight has already proven no row with a colliding username exists, the INSERT below is
+-- a plain unconditional INSERT — if a conflict somehow still occurred here, it MUST surface as a
+-- real 23505 unique_violation, not be swallowed.
+-- CompanyAttendancePolicy's ON CONFLICT DO NOTHING is unaffected by this fix: unlike User,
+-- CompanyAttendancePolicy is a brand-new table this same migration creates, so a pre-existing
+-- conflicting row can only mean this exact migration already ran once — a benign re-apply, not a
+-- collision with unrelated pre-existing data.
 -- ---------------------------------------------------------------------------
 
 INSERT INTO "User" ("username", "email", "passwordHash", "status", "locale", "twoFactorEnabled", "employeeId", "userKind", "updatedAt")
-VALUES ('system.scheduler', NULL, NULL, 'DEACTIVATED', 'EN', false, NULL, 'SYSTEM', CURRENT_TIMESTAMP)
-ON CONFLICT ("username") DO NOTHING;
+VALUES ('system.scheduler', NULL, NULL, 'DEACTIVATED', 'EN', false, NULL, 'SYSTEM', CURRENT_TIMESTAMP);
 
 INSERT INTO "CompanyAttendancePolicy" ("singleton", "timezone", "cutoffDaysAfterPeriodEnd", "cutoffTime", "systemReopenDebounceMinutes", "maxShiftDurationHours", "updatedAt")
 VALUES (true, 'Europe/Helsinki', 0, '23:59:00', 30, 16, CURRENT_TIMESTAMP)

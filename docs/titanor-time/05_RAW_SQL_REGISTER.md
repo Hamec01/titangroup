@@ -1039,7 +1039,21 @@ the existing FN-01..FN-11 convention of bare identifiers with no dynamic content
 condition, or trigger binding differs from the design document — only the RAISE EXCEPTION identifier
 text.
 
-### 11.1 CHECK constraint register (CK-22 .. CK-34)
+**Preflight guard note (2026-08-12 review, item 2)**: one migration-level guard exists outside the
+CK/UX/FK/FN/TRG categories below — a `DO $$ ... $$` block, the literal first statement in
+`migration.sql`, before any T7A DDL. It checks `EXISTS (SELECT 1 FROM "User" WHERE
+lower(username) = lower('system.scheduler'))` and raises stable identifier
+`SYSTEM_SCHEDULER_USERNAME_OCCUPIED` (SQLSTATE `P0001`) if a pre-existing row (any `userKind`, since
+that column doesn't exist yet at this point in the file) already holds the reserved SYSTEM username
+case-insensitively. This replaces the original `ON CONFLICT ("username") DO NOTHING` on the SYSTEM
+seed insert, which could silently succeed without ever creating a SYSTEM user if a pre-existing
+`HUMAN` row happened to hold that username. Being the first statement in the file makes the
+failure path atomic by construction — nothing T7A-related has executed yet when it fires, so nothing
+needs to roll back. `CompanyAttendancePolicy`'s seed keeps its `ON CONFLICT ("singleton") DO NOTHING`
+unchanged — see the migration's own inline comment for why that case is benign (brand-new table, no
+pre-existing unrelated data can occupy it).
+
+### 11.1 CHECK constraint register (CK-22 .. CK-36)
 
 ### CK-22 `ck_clock_event_device_sequence_pairing`
 
@@ -1156,6 +1170,22 @@ text.
 - Documentation synchronization: SYNCED.
 - Minimum negative test: `INSERT User` with `userKind='SYSTEM'` and `passwordHash` set — expect `23514`.
 
+### CK-35 `ck_geofence_version_coordinates`
+
+- Table: `WorkSiteGeofenceVersion`
+- Predicate: `"latitude" BETWEEN -90 AND 90 AND "longitude" BETWEEN -180 AND 180`
+- Source: §2.1 п.1. Fixed per 2026-08-12 review (item 4) — previously only a table-comment range, not a DB-level guarantee (unlike `radiusMeters`/CK-33, which already had one).
+- Documentation synchronization: SYNCED.
+- Minimum negative test: `INSERT WorkSiteGeofenceVersion` with `latitude=90.000001` — expect `23514`; same for `latitude=-90.000001`, `longitude=180.000001`, `longitude=-180.000001`. Positive: exact boundary values `90`/`-90`/`180`/`-180` insert successfully.
+
+### CK-36 `ck_clock_event_location_coordinates`
+
+- Table: `ClockEventLocation`
+- Predicate: `"latitude" BETWEEN -90 AND 90 AND "longitude" BETWEEN -180 AND 180`
+- Source: §2.1 п.4. Same fix as CK-35, on the other table §4.3 names as holding raw coordinates.
+- Documentation synchronization: SYNCED.
+- Minimum negative test: same four boundary-violation cases as CK-35, on `ClockEventLocation`. Positive: exact boundary values insert successfully.
+
 ### 11.2 Partial / expression unique index register (UX-01 .. UX-03)
 
 Not expressible via Prisma `@@unique` — filtered by a column other than the indexed columns'
@@ -1211,29 +1241,49 @@ the design (§2.1, §2.2), not an incidental detail.
 | FK-15 | `WorkSegment` | `(originClockShiftFragmentId, employeeId)` | `ClockShiftFragment(id, employeeId)` | §2.2 |
 | FK-16 | `CorrectionDraftSegment` | `(originClockShiftFragmentId, employeeId)` | `ClockShiftFragment(id, employeeId)` | §2.2 |
 
-**Reconciliation note**: the design document's own §Финал aggregate tally states "15 composite FK
-всего" (`ClockEvent×2`, omitting FK-02 above). That tally's own text documents a history of being
-miscounted and corrected across revisions (3.2.4's count was itself called out as "частичный,
-несогласованный" and fixed by issue 6). §2.1 п.3's per-field table, by contrast, explicitly and
-precisely annotates `ClockEvent.workAreaId` as `FK (siteId, workAreaId) → WorkArea(siteId, id) MATCH
-SIMPLE` inline — the same explicit, deliberate form used for the other two `ClockEvent` composite
-FKs the aggregate tally does count. This register implements all 16 composite FKs the per-field
-tables specify, including FK-02, on the grounds that the more granular, explicitly-annotated source
-takes precedence over a summary arithmetic block with a documented history of undercounting, and
-that implementing *more* cross-owner referential protection than a summary total states is
-consistent with (not a reduction of) the design's own stated intent for these constraints — see the
-project's schema-foundation implementation report for the full reasoning. Flagged here rather than
-silently reconciled so a future owner review of `T7A_1_ATTENDANCE_CLOCK_DESIGN.md` can decide whether
-to correct the doc's own aggregate tally instead.
+**Owner-confirmed correction (2026-08-12)**: the design document's own §Финал aggregate tally
+originally stated "15 composite FK всего" (`ClockEvent×2`, omitting FK-02 above). That tally's own
+text documents a history of being miscounted and corrected across revisions (3.2.4's count was
+itself called out as "частичный, несогласованный" and fixed by issue 6) — this was one further
+instance of the same class of arithmetic slip, not a real ambiguity in the architecture. §2.1 п.3's
+per-field table explicitly and precisely annotates `ClockEvent.workAreaId` as `FK (siteId,
+workAreaId) → WorkArea(siteId, id) MATCH SIMPLE` inline — the same explicit, deliberate form used
+for the other two `ClockEvent` composite FKs the aggregate tally did count. **The owner has reviewed
+this and confirmed 16 as the correct, final total** — `T7A_1_ATTENDANCE_CLOCK_DESIGN.md`'s §16 and
+"Финал" blocks are corrected to match (2026-08-12 owner correction note in each). This register, and
+the migration it documents, implement all 16; FK-02 is not a candidate for removal.
 
 All 16 use `MATCH SIMPLE` (PostgreSQL's default for multi-column FKs) — a row is exempt from the
 check whenever any one of its referencing columns is `NULL`, which is the documented intent for the
 still-resolving fields these composite FKs cover (e.g. `ClockEvent.sourceAssignmentId` before
-resolution). Minimum negative test per row above: insert/update the referencing table with a value
-combination that exists in the target table under a *different* owner key (device/site/employee) —
-expect `23503`. All 16 verified empirically on disposable PostgreSQL 16 (5 explicit cross-owner
-negative-test cases spanning FK-01, FK-02, FK-08, FK-11, FK-12, FK-13, FK-14; the remainder follow
-the identical `MATCH SIMPLE` mechanism).
+resolution). Minimum negative test per row above: insert/update the referencing table with a fully-
+populated value combination that exists in the target table under a *different* owner key
+(device/site/employee) — expect `23503`. Where the referencing column(s) are nullable per `MATCH
+SIMPLE`, a second positive test confirms the documented nullable/unresolved row inserts cleanly.
+**Fixed per 2026-08-12 review (item 5)**: all 16, individually, not a sample. Each row below is a
+real cross-owner `INSERT`/`UPDATE` executed on disposable PostgreSQL 16, expecting `23503`; rows
+with a nullable referencing column also got a documented-nullable positive test.
+
+| ID | Table.columns → target | Negative test result | Positive (nullable) test |
+|---|---|---|---|
+| FK-01 | `ClockEvent(deviceInstallationId,employeeId)` → `WorkerDeviceInstallation` | PASS `23503` | N/A (both required together, CK-22) |
+| FK-02 | `ClockEvent(siteId,workAreaId)` → `WorkArea` | PASS `23503` | PASS — `workAreaId=NULL` inserts cleanly |
+| FK-03 | `ClockEvent(siteId,geofenceVersionId)` → `WorkSiteGeofenceVersion` | PASS `23503` | N/A (tested with `geofenceVersionId` set; NULL case structurally identical to FK-02) |
+| FK-04 | `ClockShiftFragment(clockShiftId,employeeId)` → `ClockShift` | PASS `23503` | N/A (both required) |
+| FK-05 | `ClockShiftFragment(timesheetId,employeeId,payrollPeriodId)` → `Timesheet` | PASS `23503` | N/A (all required) |
+| FK-06 | `ClockShiftFragment(siteId,workAreaId)` → `WorkArea` | PASS `23503` | covered by FK-02's NULL-workAreaId mechanism |
+| FK-07 | `ClockShiftFragment(sourceAssignmentId,employeeId,siteId)` → `SiteAssignment` | PASS `23503` | PASS — `sourceAssignmentId=NULL` fragments exist in the coverage tests |
+| FK-08 | `ClockShiftAdjustment(clockShiftFragmentId,clockShiftId,employeeId)` → `ClockShiftFragment` | PASS `23503` | N/A (always required) |
+| FK-09 | `ClockShiftAdjustment(afterSourceAssignmentId,employeeId,afterSiteId)` → `SiteAssignment` | PASS `23503` | PASS — `changeType='REMOVED'` row with both `afterSourceAssignmentId`/`afterSiteId` NULL inserts cleanly |
+| FK-10 | `ClockEventIdConflict(deviceInstallationId,employeeId)` → `WorkerDeviceInstallation` | PASS `23503` | PASS — `deviceInstallationId=NULL` inserts cleanly |
+| FK-11 | `DeviceEventReceipt(deviceInstallationId,employeeId)` → `WorkerDeviceInstallation` | PASS `23503` | N/A (both required) |
+| FK-12 | `DeviceEventReceipt(clockEventId,deviceInstallationId,employeeId,deviceSequence)` → `ClockEvent` | PASS `23503` | N/A (required when `outcome='ACCEPTED'`, CK-32) |
+| FK-13 | `WorkSite(id,currentGeofenceVersionId)` → `WorkSiteGeofenceVersion` | PASS `23503` | PASS — correct-site assignment inserts cleanly after the negative case |
+| FK-14 | `TimesheetDraftSegment(originClockShiftFragmentId,employeeId)` → `ClockShiftFragment` | PASS `23503` | PASS — correctly-owned reference verified present; separately, reusing the same fragment a second time is rejected by the `@@unique` (not this FK) |
+| FK-15 | `WorkSegment(originClockShiftFragmentId,employeeId)` → `ClockShiftFragment` | PASS `23503` | PASS — correctly-owned reference inserts, and (by design, no `@@unique` here) a second `WorkSegment` may reference the same fragment |
+| FK-16 | `CorrectionDraftSegment(originClockShiftFragmentId,employeeId)` → `ClockShiftFragment` | PASS `23503` | PASS — correctly-owned reference inserts cleanly |
+
+16/16 PASS.
 
 ### 11.4 Trigger function register (FN-12 .. FN-22)
 
@@ -1269,9 +1319,10 @@ the identical `MATCH SIMPLE` mechanism).
 ### FN-16 `fn_clock_shift_immutable`
 
 - Table: `ClockShift`.
-- Behavior: narrow contract — rejects any change to a fixed field list; rejects `materializationState MATERIALIZED→PENDING`; gates `PENDING→MATERIALIZED` on all fragments existing with `sourceAssignmentId` resolved and `reportedProjectionState='SETTLED'`; rejects a second `sourceAssignmentId` change once resolved.
+- Behavior: narrow contract — rejects any change to a fixed field list (**`id`/`createdAt` included, fixed per 2026-08-12 review item 3** — the original field list omitted them, a real gap: `id` is the PK referenced by every composite FK onto this table with `ON UPDATE CASCADE`, so an unguarded `id` change would have cascaded silently into every child row's FK value); rejects `materializationState MATERIALIZED→PENDING`; gates `PENDING→MATERIALIZED` on all fragments existing with `sourceAssignmentId` resolved and `reportedProjectionState='SETTLED'`; rejects a second `sourceAssignmentId` change once resolved.
 - Stable exception identifiers: `CLOCK_SHIFT_IMMUTABLE_FIELD_CHANGED`, `CLOCK_SHIFT_MATERIALIZATION_STATE_CANNOT_REVERT`, `CLOCK_SHIFT_FRAGMENTS_MISSING`, `CLOCK_SHIFT_FRAGMENT_NOT_SETTLED`, `CLOCK_SHIFT_SOURCE_ASSIGNMENT_ALREADY_RESOLVED`.
 - Source: §4.1.
+- Minimum negative test (added 2026-08-12): `UPDATE ClockShift SET id = gen_random_uuid()` — expect `CLOCK_SHIFT_IMMUTABLE_FIELD_CHANGED`; `UPDATE ClockShift SET "createdAt" = now()` — same. Positive: the two allowed transitions still succeed; a genuine no-op `UPDATE` (no column value actually changes) is not required to be rejected and isn't.
 
 ### FN-17 `fn_clock_shift_no_delete`
 
@@ -1283,9 +1334,10 @@ the identical `MATCH SIMPLE` mechanism).
 ### FN-18 `fn_clock_shift_fragment_immutable`
 
 - Table: `ClockShiftFragment`.
-- Behavior: same narrow-contract shape as FN-16 for its own fixed field list and `sourceAssignmentId`; one-way `reportedProjectionState PENDING→SETTLED` gated on the same `TimesheetDraftSegment`/`FINAL_APPROVED` prerequisite the service layer uses (§9.4 step 8f/8g); rejects `SETTLED→PENDING`.
+- Behavior: same narrow-contract shape as FN-16 for its own fixed field list (**`id`/`createdAt` included, same 2026-08-12 fix, same gap and reasoning as FN-16**) and `sourceAssignmentId`; one-way `reportedProjectionState PENDING→SETTLED` gated on the same `TimesheetDraftSegment`/`FINAL_APPROVED` prerequisite the service layer uses (§9.4 step 8f/8g); rejects `SETTLED→PENDING`.
 - Stable exception identifiers: `CLOCK_SHIFT_FRAGMENT_IMMUTABLE_FIELD_CHANGED`, `CLOCK_SHIFT_FRAGMENT_SOURCE_ASSIGNMENT_ALREADY_RESOLVED`, `CLOCK_SHIFT_FRAGMENT_PROJECTION_STATE_CANNOT_REVERT`, `CLOCK_SHIFT_FRAGMENT_SETTLED_WITHOUT_SOURCE_ASSIGNMENT`, `CLOCK_SHIFT_FRAGMENT_SETTLED_WITHOUT_PREREQUISITE`.
 - Source: §4.1 (3.2.4, 3.2.5 issue 4).
+- Minimum negative test (added 2026-08-12): `UPDATE ClockShiftFragment SET id = gen_random_uuid()` / `SET "createdAt" = now()` — expect `CLOCK_SHIFT_FRAGMENT_IMMUTABLE_FIELD_CHANGED` for both. Positive: the two allowed transitions still succeed.
 
 ### FN-19 `fn_clock_shift_fragment_coverage_check`
 
@@ -1356,14 +1408,15 @@ an already-migrated database and confirming row counts stayed at 1.
 
 ```text
 T7A.1 SCHEMA-FOUNDATION RAW-SQL TOTALS (additive to Section 10 pre-T7A totals)
+Status as of 2026-08-12 hardening fix (see §11.3/§11.1 notes and CK-35/CK-36 below)
 New tables: 13
 New columns on 7 pre-T7A models: 9
 New columns on T7A's own tables (accumulated across design revisions): 6
-CHECK constraints: 13 (CK-22..CK-34)
+CHECK constraints: 15 (CK-22..CK-36) — CK-35/CK-36 (coordinate bounds) added 2026-08-12
 Partial/expression unique indexes: 3 (UX-01..UX-03)
-Composite foreign keys: 16 (FK-01..FK-16) — see §11.3 reconciliation note (design doc's own
-  aggregate tally states 15; this register implements the full per-field-table set)
-Trigger functions: 11 (FN-12..FN-22)
+Composite foreign keys: 16 (FK-01..FK-16) — owner-confirmed final total, §11.3
+Trigger functions: 11 (FN-12..FN-22) — FN-16/FN-18 bodies extended 2026-08-12 (id/createdAt)
 Trigger instances: 14 (TRG-14..TRG-27)
+Preflight guards: 1 (SYSTEM_SCHEDULER_USERNAME_OCCUPIED, migration's first statement — §11.1 note)
 New PostgreSQL extensions: 0
 ```

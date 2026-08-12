@@ -1702,22 +1702,24 @@ Thirteen new tables, raw device facts flowing down to payroll-period-scoped proj
 - **`WorkSiteGeofenceVersion`** (immutable) — one versioned lat/lon/radius circle per `WorkSite`;
   editing a geofence creates a new version, never rewrites the old one. `WorkSite.
   currentGeofenceVersionId` points at the active one (composite FK ties it to the same site).
+  `latitude`/`longitude` are DB-bound-checked (`-90..90`/`-180..180`).
 - **`WorkerDeviceInstallation`** (mutable, advisory) — client-generated `id`, one row per installed
   PWA instance, `lastProcessedSequence` is the FIFO high-water mark for that device (§9.11 in the
   design doc).
 - **`ClockEvent`** (immutable, append-only) — the only raw fact table; client-generated `id` is the
   idempotency key. Carries GPS verification state but never raw coordinates.
-- **`ClockEventLocation`** (immutable until 90-day retention delete) — the *only* table holding raw
-  `latitude`/`longitude`; 1:1 with `ClockEvent`, created only when a real GPS reading exists.
+- **`ClockEventLocation`** (immutable until 90-day retention delete) — the *only* other table holding
+  raw `latitude`/`longitude` (same DB bound-check as `WorkSiteGeofenceVersion`); 1:1 with `ClockEvent`,
+  created only when a real GPS reading exists.
 - **`EmployeeOpenShift`** (mutable, 0-or-1 row per `Employee`, PK = `employeeId`) — the live "currently
   clocked in" pointer; source of truth for site/area/assignment at Check Out time.
-- **`ClockShift`** (immutable with two narrow named exceptions — `materializationState`,
-  `sourceAssignmentId`) — one row per Check-In/Check-Out pair (or `FORCE_CLOSE_OPEN_SHIFT`, which
-  leaves `checkOutEventId` NULL forever for that row).
-- **`ClockShiftFragment`** (immutable, one narrow exception — `sourceAssignmentId`) — a shift split
-  into its payroll-period-scoped pieces (`fragmentIndex` 0..N-1, DB-enforced contiguous coverage);
-  `reportedProjectionState` tracks PENDING→SETTLED per fragment, independent of shift-wide
-  `materializationState`.
+- **`ClockShift`** (immutable — `id`/`createdAt` included — with two narrow named exceptions —
+  `materializationState`, `sourceAssignmentId`) — one row per Check-In/Check-Out pair (or
+  `FORCE_CLOSE_OPEN_SHIFT`, which leaves `checkOutEventId` NULL forever for that row).
+- **`ClockShiftFragment`** (immutable — `id`/`createdAt` included — one narrow exception —
+  `sourceAssignmentId`) — a shift split into its payroll-period-scoped pieces (`fragmentIndex` 0..N-1,
+  DB-enforced contiguous coverage); `reportedProjectionState` tracks PENDING→SETTLED per fragment,
+  independent of shift-wide `materializationState`.
 - **`ClockShiftAdjustment`** (truly immutable, append-only) — edit history for a fragment's reported
   interval (`EDITED`/`REMOVED`/`RESTORED_TO_RECORDED`), always carries a `reason`.
 - **`AttendanceException`** (mutable — `status`/`resolved*`) — one row per payroll period per
@@ -1742,7 +1744,10 @@ originClockShiftFragmentId` (unique — at most one draft segment per fragment),
 several versions), `CorrectionDraftSegment.originClockShiftFragmentId`, `Timesheet.
 lastReturnedReason`/`systemReopenGeneration`/`systemReopenAt`, `User.userKind` (`HUMAN`/`SYSTEM`
 structural discriminator — exactly one `SYSTEM` row ever exists, seeded by this migration as
-`system.scheduler`).
+`system.scheduler`; the seed insert has no `ON CONFLICT` — a preflight check, the migration's first
+statement, fails the whole migration with `SYSTEM_SCHEDULER_USERNAME_OCCUPIED` if a pre-existing
+`HUMAN` row already holds that username case-insensitively, rather than silently skipping SYSTEM
+user creation).
 
 Sixteen composite foreign keys enforce cross-owner referential integrity throughout this area (e.g.
 a `ClockEvent` cannot reference a `WorkerDeviceInstallation` belonging to a different employee, or a

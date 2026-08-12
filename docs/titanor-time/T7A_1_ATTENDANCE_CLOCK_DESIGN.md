@@ -252,8 +252,8 @@ flowchart LR
 | `id` | uuid | нет | PK, `gen_random_uuid()` |
 | `siteId` | uuid FK → WorkSite | нет | `ON DELETE RESTRICT` |
 | `versionNumber` | int | нет | |
-| `latitude` | numeric(8,6) | нет | −90.000000…90.000000 |
-| `longitude` | numeric(9,6) | нет | −180.000000…180.000000 |
+| `latitude` | numeric(8,6) | нет | −90.000000…90.000000, **`[2026-08-12 review fix]`** `CHECK (latitude BETWEEN -90 AND 90 AND longitude BETWEEN -180 AND 180)` — ранее было только текстовым примечанием, не DB-guarantee |
+| `longitude` | numeric(9,6) | нет | −180.000000…180.000000, см. `latitude` — один составной CHECK на обе колонки |
 | `radiusMeters` | int | нет | `CHECK (radiusMeters > 0 AND radiusMeters <= 2000)` |
 | `createdByUserId` | uuid FK → User | нет | `ON DELETE RESTRICT` |
 | `createdAt` | timestamptz | нет | default `now()` |
@@ -333,8 +333,8 @@ Immutability: §4.1, без исключений.
 | Поле | Тип | Null | Примечание |
 |---|---|---|---|
 | `clockEventId` | uuid | нет | **PK**, FK → ClockEvent, `ON DELETE CASCADE` |
-| `latitude` | numeric(8,6) | нет | |
-| `longitude` | numeric(9,6) | нет | |
+| `latitude` | numeric(8,6) | нет | **`[2026-08-12 review fix]`** `CHECK (latitude BETWEEN -90 AND 90 AND longitude BETWEEN -180 AND 180)` — same bound as `WorkSiteGeofenceVersion` (§2.1 п.1), the only other table holding raw coordinates (§4.3) |
+| `longitude` | numeric(9,6) | нет | see `latitude` — one composite CHECK covers both |
 | `createdAt` | timestamptz | нет | default `now()`, используется retention-джобой |
 
 Создаётся в той же транзакции, что и родительский `ClockEvent`, только если координаты реально были
@@ -968,12 +968,18 @@ CREATE TRIGGER trg_clock_shift_adjustment_immutable
   FOR EACH ROW EXECUTE FUNCTION fn_clock_shift_adjustment_immutable();
 ```
 
-**`ClockShift`** — узкий контракт, ровно два разрешённых перехода:
+**`ClockShift`** — узкий контракт, ровно два разрешённых перехода. **`[2026-08-12 review fix]`**
+`id`/`createdAt` explicitly включены в неизменяемый список — предыдущая редакция функции не
+запрещала их UPDATE (реальная лазейка: `id` — PK с `ON UPDATE CASCADE` на всех ссылающихся composite
+FK, так что смена `id` каскадно переписала бы FK-значения во всех дочерних строках, тихо нарушая
+immutability):
 
 ```sql
 CREATE OR REPLACE FUNCTION fn_clock_shift_immutable() RETURNS trigger AS $$
 BEGIN
-  IF OLD."recordedStartAt" IS DISTINCT FROM NEW."recordedStartAt"
+  IF OLD."id"               IS DISTINCT FROM NEW."id"
+     OR OLD."createdAt"     IS DISTINCT FROM NEW."createdAt"
+     OR OLD."recordedStartAt" IS DISTINCT FROM NEW."recordedStartAt"
      OR OLD."recordedEndAt"   IS DISTINCT FROM NEW."recordedEndAt"
      OR OLD."siteId"          IS DISTINCT FROM NEW."siteId"
      OR OLD."workAreaId"      IS DISTINCT FROM NEW."workAreaId"
@@ -1038,12 +1044,16 @@ CREATE TRIGGER trg_clock_shift_no_delete
 Разрешены **только**: `materializationState: PENDING→MATERIALIZED` (одноразово, вперёд) и
 `sourceAssignmentId: NULL→значение` (одноразово). Любая другая мутация — `RAISE EXCEPTION`.
 
-**`ClockShiftFragment`** — тот же узкий контракт, единственное разрешённое поле — `sourceAssignmentId`:
+**`ClockShiftFragment`** — тот же узкий контракт, единственные разрешённые поля —
+`sourceAssignmentId`/`reportedProjectionState`. **`[2026-08-12 review fix]`** `id`/`createdAt`
+explicitly включены в неизменяемый список, та же лазейка и то же исправление, что `ClockShift` выше:
 
 ```sql
 CREATE OR REPLACE FUNCTION fn_clock_shift_fragment_immutable() RETURNS trigger AS $$
 BEGIN
-  IF OLD."recordedStartAt" IS DISTINCT FROM NEW."recordedStartAt"
+  IF OLD."id"               IS DISTINCT FROM NEW."id"
+     OR OLD."createdAt"     IS DISTINCT FROM NEW."createdAt"
+     OR OLD."recordedStartAt" IS DISTINCT FROM NEW."recordedStartAt"
      OR OLD."recordedEndAt"   IS DISTINCT FROM NEW."recordedEndAt"
      OR OLD."siteId"          IS DISTINCT FROM NEW."siteId"
      OR OLD."workAreaId"      IS DISTINCT FROM NEW."workAreaId"
@@ -3953,6 +3963,18 @@ username='system.scheduler'`, не хардкодит UUID-константу �
 `employeeId=NULL`, `status=DEACTIVATED` (семантически честно: «не может войти»), `locale='EN'`
 (произвольно, не показывается никому).
 
+**`[2026-08-12 review fix]` Preflight collision guard**: seed-`INSERT` **не** использует
+`ON CONFLICT ("username") DO NOTHING` — на pre-T7A базе теоретически уже мог существовать `HUMAN`
+с `username='system.scheduler'` (или case-вариантом, например `System.Scheduler`); тихий `DO
+NOTHING` в этом случае завершил бы миграцию успешно, но SYSTEM-пользователь не был бы создан вовсе
+— инвариант «ровно один SYSTEM» молча нарушен без единого сообщения об ошибке. Вместо этого
+migration первым же statement'ом (до какого-либо T7A DDL) выполняет `SELECT ... WHERE
+lower(username) = lower('system.scheduler')`: если строка найдена — вся миграция откатывается со
+стабильным идентификатором `SYSTEM_SCHEDULER_USERNAME_OCCUPIED` (SQLSTATE `P0001`), ни одна T7A-
+таблица/enum/колонка не создаётся, существующий `HUMAN`-пользователь не изменяется. Это делает
+failure-path атомарным по построению (guard — буквально первый statement файла, поэтому откатывать
+после сбоя нечего), независимо от того, оборачивает ли Prisma весь `migration.sql` в транзакцию.
+
 **Требования, обеспеченные структурно**:
 
 | Требование | Механизм |
@@ -4116,7 +4138,7 @@ force-skip-final-approved) — оба уже допускают произвол
 
 | # | Задача | Границы schema/API/UI/test |
 |---|---|---|
-| 1 | Schema foundation | **`[3.2.5]`** (issue 6) точный объём, синхронизирован с финальным блоком — стале «12 таблиц/7 триггеров/3 composite FK» исправлено: **13** новых таблиц (§2.1); **9** additive-колонок на 7 pre-T7A моделях (§2.2) **+ 6** additive-колонок на собственных таблицах T7A, накопленных 3.1→3.2.4 (`ClockShift.endAtProvisional`, `WorkerDeviceInstallation.lastProcessedSequence`, `CompanyAttendancePolicy.maxShiftDurationHours`, `AttendanceException.relatedClockShiftId`, `AttendanceException.overlapEndedAt`, `ClockShiftFragment.reportedProjectionState`) — 3.2.5 не добавляет колонок; **15** composite FK всего (11 на новых таблицах: `ClockEvent`×2, `ClockShiftFragment`×4, `ClockShiftAdjustment`×2, `ClockEventIdConflict`×1, `DeviceEventReceipt`×2; **+4** additive на pre-T7A моделях: `WorkSite`, `TimesheetDraftSegment`, `WorkSegment`, `CorrectionDraftSegment`); **14** отдельных `CREATE TRIGGER`-биндингов (§4.1) — стабильно с revision 3.1, ни один НЕ добавлялся впоследствии; 3.2/3.2.1/3.2.2/3.2.4/3.2.5 расширяли **тела** ДВУХ уже существующих функций (`fn_clock_shift_immutable()`, `fn_clock_shift_fragment_immutable()`), не создавали новых триггеров — расширение функции не считается новым trigger'ом (issue 6); singleton-seed `CompanyAttendancePolicy`, seed `SYSTEM`-пользователя. Тест: миграция на одноразовом PostgreSQL 16, статический+runtime аудит по паттерну `05_RAW_SQL_REGISTER.md`, включая позитивный/негативный тест `fn_clock_shift_fragment_coverage_check` и **`[3.2.5]`** прямой SQL-тест prerequisite для `reportedProjectionState` (issue 4, тесты #126–128). |
+| 1 | Schema foundation | **`[3.2.5]`** (issue 6) точный объём, синхронизирован с финальным блоком — стале «12 таблиц/7 триггеров/3 composite FK» исправлено: **13** новых таблиц (§2.1); **9** additive-колонок на 7 pre-T7A моделях (§2.2) **+ 6** additive-колонок на собственных таблицах T7A, накопленных 3.1→3.2.4 (`ClockShift.endAtProvisional`, `WorkerDeviceInstallation.lastProcessedSequence`, `CompanyAttendancePolicy.maxShiftDurationHours`, `AttendanceException.relatedClockShiftId`, `AttendanceException.overlapEndedAt`, `ClockShiftFragment.reportedProjectionState`) — 3.2.5 не добавляет колонок; **`[2026-08-12 owner correction]`** **16** composite FK всего, не 15 (см. «Финал — подтверждение» ниже для полного разбора исправления) — **12** на новых таблицах (`ClockEvent`×3, `ClockShiftFragment`×4, `ClockShiftAdjustment`×2, `ClockEventIdConflict`×1, `DeviceEventReceipt`×2; **+4** additive на pre-T7A моделях: `WorkSite`, `TimesheetDraftSegment`, `WorkSegment`, `CorrectionDraftSegment`); **14** отдельных `CREATE TRIGGER`-биндингов (§4.1) — стабильно с revision 3.1, ни один НЕ добавлялся впоследствии; 3.2/3.2.1/3.2.2/3.2.4/3.2.5 расширяли **тела** ДВУХ уже существующих функций (`fn_clock_shift_immutable()`, `fn_clock_shift_fragment_immutable()`), не создавали новых триггеров — расширение функции не считается новым trigger'ом (issue 6); singleton-seed `CompanyAttendancePolicy`, seed `SYSTEM`-пользователя. Тест: миграция на одноразовом PostgreSQL 16, статический+runtime аудит по паттерну `05_RAW_SQL_REGISTER.md`, включая позитивный/негативный тест `fn_clock_shift_fragment_coverage_check` и **`[3.2.5]`** прямой SQL-тест prerequisite для `reportedProjectionState` (issue 4, тесты #126–128). |
 | 2 | Locking-доработки существующего кода (§15) | Без новой схемы. Тест: поведение для единственного писателя не изменилось (регрессия существующих тестов submit/patch/return). |
 | 3 | Geofence admin | `GET/POST /api/admin/sites/:siteId/geofence-versions`, секция на `/admin/sites/[siteId]`. Тест: happy path, bounds `radiusMeters`, версионирование не переписывает старую. |
 | 4 | Online clock backend | `check-in`/`check-out`/`switch-site`/`clock-state`, §9.1-9.3. Тест: inside/outside/no-geofence, double check-in, checkout-without-open, хронологическая аномалия (§9.2), switch-site атомарность. |
@@ -4330,14 +4352,23 @@ prerequisite-CHECK внутри `fn_clock_shift_fragment_immutable()` — не �
 3.1; `AttendanceException.relatedClockShiftId` — 3.2; `AttendanceException.overlapEndedAt` — 3.2.2;
 `ClockShiftFragment.reportedProjectionState` — 3.2.4, issue 2, §2.1 п.7). **`[3.2.5]`** (issue 6)
 **composite FK — грандтотал по всей схеме, а не по одной ревизии**: 3.2.4 приводила частичный,
-несогласованный со стартовой ревизией счёт («6 новых»); полный пересчёт по §2.1/§2.2 даёт **15
-composite FK**: **11** на новых таблицах (`ClockEvent`×2 — `WorkerDeviceInstallation`,
-`WorkSiteGeofenceVersion`; `ClockShiftFragment`×4 — `ClockShift`/`Timesheet`/`WorkArea`/
-`SiteAssignment`; `ClockShiftAdjustment`×2 — `SiteAssignment`/`ClockShiftFragment`;
-`ClockEventIdConflict`×1 — `WorkerDeviceInstallation`; `DeviceEventReceipt`×2 —
-`WorkerDeviceInstallation`/`ClockEvent`) **+ 4** additive на pre-T7A моделях (`WorkSite`,
-`TimesheetDraftSegment`, `WorkSegment`, `CorrectionDraftSegment`, §2.2) — все существовали уже к
-концу 3.1, ни одна не добавлена позже. **2 новых partial unique на `AttendanceException`**
+несогласованный со стартовой ревизией счёт («6 новых»); 3.2.5 пересчитала как **15**, но
+**пропустила один composite FK, уже присутствующий дословно в собственном §2.1 п.3** —
+`ClockEvent.workAreaId`, чья строка таблицы полей п.3 explicitly даёт полную составную форму `FK
+(siteId, workAreaId) → WorkArea(siteId, id) MATCH SIMPLE`, той же явной формы, что и два другие
+composite FK `ClockEvent`, уже включённые в счёт «×2» ниже. **`[2026-08-12, owner correction, docs
+close-out, не новая архитектурная ревизия]`**: полный пересчёт по §2.1/§2.2 даёт **16 composite
+FK**, не 15 — исправление арифметики документа, реализация (composite FK
+`ClockEvent(siteId, workAreaId) → WorkArea(siteId, id)`) физически существовала во всех ревизиях
+начиная с 3.1 дословно по тексту §2.1 п.3, счёт лишь не включал её: **12** на новых таблицах
+(`ClockEvent`×3 — `WorkerDeviceInstallation`, `WorkSiteGeofenceVersion`, `WorkArea`;
+`ClockShiftFragment`×4 — `ClockShift`/`Timesheet`/`WorkArea`/`SiteAssignment`;
+`ClockShiftAdjustment`×2 — `SiteAssignment`/`ClockShiftFragment`; `ClockEventIdConflict`×1 —
+`WorkerDeviceInstallation`; `DeviceEventReceipt`×2 — `WorkerDeviceInstallation`/`ClockEvent`) **+ 4**
+additive на pre-T7A моделях (`WorkSite`, `TimesheetDraftSegment`, `WorkSegment`,
+`CorrectionDraftSegment`, §2.2) — все существовали уже к концу 3.1, ни одна не добавлена позже.
+Полный per-FK реестр и runtime-верификация всех 16 — `docs/titanor-time/05_RAW_SQL_REGISTER.md`
+§11.3. **2 новых partial unique на `AttendanceException`**
 (`ux_..._missing_checkout_dedup` — 3.1, **`ux_attendance_exception_overlap_pair_open` — впервые
 введён как упорядоченный `ux_..._pair_dedup` в 3.2 без `status='OPEN'`, сужен до `status='OPEN'` в
 3.2.1, переопределён как expression index `LEAST`/`GREATEST` в 3.2.2, возвращён к обычному
@@ -4381,6 +4412,14 @@ changedByUserId`, не `actorUserId` — правильное имя поля м
 операционный обзор T7A.9 (новый §16 п.9), отдельная сложная страница для первого пилота не нужна,
 `FOREMAN` raw payload не получает; §18.1 (GPS retention legal review) подтверждён как единственный
 пункт, остающийся открытым после утверждения — не блокирует schema foundation.
+
+**Правка владельца — composite FK arithmetic (2026-08-12, schema-foundation implementation review,
+не новая ревизия архитектуры)**: правильное итоговое число — **16** composite FK, не 15.
+Шестнадцатая связь — `ClockEvent(siteId, workAreaId) → WorkArea(siteId, id)` — физически требуется
+дословным текстом §2.1 п.3 (составная FK-форма дана там же, где и для двух других composite FK
+`ClockEvent`, уже входивших в счёт «×2»), поэтому не подлежит удалению. Ошибочна была итоговая
+арифметика 3.2.5 (§16, «Финал»), не сама схема/migration. Владелец подтверждает 16 как окончательное
+число — вопрос закрыт, не оставлен будущему review.
 
 **Owner decisions — статус после утверждения 2026-08-12**: §18 сохраняет **только один** пункт —
 (18.1) юридическая формулировка 90-дневного retention сырых GPS-координат (privacy/legal review и

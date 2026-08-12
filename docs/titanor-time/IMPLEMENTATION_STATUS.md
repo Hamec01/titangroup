@@ -1,6 +1,50 @@
 # Titanor Time — Implementation Status
 
-Обновлено: 2026-08-12 Europe/Helsinki (feat: add attendance clock schema foundation)
+Обновлено: 2026-08-12 Europe/Helsinki (fix: harden attendance clock schema foundation)
+
+**T7A schema-foundation slice — review-fix applied, тот же slice, не новый.** Ревью коммита
+`49f4132` не приняло его как PASS; migration `20260812000000_add_attendance_clock_schema_foundation`
+исправлена на месте (не применялась ни к одной постоянной базе — правка допустима без новой
+миграции) и закоммичена отдельным fix-коммитом. Locking slice (§15) **не начат** — ревью явно
+запретило переходить к нему до PASS.
+
+Исправлено (полный разбор — `docs/titanor-time/05_RAW_SQL_REGISTER.md` §11):
+1. **Composite FK: 16, не 15.** `ClockEvent(siteId, workAreaId) → WorkArea(siteId, id)` физически
+   требуется §2.1 п.3 design-документа и не удалялась — ошибочна была итоговая арифметика документа
+   (§16/«Финал»), не миграция. Владелец подтвердил 16 как окончательное число во всех документах.
+2. **SYSTEM user seed collision.** Seed-`INSERT` для `system.scheduler` больше не использует
+   `ON CONFLICT ("username") DO NOTHING` (могло тихо завершить миграцию успешно, не создав SYSTEM
+   User, если username уже занят HUMAN-пользователем). Теперь первым statement'ом всего
+   `migration.sql` (до какого-либо T7A DDL) выполняется case-insensitive preflight-проверка; при
+   конфликте — откат со стабильным идентификатором `SYSTEM_SCHEDULER_USERNAME_OCCUPIED`, без единой
+   T7A-таблицы/enum/колонки, без изменения существующего пользователя. Атомарность подтверждена
+   эмпирически на одноразовом PostgreSQL 16 (точное совпадение username и case-вариант).
+3. **Immutability-триггеры `ClockShift`/`ClockShiftFragment`**: `id`/`createdAt` теперь явно входят
+   в список неизменяемых полей (раньше не были защищены — реальная лазейка через `id` с
+   `ON UPDATE CASCADE` composite FK на дочерние таблицы).
+4. **Coordinate bounds**: новые `CHECK` на `WorkSiteGeofenceVersion`/`ClockEventLocation`
+   (`latitude BETWEEN -90 AND 90`, `longitude BETWEEN -180 AND 180`) — раньше только текстовый
+   комментарий, не DB-гарантия.
+5. **Composite FK test coverage**: все 16 (не выборка) индивидуально протестированы негативным
+   cross-owner сценарием на одноразовом PostgreSQL 16 — таблица результатов в
+   `05_RAW_SQL_REGISTER.md` §11.3.
+
+Итоговые числа после фикса: 13 таблиц (без изменений), 15 CHECK (было 13, +2 coordinate bounds), 3
+partial/expression unique (без изменений), **16** composite FK (было документировано как 15/16
+непоследовательно — теперь везде согласованно 16), 14 `CREATE TRIGGER`-биндингов/11 функций (тела
+двух функций расширены, число триггеров не изменилось), 1 preflight guard (новое).
+
+Проверено на новом одноразовом PostgreSQL 16 (предыдущий disposable-контейнер из коммита `49f4132`
+был удалён вместе с тем сеансом ревью): все миграции с нуля, повторный `migrate deploy` → No
+pending migrations, `migrate status` → up to date, `prisma validate`, Prisma Client generation,
+`tsc --noEmit`, `npm run build`, `docker compose -f compose.titanor-time.yaml build app` — все
+зелёные. Docker image safety: production `titanor-time-app-1`/`titanor-time-db-1` подтверждены
+неизменными (тот же image ID/StartedAt/RestartCount до и после тестовой сборки); тестовый образ
+`titanor-time-app:latest` удалён после проверки — см. коммит-отчёт для деталей одного
+пограничного случая с недоступным для ретеггинга image ID, унаследованного из предыдущей сессии
+(production-контейнер не затронут).
+
+Production/API/UI/offline sync/locking — не затронуты этой правкой, ни в каком виде.
 
 **T7A.1 schema-foundation slice реализован.** Точный объём из `T7A_1_ATTENDANCE_CLOCK_DESIGN.md`
 §16 п.1: 13 новых таблиц (`WorkSiteGeofenceVersion`, `WorkerDeviceInstallation`, `ClockEvent`,
