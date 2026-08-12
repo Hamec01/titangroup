@@ -1,13 +1,12 @@
 -- ============================================================================
--- Preflight — SYSTEM actor username collision guard. Fixed per 2026-08-12 review (item 2).
+-- Preflight — SYSTEM actor username collision guard. Fixed per 2026-08-12 review (item 2);
+-- kept outside the explicit transaction below per 2026-08-12 review (item A) — see the note
+-- immediately above the BEGIN for why.
 --
 -- Deliberately the FIRST statement in this migration, before any T7A DDL (CREATE TYPE/TABLE,
--- ALTER TABLE ADD COLUMN) runs. This is what makes the failure path atomic: if this check raises,
--- nothing else in the file has executed yet, so the database is left in exactly its pre-migration
--- state — no T7A table, enum, column, or seed row, and no mutation of the pre-existing "User" row
--- that triggered the failure. This does not depend on Prisma wrapping migration.sql in a
--- transaction (Postgres DDL is transactional and Prisma does wrap it for this provider, but
--- placing the guard first makes the atomicity property hold by construction regardless).
+-- ALTER TABLE ADD COLUMN) runs and before the explicit transaction below opens. A failure here
+-- leaves the database in exactly its pre-migration state — nothing has executed yet, so there is
+-- nothing to roll back, and no mutation of the pre-existing "User" row that triggered the failure.
 --
 -- "userKind" does not exist yet at this point (its ALTER TABLE runs later, in Section A) — this
 -- check is deliberately username-only, case-insensitive, matching the exact scenarios required:
@@ -24,6 +23,34 @@ BEGIN
     RAISE EXCEPTION 'SYSTEM_SCHEDULER_USERNAME_OCCUPIED' USING ERRCODE = 'P0001';
   END IF;
 END $$;
+
+-- ============================================================================
+-- Atomicity — fixed per 2026-08-12 review (item A). Everything from here through the final seed
+-- INSERT runs inside one explicit transaction. Atomicity is guaranteed by this BEGIN/COMMIT pair,
+-- not by an assumed/unproven behavior of the Prisma migration runner — the previous revision's
+-- comment claimed "Prisma does wrap it for this provider" without an explicit transaction backing
+-- that claim; that assertion is removed. All statements below (CREATE TYPE, CREATE TABLE, ALTER
+-- TABLE ADD COLUMN/ADD CONSTRAINT, CREATE INDEX — none CONCURRENTLY, CREATE OR REPLACE FUNCTION,
+-- CREATE TRIGGER, INSERT) are ordinary transactional DDL/DML on PostgreSQL 16; none require
+-- running outside a transaction block.
+--
+-- The preflight DO block above is deliberately OUTSIDE this transaction, not the first statement
+-- inside it — tested empirically on disposable PostgreSQL 16 (2026-08-12): wrapping the preflight
+-- itself inside this same explicit transaction caused Prisma's migration engine to keep sending
+-- subsequent statements after the preflight's RAISE EXCEPTION aborted the transaction, so the
+-- terminal-visible error became Postgres's generic "current transaction is aborted, commands
+-- ignored until end of transaction block" instead of SYSTEM_SCHEDULER_USERNAME_OCCUPIED — the
+-- real identifier did not appear anywhere, not in stdout, not in `_prisma_migrations.logs`, not
+-- under `DEBUG=prisma:*`. That regresses the whole point of the item-2 fix (a stable, greppable
+-- failure reason). Keeping the preflight as a standalone statement before any transaction opens
+-- avoids this entirely — a failure there was already atomic by construction (nothing precedes it)
+-- and reports cleanly, exactly as before. The transaction below still closes the race this task
+-- describes: preflight finds no colliding username, then a concurrent writer inserts a
+-- "system.scheduler" row before this migration's own seed INSERT runs — that later INSERT's
+-- unique_violation on "User_username_key" now rolls back everything opened by this BEGIN (every
+-- enum, table, column, constraint, trigger, and the CompanyAttendancePolicy seed), not just itself.
+-- ============================================================================
+BEGIN;
 
 -- CreateEnum
 CREATE TYPE "ClockOperationType" AS ENUM ('CHECK_IN', 'CHECK_OUT');
@@ -1041,3 +1068,5 @@ VALUES ('system.scheduler', NULL, NULL, 'DEACTIVATED', 'EN', false, NULL, 'SYSTE
 INSERT INTO "CompanyAttendancePolicy" ("singleton", "timezone", "cutoffDaysAfterPeriodEnd", "cutoffTime", "systemReopenDebounceMinutes", "maxShiftDurationHours", "updatedAt")
 VALUES (true, 'Europe/Helsinki', 0, '23:59:00', 30, 16, CURRENT_TIMESTAMP)
 ON CONFLICT ("singleton") DO NOTHING;
+
+COMMIT;

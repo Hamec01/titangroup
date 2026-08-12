@@ -1,6 +1,55 @@
 # Titanor Time — Implementation Status
 
-Обновлено: 2026-08-12 Europe/Helsinki (fix: harden attendance clock schema foundation)
+Обновлено: 2026-08-12 Europe/Helsinki (fix: make attendance migration atomic — audit-closeout)
+
+**T7A schema-foundation slice — audit-closeout правка, тот же slice.** Продолжение review-fix
+(`eed7d1b`) — три оставшиеся проблемы найдены и исправлены; locking slice (§15) по-прежнему **не
+начат**.
+
+**A. Настоящая атомарность миграции.** Прежний комментарий утверждал недоказанное поведение Prisma
+("Prisma does wrap it for this provider") без реальной транзакции. Добавлена явная транзакция
+(`BEGIN;`/`COMMIT;`) вокруг всего DDL+seed-блока. **Важная эмпирическая находка**: обернуть SYSTEM
+collision preflight ВНУТРЬ этой же транзакции оказалось нельзя — тест на одноразовом PostgreSQL 16
+показал, что Prisma migration engine после `RAISE EXCEPTION` внутри транзакции продолжает отправлять
+следующие statements, и видимая ошибка становится generic `current transaction is aborted...` —
+реальный идентификатор `SYSTEM_SCHEDULER_USERNAME_OCCUPIED` пропадает отовсюду (ни в stdout, ни в
+`_prisma_migrations.logs`, ни под `DEBUG=prisma:*`). Итоговая структура: preflight остаётся ПЕРЕД
+транзакцией (атомарен по построению — до него ничего не выполнялось), `BEGIN`/`COMMIT` оборачивают
+весь DDL+seed-блок после него. Race (preflight не нашёл коллизию → конкурентная запись вставляет
+`system.scheduler` → seed `INSERT` получает `unique_violation`) проверен НАПРЯМУЮ двумя реально
+конкурентными psql-соединениями: DDL, выполненный до момента коллизии, полностью откатился, только
+строка конкурентного writer'а осталась.
+
+**B. Синхронизация документации.** Все оставшиеся упоминания «15 composite FK» как текущего факта
+исправлены — исторические записи (revision 3.2.5 addendum, ранняя schema-foundation запись в этом
+файле) явно помечены как «первоначальный ошибочный подсчёт, superseded owner correction
+2026-08-12», не переписаны так, будто ошибки не было. Окончательное значение — **16** — теперь
+единственное самостоятельно читаемое утверждение везде.
+
+**C. Честная nullable/MATCH SIMPLE verification.** Все 12 применимых nullable composite FK (FK-01,
+02, 03, 06, 07, 09, 10, 12, 13, 14, 15, 16) получили ОТДЕЛЬНЫЙ реальный positive-тест с NULL-значением
+на одноразовом PostgreSQL 16 — ни один не заменён словами «структурно идентично», тестом другого FK
+или корректной ненулевой ссылкой. FK-04/05/08/11 — N/A с точным обоснованием (все колонки этих FK
+`NOT NULL`, нет валидного нерезолвленного состояния). Таблица §11.3 обновлена реальными результатами.
+
+Проверено на новом одноразовом PostgreSQL 16 (предыдущий disposable-контейнер удалён вместе с
+прошлым review-fix сеансом): все 48 существующих migrations + T7A с нуля; повторный `migrate deploy`
+→ No pending migrations; `migrate status` → up to date; SYSTEM collision exact-case и case-variant —
+оба атомарны (0 T7A-таблиц/enum/колонок, HUMAN-пользователь не изменён), ошибка чисто атрибутируется
+`SYSTEM_SCHEDULER_USERNAME_OCCUPIED`; свободный username → ровно один SYSTEM User; все 16 cross-owner
+FK negative tests (`23503`); все 12 nullable positive tests; coordinate boundary tests (обе таблицы);
+`ClockShift`/`ClockShiftFragment` id+createdAt immutability regression; полный предыдущий invariant
+suite (coverage/projection/retention/singleton/AttendanceException/DeviceEventReceipt) — **111 PASS,
+0 unexpected errors** по всем тестовым батчам. `prisma validate`/generate, `tsc --noEmit`,
+`npm run build`, `docker compose -f compose.titanor-time.yaml build app`, `git diff --check` — все
+зелёные.
+
+Docker image safety: production `titanor-time-app-1`/`titanor-time-db-1` подтверждены неизменными
+(тот же image ID/`StartedAt`/`RestartCount` до и после сборки). Тега `titanor-time-app:latest` не
+было и до задачи (проверено явно перед сборкой) — после проверки тестовый образ удалён полностью,
+без попытки создать тег, которого не существовало изначально.
+
+Production/API/UI/offline sync/locking — не затронуты этой правкой, ни в каком виде.
 
 **T7A schema-foundation slice — review-fix applied, тот же slice, не новый.** Ревью коммита
 `49f4132` не приняло его как PASS; migration `20260812000000_add_attendance_clock_schema_foundation`
@@ -53,10 +102,11 @@ Production/API/UI/offline sync/locking — не затронуты этой пр
 `AutoSubmissionAttempt`, `DeviceEventReceipt`); 9 additive-колонок на 7 pre-T7A моделях (`WorkSite`,
 `TimesheetVersion`, `TimesheetDraftSegment`, `WorkSegment`, `CorrectionDraftSegment`×1 каждая,
 `Timesheet`×3, `User`×1); 6 additive-колонок, накопленных 3.1–3.2.4, на собственных T7A-таблицах; все
-enum из §3; 16 composite FK (design doc's own §Финал aggregate states 15 — `ClockEvent×2`; this
-implementation follows §2.1 п.3's own explicit per-field inline annotation for `ClockEvent.
-workAreaId`, which the aggregate tally omits — see `05_RAW_SQL_REGISTER.md` §11.3 reconciliation
-note for the full reasoning); 14 `CREATE TRIGGER`-биндингов (11 функций); singleton-seed
+enum из §3; **16** composite FK (the design doc's own §Финал aggregate originally stated 15 —
+`ClockEvent×2`, missing §2.1 п.3's own explicit per-field inline annotation for `ClockEvent.
+workAreaId`; **owner-confirmed 2026-08-12 as the final count, see `05_RAW_SQL_REGISTER.md` §11.3 and
+the "harden attendance clock schema foundation" record below — 15 is superseded, not a live
+alternative reading**); 14 `CREATE TRIGGER`-биндингов (11 функций); singleton-seed
 `CompanyAttendancePolicy`; idempotent seed `SYSTEM`-пользователя (`system.scheduler`).
 
 Migration: `prisma/migrations/20260812000000_add_attendance_clock_schema_foundation`. Применена и
@@ -106,7 +156,10 @@ schema.prisma`, migrations, API, UI и любой application-код не соз
 
 **Следующая задача — отдельный schema-foundation slice** (не geofence/API/UI напрямую): точный объём
 зафиксирован в `T7A_1_ATTENDANCE_CLOCK_DESIGN.md` §16 п.1 — 13 новых таблиц, 9 additive-колонок на 7
-pre-T7A моделях + 6 additive-колонок на собственных T7A-таблицах, 15 composite FK, 14 `CREATE
+pre-T7A моделях + 6 additive-колонок на собственных T7A-таблицах, ~~15~~ composite FK **(это был
+первоначальный ошибочный подсчёт design-документа на момент этой записи, revision 3.2.5; superseded
+owner correction 2026-08-12; окончательное реализованное значение — 16, см. запись выше и запись
+2026-08-12 «harden attendance clock schema foundation»)**, 14 `CREATE
 TRIGGER`-биндингов, singleton-seed `CompanyAttendancePolicy`, seed `SYSTEM`-пользователя — тестируется
 миграцией на одноразовом PostgreSQL 16 по паттерну `05_RAW_SQL_REGISTER.md`, прежде чем geofence
 admin/online clock backend/worker mobile UI получат хоть один API/UI endpoint.

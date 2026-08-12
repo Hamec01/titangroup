@@ -1260,30 +1260,35 @@ resolution). Minimum negative test per row above: insert/update the referencing 
 populated value combination that exists in the target table under a *different* owner key
 (device/site/employee) — expect `23503`. Where the referencing column(s) are nullable per `MATCH
 SIMPLE`, a second positive test confirms the documented nullable/unresolved row inserts cleanly.
-**Fixed per 2026-08-12 review (item 5)**: all 16, individually, not a sample. Each row below is a
-real cross-owner `INSERT`/`UPDATE` executed on disposable PostgreSQL 16, expecting `23503`; rows
-with a nullable referencing column also got a documented-nullable positive test.
+**Fixed per 2026-08-12 review (item 5), re-verified 2026-08-12 audit-closeout (item C)**: all 16,
+individually, not a sample. Each row's negative test is a real cross-owner `INSERT`/`UPDATE`
+executed on disposable PostgreSQL 16, expecting `23503`. For every FK with a nullable referencing
+column, the positive test is a real `INSERT`/`UPDATE` that leaves that column `NULL` (or, for FK-13,
+also a set→unset round trip) and asserts success — never "structurally identical to FK-N", never a
+correctly-owned *non-null* reference standing in for the null case, never a bare claim. For the 4
+FKs whose referencing columns are all `NOT NULL` (no nullable member exists), the table states the
+exact reason MATCH SIMPLE's null-skip path can never apply, instead of a positive test.
 
 | ID | Table.columns → target | Negative test result | Positive (nullable) test |
 |---|---|---|---|
-| FK-01 | `ClockEvent(deviceInstallationId,employeeId)` → `WorkerDeviceInstallation` | PASS `23503` | N/A (both required together, CK-22) |
+| FK-01 | `ClockEvent(deviceInstallationId,employeeId)` → `WorkerDeviceInstallation` | PASS `23503` | PASS — `deviceInstallationId=NULL` **and** `deviceSequence=NULL` together (orphan/server-originated event, the only valid nullable shape per CK-22) inserts cleanly |
 | FK-02 | `ClockEvent(siteId,workAreaId)` → `WorkArea` | PASS `23503` | PASS — `workAreaId=NULL` inserts cleanly |
-| FK-03 | `ClockEvent(siteId,geofenceVersionId)` → `WorkSiteGeofenceVersion` | PASS `23503` | N/A (tested with `geofenceVersionId` set; NULL case structurally identical to FK-02) |
-| FK-04 | `ClockShiftFragment(clockShiftId,employeeId)` → `ClockShift` | PASS `23503` | N/A (both required) |
-| FK-05 | `ClockShiftFragment(timesheetId,employeeId,payrollPeriodId)` → `Timesheet` | PASS `23503` | N/A (all required) |
-| FK-06 | `ClockShiftFragment(siteId,workAreaId)` → `WorkArea` | PASS `23503` | covered by FK-02's NULL-workAreaId mechanism |
-| FK-07 | `ClockShiftFragment(sourceAssignmentId,employeeId,siteId)` → `SiteAssignment` | PASS `23503` | PASS — `sourceAssignmentId=NULL` fragments exist in the coverage tests |
-| FK-08 | `ClockShiftAdjustment(clockShiftFragmentId,clockShiftId,employeeId)` → `ClockShiftFragment` | PASS `23503` | N/A (always required) |
-| FK-09 | `ClockShiftAdjustment(afterSourceAssignmentId,employeeId,afterSiteId)` → `SiteAssignment` | PASS `23503` | PASS — `changeType='REMOVED'` row with both `afterSourceAssignmentId`/`afterSiteId` NULL inserts cleanly |
+| FK-03 | `ClockEvent(siteId,geofenceVersionId)` → `WorkSiteGeofenceVersion` | PASS `23503` | PASS — `geofenceVersionId=NULL` inserts cleanly |
+| FK-04 | `ClockShiftFragment(clockShiftId,employeeId)` → `ClockShift` | PASS `23503` | N/A — both columns `NOT NULL`; every fragment structurally belongs to exactly one shift and one employee from the moment the materializer creates it, no unresolved state exists |
+| FK-05 | `ClockShiftFragment(timesheetId,employeeId,payrollPeriodId)` → `Timesheet` | PASS `23503` | N/A — all three columns `NOT NULL`; a fragment always has a resolved period/timesheet at creation time |
+| FK-06 | `ClockShiftFragment(siteId,workAreaId)` → `WorkArea` | PASS `23503` | PASS — `workAreaId=NULL` on a `ClockShiftFragment` row inserts cleanly (own dedicated test, not reused from FK-02's `ClockEvent` test) |
+| FK-07 | `ClockShiftFragment(sourceAssignmentId,employeeId,siteId)` → `SiteAssignment` | PASS `23503` | PASS — `sourceAssignmentId=NULL` on a `ClockShiftFragment` row inserts cleanly |
+| FK-08 | `ClockShiftAdjustment(clockShiftFragmentId,clockShiftId,employeeId)` → `ClockShiftFragment` | PASS `23503` | N/A — all three columns `NOT NULL`; an adjustment always records an edit against one specific, already-resolved fragment |
+| FK-09 | `ClockShiftAdjustment(afterSourceAssignmentId,employeeId,afterSiteId)` → `SiteAssignment` | PASS `23503` | PASS — `changeType='REMOVED'` row with `afterSourceAssignmentId=NULL` **and** `afterSiteId=NULL` together inserts cleanly |
 | FK-10 | `ClockEventIdConflict(deviceInstallationId,employeeId)` → `WorkerDeviceInstallation` | PASS `23503` | PASS — `deviceInstallationId=NULL` inserts cleanly |
-| FK-11 | `DeviceEventReceipt(deviceInstallationId,employeeId)` → `WorkerDeviceInstallation` | PASS `23503` | N/A (both required) |
-| FK-12 | `DeviceEventReceipt(clockEventId,deviceInstallationId,employeeId,deviceSequence)` → `ClockEvent` | PASS `23503` | N/A (required when `outcome='ACCEPTED'`, CK-32) |
-| FK-13 | `WorkSite(id,currentGeofenceVersionId)` → `WorkSiteGeofenceVersion` | PASS `23503` | PASS — correct-site assignment inserts cleanly after the negative case |
-| FK-14 | `TimesheetDraftSegment(originClockShiftFragmentId,employeeId)` → `ClockShiftFragment` | PASS `23503` | PASS — correctly-owned reference verified present; separately, reusing the same fragment a second time is rejected by the `@@unique` (not this FK) |
-| FK-15 | `WorkSegment(originClockShiftFragmentId,employeeId)` → `ClockShiftFragment` | PASS `23503` | PASS — correctly-owned reference inserts, and (by design, no `@@unique` here) a second `WorkSegment` may reference the same fragment |
-| FK-16 | `CorrectionDraftSegment(originClockShiftFragmentId,employeeId)` → `ClockShiftFragment` | PASS `23503` | PASS — correctly-owned reference inserts cleanly |
+| FK-11 | `DeviceEventReceipt(deviceInstallationId,employeeId)` → `WorkerDeviceInstallation` | PASS `23503` | N/A — both columns `NOT NULL`; every receipt is the FIFO ledger entry for one specific device/employee sequence number, unlike `ClockEvent` there is no orphan/server-originated receipt |
+| FK-12 | `DeviceEventReceipt(clockEventId,deviceInstallationId,employeeId,deviceSequence)` → `ClockEvent` | PASS `23503` | PASS — `clockEventId=NULL` in a valid `outcome='REJECTED_TERMINAL'` row (the shape CK-32 requires for that outcome) inserts cleanly |
+| FK-13 | `WorkSite(id,currentGeofenceVersionId)` → `WorkSiteGeofenceVersion` | PASS `23503` | PASS — `currentGeofenceVersionId=NULL` verified as the actual starting state on two real `WorkSite` rows, then a set→unset→NULL round trip, all succeed |
+| FK-14 | `TimesheetDraftSegment(originClockShiftFragmentId,employeeId)` → `ClockShiftFragment` | PASS `23503` | PASS — `originClockShiftFragmentId=NULL` (ordinary manually-entered segment, not derived from Attendance Clock) inserts cleanly; separately, reusing the same fragment on a second segment is rejected by the `@@unique` (not this FK) |
+| FK-15 | `WorkSegment(originClockShiftFragmentId,employeeId)` → `ClockShiftFragment` | PASS `23503` | PASS — `originClockShiftFragmentId=NULL` inserts cleanly; separately, a second `WorkSegment` referencing the *same non-null* fragment also inserts cleanly (no `@@unique` here, by design — resubmits may freeze one fragment into several versions) |
+| FK-16 | `CorrectionDraftSegment(originClockShiftFragmentId,employeeId)` → `ClockShiftFragment` | PASS `23503` | PASS — `originClockShiftFragmentId=NULL` inserts cleanly |
 
-16/16 PASS.
+16/16 negative PASS. 12/12 applicable nullable-positive PASS. 4/4 N/A justified (FK-04/05/08/11, all-NOT-NULL columns).
 
 ### 11.4 Trigger function register (FN-12 .. FN-22)
 
