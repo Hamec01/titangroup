@@ -30,6 +30,14 @@ Titanor Time · ЭТАП 7A · только проектирование · сх
 >    при неуспешном Switch Site старая открытая смена не закрывается (`GROUP_TERMINAL` откатывает
 >    `group_sp` целиком, включая уже применённую `CHECK_OUT`-половину, если она успела примениться).
 >    Формулировка теперь согласована с тестами #86/#96/#111, которые уже описывали это верно.
+> 5. **Точечное выравнивание формулировок тестов №1/№3/№7** (§17, docs-fix 2026-08-12, без изменения
+>    архитектуры): тест №1 — формулировка сценария уточнена на «при доступной сети всё время» (это
+>    online-путь, не offline); тест №3 — явно указано, что все элементы батча успели получить
+>    `outcome=ACCEPTED` до потери HTTP-ответа, и что повторный `ACCEPTED` при replay — исход именно
+>    для этого случая, а не общее правило для любого повтора (терминально отклонённые события отвечают
+>    `REJECTED` с исходным `rejectionCode`, §9.11 Проход B, тесты #45/#121); тест №7 — прежний
+>    хардкод часов заменён ссылкой на настраиваемое поле `CompanyAttendancePolicy.
+>    maxShiftDurationHours` (default 16ч), соответствующее уже принятому §18/issue 10 значению.
 >
 > **Ветка:** `feature/titanor-time-foundation` · **HEAD на момент утверждения:** `5c16507`
 > **Не создано и не изменено этим документом:** `prisma/schema.prisma`, migrations, API, UI, seed,
@@ -4130,13 +4138,13 @@ force-skip-final-approved) — оба уже допускают произвол
 
 | # | Сценарий | Ожидаемый результат |
 |---|---|---|
-| 1 | Online Check In → Check Out, без сети всё время | `ClockShift` создан, один фрагмент, `MATERIALIZED` |
+| 1 | Online Check In → Check Out, при доступной сети всё время | `ClockShift` создан, один фрагмент, `MATERIALIZED` |
 | 2 | Offline Check In → force-kill приложения → перезапуск → offline Check Out → sync | `clockOutbox` пережил рестарт, оба события синхронизированы в правильном порядке по `deviceSequence`, `ClockShift` создан ровно один раз |
-| 3 | Sync-запрос ушёл, ответ потерян, клиент повторяет тот же батч | `DUPLICATE_ACK` на все элементы, ноль дублей в БД |
+| 3 | Sync-batch полностью обработан, все элементы получили `outcome=ACCEPTED`, но HTTP-ответ потерян по дороге к клиенту; клиент повторяет тот же батч (тот же `payloadHash` для каждого элемента) | `DUPLICATE_ACK` на все элементы (каждый находит свою уже существующую `DeviceEventReceipt(outcome=ACCEPTED)`), ноль дублей в БД, ни один `ClockEvent` не создаётся повторно. **Это не общее правило для любого replay**: повтор события, ранее отклонённого как `REJECTED_TERMINAL`, возвращает `REJECTED` с исходным `rejectionCode` (не `DUPLICATE_ACK`) — см. §9.11 Проход B и тесты #45/#121 |
 | 4 | Два параллельных `POST /sync` для одного `employeeId` с CHECK_IN в обоих (гонка двух устройств) | Ровно одна `EmployeeOpenShift` создана; второй `CHECK_IN` → `NEEDS_REVIEW/DOUBLE_CHECK_IN`, не потерян |
 | 5 | Check Out с `assumedSiteId`, отличным от реально открытого сайта | Смена закрывается по реальному сайту; `SITE_MISMATCH_CHECKOUT` заведён, смена не висит |
 | 6 | Check Out с `effectiveAt <= EmployeeOpenShift.openedAt` (сломанные часы) | Смена закрывается с clamped `recordedEndAt`; `CHECKOUT_CHRONOLOGY_ANOMALY` заведён; `EmployeeOpenShift` удалена; `ClockShift` создан — транзакция НЕ откатывается constraint'ом |
-| 7 | Смена длиннее `MAX_SHIFT_DURATION_HOURS` (24ч) | Закрывается нормально, фрагментируется по фактическим периодам (сколько бы их ни было), `EXCESSIVE_SHIFT_DURATION` заведён |
+| 7 | Смена длиннее `CompanyAttendancePolicy.maxShiftDurationHours` (default 16ч) | Закрывается нормально, фрагментируется по фактическим периодам (сколько бы их ни было), `EXCESSIVE_SHIFT_DURATION` заведён |
 | 8 | Смена пересекает границу двух периодов | Два `ClockShiftFragment` (`fragmentIndex=0,1`), атомарно два `TimesheetDraftSegment` в двух разных `TimesheetDraft`; `PERIOD_BOUNDARY_SPAN` — по одной строке `AttendanceException` на каждый период |
 | 9 | Смена пересекает границы трёх периодов подряд (гипотетически короткие периоды) | Три фрагмента (`fragmentIndex=0,1,2`), три сегмента в трёх `TimesheetDraft`, три независимых исключения |
 | 10 | Coverage-триггер: попытка вставить фрагменты с пропуском (`fragmentIndex=0` заканчивается раньше, чем начинается `fragmentIndex=1`) | `INSERT` отклонён `clock_shift_fragment_coverage_gap_or_overlap` |
