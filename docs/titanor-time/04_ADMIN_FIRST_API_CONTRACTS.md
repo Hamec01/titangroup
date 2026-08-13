@@ -766,6 +766,135 @@ Actionable = `PayrollPeriodParticipant.expected=true` + `PayrollPeriod.status=OP
 - Ошибки: `403 FORBIDDEN`, `409 STALE_PROPOSAL`, `409 PROPOSAL_ALREADY_RESOLVED`
 - Audit: `PROPOSAL_REJECTED`
 
+### 9.1 Онлайн-клок посещаемости (T7A online clock core, `T7A_1_ATTENDANCE_CLOCK_DESIGN.md`
+§9.1-9.3/§12.1-12.2 — **реализовано**) — `lib/attendance-clock.ts`
+
+Все четыре эндпоинта — только `channel=ONLINE`: `deviceInstallationId`/`deviceSequence=NULL`,
+`capturedOffline=false`. `employeeId` всегда из сессии, никогда из тела запроса. **Отложено на
+следующий слайс** (не реализовано этими эндпоинтами): `materializeClockShift` (§9.2 шаг k) —
+каждый `ClockShift`, создаваемый `check-out`/`switch-site`, остаётся `materializationState=PENDING`
+без единого `ClockShiftFragment`; `deviceInstallationId`/`deviceSequence`/`DeviceEventReceipt`-FIFO,
+`POST /attendance/sync`, offline outbox, `GET /attendance/context|today|week`, worker mobile UI,
+scheduler, exception-review-эндпоинты, admin attendance overview.
+
+**GPS shape** (переиспользуется всеми телами ниже):
+```json
+"location": { "latitude": number, "longitude": number, "accuracyMeters": number } | null,
+"gpsUnavailableReason": "PERMISSION_DENIED" | "TIMEOUT" | "POSITION_UNAVAILABLE" | null
+```
+`location` есть ⟺ `gpsUnavailableReason` пуст; `location` пуст ⟺ `gpsUnavailableReason` — одна из
+трёх причин (`LOW_ACCURACY` клиент никогда не присылает — сервер выставляет её сам при
+`accuracyMeters > 75`). `latitude ∈ [-90,90]`, `longitude ∈ [-180,180]`, максимум 6 знаков после
+точки; `accuracyMeters` конечен, `>= 0`, максимум 1 знак после точки (`numeric(6,1)`) — округление
+никогда не происходит молча, избыточная точность отклоняется `400 VALIDATION_ERROR`.
+
+#### `GET /api/worker/attendance/clock-state`
+- Permission: `attendance.clock.read.own`
+- Response `200`:
+```json
+{
+  "serverNow": "ISO", "state": "CLOCKED_OUT" | "CLOCKED_IN",
+  "openShift": { "openedAt": "ISO", "siteId": "uuid", "siteName": "...", "workAreaId": "uuid|null",
+    "workAreaName": "string|null", "sourceAssignmentId": "uuid|null", "openedByClockEventId": "uuid" } | null
+}
+```
+- Никогда не содержит raw GPS. Ошибки: `401 NOT_AUTHENTICATED`, `403 FORBIDDEN` (нет permission),
+  `403 NO_EMPLOYEE_PROFILE`.
+
+#### `POST /api/worker/attendance/check-in`
+- Permission: `attendance.clock.checkin.own`; CSRF `X-Requested-With: titanor-time` обязателен;
+  `Idempotency-Key` **опциональный** (существующий HTTP-слой, `lib/idempotency.ts`) — обязательная
+  натуральная идемпотентность обеспечена самим `clientEventId` (`ClockEvent.id`) независимо от
+  заголовка; rate limit `20/60s` per `actorUserId`+route (`lib/rate-limit.ts`)
+- Request:
+```json
+{ "clientEventId": "uuid", "siteId": "uuid", "workAreaId": "uuid|null",
+  "clientCapturedAt": "ISO", "location": {...}|null, "gpsUnavailableReason": "..."|null }
+```
+- Алгоритм — §9.1 design-документа: `VERIFIED_OUTSIDE` → **вся** транзакция откатывается, `403
+  OUTSIDE_GEOFENCE`, ни один ряд не создаётся. Уже есть открытая смена → новый
+  `ClockEvent(NEEDS_REVIEW)`, `AttendanceException(DOUBLE_CHECK_IN)` (+ применимые GPS/skew
+  exceptions), старая `EmployeeOpenShift` не трогается, `201`. Нет открытой смены → `ClockEvent
+  (ACCEPTED)`, новая `EmployeeOpenShift`, `sourceAssignmentId` резолвится по Helsinki-дате
+  `effectiveAt` (`NULL` → `AttendanceException(STALE_ASSIGNMENT)`), `GPS_NOT_VERIFIED`/
+  `EXCESSIVE_CLOCK_SKEW` — если применимо, `201`.
+- Response `201`/`200` (exact replay):
+```json
+{ "clockEventId": "uuid", "operationType": "CHECK_IN", "processingState": "ACCEPTED"|"NEEDS_REVIEW",
+  "gpsVerification": "VERIFIED_INSIDE"|"VERIFIED_OUTSIDE"|"NOT_VERIFIED", "effectiveAt": "ISO",
+  "siteId": "uuid", "assumedSiteId": null, "workAreaId": "uuid|null", "sourceAssignmentId": "uuid|null",
+  "groupId": "uuid|null", "clockShiftId": null, "exceptions": ["TYPE", ...] }
+```
+`exceptions` — типы `AttendanceException`, созданные для ЭТОГО события (стабильный список,
+переживает изменение `status` позже) — так replay воспроизводит тот же ответ детерминированно, без
+хранения отдельного response-снапшота.
+- Ошибки: `400 VALIDATION_ERROR` (включая невалидный `workAreaId` для этого `siteId`), `401
+  NOT_AUTHENTICATED`, `403 FORBIDDEN`/`CSRF_REJECTED`/`NO_EMPLOYEE_PROFILE`, `403
+  OUTSIDE_GEOFENCE`, `404 SITE_NOT_FOUND` (malformed и несуществующий `siteId` — идентично, no
+  oracle), `409 CLIENT_EVENT_ID_REUSED` (тот же `clientEventId`, другой canonical payload —
+  `ClockEventIdConflict` без координат/accuracy/raw payload), `429 RATE_LIMITED`
+- Audit: `CLOCK_CHECK_IN` / `CLOCK_CHECK_IN_REJECTED_DOUBLE` — без координат
+
+#### `POST /api/worker/attendance/check-out`
+- Permission: `attendance.clock.checkout.own`; те же CSRF/Idempotency-Key/rate-limit правила
+- Request:
+```json
+{ "clientEventId": "uuid", "assumedSiteId": "uuid", "clientCapturedAt": "ISO",
+  "location": {...}|null, "gpsUnavailableReason": "..."|null }
+```
+- Алгоритм — §9.2: **никогда** не блокируется GPS/сайтом. Нет открытой смены → orphan
+  `ClockEvent(NEEDS_REVIEW)` на `assumedSiteId`, `AttendanceException(CHECKOUT_WITHOUT_OPEN_SHIFT)`
+  (+ применимые GPS/skew), `ClockShift` не создаётся. Есть открытая смена → авторитетные
+  site/workArea/sourceAssignmentId только из `EmployeeOpenShift` (тело запроса — только
+  `assumedSiteId` для detection); `effectiveAt <= openedAt` → `ClockShift.recordedEndAt = openedAt +
+  1ms` (design specifies `+1 microsecond`; здесь `+1ms` — минимальная точность JS `Date`/Prisma
+  `DateTime`, свойство «не пересекает границу периода» сохраняется), `endAtProvisional=true`,
+  `CHECKOUT_CHRONOLOGY_ANOMALY` (`clockShiftFragmentId=NULL` — материализация отложена); `ClockShift
+  (materializationState=PENDING)` создаётся, `EmployeeOpenShift` удаляется той же транзакцией;
+  применимые `SITE_MISMATCH_CHECKOUT`/`OUTSIDE_GEOFENCE_CHECKOUT`/`GPS_NOT_VERIFIED`/
+  `EXCESSIVE_CLOCK_SKEW`/`EXCESSIVE_SHIFT_DURATION` (порог из `CompanyAttendancePolicy.
+  maxShiftDurationHours`); overlap-детекция — общие `overlapCandidates`/`overlapExists`/
+  `resolveOverlapTransition` (`lib/attendance-reported-projection.ts`, тот же код, что worker
+  `PATCH`/`correction.approve`), без temporal pre-filter.
+- Response `201`/`200` (exact replay): та же форма, что check-in, плюс `clockShiftId` (заполнен для
+  обычного закрытия, `null` для orphan)
+- Ошибки: `400 VALIDATION_ERROR`, `401 NOT_AUTHENTICATED`, `403 FORBIDDEN`/`CSRF_REJECTED`/
+  `NO_EMPLOYEE_PROFILE`, `404 SITE_NOT_FOUND` (malformed/несуществующий `assumedSiteId`, no oracle),
+  `409 CLIENT_EVENT_ID_REUSED`, `429 RATE_LIMITED`
+- Audit: `CLOCK_CHECK_OUT` / `CLOCK_CHECK_OUT_ORPHAN` — без координат
+
+#### `POST /api/worker/attendance/switch-site`
+- Permission: `attendance.clock.switch_site.own`; те же CSRF/Idempotency-Key/rate-limit правила
+- Request:
+```json
+{ "groupId": "uuid", "checkOutClientEventId": "uuid", "checkInClientEventId": "uuid",
+  "oldAssumedSiteId": "uuid", "newSiteId": "uuid", "newWorkAreaId": "uuid|null",
+  "checkOutClientCapturedAt": "ISO", "checkInClientCapturedAt": "ISO",
+  "checkOutLocation": {...}|null, "checkOutGpsUnavailableReason": "..."|null,
+  "checkInLocation": {...}|null, "checkInGpsUnavailableReason": "..."|null }
+```
+- Алгоритм — §9.3: один HTTP-запрос, одна DB-транзакция. Нет открытой смены → `409
+  NO_OPEN_SHIFT_TO_SWITCH`, ни один `ClockEvent` не создаётся. Иначе — Check Out старого сайта
+  (§9.2), затем Check In нового (§9.1), общий `groupId` на обоих `ClockEvent`. `VERIFIED_OUTSIDE`
+  нового сайта, либо ЛЮБОЙ сбой check-in половины (`SITE_NOT_FOUND`/`WORK_AREA_INVALID`/
+  `CLIENT_EVENT_ID_REUSED`) — откатывает **ВСЮ** транзакцию целиком, включая уже применённый
+  check-out: старая `EmployeeOpenShift` остаётся как была, ни одного нового `ClockEvent`/
+  `ClockShift` не остаётся (для `CLIENT_EVENT_ID_REUSED` конфликт всё равно фиксируется отдельной,
+  изолированной транзакцией **после** отката — судебное доказательство сохраняется, даже когда
+  сама попытка switch отклонена). Успех — ровно одна закрытая `ClockShift` старого сайта, ровно
+  одна новая `EmployeeOpenShift` нового сайта, два `ClockEvent` с одинаковым `groupId`, никогда
+  промежуточного «нигде не отмечен» состояния.
+- Response `201`/`200` (exact replay — **вся пара** сверяется как одна группа, частично
+  совпавшая/изменённая пара не применяется):
+```json
+{ "groupId": "uuid", "checkOut": { ...та же форма, что check-out response... },
+  "checkIn": { ...та же форма, что check-in response... } }
+```
+- Ошибки: `400 VALIDATION_ERROR`, `401 NOT_AUTHENTICATED`, `403 FORBIDDEN`/`CSRF_REJECTED`/
+  `NO_EMPLOYEE_PROFILE`, `403 OUTSIDE_GEOFENCE`, `404 SITE_NOT_FOUND`, `409
+  NO_OPEN_SHIFT_TO_SWITCH`, `409 CLIENT_EVENT_ID_REUSED`, `429 RATE_LIMITED`
+- Audit: общий с check-in/check-out, для обеих половин
+
 ## 10. Служебный агрегатор
 
 #### `GET /api/admin/setup-status`

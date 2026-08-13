@@ -109,6 +109,22 @@ Check In/Out (нереализовано), геозона объекта — е�
 | `attendance.geofence.read` | `ADMIN`, `SUPER_ADMIN` | геозона любого объекта | `GET /api/admin/sites/:siteId/geofence-versions` — текущая версия + история, latitude/longitude как decimal-строки | нет | нет | — |
 | `attendance.geofence.update` | `ADMIN`, `SUPER_ADMIN` | геозона любого объекта | `POST /api/admin/sites/:siteId/geofence-versions` — создаёт новую immutable `WorkSiteGeofenceVersion`, никогда не переписывает старую; обязательный `Idempotency-Key` | нет | да (`SITE_GEOFENCE_VERSION_CREATED`, без координат) | нет |
 
+### 2.4a Онлайн-клок посещаемости (Check In / Check Out / Switch Site) — **`[2026-08-14]
+реализовано`** (`T7A_1_ATTENDANCE_CLOCK_DESIGN.md` §9.1-9.3/§12.1-12.2 "Online clock core")
+
+Засеяны миграцией `20260814000000_seed_attendance_clock_worker_permissions`, только `WORKER`
+(проверено прямым SQL-запросом на одноразовом PostgreSQL 16 — ровно 4 гранта; `ADMIN`/
+`SUPER_ADMIN`/`FOREMAN` не получают ни одного; `SYSTEM` структурно не может иметь ролей).
+`materializeClockShift` (проекция в `ClockShiftFragment`/`TimesheetDraftSegment`) этим слайсом не
+вызывается — см. §16 п.4 design-документа для полного разбора границы.
+
+| Permission | Держатели | Область | Ограничения | Причина | Аудит | Массовое |
+|---|---|---|---|---|---|---|
+| `attendance.clock.read.own` | `WORKER` | собственная открытая смена | `GET /api/worker/attendance/clock-state` — есть ли открытая смена, где; без raw GPS | нет | нет | — |
+| `attendance.clock.checkin.own` | `WORKER` | собственная смена | `POST /api/worker/attendance/check-in` — `employeeId` только из сессии; GPS `VERIFIED_OUTSIDE` откатывает запрос целиком (`403 OUTSIDE_GEOFENCE`); повторная открытая смена → новый `ClockEvent(NEEDS_REVIEW)`, `DOUBLE_CHECK_IN`, старая смена не трогается | нет | да (`CLOCK_CHECK_IN`/`CLOCK_CHECK_IN_REJECTED_DOUBLE`, без координат) | нет |
+| `attendance.clock.checkout.own` | `WORKER` | собственная смена | `POST /api/worker/attendance/check-out` — никогда не блокируется по GPS/сайту; авторитетные site/workArea/sourceAssignmentId только из `EmployeeOpenShift`, не из тела запроса; хронологическая аномалия — clamp `+1ms`, не откат | нет | да (`CLOCK_CHECK_OUT`/`CLOCK_CHECK_OUT_ORPHAN`, без координат) | нет |
+| `attendance.clock.switch_site.own` | `WORKER` | собственная смена | `POST /api/worker/attendance/switch-site` — один HTTP-запрос/одна транзакция; `VERIFIED_OUTSIDE` нового сайта откатывает ОБЕ половины; нет открытой смены → `409 NO_OPEN_SHIFT_TO_SWITCH` | нет | да (общий с check-in/check-out — обе половины) | нет |
+
 ### 2.5 Назначения
 
 | Permission | Держатели | Область | Ограничения | Причина | Аудит | Массовое |
@@ -317,6 +333,10 @@ reactivate шаблона — нет утверждённого контракт
 | `/api/worker/timesheets/:timesheetId/submit` | POST | `timesheet.submit` |
 | `/api/worker/review-proposals/:proposalId/accept` | POST | `timesheet.accept_proposal` |
 | `/api/worker/review-proposals/:proposalId/reject` | POST | `timesheet.reject_proposal` |
+| `/api/worker/attendance/clock-state` | GET | `attendance.clock.read.own` — **`[2026-08-14] реализовано`** |
+| `/api/worker/attendance/check-in` | POST | `attendance.clock.checkin.own` — **`[2026-08-14] реализовано`** |
+| `/api/worker/attendance/check-out` | POST | `attendance.clock.checkout.own` — **`[2026-08-14] реализовано`** |
+| `/api/worker/attendance/switch-site` | POST | `attendance.clock.switch_site.own` — **`[2026-08-14] реализовано`** |
 
 Эндпоинты домена `absence.*` (§2.3) **не входят в первый вертикальный срез** — permission-контракт
 определён полностью, но route/API contracts для создания/одобрения отсутствий спроектированы позже

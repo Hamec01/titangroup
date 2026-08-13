@@ -1,6 +1,178 @@
 # Titanor Time — Implementation Status
 
-Обновлено: 2026-08-13 Europe/Helsinki (feat: add versioned site geofences)
+Обновлено: 2026-08-14 Europe/Helsinki (feat: add online attendance clock core)
+
+**T7A online clock core — GPS evaluation, clock-state, Check In, Check Out, atomic Switch Site,
+НОВЫЙ этап, продолжение T7A.2 Geofence admin.** Реализует
+`docs/titanor-time/T7A_1_ATTENDANCE_CLOCK_DESIGN.md` §9.1 (Online Check In), §9.2 (Online Check
+Out с хронологической защитой), §9.3 (Switch site), §9.1a (`resolveOverlapTransition`/
+`overlapCandidates`/`effectiveReportedRanges` — переиспользованы из slice B без дублирования),
+§5 (GPS/geofence, Haversine), §5.5 правила 1-3 (online effective time/skew — правила 4-5
+offline-only не в этом слайсе), §8 (canonical lock order), §12.1-12.2 (permissions/endpoints),
+§13 (SYSTEM actor — переиспользован для auto-resolve overlap, не создан заново), §14 (threat
+model). Единственная новая migration — `20260814000000_seed_attendance_clock_worker_permissions`
+(чистый DML, seed 4 permission/RolePermission строк, без изменения схемы) — `prisma/schema.prisma`
+и все ранее применённые migrations, включая `20260812000000_add_attendance_clock_schema_foundation`,
+не тронуты.
+
+**Явно НЕ реализовано этим слайсом (§9.2 шаг k и далее — следующий отдельный слайс):**
+`materializeClockShift` — каждый `ClockShift`, создаваемый `check-out`/`switch-site`, остаётся
+`materializationState=PENDING`, без единого `ClockShiftFragment`/`TimesheetDraftSegment`;
+`CHECKOUT_CHRONOLOGY_ANOMALY.clockShiftFragmentId` остаётся `NULL`. Также не реализовано: worker
+mobile UI, `GET /attendance/context|today|week`, `deviceInstallationId`/`deviceSequence`/
+`DeviceEventReceipt`-FIFO, `POST /attendance/sync`, offline outbox, scheduler (auto-submit),
+exception-review-эндпоинты, admin attendance overview, production deploy. **Нельзя утверждать, что
+§9.2/Attendance Clock целиком, или T7A целиком, завершены** — только online Check In/Check
+Out/Switch Site/clock-state/GPS-evaluation slice.
+
+**A. Permissions** — `attendance.clock.read.own`/`.checkin.own`/`.checkout.own`/
+`.switch_site.own`, засеяны новой additive DML-миграцией, выданы только `WORKER` (проверено прямым
+SQL-запросом `RolePermission`/`Permission`/`Role` на одноразовом PostgreSQL 16 — ровно 4 гранта;
+`ADMIN`/`SUPER_ADMIN`/`FOREMAN` не получают ни одного; `SYSTEM` структурно не может иметь ролей).
+
+**B. `lib/attendance-clock.ts`** (новый модуль, ~800 строк) — route-файлы делают только HTTP/auth/
+CSRF/idempotency/validation-mapping, вся бизнес-логика здесь. `*Core`-функции (`checkInCore`,
+`checkOutCore`) принимают `Prisma.TransactionClient` и никогда не используют global `prisma`
+внутри транзакции — только верхнеуровневые `perform*`-обёртки открывают
+`prisma.$transaction(...)`, что позволяет `performSwitchSite` разделить ОДНУ транзакцию между
+обеими половинами. Чистые helpers:
+- `evaluateGpsReading(reading, geofence)` — Haversine без PostGIS, `MAX_ACCEPTABLE_ACCURACY_METERS
+  = 75`, `inside ⟺ distance <= radiusMeters + accuracyMeters`; координаты отсутствуют →
+  `NOT_VERIFIED` с указанной причиной, `ClockEventLocation` не создаётся; `accuracy > 75` →
+  `NOT_VERIFIED`/`LOW_ACCURACY`, координаты сохраняются; показание без настроенной геозоны →
+  `NOT_VERIFIED`, `geofenceVersionId=NULL`, `gpsUnavailableReason=NULL`; геозона всегда
+  резолвится заново сервером — клиент её вообще не присылает.
+- `computeOnlineEffectiveTime(clientCapturedAt, serverReceivedAt)` — §5.5 правила 1-3: будущее
+  > 2 минуты → `serverReceivedAt` + `EXCESSIVE_CLOCK_SKEW`; `|skew| <= 5 минут` →
+  `clientCapturedAt`; остальной online skew > 5 минут → `serverReceivedAt` + `EXCESSIVE_CLOCK_SKEW`.
+  `clockSkewMs` — весь расчёт через `BigInt` от старта (не `Number`-вычитание с последующим
+  приведением) — разница двух представимых `Date` может выйти за `Number.MAX_SAFE_INTEGER` на
+  экстремальных значениях (устройство, сброшенное к эпохе 1970 года).
+- Payload hashing — SHA-256 канонического business payload (сортированные ключи, координаты
+  участвуют в хэше — изменённые координаты под тем же `clientEventId` детектируются как
+  changed-replay); `employeeId` — только из сессии; координаты никогда не попадают в
+  `ClockEventIdConflict.sanitizedConflictingPayload`, `AuditEvent` или логи.
+
+**C. Check In/Check Out/Switch Site** — §9.1/§9.2/§9.3 canonical order (`Employee FOR UPDATE` →
+`EmployeeOpenShift` [implicit lock через raw `FOR UPDATE`/PK-based mutation] → …), реализованы
+дословно, включая: `VERIFIED_OUTSIDE` на Check In → **полный** rollback, `403 OUTSIDE_GEOFENCE`;
+double check-in → новый `ClockEvent(NEEDS_REVIEW)` + `DOUBLE_CHECK_IN`, старая `EmployeeOpenShift`
+не трогается; Check Out никогда не блокируется GPS/сайтом; authoritative site/workArea/
+sourceAssignmentId только из `EmployeeOpenShift`, никогда из тела запроса; orphan checkout →
+`NEEDS_REVIEW` + `CHECKOUT_WITHOUT_OPEN_SHIFT`; хронологическая аномалия → `ClockShift.
+recordedEndAt = openedAt + 1ms` (design: `+1 microsecond` — адаптировано к точности JS `Date`/
+Prisma `DateTime`, свойство «никогда не пересекает границу периода» сохраняется тождественно, т.к.
+период неизмеримо длиннее и 1мс, и 1мкс; exact-microsecond boundary-тесты §17 #66/#67 относятся к
+материализации, не к этому слайсу), `endAtProvisional=true`, `clockShiftFragmentId=NULL`;
+overlap-детекция переиспользует `overlapCandidates`/`overlapExists`/`resolveOverlapTransition`
+из `lib/attendance-reported-projection.ts` (slice B) **без единой переписанной строки формулы** —
+`ClockShift` в этом слайсе вставляется непосредственно ПЕРЕД вызовом `overlapCandidates` (вместо
+после, как в прозе design-документа) специально для того, чтобы существующий helper (который уже
+поддерживает свежевставленную PENDING-смену с нулём фрагментов через свой стандартный "fragments
+пусто → raw fallback" путь) можно было использовать без единой модификации — поведенчески
+идентично; Switch Site — Check Out старого сайта + Check In нового в ОДНОЙ транзакции, общий
+`groupId`.
+
+**D. Атомарность Switch Site — найден и исправлен реальный баг до написания тестов.** Первая
+версия `performSwitchSite` возвращала обычное значение из `prisma.$transaction`-колбэка для
+`SITE_NOT_FOUND`/`WORK_AREA_INVALID`/`CONFLICT` половины Check In, ПОСЛЕ того как половина Check
+Out уже выполнила мутации (удалила `EmployeeOpenShift`, вставила `ClockShift`+`ClockEvent`) —
+обычный `return` из транзакционного колбэка **коммитит** уже выполненные мутации, что означало бы:
+старый сайт закрыт, новый — нет, работник «нигде не отмечен», ровно то состояние, которое §9.3
+явно запрещает. Исправлено: любой неуспешный исход половины Check In теперь **выбрасывает**
+специальный signal-класс, откатывающий ВСЮ транзакцию целиком (включая уже применённую половину
+Check Out); для `CONFLICT`-исхода судебная запись (`ClockEventIdConflict`) пересоздаётся отдельной,
+изолированной транзакцией уже ПОСЛЕ отката — доказательство сохраняется, даже когда сама попытка
+switch отклонена и не оставляет следа в бизнес-данных.
+
+**E. Online replay/conflict** — `ClockEvent.id` (=`clientEventId`) — обязательный natural
+idempotency key, независимо от опционального HTTP `Idempotency-Key`. Точный повтор (тот же id +
+тот же canonical payload hash) → исходный ответ реконструируется **детерминированно** из
+durable-строк (сам `ClockEvent` + множество типов `AttendanceException`, созданных для него при
+вставке — оба неизменны после создания), без отдельного response-снапшота: тот же код строит
+ответ и для свежесозданного события, и для replay. Тот же id + другой payload →
+`ClockEventIdConflict(CLIENT_EVENT_ID_REUSED)`, исходный `ClockEvent` не тронут, `409`. Неожиданный
+`P2002` unique-конфликт (редкая кросс-employee гонка на глобальном PK, §8.3 Инвариант 3
+не распространяется на `ClockEvent.id`) перехватывается и разрешается повторным чтением, никогда
+не становится необработанным `500`.
+
+Проверено на новом одноразовом PostgreSQL 16, **153/153 PASS, 0 FAIL** (DB-level, прямые вызовы
+`lib/attendance-clock.ts` + `pg_stat_activity`-подтверждённая реальная конкуренция) + отдельный
+живой HTTP-прогон (временный `next dev` на той же disposable БД):
+- **Permissions**: 4 permission только `WORKER`; `ADMIN`/`SUPER_ADMIN`/`FOREMAN`/`SYSTEM`
+  (ноль ролей) — ни одного; живые `401 NOT_AUTHENTICATED`/`403 FORBIDDEN`/`403
+  NO_EMPLOYEE_PROFILE`/`403 CSRF_REJECTED` через реальные HTTP-запросы.
+- **GPS**: Haversine контрольная пара (антиподы на экваторе, `distance = R·π`, независимо
+  вычислимое ожидаемое значение) и same-point; inside/outside; ровно на границе
+  `radius+accuracy` (`<=`) и чуть за её пределами; `accuracy > 75` →
+  `NOT_VERIFIED`/`LOW_ACCURACY`, координаты сохраняются, `geofenceVersionId=NULL`;
+  `PERMISSION_DENIED`/`TIMEOUT`/`POSITION_UNAVAILABLE`; отсутствующая геозона →
+  `NOT_VERIFIED`, `gpsUnavailableReason=NULL`; Check In outside → полный откат (ни `ClockEvent`,
+  ни `EmployeeOpenShift`, ни `AttendanceException` не создаются); Check Out outside — всё равно
+  закрывает смену; precision/bounds/NaN/Infinity validation.
+- **Time**: online skew `<= 5 мин` (включая ровно 5 мин на границе); прошлое `> 5 мин`; будущее
+  `<= 2 мин` (включая ровно 2 мин); будущее `> 2 мин` (включая случай `< 5 мин`, всё равно
+  `EXCESSIVE_CLOCK_SKEW`); bigint-safe экстремальный timestamp (эпоха 1970 vs текущее время, без
+  переполнения `Number.MAX_SAFE_INTEGER`); хронологический clamp ровно `+1мс`.
+- **Check In**: normal accepted; source assignment resolved; stale assignment допущен +
+  `STALE_ASSIGNMENT`; без геозоны допущен + `GPS_NOT_VERIFIED`; double check-in создаёt
+  event/exception, не заменяя открытую смену; точный replay без дубликата; изменённый replay →
+  конфликт с записанным `ClockEventIdConflict` без координат.
+- **Check Out**: normal close; orphan checkout; site mismatch закрывает по authoritative site;
+  outside geofence/no GPS всё равно закрывают; хронологическая аномалия (`endAtProvisional=true`,
+  `+1мс` clamp, `CHECK(recordedEndAt > recordedStartAt)` гарантированно удовлетворён); excessive
+  duration (`EXCESSIVE_SHIFT_DURATION` относительно `CompanyAttendancePolicy.
+  maxShiftDurationHours`); overlap с фиктивно состаренной (`createdAt` −100 дней) сырой сменой —
+  подтверждает отсутствие temporal pre-filter в переиспользованном `overlapCandidates`;
+  `ClockShift` остаётся `PENDING`, ноль `ClockShiftFragment`.
+- **Switch**: success (общий `groupId`, старая смена закрыта + новая открыта атомарно); no open
+  shift → `409`; new site outside geofence → полный откат; forced failure between halves
+  (несуществующий `newSiteId` после того, как Check Out половина уже писала) → полный откат,
+  старая смена остаётся открытой (прямая проверка исправленного в п. D бага); exact replay без
+  повторного создания; конфликтующая половина → `409`, состояние работника не тронуто.
+- **Real concurrency** (`pg_stat_activity`, `>= 2` одновременно активных backend PID
+  подтверждено): два одновременных Check In — ровно один `ACCEPTED`, второй
+  `NEEDS_REVIEW`/`DOUBLE_CHECK_IN`; два одновременных Check Out — ровно один закрывает со
+  `ClockShift`, второй становится orphan; Check Out vs Switch на одном работнике — без падения,
+  согласованное конечное состояние; два Switch на одном работнике — без падения, согласованное
+  состояние; replay race с одинаковым `clientEventId` — ровно одна строка `ClockEvent`, без
+  дублей; противоположная ориентация конкурентного `resolveOverlapTransition(A,B)`/`(B,A)` —
+  ровно одна каноническая `OPEN`-строка.
+- **DB invariants**: прямой `UPDATE`/`DELETE` `ClockEvent` отклонён триггером (оба);
+  `ClockEventLocation` структурно привязана PK к своему событию; чужой-site `geofenceVersionId`
+  отклонён composite FK (проверено через `INSERT`, не `UPDATE` — `ClockEvent` полностью immutable,
+  `UPDATE` отклоняется триггером раньше, чем FK успевает сработать); чужой-site `WorkArea`
+  отклонён composite FK; `ClockShift.checkInEventId`/`checkOutEventId` ссылаются на реальные
+  события правильного типа/работника; ни `AuditEvent`, ни `ClockEventIdConflict` не содержат
+  координат.
+- **HTTP-level**: CSRF (`403 CSRF_REJECTED` без заголовка); malformed JSON/UUID → `400
+  VALIDATION_ERROR`; malformed и несуществующий `siteId`/`assumedSiteId` → идентичный `404
+  SITE_NOT_FOUND` (no oracle); `workAreaId`, не принадлежащий сайту → `400`; опциональный
+  `Idempotency-Key` — невалидный формат → `400`, точный повтор (тот же key+body) → тот же
+  cached-ответ, тот же key с другим телом → `409 IDEMPOTENCY_KEY_REUSED`; natural `clientEventId`
+  replay работает НЕЗАВИСИМО от `Idempotency-Key`; rate limit (`20/60s` per actor+route) —
+  реально протестирован до срабатывания `429 RATE_LIMITED`; `X-Request-Id` на каждом ответе.
+- **Regression**: geofence admin (`GET /api/admin/sites/:siteId/geofence-versions`) — без
+  изменений; worker `PATCH /api/worker/timesheets/:timesheetId/days/:date` — без изменений,
+  включая резолюцию `sourceAssignmentId`; `POST /api/admin/corrections` (создание запроса на
+  корректировку) — без изменений; `POST /api/admin/periods` — без изменений; worker/admin
+  auth+session на всём протяжении HTTP-прогона — без изменений.
+
+Технические проверки (все зелёные): `git diff --check`, `prisma validate` (схема не менялась),
+`npx tsc --noEmit`, `npm run build` (все четыре новых роута подтверждены в билде), `docker compose
+-f compose.titanor-time.yaml build app`, повторный `prisma migrate deploy` на новом disposable
+Postgres 16 → `No pending migrations to apply` (50 миграций, ровно одна новая — чистый DML
+permission-seed). Production (`titanor-time-app-1`/`titanor-time-db-1`) — только read-only
+`docker inspect`, не тронут. Disposable Postgres 16 контейнер, тестовый docker-образ, dev-сервер и
+scratch test-скрипты удалены после проверки.
+
+Check In/Check Out/Switch Site online-контур закрыт; **`materializeClockShift` (§9.2 шаг k),
+`ClockShiftFragment`/`TimesheetDraftSegment`-проекция, worker mobile UI, `GET /attendance/
+context|today|week`, offline outbox/`deviceSequence`/`DeviceEventReceipt`-FIFO, `POST /
+attendance/sync`, scheduler, exception-review-эндпоинты, admin attendance overview, production —
+не реализованы и не затронуты этим слайсом.** Attendance Clock/T7A в целом — не завершён.
+
+---
 
 **T7A.2 — Geofence admin, НОВЫЙ этап, продолжение locking/provenance foundation (slice A+B).**
 Реализует `docs/titanor-time/T7A_1_ATTENDANCE_CLOCK_DESIGN.md` §2.1 п.1 (`WorkSiteGeofenceVersion`),

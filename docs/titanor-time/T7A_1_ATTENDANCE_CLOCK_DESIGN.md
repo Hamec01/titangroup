@@ -3858,21 +3858,27 @@ read-only проверка) — несовпадение → `409 ACTION_NOT_APP
 **`[2026-08-13] T7A.2 — реализовано.`** `attendance.geofence.read`/`.update` (первые две строки
 таблицы ниже) — семена в `prisma/migrations/20260813000000_seed_attendance_geofence_permissions`,
 только `ADMIN`/`SUPER_ADMIN` (проверено прямым SQL-запросом `RolePermission`/`Permission`/`Role` на
-одноразовом PostgreSQL 16 — ровно 4 строки, `FOREMAN`/`WORKER` отсутствуют). Все остальные
-permission-строки в этой таблице (`attendance.clock.*`, `attendance.exception.*`,
-`attendance.gps.read.raw`, `attendance.conflict.read`, `attendance.policy.*`,
-`timesheet.draft.edit.exception`) остаются нереализованными — они принадлежат Check In/Check
-Out/exception review/policy-слайсам, не этому.
+одноразовом PostgreSQL 16 — ровно 4 строки, `FOREMAN`/`WORKER` отсутствуют).
+
+**`[2026-08-14] T7A online clock core — реализовано.`** `attendance.clock.read.own`/
+`.checkin.own`/`.checkout.own`/`.switch_site.own` — семена в `prisma/migrations/
+20260814000000_seed_attendance_clock_worker_permissions`, только `WORKER` (проверено прямым
+SQL-запросом на одноразовом PostgreSQL 16 — ровно 4 строки, `ADMIN`/`SUPER_ADMIN`/`FOREMAN`
+отсутствуют; `SYSTEM` структурно не может получить ни одной роли). `attendance.clock.sync.own`
+остаётся нереализованным (offline batch — отдельный будущий слайс). Все остальные
+permission-строки в этой таблице (`attendance.exception.*`, `attendance.gps.read.raw`,
+`attendance.conflict.read`, `attendance.policy.*`, `timesheet.draft.edit.exception`) остаются
+нереализованными — они принадлежат exception review/policy-слайсам, не этому.
 
 | Permission | Держатели | Область |
 |---|---|---|
 | `attendance.geofence.read` | `ADMIN`, `SUPER_ADMIN` | |
 | `attendance.geofence.update` | `ADMIN`, `SUPER_ADMIN` | создаёт новую `WorkSiteGeofenceVersion` |
-| `attendance.clock.read.own` | `WORKER` | bootstrap/context, clock-state, today/week |
-| `attendance.clock.checkin.own` | `WORKER` | |
-| `attendance.clock.checkout.own` | `WORKER` | |
-| `attendance.clock.switch_site.own` | `WORKER` | |
-| `attendance.clock.sync.own` | `WORKER` | batch offline endpoint |
+| `attendance.clock.read.own` | `WORKER` | **`[2026-08-14] реализовано`** — только `GET /api/worker/attendance/clock-state`; bootstrap/context, today/week — не в этом слайсе |
+| `attendance.clock.checkin.own` | `WORKER` | **`[2026-08-14] реализовано`** |
+| `attendance.clock.checkout.own` | `WORKER` | **`[2026-08-14] реализовано`** |
+| `attendance.clock.switch_site.own` | `WORKER` | **`[2026-08-14] реализовано`** |
+| `attendance.clock.sync.own` | `WORKER` | batch offline endpoint — не реализовано |
 | `attendance.exception.read.assigned` | `FOREMAN` | только свои объекты, без raw координат |
 | `attendance.exception.read.all` | `ADMIN`, `SUPER_ADMIN` | |
 | `attendance.exception.resolve.assigned` | `FOREMAN` | только `DISMISS`/`ACKNOWLEDGE_AS_VALID`/`PAIR_ORPHAN_EVENTS` своих объектов — см. v1-рекомендацию §12.4 |
@@ -3886,15 +3892,21 @@ Out/exception review/policy-слайсам, не этому.
 
 ```text
 GET  /api/worker/attendance/context        -- bootstrap: назначения+геозоны для offline-кеша,
-                                               upsert WorkerDeviceInstallation
-GET  /api/worker/attendance/clock-state    -- есть ли открытая смена, где
-POST /api/worker/attendance/check-in
-POST /api/worker/attendance/check-out
-POST /api/worker/attendance/switch-site
-POST /api/worker/attendance/sync           -- offline batch, §7
-GET  /api/worker/attendance/today
-GET  /api/worker/attendance/week
+                                               upsert WorkerDeviceInstallation -- не реализовано
+GET  /api/worker/attendance/clock-state    -- [2026-08-14] реализовано, lib/attendance-clock.ts
+POST /api/worker/attendance/check-in       -- [2026-08-14] реализовано, lib/attendance-clock.ts
+POST /api/worker/attendance/check-out      -- [2026-08-14] реализовано, lib/attendance-clock.ts
+POST /api/worker/attendance/switch-site    -- [2026-08-14] реализовано, lib/attendance-clock.ts
+POST /api/worker/attendance/sync           -- offline batch, §7 -- не реализовано
+GET  /api/worker/attendance/today          -- не реализовано
+GET  /api/worker/attendance/week           -- не реализовано
 ```
+
+**`[2026-08-14]`** Реализованные три `POST` — только `channel=ONLINE`, `deviceInstallationId=NULL`.
+`materializeClockShift` (§9.2 шаг k) **не вызывается** — каждый закрытый `ClockShift` остаётся
+`materializationState=PENDING`; `ClockShiftFragment`/`TimesheetDraftSegment`-проекция, worker mobile
+UI, `deviceSequence`/`DeviceEventReceipt`-FIFO, `POST /sync`, offline outbox, scheduler,
+exception-review-эндпоинты — этим слайсом не затронуты. Полный разбор — §16 п.4.
 
 ### 12.3 Endpoints — Foreman / Admin
 
@@ -4212,7 +4224,7 @@ Out, worker mobile UI, offline outbox/sync, materializer, scheduler и exception
 | 1 | Schema foundation | **`[3.2.5]`** (issue 6) точный объём, синхронизирован с финальным блоком — стале «12 таблиц/7 триггеров/3 composite FK» исправлено: **13** новых таблиц (§2.1); **9** additive-колонок на 7 pre-T7A моделях (§2.2) **+ 6** additive-колонок на собственных таблицах T7A, накопленных 3.1→3.2.4 (`ClockShift.endAtProvisional`, `WorkerDeviceInstallation.lastProcessedSequence`, `CompanyAttendancePolicy.maxShiftDurationHours`, `AttendanceException.relatedClockShiftId`, `AttendanceException.overlapEndedAt`, `ClockShiftFragment.reportedProjectionState`) — 3.2.5 не добавляет колонок; **`[2026-08-12 owner correction]`** **16** composite FK всего, не 15 (см. «Финал — подтверждение» ниже для полного разбора исправления) — **12** на новых таблицах (`ClockEvent`×3, `ClockShiftFragment`×4, `ClockShiftAdjustment`×2, `ClockEventIdConflict`×1, `DeviceEventReceipt`×2; **+4** additive на pre-T7A моделях: `WorkSite`, `TimesheetDraftSegment`, `WorkSegment`, `CorrectionDraftSegment`); **14** отдельных `CREATE TRIGGER`-биндингов (§4.1) — стабильно с revision 3.1, ни один НЕ добавлялся впоследствии; 3.2/3.2.1/3.2.2/3.2.4/3.2.5 расширяли **тела** ДВУХ уже существующих функций (`fn_clock_shift_immutable()`, `fn_clock_shift_fragment_immutable()`), не создавали новых триггеров — расширение функции не считается новым trigger'ом (issue 6); singleton-seed `CompanyAttendancePolicy`, seed `SYSTEM`-пользователя. Тест: миграция на одноразовом PostgreSQL 16, статический+runtime аудит по паттерну `05_RAW_SQL_REGISTER.md`, включая позитивный/негативный тест `fn_clock_shift_fragment_coverage_check` и **`[3.2.5]`** прямой SQL-тест prerequisite для `reportedProjectionState` (issue 4, тесты #126–128). |
 | 2 | Locking-доработки существующего кода (§15) | Без новой схемы. Тест: поведение для единственного писателя не изменилось (регрессия существующих тестов submit/patch/return). |
 | 3 | Geofence admin — **`[2026-08-13] реализовано (T7A.2).`** | `GET/POST /api/admin/sites/:siteId/geofence-versions` (`lib/geofences.ts`), секция `GeofenceSection` на `/admin/sites/[siteId]`. `attendance.geofence.read`/`.update` — новая additive DML-миграция `20260813000000_seed_attendance_geofence_permissions`, только `ADMIN`/`SUPER_ADMIN`. Проверено на одноразовом PostgreSQL 16, включая реальную two-connection concurrency (одна и та же геозона — последовательные versionNumber; разные объекты не блокируют друг друга) и immutable-триггер (`trg_geofence_version_immutable`, уже существовал с revision 3, только теперь реально упражняется приложением). Check In/Check Out, Haversine/GPS-оценка (§5), worker UI, offline sync, materializer/scheduler, exception review — этим слайсом НЕ реализованы. |
-| 4 | Online clock backend | `check-in`/`check-out`/`switch-site`/`clock-state`, §9.1-9.3. Тест: inside/outside/no-geofence, double check-in, checkout-without-open, хронологическая аномалия (§9.2), switch-site атомарность. |
+| 4 | Online clock backend — **`[2026-08-14] реализовано.`** | `GET clock-state`, `POST check-in`/`check-out`/`switch-site` (`lib/attendance-clock.ts`, §9.1-9.3), только `channel=ONLINE`. `attendance.clock.{read,checkin,checkout,switch_site}.own` — новая additive DML-миграция `20260814000000_seed_attendance_clock_worker_permissions`, только `WORKER`. Проверено на одноразовом PostgreSQL 16: 153/153 DB-level (GPS Haversine/boundary/accuracy/no-geofence, online skew §5.5 boundary+bigint-safe, check-in/out/switch включая полный rollback на `OUTSIDE_GEOFENCE`, реальная two/N-connection конкуренция через `pg_stat_activity`, DB invariants) + полный HTTP-прогон (CSRF, optional `Idempotency-Key`, natural `clientEventId`-replay/conflict, rate limit, 401/403/404/409/429) + regression (geofence admin, worker `PATCH`, `correction.request`). **`materializeClockShift` (§9.2 шаг k) НЕ вызывается — явно отложено на следующий слайс**: каждый `ClockShift`, созданный этим слайсом, остаётся `materializationState=PENDING`, без единого `ClockShiftFragment`; `CHECKOUT_CHRONOLOGY_ANOMALY.clockShiftFragmentId` остаётся `NULL`. `+1 microsecond`-clamp (§9.2 шаг d) реализован как `+1 millisecond` — JS `Date`/Prisma `DateTime`-стек не может выразить точность `timestamptz(6)` напрямую; свойство «clamp никогда не пересекает границу периода» сохраняется тождественно (период неизмеримо длиннее 1мс), а сами exact-microsecond boundary-тесты (§17 #66/#67) относятся к материализации, не к этому слайсу. Worker mobile UI, `GET context/today/week`, `deviceInstallationId`/`deviceSequence`/`DeviceEventReceipt`-FIFO, `POST /sync`, offline outbox, scheduler, exception-review-эндпоинты, admin attendance overview — этим слайсом НЕ реализованы. |
 | 5 | Worker mobile UI | `/worker` mobile-first домашняя страница. Тест: Playwright — один тап Check In, таймер, Check Out, меню. |
 | 6 | Materialization | `materializeClockShift` (§9.4), включая `TimesheetDraftPlannedShift`-prerequisite и period-boundary split. Тест: идемпотентность повторного прохода, split на границе периода (два `TimesheetDraft` атомарно), coverage-триггер. |
 | 7 | Offline outbox/sync | `POST /api/worker/attendance/sync`, IndexedDB (§6), `deviceSequence`. Тест: offline check-in→restart→offline check-out→sync, потерянный ответ+повтор, две вкладки, два устройства, `CLIENT_EVENT_ID_REUSED`/`DEVICE_SEQUENCE_REUSED`. |
