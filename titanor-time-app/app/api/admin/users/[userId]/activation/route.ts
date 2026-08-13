@@ -98,6 +98,8 @@ export async function POST(request: NextRequest, { params }: RouteParams): Promi
           409,
           errorBody({ code: 'USER_USES_WORKER_ACTIVATION', message: 'This user is linked to an Employee and uses the worker activation flow instead.' }, requestId)
         );
+      case 'SYSTEM_USER_NOT_ELIGIBLE':
+        return respond(409, errorBody({ code: 'SYSTEM_USER_NOT_ELIGIBLE', message: 'This user is a reserved system actor and cannot be activated.' }, requestId));
       case 'ACCOUNT_NOT_ELIGIBLE':
         return respond(409, errorBody({ code: 'ACCOUNT_NOT_ELIGIBLE', message: 'This account is not eligible for activation.' }, requestId));
     }

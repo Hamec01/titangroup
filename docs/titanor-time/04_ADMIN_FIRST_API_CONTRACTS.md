@@ -82,6 +82,11 @@ relevant query + canonical body)`.
 - Response `200`: `{ "user": { "id", "username", "roles": ["WORKER"], "locale" } }`
 - Ошибки: `401 INVALID_CREDENTIALS`, `403 ACCOUNT_DEACTIVATED`, `403 ACCOUNT_PENDING_ACTIVATION`,
   `429 RATE_LIMITED`
+- `T7A §13`: reserved SYSTEM actor (`userKind=SYSTEM`) всегда отклоняется — тем же `401
+  INVALID_CREDENTIALS`, не отдельным кодом (не должен подтверждать существование
+  `system.scheduler`), с той же dummy-verify задержкой, что и неизвестный identifier. Проверка не
+  зависит от `status` — уже сегодня `DEACTIVATED` отклонил бы вход, но это не структурная
+  гарантия, отдельная от неё.
 - Rate limit: 5/15мин на `identifier` + 50/15мин на IP
 - Audit: `LOGIN_SUCCEEDED` / `LOGIN_FAILED`
 
@@ -782,6 +787,8 @@ Backend-срез (`02_...`, §2.12): создание/пополнение то�
   `SUPER_ADMIN` (`UserRole.validFrom <= now AND (validTo IS NULL OR validTo > now)`); `WORKER`-only
   аккаунты не включаются; дуал-роль `FOREMAN`+`WORKER` включается. `roles` в каждом элементе — полный
   набор текущих активных ролей пользователя, не только совпавшая с фильтром.
+- `T7A §13/§15 п.4`: `WHERE userKind='HUMAN'` — reserved SYSTEM actor (`username=system.scheduler`)
+  никогда не появляется в этом списке, явным фильтром, а не только за счёт отсутствия ролей.
 - Response `200`:
 ```json
 {
@@ -850,9 +857,11 @@ Backend-срез (`02_...`, §2.12): создание/пополнение то�
 - `userId` — строгий UUID-формат; malformed → `404 USER_NOT_FOUND` (тот же паттерн, что
   `POST /api/admin/workers/:employeeId/activation`)
 - Eligibility (проверяется под `SELECT ... FOR UPDATE` на `User`, порядок проверок фиксирован —
-  `employeeId` раньше `status`, чтобы worker-пользователь всегда получал
-  `USER_USES_WORKER_ACTIVATION`, а не `USER_ALREADY_ACTIVE`): `User` существует; `employeeId IS
-  NULL`; `status=PENDING_ACTIVATION`; `passwordHash IS NULL`; текущая активная роль `FOREMAN`
+  `userKind` раньше `employeeId` раньше `status`, T7A §13/§15: reserved SYSTEM actor
+  (`userKind=SYSTEM`) всегда получает `SYSTEM_USER_NOT_ELIGIBLE`, раньше любой другой проверки,
+  затем worker-пользователь всегда получает `USER_USES_WORKER_ACTIVATION`, а не
+  `USER_ALREADY_ACTIVE`): `User` существует; `userKind=HUMAN`; `employeeId IS NULL`;
+  `status=PENDING_ACTIVATION`; `passwordHash IS NULL`; текущая активная роль `FOREMAN`
   (`validFrom <= now AND (validTo IS NULL OR validTo > now)`)
 - Reissue: любой оставшийся `PENDING` код того же `userId` — просроченный (`expiresAt <= now`)
   помечается `EXPIRED`, остальные — `REVOKED`, в той же транзакции, что создание нового кода
@@ -863,8 +872,9 @@ Backend-срез (`02_...`, §2.12): создание/пополнение то�
   Raw-код показывается только в этом успешном response — не хранится (только HMAC в
   `UserActivationToken.tokenHash`), не логируется, не попадает в аудит
 - Ошибки: `404 USER_NOT_FOUND`, `409 USER_ALREADY_ACTIVE`, `409 USER_USES_WORKER_ACTIVATION`
-  (`employeeId` не `NULL`), `409 ACCOUNT_NOT_ELIGIBLE` (нет текущей роли `FOREMAN`,
-  `status`≠`PENDING_ACTIVATION` или `passwordHash` уже установлен)
+  (`employeeId` не `NULL`), `409 SYSTEM_USER_NOT_ELIGIBLE` (T7A §13 — `userId` резолвит
+  reserved SYSTEM actor, `userKind=SYSTEM`), `409 ACCOUNT_NOT_ELIGIBLE` (нет текущей роли
+  `FOREMAN`, `status`≠`PENDING_ACTIVATION` или `passwordHash` уже установлен)
 - Idempotency: обязателен (`X-Requested-With: titanor-time` + `Idempotency-Key`)
 - Audit: `USER_ACTIVATION_TOKEN_ISSUED`, `entityType USER`, `entityId = userId`, `afterValue` —
   только `{ expiresAt }`, без кода/`tokenHash`
@@ -891,9 +901,11 @@ Backend-срез (`02_...`, §2.12): создание/пополнение то�
   (через дешёвый unlocked preflight lookup `UserActivationToken.userId` по `tokenHash`, ничего из
   preflight не используется для решения), затем `UserActivationToken FOR UPDATE`; token
   status/expiry и eligibility User перепроверяются под обоими локами
-- Redeem eligibility: `employeeId IS NULL`, `status=PENDING_ACTIVATION`, `passwordHash IS NULL`,
-  текущая активная роль `FOREMAN` — иначе `409 ACCOUNT_NOT_ELIGIBLE` (включая
-  `OFFBOARDING`/`DEACTIVATED` или отсутствие роли)
+- Redeem eligibility: `userKind=HUMAN` (T7A §13 — checked before every other field, defense-in-
+  depth even though a token pointing at a SYSTEM actor should never exist per the issuance-time
+  guard above), `employeeId IS NULL`, `status=PENDING_ACTIVATION`, `passwordHash IS NULL`,
+  текущая активная роль `FOREMAN` — иначе `409 SYSTEM_USER_NOT_ELIGIBLE` or `409
+  ACCOUNT_NOT_ELIGIBLE` (включая `OFFBOARDING`/`DEACTIVATED` или отсутствие роли)
 - Атомарно: Argon2id `passwordHash`, `User.status → ACTIVE`, существующая активная `UserRole`
   `FOREMAN` не создаётся повторно, `UserActivationToken.status → USED` + `usedAt`, новая
   `UserSession`, `AuditEvent(ACCOUNT_ACTIVATED)` с `entityType USER`
@@ -905,7 +917,8 @@ Backend-срез (`02_...`, §2.12): создание/пополнение то�
   те же флаги/TTL, что `POST /api/auth/set-initial-password` (`httpOnly`, `secure`,
   `sameSite=lax`, `path=/`, `maxAge` = `SESSION_DURATION_MS`)
 - Ошибки: `400 VALIDATION_ERROR`, `403 CSRF_REJECTED`, `404 TOKEN_INVALID`,
-  `409 ACCOUNT_NOT_ELIGIBLE`, `410 TOKEN_EXPIRED`, `410 TOKEN_USED`, `429 RATE_LIMITED`
+  `409 SYSTEM_USER_NOT_ELIGIBLE`, `409 ACCOUNT_NOT_ELIGIBLE`, `410 TOKEN_EXPIRED`,
+  `410 TOKEN_USED`, `429 RATE_LIMITED`
 
 ## 16. Назначение прораба (`ForemanAssignment`) — selector без UUID, реализовано
 

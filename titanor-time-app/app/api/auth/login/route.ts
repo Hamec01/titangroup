@@ -144,6 +144,21 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     );
   }
 
+  // T7A §13 — the reserved SYSTEM actor must never be able to log in, independent of `status`.
+  // Today `status=DEACTIVATED` already blocks it below, but that's incidental to status, not a
+  // structural guarantee — this check doesn't rely on it. Same "don't reveal which accounts
+  // exist" handling as the `!user` branch above: dummy verify (timing) + generic
+  // INVALID_CREDENTIALS, never a dedicated code that would confirm system.scheduler exists.
+  if (user.userKind !== 'HUMAN') {
+    await argon2.verify(DUMMY_PASSWORD_HASH, password as string).catch(() => false);
+    await recordLoginFailed(requestId);
+    return jsonError(
+      401,
+      { code: 'INVALID_CREDENTIALS', message: 'Invalid username/email or password.' },
+      requestId
+    );
+  }
+
   if (user.status === 'PENDING_ACTIVATION') {
     return jsonError(
       403,

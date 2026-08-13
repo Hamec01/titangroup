@@ -257,7 +257,9 @@ export async function returnTimesheetOverride(timesheetId: string, actorUserId: 
       await reinitializeDraftFromVersion(tx, draftId, timesheet.employeeId, fresh.currentVersionId);
     }
 
-    await tx.timesheet.update({ where: { id: timesheetId }, data: { status: 'RETURNED' } });
+    // §15 п.3 — same requirement as scope.return: a human return (admin override included) must
+    // set lastReturnedReason=HUMAN_REVIEW_RETURN, never leave it NULL.
+    await tx.timesheet.update({ where: { id: timesheetId }, data: { status: 'RETURNED', lastReturnedReason: 'HUMAN_REVIEW_RETURN' } });
 
     await createAuditEvent(tx, {
       actorUserId,

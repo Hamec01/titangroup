@@ -29,6 +29,7 @@ const MIN_PASSWORD_LENGTH = 16;
 
 class UsageError extends Error {}
 class NotFoundError extends Error {}
+class SystemUserNotEligibleError extends Error {}
 class DryRunCompleted extends Error {
   constructor(public readonly summary: string) {
     super('dry-run');
@@ -130,6 +131,12 @@ export async function resetPassword(rawInput: ResetPasswordInput): Promise<Reset
       throw new NotFoundError(`No user found with username "${username}".`);
     }
 
+    // T7A §13/§15 — the reserved SYSTEM actor (userKind=SYSTEM, passwordHash always NULL by
+    // invariant) must never have a password written by this tool, dry-run or not.
+    if (user.userKind !== 'HUMAN') {
+      throw new SystemUserNotEligibleError(`SYSTEM_USER_NOT_ELIGIBLE: username="${username}" is a reserved system actor, not a resettable account.`);
+    }
+
     if (rawInput.dryRun) {
       const activeSessionCount = await tx.userSession.count({
         where: { userId: user.id, revokedAt: null }
@@ -175,6 +182,10 @@ if (require.main === module) {
       if (error instanceof NotFoundError) {
         console.error(`No changes made: ${error.message}`);
         process.exit(3);
+      }
+      if (error instanceof SystemUserNotEligibleError) {
+        console.error(`No changes made: ${error.message}`);
+        process.exit(4);
       }
       if (error instanceof UsageError) {
         console.error(`Usage error: ${error.message}`);

@@ -399,7 +399,10 @@ export async function returnReviewScope(
     });
 
     if (fresh.status === 'SUBMITTED') {
-      await tx.timesheet.update({ where: { id: scope.timesheetId }, data: { status: 'RETURNED' } });
+      // §15 п.3 — a human return must mark lastReturnedReason=HUMAN_REVIEW_RETURN, or the field
+      // stays NULL forever for human returns and §9.6's auto-submit candidate query can no longer
+      // tell a human return apart from a system late-sync reopen.
+      await tx.timesheet.update({ where: { id: scope.timesheetId }, data: { status: 'RETURNED', lastReturnedReason: 'HUMAN_REVIEW_RETURN' } });
     }
 
     await createAuditEvent(tx, {
@@ -459,6 +462,7 @@ export async function reinitializeDraftFromVersion(tx: Prisma.TransactionClient,
           sourceAssignmentId: true,
           startAt: true,
           endAt: true,
+          originClockShiftFragmentId: true,
           breaks: { select: { startAt: true, endAt: true, paid: true } }
         }
       }
@@ -470,7 +474,22 @@ export async function reinitializeDraftFromVersion(tx: Prisma.TransactionClient,
     });
     for (const seg of day.segments) {
       const newSegment = await tx.timesheetDraftSegment.create({
-        data: { draftDayId: newDay.id, draftId, employeeId, date: day.date, startAt: seg.startAt, endAt: seg.endAt, siteId: seg.siteId, workAreaId: seg.workAreaId, sourceAssignmentId: seg.sourceAssignmentId }
+        data: {
+          draftDayId: newDay.id,
+          draftId,
+          employeeId,
+          date: day.date,
+          startAt: seg.startAt,
+          endAt: seg.endAt,
+          siteId: seg.siteId,
+          workAreaId: seg.workAreaId,
+          sourceAssignmentId: seg.sourceAssignmentId,
+          // §15 п.6 — without this, clock-origin provenance is silently lost on every
+          // return/reopen cycle (a fresh TimesheetDraftSegment is created with NULL instead of
+          // the real fragment reference), and the materializer would then wrongly try to insert
+          // a second live segment for a fragment that already has one.
+          originClockShiftFragmentId: seg.originClockShiftFragmentId
+        }
       });
       if (seg.breaks.length > 0) {
         await tx.timesheetDraftBreakSegment.createMany({ data: seg.breaks.map((b) => ({ draftSegmentId: newSegment.id, startAt: b.startAt, endAt: b.endAt, paid: b.paid })) });

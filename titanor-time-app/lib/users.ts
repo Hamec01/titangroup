@@ -65,6 +65,11 @@ export async function listUsers(filters: UserListFilters): Promise<UserListResul
   const roleNamesForFilter = filters.role === 'FOREMAN' ? (['FOREMAN'] as const) : LOOKUP_ROLE_NAMES;
 
   const where: Prisma.UserWhereInput = {
+    // T7A §13/§15 п.4 — the reserved SYSTEM actor (userKind=SYSTEM, username=system.scheduler)
+    // must never appear in this admin-facing list. Explicit, not incidental: today it also has
+    // no active role row so it's excluded either way, but that's not an independent guarantee —
+    // this filter is the real one.
+    userKind: 'HUMAN',
     userRoles: { some: activeRoleWhere(now, roleNamesForFilter) }
   };
 

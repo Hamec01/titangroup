@@ -4056,6 +4056,19 @@ force-skip-final-approved) — оба уже допускают произвол
 потому что T7A впервые вводит конкурентных писателей (materializer, scheduler, resolver) в таблицы,
 которые сегодня пишет только один HTTP-хендлер за раз.
 
+**`[2026-08-13] T7A locking slice A — реализовано.`** Пункты **1–6** ниже реализованы и проверены
+на одноразовом PostgreSQL 16 (24 обязательных пункта, включая реальные two-connection concurrency
+тесты для submit/submit, patch/submit и return/patch). Дополнительно к пункту 4 — **все** реальные
+application-level SYSTEM-guard пути закрыты явной проверкой `userKind='HUMAN'`, не только список
+`GET /api/admin/users`: `POST /api/auth/login` (независимо от `status`), `POST /api/admin/users/
+:userId/activation` и `POST /api/auth/set-account-password` (issuance и redemption обеих сторон
+standalone-активации, стабильный код `SYSTEM_USER_NOT_ELIGIBLE`), `scripts/reset-password.ts`
+(CLI). Роль/сессия — отдельного HTTP-пути, выдающего произвольному `userId` роль или сессию, в
+проекте сегодня нет; оба реальных `UserSession.create` сайта уже транзитивно защищены логином и
+redemption-guard'ом выше. Пункты **7–9** (correction provenance/adjustments/before-after снимок
+по версии) — отдельный, ещё не начатый T7A locking slice B; ничего из geofence/clock API/worker
+mobile UI/offline sync этим слайсом не затронуто.
+
 1. **`submitWorkerTimesheet`** (`lib/worker-timesheets.ts`) — разбить на
    `submitWorkerTimesheetCore(tx, ...)` (тело без изменений, кроме `submissionSource`-параметра и
    финального шага разрешения `LATE_SYNC_AFTER_SUBMIT`, §9.5) + тонкую обёртку, берущую `Timesheet

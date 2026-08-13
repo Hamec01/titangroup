@@ -23,6 +23,7 @@ export type IssueSystemActivationTokenError =
   | { code: 'USER_NOT_FOUND' }
   | { code: 'USER_ALREADY_ACTIVE' }
   | { code: 'USER_USES_WORKER_ACTIVATION' }
+  | { code: 'SYSTEM_USER_NOT_ELIGIBLE' }
   | { code: 'ACCOUNT_NOT_ELIGIBLE' };
 
 export interface IssueSystemActivationTokenResult {
@@ -50,9 +51,16 @@ export async function issueSystemActivationToken(userId: string, actorUserId: st
         employeeId: true,
         status: true,
         passwordHash: true,
+        userKind: true,
         userRoles: { select: { validFrom: true, validTo: true, role: { select: { name: true } } } }
       }
     });
+
+    // T7A §13/§15 — the reserved SYSTEM actor can never be issued an activation token; checked
+    // before every other branch so it can never be misreported as an ordinary ineligible account.
+    if (user.userKind !== 'HUMAN') {
+      return { code: 'SYSTEM_USER_NOT_ELIGIBLE' as const };
+    }
 
     // employeeId check comes first — a worker User must always be reported as
     // USER_USES_WORKER_ACTIVATION, never USER_ALREADY_ACTIVE, regardless of its status.
@@ -155,6 +163,7 @@ export type SetAccountPasswordError =
   | { code: 'TOKEN_EXPIRED' }
   | { code: 'TOKEN_USED' }
   | { code: 'TOKEN_INVALID' }
+  | { code: 'SYSTEM_USER_NOT_ELIGIBLE' }
   | { code: 'ACCOUNT_NOT_ELIGIBLE' }
   | { code: 'VALIDATION_ERROR'; fieldErrors: Record<string, string[]> };
 
@@ -221,6 +230,7 @@ export async function setAccountPassword(
             status: true,
             employeeId: true,
             passwordHash: true,
+            userKind: true,
             userRoles: { select: { validFrom: true, validTo: true, role: { select: { name: true } } } }
           }
         }
@@ -242,6 +252,12 @@ export async function setAccountPassword(
     }
 
     const user = token.user;
+    // T7A §13/§15 — last line of defense before a passwordHash would be written to the reserved
+    // SYSTEM actor and a session auto-created below; checked even though issueSystemActivationToken
+    // should already prevent a token from ever existing for it.
+    if (user.userKind !== 'HUMAN') {
+      return { code: 'SYSTEM_USER_NOT_ELIGIBLE' as const };
+    }
     const hasCurrentForeman = user.userRoles.some(currentForemanRoleWhere(now));
     if (user.employeeId !== null || user.status !== 'PENDING_ACTIVATION' || user.passwordHash !== null || !hasCurrentForeman) {
       return { code: 'ACCOUNT_NOT_ELIGIBLE' as const };

@@ -1,7 +1,7 @@
 import { Prisma } from '@prisma/client';
 import { prisma } from '@/lib/prisma';
 import { createAuditEvent } from '@/lib/audit';
-import { enumerateDates, toTemplateWeekday, helsinkiWallClockToUtc } from '@/lib/periods';
+import { enumerateDates, toTemplateWeekday, computePlannedShiftForAssignmentDate } from '@/lib/periods';
 
 // docs/titanor-time/04_ADMIN_FIRST_API_CONTRACTS.md §6 (Назначения) — shared
 // by POST /api/admin/assignments/validate-overlap and POST /api/admin/assignments.
@@ -231,17 +231,13 @@ export async function createAssignment(
 
       const plannedShiftRows: Prisma.TimesheetDraftPlannedShiftCreateManyInput[] = dates.map((date) => {
         const templateDay = templateVersionId ? templateDayByWeekday.get(toTemplateWeekday(date)) : undefined;
-        const isWorking = templateDay?.isWorkingDay ?? false;
         return {
           draftId: draft.id,
           employeeId: input.employeeId,
           date,
           siteId: input.siteId,
           sourceAssignmentId: assignment.id,
-          templateVersionDayId: isWorking && templateDay ? templateDay.id : null,
-          plannedStartAt: isWorking && templateDay?.plannedStartTime ? helsinkiWallClockToUtc(date, templateDay.plannedStartTime) : null,
-          plannedEndAt: isWorking && templateDay?.plannedEndTime ? helsinkiWallClockToUtc(date, templateDay.plannedEndTime) : null,
-          plannedBreakMinutes: isWorking && templateDay ? templateDay.plannedBreakMinutes : 0
+          ...computePlannedShiftForAssignmentDate(templateDay, date)
         };
       });
       if (plannedShiftRows.length > 0) {

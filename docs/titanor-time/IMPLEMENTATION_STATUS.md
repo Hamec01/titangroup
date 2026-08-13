@@ -1,6 +1,123 @@
 # Titanor Time — Implementation Status
 
-Обновлено: 2026-08-12 Europe/Helsinki (fix: reserve system scheduler identity)
+Обновлено: 2026-08-13 Europe/Helsinki (feat: harden timesheet locking for attendance)
+
+**T7A locking slice A — безопасная подготовка существующего timesheet-кода к Attendance Clock,
+НОВЫЙ этап (не audit-fix предыдущего).** Реализует `docs/titanor-time/T7A_1_ATTENDANCE_CLOCK_
+DESIGN.md` §15 пункты 1–6 (locking-дисциплина существующего кода) + application-level SYSTEM
+guards (§13) шире, чем буквальный пункт 4. Никакой новой схемы/миграции — `prisma/schema.prisma`
+и `prisma/migrations/` не тронуты этим слайсом. §15 пункты 7–9 (correction provenance/adjustments)
+— отдельный, ещё не начатый T7A locking slice B. Geofence API/UI, Check In/Check Out, worker
+mobile UI, offline outbox/sync, materializer, scheduler — не реализованы, как и требовалось.
+
+**A. `submitWorkerTimesheetCore(tx, ...)` + тонкая `submitWorkerTimesheet` обёртка**
+(`lib/worker-timesheets.ts`). Core принимает `Prisma.TransactionClient`, не открывает своей
+транзакции, не использует global `prisma`; пишет `TimesheetVersion.submissionSource` (manual
+wrapper всегда передаёт `MANUAL`); копирует `TimesheetDraftSegment.originClockShiftFragmentId` →
+`WorkSegment.originClockShiftFragmentId` при заморозке сегментов; carry-forward/review-scope/
+contentHash семантика не менялась. Manual-обёртка открывает одну транзакцию, берёт `Employee` →
+`Timesheet FOR UPDATE` (канонический порядок §8.1), перечитывает `employeeId`/`status` **под
+локом** (не из pre-lock чтения), затем `TimesheetDraft FOR UPDATE`, затем вызывает Core. Перед
+`return` Core сканирует `AttendanceException(LATE_SYNC_AFTER_SUBMIT, OPEN)` этого employee/
+timesheet/payrollPeriod, чей `clockShiftFragmentId` теперь представлен среди только что
+замороженных `WorkSegment.originClockShiftFragmentId` — переводит их в `RESOLVED`,
+`resolvedByUserId` = реальный `User(userKind=SYSTEM, username=system.scheduler)`,
+`resolutionNote='resolved by resubmission (Vn+1)'` (стабильный технический текст, без координат/
+секретов). Если такие исключения есть, а SYSTEM-актор отсутствует или не соответствует инварианту
+(`status≠DEACTIVATED`/`passwordHash≠NULL`/`employeeId≠NULL`) — вся submit-транзакция откатывается
+(`throw new Error('SYSTEM_SCHEDULER_ACTOR_MISSING_OR_INVALID')`); обычный submit без таких
+исключений не платит эту дополнительную проверку вовсе.
+
+**B. `patchWorkerTimesheetDay`** (`lib/worker-timesheets.ts`) — все DB-чтения, влияющие на
+ownership/state/day-validation/write, перенесены внутрь одной транзакции, за `Employee` →
+`Timesheet` → `TimesheetDraft FOR UPDATE` (первым действием, §8.1/§10.3); только два чисто
+DB-независимых предвалидационных чека (self-overlap сегментов, границы перерывов) остаются перед
+транзакцией. Статус/ownership перечитываются под локом, не из старого чтения. Существующие
+API-коды, delete-before-insert порядок и overlap-mapping не изменились. Расширенный clock
+provenance PATCH/`ClockShiftAdjustment` (§10.2/§15 пп.7–9) этим слайсом не реализован.
+
+**C. `returnReviewScope`** (`lib/review-scopes.ts`) и **`returnTimesheetOverride`**
+(`lib/admin-timesheets.ts`) — оба человеческих пути возврата теперь атомарно, в существующей
+транзакции/локах, выставляют `Timesheet.lastReturnedReason = HUMAN_REVIEW_RETURN` при переходе в
+`RETURNED`. Человечески-возвращённый табель больше никогда не остаётся с `lastReturnedReason =
+NULL`.
+
+**D. `reinitializeDraftFromVersion`** (`lib/review-scopes.ts`) — список копируемых полей
+`WorkSegment → TimesheetDraftSegment` теперь включает `originClockShiftFragmentId`. Provenance
+clock-сегмента больше не теряется на каждом цикле `return`/`reopen`.
+
+**E. `computePlannedShiftForAssignmentDate(templateDay, date)`** — общая, чистая функция в
+`lib/periods.ts`, извлечённая из идентичной, ранее продублированной формулы `createPeriod`
+(`lib/periods.ts`) и `createAssignment` (`lib/assignments.ts`). Единая weekday/DST/Helsinki
+wall-clock/working-day/null-template логика; оба call site теперь вызывают её, не поддерживают
+копию независимо; будущий materializer (§9.4) сможет использовать ту же функцию.
+
+**F. SYSTEM user application guards** (§13, шире буквального пункта 4 из соображений
+defense-in-depth) — явная проверка `userKind='HUMAN'` на каждом реальном пути, где мог бы
+оказаться SYSTEM: `lib/users.ts` `listUsers()` (`WHERE userKind='HUMAN'`); `POST /api/auth/login`
+(независимо от `status`, тот же `401 INVALID_CREDENTIALS` + dummy-verify задержка, что и
+неизвестный identifier — не отдельный код, не подтверждающий существование `system.scheduler`);
+`lib/system-activation.ts` `issueSystemActivationToken()` и `setAccountPassword()` (issuance И
+redemption обеих сторон standalone-активации — стабильный код `SYSTEM_USER_NOT_ELIGIBLE`);
+`scripts/reset-password.ts` CLI (`SystemUserNotEligibleError`, exit code 4, без изменения
+`passwordHash`). Роль/сессия: отдельного HTTP-пути, выдающего произвольному `userId` роль или
+сессию, в проекте не существует — оба реальных `UserSession.create` сайта уже транзитивно
+защищены login- и redemption-guard'ом выше. HUMAN worker/admin/foreman login+activation regression
+подтверждён (не изменилось поведение).
+
+Проверено на новом одноразовом PostgreSQL 16, **102/102 PASS, 0 FAIL** по прямому вызову
+production-функций (не только raw SQL) — 5 test-суитов, все с нуля из 48 baseline migrations +
+T7A schema-foundation (без создания новой миграции этим слайсом):
+- **Suite 1 (32 PASS)**: manual submit (одна версия, `submissionSource=MANUAL`, `AuditEvent`,
+  planned-shift заморожен); provenance freeze + return/reinitialize + resubmit round-trip
+  (`originClockShiftFragmentId` не теряется ни на одном шаге); late-sync resolution (только
+  подходящее исключение резолвится, несвязанное не трогается, `resolvedByUserId` — реальный
+  SYSTEM, `resolutionNote` без координат/секретов; отсутствие SYSTEM при наличии подходящего
+  исключения откатывает ВСЮ версию/статус/audit; обычный submit без исключений не зависит от
+  SYSTEM); human return reason (оба пути — `returnReviewScope` и `returnTimesheetOverride`).
+- **Suite 2 (17 PASS)**: `computePlannedShiftForAssignmentDate` напрямую — non-working day,
+  null-template, working day зимой (EET, UTC+2) и летом (EEST, UTC+3) с точными UTC-инстантами,
+  overnight (текущее, не изменённое поведение), `toTemplateWeekday`; интеграционно —
+  `createPeriod` и `createAssignment` дают идентичные значения для одной и той же
+  (assignment, date) пары; старый snapshot-assignment не переключается на новую template version
+  после её создания.
+- **Suite 3 (17 PASS)**: `patchWorkerTimesheetDay` regression — `FORBIDDEN`/`NOT_FOUND`/
+  `VALIDATION_ERROR`(дата вне периода)/`SITE_NOT_ASSIGNED`/`WORK_SEGMENT_OVERLAP`/breaks-валидация/
+  `DAY_TYPE_REQUIRES_ABSENCE`/`DAY_TYPE_CONFLICT`, успешный patch, delete-before-insert (замена, не
+  append), `DRAFT_NOT_EDITABLE` после submit — все существующие коды/поведение не изменились.
+- **Suite 4 (16 PASS)**: SYSTEM guards — `listUsers` исключает SYSTEM даже при искусственно
+  выданной роли; login отклоняет SYSTEM (`401`), принимает HUMAN (regression), отклоняет неверный
+  пароль (regression); ноль `UserSession` для SYSTEM; issuance И redemption активации отклоняют
+  SYSTEM (`SYSTEM_USER_NOT_ELIGIBLE`), legitimate HUMAN standalone foreman по-прежнему проходит
+  (regression); reset-password CLI отклоняет SYSTEM без изменения `passwordHash`, HUMAN dry-run
+  regression проходит; ноль ролей/сессий у SYSTEM в конце прогона.
+- **Suite 5 (20 PASS) — РЕАЛЬНАЯ two-connection concurrency**, не последовательная симуляция:
+  submit vs submit одного DRAFT (`Promise.all` двух настоящих вызовов `submitWorkerTimesheet` —
+  ровно один успех/одна версия, второй `INVALID_STATE_TRANSITION`, ≥2 одновременно активных
+  backend PID подтверждены прямым запросом к `pg_stat_activity` во время гонки); patch vs submit,
+  обе очерёдности (patch-first: submit видит патч, не устаревший draft; submit-first: patch
+  получает `DRAFT_NOT_EDITABLE` под свежим локом, ровно одна версия, без partial freeze); return
+  vs patch, обе очерёдности (второй scope-return гонится с worker patch — committed данные patch'а
+  переживают идемпотентный reinitialize-check независимо от того, кто победил гонку). Для каждого
+  сценария в логе — фактический результат ОБОИХ соединений и read-only DB-итог, не нарратив.
+
+Технические проверки (все зелёные): `prisma validate`/`generate` (схема не менялась — подтверждён
+diff `prisma/`), `npx tsc --noEmit`, `npm run build`, повторный `prisma migrate deploy` на новом
+disposable Postgres 16 → `No pending migrations` / `Database schema is up to date!` (эта задача не
+создаёт новую миграцию), `docker compose -f compose.titanor-time.yaml build app`, `git diff
+--check`.
+
+Docker image safety: production `titanor-time-app-1`/`titanor-time-db-1` подтверждены неизменными
+(тот же image ID/`StartedAt`/`RestartCount` до и после сборки). Тега `titanor-time-app:latest` не
+было до задачи — тестовый образ удалён полностью после проверки. Пять scratch-тест-скриптов
+(`scripts/_ls_0{1..5}_*.ts`), использованных для этого прогона, удалены до коммита — не часть
+финального diff'а.
+
+Production/geofence API/UI/Check In-Out/worker mobile UI/offline sync/materializer/scheduler/
+correction provenance (T7A locking slice B, §15 пп.7–9)/locking §15 как целое (только пп.1–6
+закрыты этим слайсом) — не затронуты этой правкой, ни в каком виде.
+
+---
 
 **T7A schema-foundation slice — закрытие последнего SYSTEM identity race, тот же slice.**
 Продолжение review-fix (`9416e26`) — audit-closeout закрыл гонку между preflight-проверкой и

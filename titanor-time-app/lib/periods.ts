@@ -65,6 +65,42 @@ export function helsinkiWallClockToUtc(date: Date, timeOfDay: Date): Date {
   return new Date(naiveGuess.getTime() - offsetMinutes * 60000);
 }
 
+export interface TemplateDayInput {
+  id: string;
+  isWorkingDay: boolean;
+  plannedStartTime: Date | null;
+  plannedEndTime: Date | null;
+  plannedBreakMinutes: number;
+}
+
+export interface PlannedShiftComputation {
+  templateVersionDayId: string | null;
+  plannedStartAt: Date | null;
+  plannedEndAt: Date | null;
+  plannedBreakMinutes: number;
+}
+
+/**
+ * docs/titanor-time/T7A_1_ATTENDANCE_CLOCK_DESIGN.md §15 п.5 — the single weekday/DST/Helsinki
+ * wall-clock/working-day/null-template formula for one (assignment, date) pair, previously
+ * duplicated between `createPeriod` and `createAssignment`. `templateDay` is the caller-resolved
+ * `WorkScheduleTemplateVersionDay` row for this date's weekday (or `undefined`/`null` when the
+ * assignment has no template, or the template has no row for that weekday) — resolving which row
+ * that is stays the caller's job, since `createPeriod` looks it up across many assignments/
+ * template versions at once while `createAssignment` looks it up for a single template version;
+ * only the pure "what does this templateDay mean for this date" formula is shared here. A future
+ * materializer (§9.4) is meant to call this same function, not reimplement the formula again.
+ */
+export function computePlannedShiftForAssignmentDate(templateDay: TemplateDayInput | null | undefined, date: Date): PlannedShiftComputation {
+  const isWorking = templateDay?.isWorkingDay ?? false;
+  return {
+    templateVersionDayId: isWorking && templateDay ? templateDay.id : null,
+    plannedStartAt: isWorking && templateDay?.plannedStartTime ? helsinkiWallClockToUtc(date, templateDay.plannedStartTime) : null,
+    plannedEndAt: isWorking && templateDay?.plannedEndTime ? helsinkiWallClockToUtc(date, templateDay.plannedEndTime) : null,
+    plannedBreakMinutes: isWorking && templateDay ? templateDay.plannedBreakMinutes : 0
+  };
+}
+
 /**
  * EX-03 (`ex_payroll_period_date_overlap`, 05_RAW_SQL_REGISTER.md) is a
  * Postgres EXCLUDE constraint (SQLSTATE 23P01) — surfaces as an untyped
@@ -186,7 +222,6 @@ export async function createPeriod(input: CreatePeriodInput): Promise<CreatePeri
             const templateDay = assignment.templateVersionId
               ? templateDayByKey.get(`${assignment.templateVersionId}:${toTemplateWeekday(date)}`)
               : undefined;
-            const isWorking = templateDay?.isWorkingDay ?? false;
 
             plannedShiftRows.push({
               draftId: draft.id,
@@ -194,10 +229,7 @@ export async function createPeriod(input: CreatePeriodInput): Promise<CreatePeri
               date,
               siteId: assignment.siteId,
               sourceAssignmentId: assignment.id,
-              templateVersionDayId: isWorking && templateDay ? templateDay.id : null,
-              plannedStartAt: isWorking && templateDay?.plannedStartTime ? helsinkiWallClockToUtc(date, templateDay.plannedStartTime) : null,
-              plannedEndAt: isWorking && templateDay?.plannedEndTime ? helsinkiWallClockToUtc(date, templateDay.plannedEndTime) : null,
-              plannedBreakMinutes: isWorking && templateDay ? templateDay.plannedBreakMinutes : 0
+              ...computePlannedShiftForAssignmentDate(templateDay, date)
             });
           }
         }

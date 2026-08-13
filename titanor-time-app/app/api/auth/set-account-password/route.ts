@@ -73,6 +73,8 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
         return jsonError(410, { code: 'TOKEN_USED', message: 'This activation code has already been used.' }, requestId);
       case 'TOKEN_INVALID':
         return jsonError(404, { code: 'TOKEN_INVALID', message: 'This activation code is not valid.' }, requestId);
+      case 'SYSTEM_USER_NOT_ELIGIBLE':
+        return jsonError(409, { code: 'SYSTEM_USER_NOT_ELIGIBLE', message: 'This account is a reserved system actor and cannot be activated.' }, requestId);
       case 'ACCOUNT_NOT_ELIGIBLE':
         return jsonError(409, { code: 'ACCOUNT_NOT_ELIGIBLE', message: 'This account is no longer eligible for activation.' }, requestId);
       case 'VALIDATION_ERROR':

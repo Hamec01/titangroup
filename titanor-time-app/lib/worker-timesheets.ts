@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { Prisma, AbsenceType, DayType } from '@prisma/client';
+import { Prisma, AbsenceType, DayType, SubmissionSource } from '@prisma/client';
 import { prisma } from '@/lib/prisma';
 import { createAuditEvent } from '@/lib/audit';
 import { helsinkiToday } from '@/lib/workers';
@@ -420,6 +420,13 @@ export type PatchDayError =
  * `input` are changed; `segments`, when present, is the day's FULL final segment list (not a
  * per-siteId delta) — a segment whose siteId is missing from the new array is deleted.
  *
+ * §10.3/§15 п.2 — every DB read that affects ownership/state/day-validation/write happens inside
+ * one transaction, behind `Employee` → `Timesheet` → `TimesheetDraft FOR UPDATE` (canonical order,
+ * §8.1) taken as the very first actions. Only the two purely request-shape checks that never touch
+ * the DB (segment-list self-overlap, break bounds) run before the transaction opens — nothing
+ * about them can go stale between a pre-lock read and the write. Status/ownership are re-read
+ * fresh under the lock, never trusted from a read taken before it.
+ *
  * Write order matters for the DB's own BEFORE ROW triggers (TRG-05/06, 03_...§4.6 "Concurrency-
  * safe реализация"): segments are always deleted before the day row is updated, and re-inserted
  * only after — zero segments is valid against every (dayType, confirmedZero) combination, so
@@ -429,7 +436,8 @@ export type PatchDayError =
  * `affectedSitePairs` → TimesheetReviewProposal resolution (03_...§4.6) is NOT implemented here —
  * TimesheetReviewScope/Proposal are not schema yet (a later ЭТАП 7 sub-task); `resolvedProposals`
  * is always `[]`, which is correct today, not a stub — no proposal can exist before that
- * subsystem does.
+ * subsystem does. Extended clock-provenance PATCH semantics (§10.2 originClockShiftFragmentId
+ * validation/ClockShiftAdjustment/§15 пп.7-9) are a separate, later locking slice — not this one.
  */
 export async function patchWorkerTimesheetDay(
   employeeId: string,
@@ -437,55 +445,6 @@ export async function patchWorkerTimesheetDay(
   date: Date,
   input: PatchDayInput
 ): Promise<(DraftDayView & { resolvedProposals: never[] }) | PatchDayError> {
-  const result = await loadOwnTimesheet(employeeId, timesheetId);
-  if ('error' in result) {
-    return result.error;
-  }
-  if (result.timesheet.status !== 'DRAFT' && result.timesheet.status !== 'RETURNED') {
-    return { code: 'DRAFT_NOT_EDITABLE' };
-  }
-
-  const draft = await prisma.timesheetDraft.findUnique({ where: { timesheetId }, select: { id: true } });
-  if (!draft) {
-    return { code: 'NOT_FOUND' };
-  }
-
-  const currentDay = await prisma.timesheetDraftDay.findUnique({
-    where: { draftId_date: { draftId: draft.id, date } },
-    select: { id: true, dayType: true, confirmedZero: true, segments: { select: { id: true } } }
-  });
-  if (!currentDay) {
-    // Not named in 04_...§9's error list — a date outside this timesheet's own period never got
-    // a TimesheetDraftDay row in the first place (period.create/assignment.create both generate
-    // exactly one per period day), so this is a client input problem, not a missing-resource one.
-    return { code: 'VALIDATION_ERROR', fieldErrors: { date: ['not within this timesheet\'s period'] } };
-  }
-
-  const finalDayType = input.dayType ?? currentDay.dayType;
-  const finalConfirmedZero = input.confirmedZero ?? currentDay.confirmedZero;
-  const hasSegments = input.segments !== undefined ? input.segments.length > 0 : currentDay.segments.length > 0;
-
-  const stateViolation = classifyDayStateViolation(finalDayType, finalConfirmedZero, hasSegments);
-  if (stateViolation) {
-    return { code: stateViolation };
-  }
-
-  let resolvedAbsenceId: string | null = null;
-  if (input.dayType !== undefined && input.dayType !== 'WORK') {
-    if (!ABSENCE_DAY_TYPES.has(input.dayType)) {
-      return { code: 'DAY_TYPE_REQUIRES_ABSENCE' };
-    }
-    const absence = await prisma.absence.findFirst({
-      where: { employeeId, status: 'APPROVED', type: input.dayType as AbsenceType, startDate: { lte: date }, endDate: { gte: date } },
-      select: { id: true }
-    });
-    if (!absence) {
-      return { code: 'DAY_TYPE_REQUIRES_ABSENCE' };
-    }
-    resolvedAbsenceId = absence.id;
-  }
-
-  const resolvedSegments: { segment: PatchSegmentInput; sourceAssignmentId: string }[] = [];
   if (input.segments !== undefined) {
     const sortedSegments = [...input.segments].sort((a, b) => a.startAt.getTime() - b.startAt.getTime());
     for (let i = 1; i < sortedSegments.length; i++) {
@@ -506,26 +465,87 @@ export async function patchWorkerTimesheetDay(
           return { code: 'VALIDATION_ERROR', fieldErrors: { breaks: ['must not overlap each other within the same segment'] } };
         }
       }
-
-      const assignment = await prisma.siteAssignment.findFirst({
-        where: {
-          employeeId,
-          siteId: segment.siteId,
-          workAreaId: segment.workAreaId,
-          validFrom: { lte: date },
-          OR: [{ validTo: null }, { validTo: { gte: date } }]
-        },
-        select: { id: true }
-      });
-      if (!assignment) {
-        return { code: 'SITE_NOT_ASSIGNED', siteId: segment.siteId };
-      }
-      resolvedSegments.push({ segment, sourceAssignmentId: assignment.id });
     }
   }
 
   try {
-    const updatedDay = await prisma.$transaction(async (tx) => {
+    return await prisma.$transaction(async (tx): Promise<(DraftDayView & { resolvedProposals: never[] }) | PatchDayError> => {
+      await tx.$queryRaw`SELECT id FROM "Employee" WHERE id = ${employeeId}::uuid FOR UPDATE`;
+      await tx.$queryRaw`SELECT id FROM "Timesheet" WHERE id = ${timesheetId}::uuid FOR UPDATE`;
+      await tx.$queryRaw`SELECT id FROM "TimesheetDraft" WHERE "timesheetId" = ${timesheetId}::uuid FOR UPDATE`;
+
+      const timesheet = await tx.timesheet.findUnique({ where: { id: timesheetId }, select: { employeeId: true, status: true } });
+      if (!timesheet) {
+        return { code: 'NOT_FOUND' };
+      }
+      if (timesheet.employeeId !== employeeId) {
+        return { code: 'FORBIDDEN' };
+      }
+      if (timesheet.status !== 'DRAFT' && timesheet.status !== 'RETURNED') {
+        return { code: 'DRAFT_NOT_EDITABLE' };
+      }
+
+      const draft = await tx.timesheetDraft.findUnique({ where: { timesheetId }, select: { id: true } });
+      if (!draft) {
+        return { code: 'NOT_FOUND' };
+      }
+
+      const currentDay = await tx.timesheetDraftDay.findUnique({
+        where: { draftId_date: { draftId: draft.id, date } },
+        select: { id: true, dayType: true, confirmedZero: true, segments: { select: { id: true } } }
+      });
+      if (!currentDay) {
+        // Not named in 04_...§9's error list — a date outside this timesheet's own period never
+        // got a TimesheetDraftDay row in the first place (period.create/assignment.create both
+        // generate exactly one per period day), so this is a client input problem, not a
+        // missing-resource one.
+        return { code: 'VALIDATION_ERROR', fieldErrors: { date: ['not within this timesheet\'s period'] } };
+      }
+
+      const finalDayType = input.dayType ?? currentDay.dayType;
+      const finalConfirmedZero = input.confirmedZero ?? currentDay.confirmedZero;
+      const hasSegments = input.segments !== undefined ? input.segments.length > 0 : currentDay.segments.length > 0;
+
+      const stateViolation = classifyDayStateViolation(finalDayType, finalConfirmedZero, hasSegments);
+      if (stateViolation) {
+        return { code: stateViolation };
+      }
+
+      let resolvedAbsenceId: string | null = null;
+      if (input.dayType !== undefined && input.dayType !== 'WORK') {
+        if (!ABSENCE_DAY_TYPES.has(input.dayType)) {
+          return { code: 'DAY_TYPE_REQUIRES_ABSENCE' };
+        }
+        const absence = await tx.absence.findFirst({
+          where: { employeeId, status: 'APPROVED', type: input.dayType as AbsenceType, startDate: { lte: date }, endDate: { gte: date } },
+          select: { id: true }
+        });
+        if (!absence) {
+          return { code: 'DAY_TYPE_REQUIRES_ABSENCE' };
+        }
+        resolvedAbsenceId = absence.id;
+      }
+
+      const resolvedSegments: { segment: PatchSegmentInput; sourceAssignmentId: string }[] = [];
+      if (input.segments !== undefined) {
+        for (const segment of input.segments) {
+          const assignment = await tx.siteAssignment.findFirst({
+            where: {
+              employeeId,
+              siteId: segment.siteId,
+              workAreaId: segment.workAreaId,
+              validFrom: { lte: date },
+              OR: [{ validTo: null }, { validTo: { gte: date } }]
+            },
+            select: { id: true }
+          });
+          if (!assignment) {
+            return { code: 'SITE_NOT_ASSIGNED', siteId: segment.siteId };
+          }
+          resolvedSegments.push({ segment, sourceAssignmentId: assignment.id });
+        }
+      }
+
       if (input.segments !== undefined) {
         await tx.timesheetDraftSegment.deleteMany({ where: { draftDayId: currentDay.id } });
       }
@@ -565,7 +585,7 @@ export async function patchWorkerTimesheetDay(
 
       await tx.timesheetDraft.update({ where: { id: draft.id }, data: { contentRevision: { increment: 1 } } });
 
-      return tx.timesheetDraftDay.findUniqueOrThrow({
+      const updatedDay = await tx.timesheetDraftDay.findUniqueOrThrow({
         where: { id: currentDay.id },
         select: {
           date: true,
@@ -585,23 +605,23 @@ export async function patchWorkerTimesheetDay(
           }
         }
       });
-    });
 
-    return {
-      date: formatDate(updatedDay.date),
-      dayType: updatedDay.dayType,
-      confirmedZero: updatedDay.confirmedZero,
-      segments: updatedDay.segments.map((s) => ({
-        id: s.id,
-        startAt: s.startAt.toISOString(),
-        endAt: s.endAt.toISOString(),
-        siteId: s.siteId,
-        workAreaId: s.workAreaId,
-        sourceAssignmentId: s.sourceAssignmentId,
-        breaks: s.breaks.map((b) => ({ id: b.id, startAt: b.startAt.toISOString(), endAt: b.endAt.toISOString(), paid: b.paid }))
-      })),
-      resolvedProposals: []
-    };
+      return {
+        date: formatDate(updatedDay.date),
+        dayType: updatedDay.dayType,
+        confirmedZero: updatedDay.confirmedZero,
+        segments: updatedDay.segments.map((s) => ({
+          id: s.id,
+          startAt: s.startAt.toISOString(),
+          endAt: s.endAt.toISOString(),
+          siteId: s.siteId,
+          workAreaId: s.workAreaId,
+          sourceAssignmentId: s.sourceAssignmentId,
+          breaks: s.breaks.map((b) => ({ id: b.id, startAt: b.startAt.toISOString(), endAt: b.endAt.toISOString(), paid: b.paid }))
+        })),
+        resolvedProposals: []
+      };
+    });
   } catch (error) {
     if (isSegmentOverlapViolation(error)) {
       return { code: 'WORK_SEGMENT_OVERLAP' };
@@ -759,181 +779,267 @@ export interface SubmitResult {
 
 export type SubmitError = TimesheetAccessError | { code: 'INVALID_STATE_TRANSITION' };
 
-export async function submitWorkerTimesheet(employeeId: string, timesheetId: string, actorUserId: string, requestId: string): Promise<SubmitResult | SubmitError> {
-  const result = await loadOwnTimesheet(employeeId, timesheetId);
-  if ('error' in result) {
-    return result.error;
-  }
-  const previousStatus = result.timesheet.status;
-  if (previousStatus !== 'DRAFT' && previousStatus !== 'RETURNED') {
-    return { code: 'INVALID_STATE_TRANSITION' };
-  }
+/**
+ * docs/titanor-time/T7A_1_ATTENDANCE_CLOCK_DESIGN.md §9.5/§9.6/§15 п.1 — the single point that
+ * ever freezes a TimesheetVersion (manual submit today; auto-submit, §9.6, is a future slice that
+ * will call this same function). Takes `tx` from the caller and never opens its own transaction —
+ * the caller is responsible for holding `Employee`/`Timesheet`/`TimesheetDraft FOR UPDATE` in
+ * canonical order (§8.1) before calling this. Body is otherwise the pre-existing submit logic,
+ * unchanged, plus: `submissionSource` is written onto the new version, `TimesheetDraftSegment.
+ * originClockShiftFragmentId` is copied onto the frozen `WorkSegment`, and — immediately before
+ * returning — any `AttendanceException(LATE_SYNC_AFTER_SUBMIT, OPEN)` of this employee/timesheet/
+ * payrollPeriod whose `clockShiftFragmentId` is now represented among this version's frozen
+ * `WorkSegment.originClockShiftFragmentId` is resolved (§9.5 "Разрешение LATE_SYNC_AFTER_SUBMIT").
+ */
+export async function submitWorkerTimesheetCore(
+  tx: Prisma.TransactionClient,
+  employeeId: string,
+  timesheetId: string,
+  actorUserId: string,
+  requestId: string,
+  submissionSource: SubmissionSource
+): Promise<SubmitResult> {
+  const previousTimesheet = await tx.timesheet.findUniqueOrThrow({ where: { id: timesheetId }, select: { status: true } });
+  const previousStatus = previousTimesheet.status;
 
-  const newVersion = await prisma.$transaction(async (tx) => {
-    const draft = await tx.timesheetDraft.findUniqueOrThrow({
-      where: { timesheetId },
-      select: {
-        id: true,
-        days: {
-          select: {
-            date: true,
-            dayType: true,
-            confirmedZero: true,
-            sourceAbsenceId: true,
-            note: true,
-            segments: {
-              select: {
-                startAt: true,
-                endAt: true,
-                siteId: true,
-                workAreaId: true,
-                sourceAssignmentId: true,
-                breaks: { select: { startAt: true, endAt: true, paid: true } }
-              }
+  const draft = await tx.timesheetDraft.findUniqueOrThrow({
+    where: { timesheetId },
+    select: {
+      id: true,
+      timesheet: { select: { periodId: true } },
+      days: {
+        select: {
+          date: true,
+          dayType: true,
+          confirmedZero: true,
+          sourceAbsenceId: true,
+          note: true,
+          segments: {
+            select: {
+              startAt: true,
+              endAt: true,
+              siteId: true,
+              workAreaId: true,
+              sourceAssignmentId: true,
+              originClockShiftFragmentId: true,
+              breaks: { select: { startAt: true, endAt: true, paid: true } }
             }
           }
-        },
-        plannedShifts: {
-          select: { date: true, siteId: true, sourceAssignmentId: true, templateVersionDayId: true, plannedStartAt: true, plannedEndAt: true, plannedBreakMinutes: true }
         }
+      },
+      plannedShifts: {
+        select: { date: true, siteId: true, sourceAssignmentId: true, templateVersionDayId: true, plannedStartAt: true, plannedEndAt: true, plannedBreakMinutes: true }
       }
-    });
-
-    const lastVersion = await tx.timesheetVersion.findFirst({
-      where: { timesheetId },
-      orderBy: { versionNumber: 'desc' },
-      select: { id: true, versionNumber: true }
-    });
-    const versionNumber = (lastVersion?.versionNumber ?? 0) + 1;
-
-    const version = await tx.timesheetVersion.create({
-      data: { timesheetId, employeeId, versionNumber, source: 'WORKER', createdByUserId: actorUserId }
-    });
-
-    // TimesheetPlannedShift must be frozen before any WorkSegment — WorkSegment's composite FK
-    // (timesheetVersionId, date, sourceAssignmentId) requires the matching planned-shift row to
-    // already exist, same as TimesheetDraftSegment's FK onto TimesheetDraftPlannedShift (found
-    // the hard way on disposable PostgreSQL 16 while testing this function: freezing days/segments
-    // first threw P2003 on the very first segment).
-    const frozenPlannedShifts: FrozenPlannedShift[] = draft.plannedShifts.map((p) => ({
-      date: p.date,
-      siteId: p.siteId,
-      sourceAssignmentId: p.sourceAssignmentId,
-      plannedStartAt: p.plannedStartAt,
-      plannedEndAt: p.plannedEndAt,
-      plannedBreakMinutes: p.plannedBreakMinutes
-    }));
-    if (draft.plannedShifts.length > 0) {
-      await tx.timesheetPlannedShift.createMany({
-        data: draft.plannedShifts.map((p) => ({
-          timesheetVersionId: version.id,
-          employeeId,
-          date: p.date,
-          siteId: p.siteId,
-          sourceAssignmentId: p.sourceAssignmentId,
-          templateVersionDayId: p.templateVersionDayId,
-          plannedStartAt: p.plannedStartAt,
-          plannedEndAt: p.plannedEndAt,
-          plannedBreakMinutes: p.plannedBreakMinutes
-        }))
-      });
     }
-
-    const frozenDays: FrozenDay[] = [];
-    for (const day of draft.days) {
-      const newDay = await tx.timesheetDay.create({
-        data: { timesheetVersionId: version.id, date: day.date, dayType: day.dayType, confirmedZero: day.confirmedZero, sourceAbsenceId: day.sourceAbsenceId, note: day.note }
-      });
-      const frozenSegments: FrozenSegment[] = [];
-      for (const seg of day.segments) {
-        const crossesMidnight = helsinkiLocalDate(seg.endAt) !== formatDate(day.date);
-        const newSegment = await tx.workSegment.create({
-          data: {
-            timesheetDayId: newDay.id,
-            timesheetVersionId: version.id,
-            employeeId,
-            date: day.date,
-            startAt: seg.startAt,
-            endAt: seg.endAt,
-            siteId: seg.siteId,
-            workAreaId: seg.workAreaId,
-            sourceAssignmentId: seg.sourceAssignmentId,
-            crossesMidnight
-          }
-        });
-        if (seg.breaks.length > 0) {
-          await tx.breakSegment.createMany({
-            data: seg.breaks.map((b) => ({ workSegmentId: newSegment.id, startAt: b.startAt, endAt: b.endAt, paid: b.paid }))
-          });
-        }
-        frozenSegments.push({ siteId: seg.siteId, workAreaId: seg.workAreaId, sourceAssignmentId: seg.sourceAssignmentId, startAt: seg.startAt, endAt: seg.endAt, breaks: seg.breaks });
-      }
-      frozenDays.push({ date: day.date, dayType: day.dayType, confirmedZero: day.confirmedZero, note: day.note, segments: frozenSegments });
-    }
-
-    // --- Classify days (03_...§4.6, "Алгоритм формирования набора scope") ---
-    const siteIdsWithData = new Set<string>();
-    for (const day of frozenDays) {
-      for (const seg of day.segments) siteIdsWithData.add(seg.siteId);
-    }
-    const nonSiteDataDays = frozenDays.filter((d) => d.dayType !== 'WORK' || d.confirmedZero);
-
-    const previousSiteScopes = lastVersion
-      ? await tx.timesheetReviewScope.findMany({ where: { timesheetVersionId: lastVersion.id, scopeType: 'SITE' }, select: { id: true, siteId: true, status: true, contentHash: true } })
-      : [];
-    const previousSiteScopeBySite = new Map(previousSiteScopes.map((s) => [s.siteId as string, s]));
-    const allSiteIds = new Set<string>([...siteIdsWithData, ...previousSiteScopeBySite.keys()]);
-
-    for (const siteId of allSiteIds) {
-      const contentHash = computeContentHash(canonicalSiteProjection(siteId, frozenDays, frozenPlannedShifts));
-      const previous = previousSiteScopeBySite.get(siteId);
-      const { status, carriedFromScopeId } = decideScopeCarryForward(previous, contentHash);
-      await tx.timesheetReviewScope.create({
-        data: { timesheetVersionId: version.id, scopeType: 'SITE', siteId, status, contentHash, carriedFromScopeId }
-      });
-    }
-
-    const previousNonSiteDataScope = lastVersion
-      ? await tx.timesheetReviewScope.findFirst({
-          where: { timesheetVersionId: lastVersion.id, scopeType: 'NON_SITE', scopePurpose: 'DATA' },
-          select: { id: true, status: true, contentHash: true }
-        })
-      : null;
-    const hasNonSiteData = nonSiteDataDays.length > 0;
-
-    if (hasNonSiteData || previousNonSiteDataScope) {
-      const contentHash = computeContentHash(canonicalNonSiteDataProjection(nonSiteDataDays));
-      const { status, carriedFromScopeId } = decideScopeCarryForward(previousNonSiteDataScope ?? undefined, contentHash);
-      const contextSiteId = await resolvePrimarySiteId(tx, employeeId);
-      await tx.timesheetReviewScope.create({
-        data: { timesheetVersionId: version.id, scopeType: 'NON_SITE', scopePurpose: 'DATA', contextSiteId, status, contentHash, carriedFromScopeId }
-      });
-    } else if (allSiteIds.size === 0) {
-      const contentHash = computeContentHash({ empty: true });
-      const contextSiteId = await resolvePrimarySiteId(tx, employeeId);
-      await tx.timesheetReviewScope.create({
-        data: { timesheetVersionId: version.id, scopeType: 'NON_SITE', scopePurpose: 'EMPTY_FALLBACK', contextSiteId, status: 'PENDING', contentHash }
-      });
-    }
-
-    // --- Clear draft content (container itself stays) and flip Timesheet status ---
-    await tx.timesheetDraftDay.deleteMany({ where: { draftId: draft.id } });
-    await tx.timesheetDraftPlannedShift.deleteMany({ where: { draftId: draft.id } });
-
-    await tx.timesheet.update({ where: { id: timesheetId }, data: { status: 'SUBMITTED', currentVersionId: version.id } });
-
-    await createAuditEvent(tx, {
-      actorUserId,
-      eventType: 'TIMESHEET_SUBMITTED',
-      entityType: 'TIMESHEET',
-      entityId: timesheetId,
-      requestId,
-      beforeValue: { status: previousStatus },
-      afterValue: { status: 'SUBMITTED', versionId: version.id, versionNumber }
-    });
-
-    return version;
   });
 
-  return { timesheetId, status: 'SUBMITTED', versionId: newVersion.id, versionNumber: newVersion.versionNumber };
+  const lastVersion = await tx.timesheetVersion.findFirst({
+    where: { timesheetId },
+    orderBy: { versionNumber: 'desc' },
+    select: { id: true, versionNumber: true }
+  });
+  const versionNumber = (lastVersion?.versionNumber ?? 0) + 1;
+
+  const version = await tx.timesheetVersion.create({
+    data: { timesheetId, employeeId, versionNumber, source: 'WORKER', createdByUserId: actorUserId, submissionSource }
+  });
+
+  // TimesheetPlannedShift must be frozen before any WorkSegment — WorkSegment's composite FK
+  // (timesheetVersionId, date, sourceAssignmentId) requires the matching planned-shift row to
+  // already exist, same as TimesheetDraftSegment's FK onto TimesheetDraftPlannedShift (found
+  // the hard way on disposable PostgreSQL 16 while testing this function: freezing days/segments
+  // first threw P2003 on the very first segment).
+  const frozenPlannedShifts: FrozenPlannedShift[] = draft.plannedShifts.map((p) => ({
+    date: p.date,
+    siteId: p.siteId,
+    sourceAssignmentId: p.sourceAssignmentId,
+    plannedStartAt: p.plannedStartAt,
+    plannedEndAt: p.plannedEndAt,
+    plannedBreakMinutes: p.plannedBreakMinutes
+  }));
+  if (draft.plannedShifts.length > 0) {
+    await tx.timesheetPlannedShift.createMany({
+      data: draft.plannedShifts.map((p) => ({
+        timesheetVersionId: version.id,
+        employeeId,
+        date: p.date,
+        siteId: p.siteId,
+        sourceAssignmentId: p.sourceAssignmentId,
+        templateVersionDayId: p.templateVersionDayId,
+        plannedStartAt: p.plannedStartAt,
+        plannedEndAt: p.plannedEndAt,
+        plannedBreakMinutes: p.plannedBreakMinutes
+      }))
+    });
+  }
+
+  const frozenDays: FrozenDay[] = [];
+  // §9.5/§15 п.1 — clock-origin fragments actually frozen into a live WorkSegment of this
+  // version; feeds the LATE_SYNC_AFTER_SUBMIT resolution scan below.
+  const frozenOriginFragmentIds = new Set<string>();
+  for (const day of draft.days) {
+    const newDay = await tx.timesheetDay.create({
+      data: { timesheetVersionId: version.id, date: day.date, dayType: day.dayType, confirmedZero: day.confirmedZero, sourceAbsenceId: day.sourceAbsenceId, note: day.note }
+    });
+    const frozenSegments: FrozenSegment[] = [];
+    for (const seg of day.segments) {
+      const crossesMidnight = helsinkiLocalDate(seg.endAt) !== formatDate(day.date);
+      const newSegment = await tx.workSegment.create({
+        data: {
+          timesheetDayId: newDay.id,
+          timesheetVersionId: version.id,
+          employeeId,
+          date: day.date,
+          startAt: seg.startAt,
+          endAt: seg.endAt,
+          siteId: seg.siteId,
+          workAreaId: seg.workAreaId,
+          sourceAssignmentId: seg.sourceAssignmentId,
+          originClockShiftFragmentId: seg.originClockShiftFragmentId,
+          crossesMidnight
+        }
+      });
+      if (seg.breaks.length > 0) {
+        await tx.breakSegment.createMany({
+          data: seg.breaks.map((b) => ({ workSegmentId: newSegment.id, startAt: b.startAt, endAt: b.endAt, paid: b.paid }))
+        });
+      }
+      if (seg.originClockShiftFragmentId) {
+        frozenOriginFragmentIds.add(seg.originClockShiftFragmentId);
+      }
+      frozenSegments.push({ siteId: seg.siteId, workAreaId: seg.workAreaId, sourceAssignmentId: seg.sourceAssignmentId, startAt: seg.startAt, endAt: seg.endAt, breaks: seg.breaks });
+    }
+    frozenDays.push({ date: day.date, dayType: day.dayType, confirmedZero: day.confirmedZero, note: day.note, segments: frozenSegments });
+  }
+
+  // --- Classify days (03_...§4.6, "Алгоритм формирования набора scope") ---
+  const siteIdsWithData = new Set<string>();
+  for (const day of frozenDays) {
+    for (const seg of day.segments) siteIdsWithData.add(seg.siteId);
+  }
+  const nonSiteDataDays = frozenDays.filter((d) => d.dayType !== 'WORK' || d.confirmedZero);
+
+  const previousSiteScopes = lastVersion
+    ? await tx.timesheetReviewScope.findMany({ where: { timesheetVersionId: lastVersion.id, scopeType: 'SITE' }, select: { id: true, siteId: true, status: true, contentHash: true } })
+    : [];
+  const previousSiteScopeBySite = new Map(previousSiteScopes.map((s) => [s.siteId as string, s]));
+  const allSiteIds = new Set<string>([...siteIdsWithData, ...previousSiteScopeBySite.keys()]);
+
+  for (const siteId of allSiteIds) {
+    const contentHash = computeContentHash(canonicalSiteProjection(siteId, frozenDays, frozenPlannedShifts));
+    const previous = previousSiteScopeBySite.get(siteId);
+    const { status, carriedFromScopeId } = decideScopeCarryForward(previous, contentHash);
+    await tx.timesheetReviewScope.create({
+      data: { timesheetVersionId: version.id, scopeType: 'SITE', siteId, status, contentHash, carriedFromScopeId }
+    });
+  }
+
+  const previousNonSiteDataScope = lastVersion
+    ? await tx.timesheetReviewScope.findFirst({
+        where: { timesheetVersionId: lastVersion.id, scopeType: 'NON_SITE', scopePurpose: 'DATA' },
+        select: { id: true, status: true, contentHash: true }
+      })
+    : null;
+  const hasNonSiteData = nonSiteDataDays.length > 0;
+
+  if (hasNonSiteData || previousNonSiteDataScope) {
+    const contentHash = computeContentHash(canonicalNonSiteDataProjection(nonSiteDataDays));
+    const { status, carriedFromScopeId } = decideScopeCarryForward(previousNonSiteDataScope ?? undefined, contentHash);
+    const contextSiteId = await resolvePrimarySiteId(tx, employeeId);
+    await tx.timesheetReviewScope.create({
+      data: { timesheetVersionId: version.id, scopeType: 'NON_SITE', scopePurpose: 'DATA', contextSiteId, status, contentHash, carriedFromScopeId }
+    });
+  } else if (allSiteIds.size === 0) {
+    const contentHash = computeContentHash({ empty: true });
+    const contextSiteId = await resolvePrimarySiteId(tx, employeeId);
+    await tx.timesheetReviewScope.create({
+      data: { timesheetVersionId: version.id, scopeType: 'NON_SITE', scopePurpose: 'EMPTY_FALLBACK', contextSiteId, status: 'PENDING', contentHash }
+    });
+  }
+
+  // --- Clear draft content (container itself stays) and flip Timesheet status ---
+  await tx.timesheetDraftDay.deleteMany({ where: { draftId: draft.id } });
+  await tx.timesheetDraftPlannedShift.deleteMany({ where: { draftId: draft.id } });
+
+  await tx.timesheet.update({ where: { id: timesheetId }, data: { status: 'SUBMITTED', currentVersionId: version.id } });
+
+  await createAuditEvent(tx, {
+    actorUserId,
+    eventType: 'TIMESHEET_SUBMITTED',
+    entityType: 'TIMESHEET',
+    entityId: timesheetId,
+    requestId,
+    beforeValue: { status: previousStatus },
+    afterValue: { status: 'SUBMITTED', versionId: version.id, versionNumber }
+  });
+
+  // §9.5 "Разрешение LATE_SYNC_AFTER_SUBMIT" — structural resolution, not one of the six
+  // resolution-actions (§11): a fragment's exception resolves the moment it's actually frozen
+  // into a live WorkSegment of a new version. Only queried when this version actually froze at
+  // least one clock-origin segment — an ordinary manual submit with none never pays this extra
+  // lookup or needs the SYSTEM actor to exist at all.
+  if (frozenOriginFragmentIds.size > 0) {
+    const openLateSyncExceptions = await tx.attendanceException.findMany({
+      where: {
+        type: 'LATE_SYNC_AFTER_SUBMIT',
+        status: 'OPEN',
+        employeeId,
+        timesheetId,
+        payrollPeriodId: draft.timesheet.periodId
+      },
+      select: { id: true, clockShiftFragmentId: true }
+    });
+    const resolvableIds = openLateSyncExceptions
+      .filter((e) => e.clockShiftFragmentId !== null && frozenOriginFragmentIds.has(e.clockShiftFragmentId))
+      .map((e) => e.id);
+
+    if (resolvableIds.length > 0) {
+      // §13 — the reserved SYSTEM actor; ck_user_system_shape (CK-34) already guarantees this
+      // shape at the DB level when the row exists at all, but a submit that would otherwise
+      // silently resolve exceptions under a non-existent/malformed actor must never proceed —
+      // the whole submit transaction rolls back instead (stable identifier, matches the
+      // SYSTEM_SCHEDULER_USERNAME_OCCUPIED/SYSTEM_USER_NOT_ELIGIBLE convention elsewhere).
+      const systemActor = await tx.user.findFirst({
+        where: { userKind: 'SYSTEM', username: 'system.scheduler' },
+        select: { id: true, status: true, passwordHash: true, employeeId: true }
+      });
+      if (!systemActor || systemActor.status !== 'DEACTIVATED' || systemActor.passwordHash !== null || systemActor.employeeId !== null) {
+        throw new Error('SYSTEM_SCHEDULER_ACTOR_MISSING_OR_INVALID');
+      }
+      await tx.attendanceException.updateMany({
+        where: { id: { in: resolvableIds } },
+        data: { status: 'RESOLVED', resolvedByUserId: systemActor.id, resolvedAt: new Date(), resolutionNote: 'resolved by resubmission (Vn+1)' }
+      });
+    }
+  }
+
+  return { timesheetId, status: 'SUBMITTED', versionId: version.id, versionNumber };
+}
+
+/**
+ * Manual submit — thin wrapper (§9.6 "Ручной путь"). Opens the one transaction, takes
+ * `Employee` → `Timesheet` → `TimesheetDraft FOR UPDATE` in canonical order (§8.1), re-reads
+ * ownership/status under the lock (never trusts a pre-lock read for this decision), then hands
+ * off to `submitWorkerTimesheetCore` with `submissionSource=MANUAL`.
+ */
+export async function submitWorkerTimesheet(employeeId: string, timesheetId: string, actorUserId: string, requestId: string): Promise<SubmitResult | SubmitError> {
+  return prisma.$transaction(async (tx): Promise<SubmitResult | SubmitError> => {
+    await tx.$queryRaw`SELECT id FROM "Employee" WHERE id = ${employeeId}::uuid FOR UPDATE`;
+    await tx.$queryRaw`SELECT id FROM "Timesheet" WHERE id = ${timesheetId}::uuid FOR UPDATE`;
+
+    const fresh = await tx.timesheet.findUnique({ where: { id: timesheetId }, select: { employeeId: true, status: true } });
+    if (!fresh) {
+      return { code: 'NOT_FOUND' };
+    }
+    if (fresh.employeeId !== employeeId) {
+      return { code: 'FORBIDDEN' };
+    }
+    if (fresh.status !== 'DRAFT' && fresh.status !== 'RETURNED') {
+      return { code: 'INVALID_STATE_TRANSITION' };
+    }
+
+    await tx.$queryRaw`SELECT id FROM "TimesheetDraft" WHERE "timesheetId" = ${timesheetId}::uuid FOR UPDATE`;
+
+    return submitWorkerTimesheetCore(tx, employeeId, timesheetId, actorUserId, requestId, SubmissionSource.MANUAL);
+  });
 }
