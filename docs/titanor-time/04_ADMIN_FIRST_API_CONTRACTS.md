@@ -178,6 +178,68 @@ relevant query + canonical body)`.
 - Ошибки: `404`, `409 VERSION_CONFLICT`, `409 DUPLICATE_WORK_AREA_NAME`, `400 VALIDATION_ERROR`
 - Audit: `WORK_AREA_UPDATED`
 
+### 3.1 Геозона объекта (T7A.2, `T7A_1_ATTENDANCE_CLOCK_DESIGN.md` §12.1/§16 "Geofence admin" —
+реализовано) — `lib/geofences.ts`
+
+`WorkSiteGeofenceVersion` — immutable, append-only (`trg_geofence_version_immutable`, DB-уровень,
+не только соглашение API): `PATCH`/`DELETE` напрямую SQL отклонены триггером; редактирование
+геозоны всегда создаёт новую версию, `WorkSite.currentGeofenceVersionId` атомарно переключается на
+неё. `latitude`/`longitude` сериализуются как **decimal-строки** с ровно 6 знаками после точки
+(`numeric(8,6)`/`numeric(9,6)`, `"60.169900"`), никогда как bare JS number — не теряет точность,
+стабильно между запросами.
+
+#### `GET /api/admin/sites/:siteId/geofence-versions`
+- Permission: `attendance.geofence.read`
+- Query: `page` (default `1`), `pageSize` (default `20`, максимум `100`)
+- Response `200`:
+  ```jsonc
+  {
+    "siteId": "uuid",
+    "currentGeofenceVersionId": "uuid | null",
+    "current": { "id", "versionNumber", "latitude", "longitude", "radiusMeters", "createdByUserId", "createdByUsername", "createdAt" } | null,
+    "items": [ /* та же форма, versionNumber DESC (newest-first) */ ],
+    "page", "pageSize", "totalItems", "totalPages"
+  }
+  ```
+- `current=null`/`items=[]`, если геозона объекта ещё не настроена — не ошибка
+- Никогда не возвращает `ClockEventLocation`/сырые GPS-координаты сотрудников — только
+  собственную, фиксированную конфигурацию объекта
+- Ошибки: `401 NOT_AUTHENTICATED`, `403 FORBIDDEN`, `404 SITE_NOT_FOUND` (malformed и
+  несуществующий `siteId` дают идентичный ответ — без UUID-oracle)
+
+#### `POST /api/admin/sites/:siteId/geofence-versions`
+- Permission: `attendance.geofence.update`
+- CSRF: `X-Requested-With: titanor-time`
+- Idempotency: **обязателен** — `Idempotency-Key: <uuid>`, тот же шифрованный механизм, что
+  `POST /api/admin/workers` (`lib/idempotency.ts`); `requestHash` включает `siteId` (path param) +
+  canonical body — точный повтор того же `key`+`body` возвращает тот же `201`-ответ без новой
+  версии; тот же `key` с другим `siteId`/телом → `409 IDEMPOTENCY_KEY_REUSED`; конкурентный запрос
+  с тем же `key`, ещё не завершённый → `409 IDEMPOTENCY_KEY_IN_PROGRESS`
+- Request: `{ "latitude": number, "longitude": number, "radiusMeters": number }` — все поля
+  обязательны; неизвестные поля в теле не влияют на запись (включая попытку подсунуть
+  `currentGeofenceVersionId`)
+- Validation (`400 VALIDATION_ERROR`, `fieldErrors` по каждому полю независимо):
+  - `latitude`: конечное число, `-90..90`, **максимум 6 знаков после точки** — избыточная
+    точность отклоняется целиком (`round-trip` через `Math.round(v·1e6)/1e6`), никогда не
+    округляется молча;
+  - `longitude`: то же, `-180..180`;
+  - `radiusMeters`: целое число, `1..2000`
+- Транзакция (одна): `WorkSite SELECT ... FOR UPDATE` → под локом переподтвердить существование
+  (`404 SITE_NOT_FOUND` иначе) → вычислить следующий `versionNumber` из свежего состояния под
+  локом → `INSERT WorkSiteGeofenceVersion` → `UPDATE WorkSite.currentGeofenceVersionId` → `INSERT
+  AuditEvent` → `COMMIT`. Два конкурентных `POST` одного объекта сериализуются на локе объекта и
+  получают последовательные уникальные `versionNumber`; разные объекты не блокируют друг друга.
+  Существующие версии никогда не переписываются.
+- Response `201`: та же форма записи, что `current`/`items[]` выше, плюс
+  `"currentGeofenceVersionId"` (всегда равен `id` только что созданной версии)
+- Ошибки: `401 NOT_AUTHENTICATED`, `403 FORBIDDEN`, `403 CSRF_REJECTED`, `404 SITE_NOT_FOUND`,
+  `400 VALIDATION_ERROR`, `400` (`Idempotency-Key` отсутствует/не UUID), `409
+  IDEMPOTENCY_KEY_REUSED`, `409 IDEMPOTENCY_KEY_IN_PROGRESS`
+- Audit: `SITE_GEOFENCE_VERSION_CREATED`, `entityType WORK_SITE_GEOFENCE_VERSION`, `entityId` =
+  id новой версии; `beforeValue`/`afterValue` содержат только `siteId`/version id/versionNumber/
+  `radiusMeters` — **`latitude`/`longitude` никогда не попадают в `AuditEvent`**, координаты не
+  логируются через `console`/`error`/`debug` нигде в этом пути
+
 ## 4. Рабочие шаблоны
 
 `POST` создаёт `WorkScheduleTemplate`+версию 1; `PATCH` создаёт новую версию.

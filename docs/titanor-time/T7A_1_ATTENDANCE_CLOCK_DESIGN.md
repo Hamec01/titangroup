@@ -3855,6 +3855,15 @@ read-only проверка) — несовпадение → `409 ACTION_NOT_APP
 
 ### 12.1 Permission-строки
 
+**`[2026-08-13] T7A.2 — реализовано.`** `attendance.geofence.read`/`.update` (первые две строки
+таблицы ниже) — семена в `prisma/migrations/20260813000000_seed_attendance_geofence_permissions`,
+только `ADMIN`/`SUPER_ADMIN` (проверено прямым SQL-запросом `RolePermission`/`Permission`/`Role` на
+одноразовом PostgreSQL 16 — ровно 4 строки, `FOREMAN`/`WORKER` отсутствуют). Все остальные
+permission-строки в этой таблице (`attendance.clock.*`, `attendance.exception.*`,
+`attendance.gps.read.raw`, `attendance.conflict.read`, `attendance.policy.*`,
+`timesheet.draft.edit.exception`) остаются нереализованными — они принадлежат Check In/Check
+Out/exception review/policy-слайсам, не этому.
+
 | Permission | Держатели | Область |
 |---|---|---|
 | `attendance.geofence.read` | `ADMIN`, `SUPER_ADMIN` | |
@@ -3900,8 +3909,8 @@ POST /api/foreman/attendance/exceptions/:id/resolve
 GET/POST /api/admin/attendance/exceptions/:id/resolve
      body: { action: любое из шести, ...action-specific }
 
-GET  /api/admin/sites/:siteId/geofence-versions
-POST /api/admin/sites/:siteId/geofence-versions
+GET  /api/admin/sites/:siteId/geofence-versions   -- [2026-08-13] реализовано (T7A.2), lib/geofences.ts
+POST /api/admin/sites/:siteId/geofence-versions   -- [2026-08-13] реализовано (T7A.2), lib/geofences.ts
 GET  /api/admin/attendance/overview
 GET  /api/admin/attendance/conflicts           -- attendance.conflict.read
 GET/PATCH /api/admin/attendance/policy
@@ -4202,7 +4211,7 @@ Out, worker mobile UI, offline outbox/sync, materializer, scheduler и exception
 |---|---|---|
 | 1 | Schema foundation | **`[3.2.5]`** (issue 6) точный объём, синхронизирован с финальным блоком — стале «12 таблиц/7 триггеров/3 composite FK» исправлено: **13** новых таблиц (§2.1); **9** additive-колонок на 7 pre-T7A моделях (§2.2) **+ 6** additive-колонок на собственных таблицах T7A, накопленных 3.1→3.2.4 (`ClockShift.endAtProvisional`, `WorkerDeviceInstallation.lastProcessedSequence`, `CompanyAttendancePolicy.maxShiftDurationHours`, `AttendanceException.relatedClockShiftId`, `AttendanceException.overlapEndedAt`, `ClockShiftFragment.reportedProjectionState`) — 3.2.5 не добавляет колонок; **`[2026-08-12 owner correction]`** **16** composite FK всего, не 15 (см. «Финал — подтверждение» ниже для полного разбора исправления) — **12** на новых таблицах (`ClockEvent`×3, `ClockShiftFragment`×4, `ClockShiftAdjustment`×2, `ClockEventIdConflict`×1, `DeviceEventReceipt`×2; **+4** additive на pre-T7A моделях: `WorkSite`, `TimesheetDraftSegment`, `WorkSegment`, `CorrectionDraftSegment`); **14** отдельных `CREATE TRIGGER`-биндингов (§4.1) — стабильно с revision 3.1, ни один НЕ добавлялся впоследствии; 3.2/3.2.1/3.2.2/3.2.4/3.2.5 расширяли **тела** ДВУХ уже существующих функций (`fn_clock_shift_immutable()`, `fn_clock_shift_fragment_immutable()`), не создавали новых триггеров — расширение функции не считается новым trigger'ом (issue 6); singleton-seed `CompanyAttendancePolicy`, seed `SYSTEM`-пользователя. Тест: миграция на одноразовом PostgreSQL 16, статический+runtime аудит по паттерну `05_RAW_SQL_REGISTER.md`, включая позитивный/негативный тест `fn_clock_shift_fragment_coverage_check` и **`[3.2.5]`** прямой SQL-тест prerequisite для `reportedProjectionState` (issue 4, тесты #126–128). |
 | 2 | Locking-доработки существующего кода (§15) | Без новой схемы. Тест: поведение для единственного писателя не изменилось (регрессия существующих тестов submit/patch/return). |
-| 3 | Geofence admin | `GET/POST /api/admin/sites/:siteId/geofence-versions`, секция на `/admin/sites/[siteId]`. Тест: happy path, bounds `radiusMeters`, версионирование не переписывает старую. |
+| 3 | Geofence admin — **`[2026-08-13] реализовано (T7A.2).`** | `GET/POST /api/admin/sites/:siteId/geofence-versions` (`lib/geofences.ts`), секция `GeofenceSection` на `/admin/sites/[siteId]`. `attendance.geofence.read`/`.update` — новая additive DML-миграция `20260813000000_seed_attendance_geofence_permissions`, только `ADMIN`/`SUPER_ADMIN`. Проверено на одноразовом PostgreSQL 16, включая реальную two-connection concurrency (одна и та же геозона — последовательные versionNumber; разные объекты не блокируют друг друга) и immutable-триггер (`trg_geofence_version_immutable`, уже существовал с revision 3, только теперь реально упражняется приложением). Check In/Check Out, Haversine/GPS-оценка (§5), worker UI, offline sync, materializer/scheduler, exception review — этим слайсом НЕ реализованы. |
 | 4 | Online clock backend | `check-in`/`check-out`/`switch-site`/`clock-state`, §9.1-9.3. Тест: inside/outside/no-geofence, double check-in, checkout-without-open, хронологическая аномалия (§9.2), switch-site атомарность. |
 | 5 | Worker mobile UI | `/worker` mobile-first домашняя страница. Тест: Playwright — один тап Check In, таймер, Check Out, меню. |
 | 6 | Materialization | `materializeClockShift` (§9.4), включая `TimesheetDraftPlannedShift`-prerequisite и period-boundary split. Тест: идемпотентность повторного прохода, split на границе периода (два `TimesheetDraft` атомарно), coverage-триггер. |

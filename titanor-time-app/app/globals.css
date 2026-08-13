@@ -238,6 +238,12 @@ button:disabled {
   box-shadow: 0 14px 30px rgba(47, 94, 157, 0.35);
 }
 
+.field-error {
+  color: var(--error);
+  font-size: 0.8rem;
+  margin: 0;
+}
+
 .login-error {
   color: var(--error);
   font-size: 0.9rem;
@@ -373,6 +379,12 @@ button:disabled {
 
 .setup-label {
   flex: 1;
+}
+
+.setup-item-column {
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
 }
 
 .worker-card {

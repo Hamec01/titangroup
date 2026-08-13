@@ -98,6 +98,17 @@ permission с более чем одним держателем разной о�
 | `workarea.read.own` | `WORKER` | области активных `SiteAssignment` | — | нет | нет | — |
 | `workarea.update` | `ADMIN`, `SUPER_ADMIN` | в рамках объекта | — | нет | да | нет |
 
+**`[2026-08-13] реализовано (T7A.2, `T7A_1_ATTENDANCE_CLOCK_DESIGN.md` §12.1/§16 "Geofence
+admin").`** `attendance.geofence.read`/`.update` — засеяны миграцией
+`20260813000000_seed_attendance_geofence_permissions`, только `ADMIN`/`SUPER_ADMIN` (проверено
+прямым SQL-запросом на одноразовом PostgreSQL 16 — ровно 4 гранта, `FOREMAN`/`WORKER` не получают
+ни то ни другое). Не путать с `gps.read.*` (§2.11) — это про сырые координаты сотрудника при
+Check In/Out (нереализовано), геозона объекта — его собственная, фиксированная конфигурация
+центра/радиуса.
+
+| `attendance.geofence.read` | `ADMIN`, `SUPER_ADMIN` | геозона любого объекта | `GET /api/admin/sites/:siteId/geofence-versions` — текущая версия + история, latitude/longitude как decimal-строки | нет | нет | — |
+| `attendance.geofence.update` | `ADMIN`, `SUPER_ADMIN` | геозона любого объекта | `POST /api/admin/sites/:siteId/geofence-versions` — создаёт новую immutable `WorkSiteGeofenceVersion`, никогда не переписывает старую; обязательный `Idempotency-Key` | нет | да (`SITE_GEOFENCE_VERSION_CREATED`, без координат) | нет |
+
 ### 2.5 Назначения
 
 | Permission | Держатели | Область | Ограничения | Причина | Аудит | Массовое |
@@ -272,6 +283,7 @@ reactivate шаблона — нет утверждённого контракт
 | `/api/admin/sites/:siteId` | GET/PATCH | `site.read.all` / `site.update` |
 | `/api/admin/sites/:siteId/work-areas` | GET/POST | `workarea.read.all` / `workarea.create` |
 | `/api/admin/sites/:siteId/work-areas/:workAreaId` | PATCH | `workarea.update` |
+| `/api/admin/sites/:siteId/geofence-versions` | GET/POST | `attendance.geofence.read` / `attendance.geofence.update` |
 | `/api/admin/templates` | GET/POST | `template.read.all` / `template.create` |
 | `/api/admin/templates/:templateId` | GET/PATCH | `template.read.all` / `template.update` |
 | `/api/admin/setup-status` | GET | `worker.read.all` |

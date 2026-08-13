@@ -2,9 +2,11 @@ import { redirect } from 'next/navigation';
 import { resolveServerSession } from '@/lib/server-session';
 import { getSiteDetail } from '@/lib/sites';
 import { listAssignableForemen } from '@/lib/foreman-assignments';
+import { getGeofenceHistory } from '@/lib/geofences';
 import { SiteEditForm } from './SiteEditForm';
 import { WorkAreaSection } from './WorkAreaSection';
 import { ForemanAssignmentSection } from './ForemanAssignmentSection';
+import { GeofenceSection } from './GeofenceSection';
 
 export const dynamic = 'force-dynamic';
 
@@ -30,7 +32,7 @@ export default async function SiteDetailPage({ params }: { params: Promise<{ sit
   }
 
   const { siteId } = await params;
-  const [site, assignableForemen] = await Promise.all([getSiteDetail(siteId), listAssignableForemen()]);
+  const [site, assignableForemen, geofenceHistory] = await Promise.all([getSiteDetail(siteId), listAssignableForemen(), getGeofenceHistory(siteId, 1, 20)]);
 
   if (!site) {
     return (
@@ -44,6 +46,10 @@ export default async function SiteDetailPage({ params }: { params: Promise<{ sit
     );
   }
 
+  // getGeofenceHistory only returns null for a nonexistent site — site is already confirmed to
+  // exist above (WorkSite has no delete path), this fallback is purely defensive.
+  const geofence = geofenceHistory ?? { siteId: site.id, currentGeofenceVersionId: null, current: null, items: [], page: 1, pageSize: 20, totalItems: 0, totalPages: 0 };
+
   return (
     <main className="setup-page">
       <div className="setup-card worker-card">
@@ -56,6 +62,8 @@ export default async function SiteDetailPage({ params }: { params: Promise<{ sit
         <WorkAreaSection siteId={site.id} workAreas={site.workAreas} />
 
         <ForemanAssignmentSection siteId={site.id} foremanAssignments={site.foremanAssignments} assignableForemen={assignableForemen} />
+
+        <GeofenceSection siteId={site.id} history={geofence} />
 
         <h2>Active assignments</h2>
         {site.activeAssignments.length === 0 ? (

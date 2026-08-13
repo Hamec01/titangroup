@@ -1,6 +1,109 @@
 # Titanor Time — Implementation Status
 
-Обновлено: 2026-08-13 Europe/Helsinki (feat: preserve clock provenance through corrections)
+Обновлено: 2026-08-13 Europe/Helsinki (feat: add versioned site geofences)
+
+**T7A.2 — Geofence admin, НОВЫЙ этап, продолжение locking/provenance foundation (slice A+B).**
+Реализует `docs/titanor-time/T7A_1_ATTENDANCE_CLOCK_DESIGN.md` §2.1 п.1 (`WorkSiteGeofenceVersion`),
+§2.2 (`WorkSite.currentGeofenceVersionId`), §4.1 (immutable trigger, уже существовал в схеме с
+revision 3 — этот слайс впервые заставляет приложение реально его упражнять), §5.1 (bounds/default
+radius), §12.1/§12.3/§16 "Geofence admin": `GET/POST /api/admin/sites/:siteId/geofence-versions` +
+секция `GeofenceSection` на `/admin/sites/[siteId]`. Единственная новая migration —
+`20260813000000_seed_attendance_geofence_permissions` (чистый DML, seed permission/RolePermission,
+без изменения схемы) — `prisma/schema.prisma` и все ранее применённые migrations, включая
+`20260812000000_add_attendance_clock_schema_foundation`, не тронуты. Check In/Check Out,
+Haversine/GPS-оценка (§5.2-5.4), worker mobile UI, offline outbox/sync, materializer, scheduler,
+exception review — не реализованы, как и требовалось; карты/сторонний map SDK не подключены.
+
+**A. Permissions** — `attendance.geofence.read`/`attendance.geofence.update`, засеяны новой
+additive DML-миграцией, выданы только `ADMIN`/`SUPER_ADMIN` (проверено прямым SQL-запросом
+`RolePermission`/`Permission`/`Role` на одноразовом PostgreSQL 16 — ровно 4 гранта; `FOREMAN`/
+`WORKER`/`SYSTEM` не получают ни одной).
+
+**B. `lib/geofences.ts`** (новый модуль, tx-safe, без дублирования бизнес-логики в route) —
+`getGeofenceHistory(siteId, page, pageSize)`: `current` (текущая версия либо `null`) отдельно от
+`items` (пагинированная история, `versionNumber DESC`), `latitude`/`longitude` сериализованы как
+стабильные decimal-строки (`.toFixed(6)`), никогда сырые GPS-координаты сотрудников.
+`validateGeofenceInput` (чистая функция) — `latitude ∈ [-90,90]`, `longitude ∈ [-180,180]`,
+максимум 6 знаков после точки (round-trip проверка, `Math.round(v·1e6)/1e6 === v` — избыточная
+точность отклоняется, никогда не округляется молча), `radiusMeters` — целое `1..2000`, все поля
+обязательны. `createGeofenceVersion(siteId, actorUserId, requestId, input)` — одна транзакция:
+`WorkSite FOR UPDATE` → переподтвердить существование под локом (`SITE_NOT_FOUND` иначе) →
+следующий `versionNumber` из свежего состояния → `INSERT` новой (immutable) версии → `UPDATE
+WorkSite.currentGeofenceVersionId` → `AuditEvent(SITE_GEOFENCE_VERSION_CREATED)` без координат.
+
+**C. HTTP-контракт** (`app/api/admin/sites/[siteId]/geofence-versions/route.ts`) — `GET`: malformed
+и несуществующий `siteId` дают идентичный `404 SITE_NOT_FOUND` (no oracle, `UUID_PATTERN`-проверка
+до обращения к Prisma). `POST`: CSRF, обязательный `Idempotency-Key` (тот же шифрованный механизм,
+что `POST /api/admin/workers`, `requestHash` включает `siteId`+canonical body — точный повтор не
+создаёт новую версию, тот же `key` с другим site/телом → `409 IDEMPOTENCY_KEY_REUSED`), permission,
+затем `validateGeofenceInput`, затем `createGeofenceVersion` — успех `201` с созданной версией +
+`currentGeofenceVersionId`.
+
+**D. UI** (`GeofenceSection.tsx`, `app/admin/sites/[siteId]/page.tsx`) — данные загружаются
+server-side в `SiteDetailPage` (`Promise.all` вместе с `getSiteDetail`/`listAssignableForemen`, без
+N+1, без client-side `GET`); empty state "Geofence not configured"; текущая версия +
+краткая история newest-first; форма latitude/longitude/radiusMeters (`step="any"` — намеренно без
+native `min`/`max`/`step`-blocking, чтобы КАЖДОЕ значение доходило до серверной валидации и её
+`fieldErrors`, не до generic browser tooltip); default radius `150` для первой настройки,
+предзаполнение текущими значениями для последующей версии; явный текст «Saving creates a new,
+immutable geofence version»; `router.refresh()` после успеха; `fieldErrors`/`409`
+idempotency-ошибки отображаются понятно. Доступ ограничен тем же `ADMIN`/`SUPER_ADMIN`-гейтом
+страницы, что уже используют `WorkAreaSection`/`ForemanAssignmentSection`.
+
+Проверено на новом одноразовом PostgreSQL 16, **68/68 PASS, 0 FAIL** (DB-level, `lib/geofences.ts`
+напрямую) + отдельный живой HTTP-прогон (временный `next dev` на той же disposable БД) + браузерная
+(Playwright) UI-проверка:
+- **Permissions**: `ADMIN`/`SUPER_ADMIN` — оба permission; `FOREMAN`/`WORKER` — ни одного; `SYSTEM`
+  (ноль ролей) — ни одного; живые `401`/`403` через реальные HTTP-запросы.
+- **GET**: объект без геозоны → `current=null`, `items=[]`; после создания → `current` заполнен;
+  история newest-first; pagination (`page`/`pageSize`, дефолт 20/максимум 100); malformed и
+  несуществующий `siteId` → идентичный `404`; decimal precision стабильна между запросами.
+- **POST**: v1→`versionNumber=1`, v2→`versionNumber=2`, v1-строка не изменилась, `current`
+  переключился на v2; bounds latitude/longitude (`-90/90`, `-180/180`, включительно); radius `0`/
+  отрицательный/`>2000`/не целое отклонены, `1`/`2000` приняты (границы включительно); избыточная
+  точность (7-8 знаков) отклонена, не округлена; отсутствующие/`NaN`/`Infinity`/строковый мусор
+  отклонены с точными `fieldErrors`; malformed JSON → `400`; лишние поля в теле (включая попытку
+  подсунуть `currentGeofenceVersionId`) не влияют на запись; CSRF/permission/`Idempotency-Key`
+  required-и-невалидный — все через реальные HTTP-запросы; точный повтор (`key`+тело) не создаёт
+  новую версию — тот же `201`-ответ; тот же `key` с другим телом → `409 IDEMPOTENCY_KEY_REUSED`.
+- **Atomicity/concurrency (РЕАЛЬНАЯ, не последовательная симуляция)**: два конкурентных `POST`
+  одного объекта — `versionNumber` последовательны и уникальны (`[1,2]`), `current` указывает на
+  последнюю закоммиченную версию, ровно один `AuditEvent` на версию; подтверждено прямым запросом
+  `pg_stat_activity` — 2 конкурентно активных backend PID, исключая наблюдателя; разные объекты не
+  блокируют друг друга (оба завершаются быстро при конкурентном вызове); принудительная ошибка
+  между `INSERT` версии и `UPDATE current` откатывает всё — ни строки версии, ни `AuditEvent`, ни
+  изменения `currentGeofenceVersionId` не переживают откат.
+- **DB invariants**: прямой `UPDATE`/`DELETE` `WorkSiteGeofenceVersion` отклонён
+  `trg_geofence_version_immutable`; `currentGeofenceVersionId`, направленный на версию другого
+  объекта, отклонён composite FK; повторный `prisma migrate deploy` на чистой БД → `No pending
+  migrations` (49 миграций).
+- **UI (живой браузер, Playwright)**: empty state; первое создание с default radius 150; состояние
+  после `router.refresh()`; создание второй версии; история показывает обе, старые данные не
+  изменились; validation error state (excess precision) корректно показывает и field-level, и
+  общую ошибку — потребовало правки: native `min`/`max`/`step` на `<input type="number">`
+  блокировали отправку ДО достижения серверной валидации (browser-native tooltip вместо
+  `fieldErrors`), заменено на `step="any"` без `min`/`max`; console — без ошибок приложения (один
+  наблюдаемый `404` — `/favicon.ico`, пред-существующий пробел сайта, не связан с этим слайсом);
+  существующие Work areas/Foremen/Active assignments/Edit-секции той же страницы работают как
+  раньше, layout не сломан.
+- **Security**: `AuditEvent`/логи не содержат latitude/longitude; нет чтения `ClockEventLocation`/
+  сырых GPS сотрудников; `X-Request-Id` на каждом ответе; `404 SITE_NOT_FOUND` не превращается в
+  UUID-oracle (malformed/несуществующий — идентичный ответ).
+
+Технические проверки (все зелёные): `git diff --check`, `prisma validate` (схема не менялась),
+`npx tsc --noEmit`, `npm run build`, `docker compose -f compose.titanor-time.yaml build app`,
+повторный `prisma migrate deploy` на новом disposable Postgres 16 → `No pending migrations to
+apply` (49 миграций, ровно одна новая — чистый DML permission-seed). Docker image safety:
+production `titanor-time-app-1`/`titanor-time-db-1` подтверждены неизменными (тот же image ID/
+`StartedAt`/`RestartCount` до и после сборки) — read-only `docker inspect` только. Тестовый образ
+`titanor-time-app:latest` удалён после проверки. Disposable Postgres 16 контейнер и все scratch
+test/screenshot-скрипты удалены до/после использования — не часть финального diff'а.
+
+Production/Check In-Out/GPS-Haversine-оценка/worker mobile UI/offline sync/materializer/scheduler/
+exception-review/map SDK — не затронуты этой правкой, ни в каком виде. T7A.2 (Geofence admin)
+закрыт; Attendance Clock/T7A в целом — не реализован.
+
+---
 
 **T7A locking slice B — recorded-vs-reported provenance, `ClockShiftAdjustment` и overlap
 transitions, НОВЫЙ этап, продолжение slice A.** Реализует `docs/titanor-time/T7A_1_ATTENDANCE_

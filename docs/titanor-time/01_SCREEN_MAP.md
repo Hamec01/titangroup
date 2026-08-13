@@ -255,24 +255,31 @@ touch target ≥ 48px), `/foreman/*` — desktop-first с поддержкой �
 #### `/admin/sites/[siteId]` 🟢
 - Роли: `ADMIN`, `SUPER_ADMIN`
 - Приоритет: desktop
-- Назначение: карточка объекта — данные, рабочие области, назначенные работники/прорабы
+- Назначение: карточка объекта — данные, рабочие области, назначенные работники/прорабы, геозона
 - Данные: `WorkSite`, `WorkArea[]`, `SiteAssignment[]`, `ForemanAssignment[]`, список кандидатов на
-  роль прораба (`listAssignableForemen()`)
+  роль прораба (`listAssignableForemen()`), текущая версия геозоны + история версий
+  (`getGeofenceHistory()`, `GeofenceSection` — **[2026-08-13] реализовано (T7A.2)**)
 - Действия: редактировать, закрыть объект, добавить рабочую область; назначить прораба через
   `<select>` (username/имя+`employeeNumber`, **без** UUID в видимом тексте) — только `User` с
   текущей активной ролью `FOREMAN` (`validFrom <= now AND (validTo IS NULL OR validTo > now)`) и
   `status IN (PENDING_ACTIVATION, ACTIVE)`; `PENDING_ACTIVATION` разрешён с явной подсказкой, что
-  войти прораб сможет только после активации своего аккаунта
+  войти прораб сможет только после активации своего аккаунта; задать/пересоздать геозону
+  (latitude/longitude/radiusMeters) — каждое сохранение создаёт новую immutable версию, старые
+  версии не изменяются (**[2026-08-13] реализовано (T7A.2)**, требует `attendance.geofence.update`)
 - Состояния: loading; empty на вкладке «рабочие области»; empty selector («No eligible foremen
-  yet.» + ссылка на `/admin/users/new`, submit назначения недоступен); error
+  yet.» + ссылка на `/admin/users/new`, submit назначения недоступен); geofence not configured
+  (`current = null`); error; ошибки валидации геозоны — по полям (`fieldErrors`)
 - Откуда: `/admin/sites`
 - Куда: `/admin/sites/[siteId]/work-areas`, `/admin/assignments/new?siteId=`, `/admin/users/new`
   (из empty selector)
-- API: `GET/PATCH /api/admin/sites/:siteId`, `POST /api/admin/foreman-assignments`
+- API: `GET/PATCH /api/admin/sites/:siteId`, `POST /api/admin/foreman-assignments`,
+  `GET/POST /api/admin/sites/:siteId/geofence-versions` (**[2026-08-13] реализовано (T7A.2)**,
+  `attendance.geofence.read`/`attendance.geofence.update`)
 - DoD: закрытие объекта не удаляет существующие назначения; selector — только UX-фильтр, сервер
   повторно проверяет статус и текущую роль `FOREMAN` независимо от того, что показал selector
   (`409 FOREMAN_NOT_ELIGIBLE` для `OFFBOARDING`/`DEACTIVATED`, `409 USER_NOT_FOREMAN` для
-  отсутствующей/будущей/завершённой роли)
+  отсутствующей/будущей/завершённой роли); новая версия геозоны никогда не переписывает старую,
+  `WorkSite.currentGeofenceVersionId` переключается атомарно вместе с созданием версии
 
 #### `/admin/sites/[siteId]/work-areas` 🟢
 - Роли: `ADMIN`, `SUPER_ADMIN`
