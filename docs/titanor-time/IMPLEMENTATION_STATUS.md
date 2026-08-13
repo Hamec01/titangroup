@@ -1,8 +1,126 @@
 # Titanor Time — Implementation Status
 
-Обновлено: 2026-08-15 Europe/Helsinki (feat: add worker online clock UI)
+Обновлено: 2026-08-16 Europe/Helsinki (feat: add offline attendance sync backend)
 
-**T7A Worker Online Clock UI — новый завершённый frontend-слайс поверх online clock core +
+**T7A.7A Offline Attendance Sync Backend — новый завершённый backend-слайс поверх online clock
+core + materialization.** Реализует `docs/titanor-time/T7A_1_ATTENDANCE_CLOCK_DESIGN.md` §7 (batch
+contract), §9.11 (нормативный FIFO/`SAVEPOINT`-алгоритм — реализован дословно, не упрощён до «одна
+транзакция на событие» и не сведён к последовательному вызову online-эндпоинтов), §5.5 правила 4-5
+(offline effective-time), §12.1-12.2 (device bootstrap/context, sync permission). **IndexedDB/outbox
+клиент и интеграция `WorkerClockPanel` НЕ реализованы этим слайсом** — отдельная будущая задача
+T7A.7B.
+
+**Файлы**: новый `lib/attendance-sync.ts` (~950 строк) — device bootstrap (`GET context`) +
+batch ingestion (`POST sync`). Новые роуты `app/api/worker/attendance/context/route.ts`,
+`app/api/worker/attendance/sync/route.ts` (HTTP/auth/CSRF/idempotency/validation-mapping only, вся
+бизнес-логика в `lib/attendance-sync.ts`, тот же паттерн, что `lib/attendance-clock.ts`).
+**`lib/attendance-clock.ts` не переписан** — только `export` добавлен семи уже протестированным
+чистым/tx-safe helper'ам (`resolveTimesheetForInstant`, `resolveActiveSiteAssignment`,
+`canonicalizeForHash`, `loadCurrentGeofence`, `exceptionDetailForGps`, `validateGpsPayload`,
+`helsinkiCalendarDateAsUtcMidnight`) — ноль изменений поведения, подтверждено online-регрессией
+ниже. Haversine/overlap-детекция/материализация НЕ переизобретены: `evaluateGpsReading`,
+`overlapCandidates`/`overlapExists`/`resolveOverlapTransition`, `materializeClockShiftCore`
+переиспользованы как есть, инлайн, в том же `SAVEPOINT`, что и остальные business-эффекты события
+— не отдельная/вложенная транзакция.
+
+**Migration**: `20260815000000_seed_attendance_clock_sync_permission` — чистый DML, сеет ровно один
+permission (`attendance.clock.sync.own`) и один grant (`WORKER`), без `ALTER`/`CREATE`/`DROP`; `GET
+context` переиспользует уже существующий `attendance.clock.read.own`, новый grant не потребовался.
+Schema/enums/triggers/constraints не менялись — все 13 таблиц/16 composite FK/14 триггеров T7A уже
+существовали с `20260812000000_add_attendance_clock_schema_foundation`.
+
+**Архитектура ingestion** (§9.11, `performSync`): одна outer-транзакция (`prisma.$transaction`) на
+весь батч — `Employee FOR UPDATE` → `WorkerDeviceInstallation FOR UPDATE` (canonical order, только
+когда `deviceInstallationId` есть) → ownership/revocation once per request (не per-event) → Проход
+A (строго последовательный, `current+1`; группы switch-site детектируются как соседние элементы с
+общим `groupId`; `INVALID`/`INCOMPLETE`/`SEQUENCE_GAP` — те самые узкие семантики §9.11, не
+объединены в один код) → Проход B (stale/replay, никогда не продвигает `current`, никогда не
+повторяет business-эффект). Один `SAVEPOINT event_sp` на независимое событие, один `SAVEPOINT
+group_sp` на целую switch-site группу — `RELEASE` после принятого результата, `ROLLBACK TO
+SAVEPOINT` только для ожидаемой terminal business-ошибки (§9.11 доказательство 1: `RELEASE`-эффекты
+Прохода A необратимы более поздним `ROLLBACK TO SAVEPOINT`). Bounded retry всей outer-транзакции —
+только `SQLSTATE 40P01`/`40001`, максимум 3 попытки, exponential backoff, `503
+INGESTION_RETRY_EXHAUSTED` после исчерпания; неожиданная внутренняя ошибка НЕ превращается в
+terminal receipt — пробрасывается наружу, весь batch attempt откатывается (§9.11 доказательство 2).
+`ClockEvent` вставляется через `createMany({skipDuplicates:true})` (`ON CONFLICT (id) DO NOTHING`
+без исключения, не поражает окружающий `SAVEPOINT` — критично для продолжения обработки в том же
+event_sp после конфликта).
+
+**Классификация исходов** — точная матрица §9.11: `ACCEPTED_NORMAL`/`ACCEPTED_NEEDS_REVIEW` (оба —
+`DeviceEventReceipt.outcome=ACCEPTED`, различаются только `ClockEvent.processingState`;
+`DOUBLE_CHECK_IN`/`CHECKOUT_WITHOUT_OPEN_SHIFT` — не отказы, raw-факт сохранён);
+`REJECTED_TERMINAL_WITHOUT_CLOCK_EVENT` (`VALIDATION_ERROR`/`OUTSIDE_GEOFENCE`(только Check In)/
+`CLIENT_EVENT_ID_REUSED`/`SWITCH_SITE_GROUP_FAILED`/`SWITCH_SITE_GROUP_INVALID`); `RETRYABLE`
+(`SEQUENCE_GAP`/`SWITCH_SITE_GROUP_INCOMPLETE`/`FIFO_LEDGER_INCONSISTENT`/`INGESTION_RETRY_EXHAUSTED`
+— нет receipt в этой попытке, high-water не продвинут). `GEOFENCE_VERSION_MISMATCH` (новый
+реально-создаваемый exception type — раньше нигде не создавался): сравнение
+`event.cachedGeofenceVersionId` (request-only, нигде не хранится) с сайтовым текущим
+`geofenceVersionId`, никогда не заменяет живую §5.2-оценку.
+
+**Тесты, реально выполненные на одноразовом PostgreSQL 16** (контейнер `postgres:16`, `--rm`, tmpfs,
+случайные credentials/порт, удалён по завершении):
+- Static: `git diff --check`, `prisma validate`, `prisma generate`, `tsc --noEmit`, `npm run build`
+  — все зелёные (включая `/worker`, `/api/worker/attendance/context`, `/api/worker/attendance/sync`
+  в build-выводе). `docker compose -f compose.titanor-time.yaml build app` — успешный build
+  (мандаторный тест); повторный `prisma migrate deploy` — "No pending migrations to apply" (51
+  миграций — было 50, плюс ровно одна новая DML-миграция этого слайса).
+- HTTP/DB (65/65 PASS, прямые вызовы route-функций): permission (1-2), device bootstrap/context
+  (3-7), FIFO (8-18, включая реальную двух-backend-PID конкуренцию одного устройства и независимость
+  разных устройств), replay/conflict (19-25, включая искусственно смоделированный
+  `FIFO_LEDGER_INCONSISTENT` — receipt неизменяем, DELETE физически заблокирован триггером, поэтому
+  ledger-порча смоделирована прямым UPDATE `lastProcessedSequence`, не удалением receipt), business
+  (26-39: inside/outside/no-GPS Check In, double Check In, normal/orphan Check Out, site mismatch,
+  chronology anomaly, offline time rules ≤7/>7 дней, `GEOFENCE_VERSION_MISMATCH`, overlap gate,
+  inline materialization, late-sync reopen в `SUBMITTED`/`FINAL_APPROVED` — regression уже
+  протестированного materializer'а, достигнутого через НОВЫЙ offline-путь), groups (40-50: valid
+  switch atomic accept, failed CHECK_IN откатывает уже применённый CHECK_OUT, incomplete/invalid
+  варианты по каждому правилу §9.11 отдельно, exact replay accepted/rejected group, конкурентные
+  противоположные group-попытки без half-applied состояния), HTTP (51-60: 401/403/
+  NO_EMPLOYEE_PROFILE/CSRF/malformed JSON/invalid UUID·sequence·precision/empty·oversized batch/
+  Idempotency-Key replay·conflict/always-200-structurally-valid/реальный cross-employee
+  `40P01`-deadlock с bounded retry), DB invariants/security (61-65: `DeviceEventReceipt` immutable,
+  composite FK не даёт сослаться на чужой `ClockEvent`, duplicate device sequence блокируется
+  constraint'ом напрямую, raw координаты только в `ClockEventLocation`, ноль координат в
+  просканированных `AuditEvent`/`ClockEventIdConflict`).
+- Regression (все зелёные, отдельные прогоны): online clock core (check-in/check-out/switch-site/
+  clock-state — 6/6 напрямую через route-функции, включая exact-replay и outside-geofence, контракт
+  не изменился); `scripts/_test-activation.ts`; `scripts/_test-corrections.ts`; geofence admin API
+  (`GET geofence-versions`); worker timesheet listing (`GET /api/worker/timesheets`) — все на
+  отдельных чистых disposable PostgreSQL 16, не переиспользующих основную тестовую БД.
+- Найден и исправлен один реальный баг при построении тестов: `EXCESSIVE_CLOCK_SKEW`
+  `AttendanceException` не создавался в НОРМАЛЬНОЙ (не orphan) ветке offline Check Out —
+  присутствовал в offline Check In и orphan Check Out, отсутствовал в обычном закрытии смены.
+  Исправлено в `lib/attendance-sync.ts` до коммита, покрыто тестом 34b.
+- Не выполнено эмпирически (заявлено честно, не выдаётся за пройденное): детерминированное
+  3-попыточное исчерпание retry (`503`) — реальный `40P01` был воспроизведён (cross-employee
+  reciprocal `clientEventId` collision, тест 60) и подтверждает, что bounded retry работает и
+  ошибка не становится необработанным `500`, но гарантированно проиграть ВСЕ 3 попытки одного
+  конкретного вызова без выделенных fault-injection хуков (которые этот слайс сознательно не
+  добавляет) — вероятностно, не воспроизведено детерминированно; путь `503
+  INGESTION_RETRY_EXHAUSTED` подтверждён прямым код-ревью `performSync`. `40001`
+  (`serialization_failure`) обрабатывается тем же кодовым путём, что `40P01`, но физически не
+  достижим при текущей `READ COMMITTED` + `FOR UPDATE`-дисциплине без явного перехода на
+  `SERIALIZABLE` — design не требует такого перехода (доказательство §8.3 построено на
+  `FOR UPDATE`-порядке), поэтому изоляция не менялась; код для `40001` — forward-совместимая защита,
+  не независимо протестированный путь.
+
+**Production**: `titanor-time-app-1`/`titanor-time-db-1` — только read-only `docker inspect` до и
+после; `RestartCount=0`, `StartedAt` и image ID контейнеров не изменились, `/api/health` отвечает
+`200`. Мандаторный `docker compose build app` (без `up`) снова перевесил локальный тег
+`titanor-time-app:latest` на новый build-артефакт (тот же, уже задокументированный, побочный эффект
+обычной семантики Docker-тегов — не затрагивает работающий контейнер, который ссылается на образ по
+ID, не по тегу).
+
+**Остаётся вне этого слайса** (явно, по границам задачи): IndexedDB/outbox клиент,
+`WorkerClockPanel`-интеграция с offline-путём (T7A.7B), `GET /attendance/today|week`,
+scheduler/auto-submit, exception-review UI/API, admin attendance overview. Schema/migrations (кроме
+одной additive DML)/permissions (кроме одной новой строки)/online route surface не изменены —
+подтверждено: 51 миграция до и после (было 50), `lib/attendance-clock.ts` изменён только семью
+`export`-добавлениями, все четыре online route-файла не тронуты.
+
+---
+
+**T7A Worker Online Clock UI — предыдущий завершённый frontend-слайс поверх online clock core +
 materialization.** Реализует `docs/titanor-time/T7A_1_ATTENDANCE_CLOCK_DESIGN.md` decomposition п.5
 (`01_SCREEN_MAP.md` §3 `/worker`) — mobile-first `/worker` как основной экран после логина работника,
 строго online (offline outbox/§6 IndexedDB-протокол намеренно не реализован этим слайсом).

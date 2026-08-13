@@ -170,12 +170,13 @@ function roundTripDecimal(value: number, scaleFactor: number): boolean {
   return Math.round(value * scaleFactor) / scaleFactor === value;
 }
 
-function helsinkiCalendarDateAsUtcMidnight(instant: Date): Date {
+/** Exported for reuse by lib/attendance-sync.ts (§9.11 offline ingestion resolves timesheets/assignments the same way online does) — no behavior change. */
+export function helsinkiCalendarDateAsUtcMidnight(instant: Date): Date {
   const dateStr = new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Helsinki' }).format(instant);
   return new Date(`${dateStr}T00:00:00.000Z`);
 }
 
-async function resolveTimesheetForInstant(tx: Prisma.TransactionClient, employeeId: string, instant: Date): Promise<{ timesheetId: string | null; payrollPeriodId: string | null }> {
+export async function resolveTimesheetForInstant(tx: Prisma.TransactionClient, employeeId: string, instant: Date): Promise<{ timesheetId: string | null; payrollPeriodId: string | null }> {
   const date = helsinkiCalendarDateAsUtcMidnight(instant);
   const timesheet = await tx.timesheet.findFirst({
     where: { employeeId, period: { startDate: { lte: date }, endDate: { gte: date } } },
@@ -184,7 +185,7 @@ async function resolveTimesheetForInstant(tx: Prisma.TransactionClient, employee
   return timesheet ? { timesheetId: timesheet.id, payrollPeriodId: timesheet.periodId } : { timesheetId: null, payrollPeriodId: null };
 }
 
-async function resolveActiveSiteAssignment(tx: Prisma.TransactionClient, employeeId: string, siteId: string, workAreaId: string | null, instant: Date): Promise<string | null> {
+export async function resolveActiveSiteAssignment(tx: Prisma.TransactionClient, employeeId: string, siteId: string, workAreaId: string | null, instant: Date): Promise<string | null> {
   const date = helsinkiCalendarDateAsUtcMidnight(instant);
   const assignment = await tx.siteAssignment.findFirst({
     where: { employeeId, siteId, workAreaId, validFrom: { lte: date }, OR: [{ validTo: null }, { validTo: { gte: date } }] },
@@ -201,7 +202,8 @@ export type ValidationResult<T> = { ok: true; value: T } | { ok: false; fieldErr
 
 const CLIENT_GPS_UNAVAILABLE_REASONS = new Set<string>(['PERMISSION_DENIED', 'TIMEOUT', 'POSITION_UNAVAILABLE']);
 
-function validateGpsPayload(rawLocation: unknown, rawReason: unknown, locationField: string, reasonField: string): ValidationResult<ClockGpsReading> {
+/** Exported for reuse by lib/attendance-sync.ts — identical GPS shape/bounds/precision rules apply to offline events (§14), no independent reimplementation. */
+export function validateGpsPayload(rawLocation: unknown, rawReason: unknown, locationField: string, reasonField: string): ValidationResult<ClockGpsReading> {
   const fieldErrors: Record<string, string[]> = {};
 
   if (rawLocation === undefined) {
@@ -421,7 +423,8 @@ export function validateSwitchSiteBody(raw: Record<string, unknown>): Validation
 // appear anywhere else outside ClockEventLocation (§4.3).
 // ---------------------------------------------------------------------------------------------
 
-function canonicalizeForHash(value: unknown): string {
+/** Exported for reuse by lib/attendance-sync.ts's own offline payload hash (different input shape — deviceInstallationId/deviceSequence — so not the same EventHashInput, but the canonicalization primitive itself must not be reimplemented). */
+export function canonicalizeForHash(value: unknown): string {
   if (Array.isArray(value)) {
     return `[${value.map(canonicalizeForHash).join(',')}]`;
   }
@@ -618,7 +621,8 @@ export async function getClockState(employeeId: string): Promise<ClockStateView>
 class OutsideGeofenceSignal extends Error {}
 class NoOpenShiftToSwitchSignal extends Error {}
 
-async function loadCurrentGeofence(tx: Prisma.TransactionClient, siteId: string): Promise<ClockGeofence | null> {
+/** Exported for reuse by lib/attendance-sync.ts — offline events must be evaluated against the site's CURRENT geofence, never a client-cached one (§14/§12 security); no independent Haversine/geofence-lookup reimplementation. */
+export async function loadCurrentGeofence(tx: Prisma.TransactionClient, siteId: string): Promise<ClockGeofence | null> {
   const site = await tx.workSite.findUnique({ where: { id: siteId }, select: { currentGeofenceVersionId: true } });
   if (!site?.currentGeofenceVersionId) {
     return null;
@@ -633,7 +637,7 @@ async function loadCurrentGeofence(tx: Prisma.TransactionClient, siteId: string)
   return { geofenceVersionId: version.id, latitude: Number(version.latitude), longitude: Number(version.longitude), radiusMeters: version.radiusMeters };
 }
 
-function exceptionDetailForGps(evaluation: GpsEvaluation, geofence: ClockGeofence | null): Prisma.InputJsonValue | undefined {
+export function exceptionDetailForGps(evaluation: GpsEvaluation, geofence: ClockGeofence | null): Prisma.InputJsonValue | undefined {
   if (evaluation.gpsVerification === 'VERIFIED_OUTSIDE' && geofence && evaluation.distanceMeters !== null) {
     return { distanceMeters: Math.round(evaluation.distanceMeters), accuracyMeters: evaluation.gpsAccuracyMeters, thresholdMeters: geofence.radiusMeters };
   }

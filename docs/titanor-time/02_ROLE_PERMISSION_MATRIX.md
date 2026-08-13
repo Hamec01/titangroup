@@ -115,8 +115,9 @@ Check In/Out (нереализовано), геозона объекта — е�
 Засеяны миграцией `20260814000000_seed_attendance_clock_worker_permissions`, только `WORKER`
 (проверено прямым SQL-запросом на одноразовом PostgreSQL 16 — ровно 4 гранта; `ADMIN`/
 `SUPER_ADMIN`/`FOREMAN` не получают ни одного; `SYSTEM` структурно не может иметь ролей).
-`materializeClockShift` (проекция в `ClockShiftFragment`/`TimesheetDraftSegment`) этим слайсом не
-вызывается — см. §16 п.4 design-документа для полного разбора границы.
+**`[2026-08-16]`** `materializeClockShiftCore` теперь вызывается инлайн и для offline-checkout
+(`attendance.clock.sync.own` ниже), тем же кодом, что online check-out/switch-site — не отдельная
+реализация.
 
 | Permission | Держатели | Область | Ограничения | Причина | Аудит | Массовое |
 |---|---|---|---|---|---|---|
@@ -124,6 +125,7 @@ Check In/Out (нереализовано), геозона объекта — е�
 | `attendance.clock.checkin.own` | `WORKER` | собственная смена | `POST /api/worker/attendance/check-in` — `employeeId` только из сессии; GPS `VERIFIED_OUTSIDE` откатывает запрос целиком (`403 OUTSIDE_GEOFENCE`); повторная открытая смена → новый `ClockEvent(NEEDS_REVIEW)`, `DOUBLE_CHECK_IN`, старая смена не трогается | нет | да (`CLOCK_CHECK_IN`/`CLOCK_CHECK_IN_REJECTED_DOUBLE`, без координат) | нет |
 | `attendance.clock.checkout.own` | `WORKER` | собственная смена | `POST /api/worker/attendance/check-out` — никогда не блокируется по GPS/сайту; авторитетные site/workArea/sourceAssignmentId только из `EmployeeOpenShift`, не из тела запроса; хронологическая аномалия — clamp `+1ms`, не откат | нет | да (`CLOCK_CHECK_OUT`/`CLOCK_CHECK_OUT_ORPHAN`, без координат) | нет |
 | `attendance.clock.switch_site.own` | `WORKER` | собственная смена | `POST /api/worker/attendance/switch-site` — один HTTP-запрос/одна транзакция; `VERIFIED_OUTSIDE` нового сайта откатывает ОБЕ половины; нет открытой смены → `409 NO_OPEN_SHIFT_TO_SWITCH` | нет | да (общий с check-in/check-out — обе половины) | нет |
+| `attendance.clock.sync.own` | `WORKER` | собственные offline-события | **`[2026-08-16] реализовано`** — `POST /api/worker/attendance/sync` — `GET /api/worker/attendance/context` переиспользует `attendance.clock.read.own` вместо нового granta; §9.11 FIFO/`SAVEPOINT`-модель, bounded batch (100), bounded retry на `40P01`/`40001` → `503`; засеяна миграцией `20260815000000_seed_attendance_clock_sync_permission`, только `WORKER` (проверено прямым SQL — ровно 1 грант) | нет | да (общий с check-in/check-out + новые `SWITCH_SITE_GROUP_FAILED`/`SWITCH_SITE_GROUP_INVALID`/`FIFO_LEDGER_INCONSISTENT`, `actorUserId=NULL`, без координат) | нет |
 
 ### 2.5 Назначения
 
@@ -337,6 +339,8 @@ reactivate шаблона — нет утверждённого контракт
 | `/api/worker/attendance/check-in` | POST | `attendance.clock.checkin.own` — **`[2026-08-14] реализовано`** |
 | `/api/worker/attendance/check-out` | POST | `attendance.clock.checkout.own` — **`[2026-08-14] реализовано`** |
 | `/api/worker/attendance/switch-site` | POST | `attendance.clock.switch_site.own` — **`[2026-08-14] реализовано`** |
+| `/api/worker/attendance/context` | GET | `attendance.clock.read.own` (переиспользован) — **`[2026-08-16] реализовано`** |
+| `/api/worker/attendance/sync` | POST | `attendance.clock.sync.own` — **`[2026-08-16] реализовано`** |
 
 Эндпоинты домена `absence.*` (§2.3) **не входят в первый вертикальный срез** — permission-контракт
 определён полностью, но route/API contracts для создания/одобрения отсутствий спроектированы позже

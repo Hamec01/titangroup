@@ -775,9 +775,10 @@ Actionable = `PayrollPeriodParticipant.expected=true` + `PayrollPeriod.status=OP
 и без OPEN overlap вызывает `materializeClockShiftCore` инлайн в той же транзакции; иначе shift
 остаётся `PENDING` для внутреннего catch-up. **`[2026-08-15]`** Worker mobile UI (`/worker`,
 `app/worker/page.tsx` + `WorkerClockPanel.tsx`) реализован поверх этих же четырёх эндпоинтов без их
-изменения. По-прежнему отложены: `deviceInstallationId`/`deviceSequence`/`DeviceEventReceipt`-FIFO,
-`POST /attendance/sync`, offline outbox, `GET /attendance/context|today|week`,
-scheduler, exception-review-эндпоинты, admin attendance overview.
+изменения. **`[2026-08-16]`** `GET /attendance/context` и `POST /attendance/sync` теперь тоже
+реализованы (§9.1a ниже) — по-прежнему отложены: IndexedDB/outbox клиент,
+`WorkerClockPanel`-интеграция с offline-путём, `GET /attendance/today|week`, scheduler,
+exception-review-эндпоинты, admin attendance overview.
 
 **GPS shape** (переиспользуется всеми телами ниже):
 ```json
@@ -903,6 +904,102 @@ scheduler, exception-review-эндпоинты, admin attendance overview.
   `NO_EMPLOYEE_PROFILE`, `403 OUTSIDE_GEOFENCE`, `404 SITE_NOT_FOUND`, `409
   NO_OPEN_SHIFT_TO_SWITCH`, `409 CLIENT_EVENT_ID_REUSED`, `429 RATE_LIMITED`
 - Audit: общий с check-in/check-out, для обеих половин
+
+### 9.1a Offline attendance sync (T7A.7A, `T7A_1_ATTENDANCE_CLOCK_DESIGN.md` §7/§9.11 —
+**реализовано**) — `lib/attendance-sync.ts`
+
+#### `GET /api/worker/attendance/context`
+- Permission: `attendance.clock.read.own` (переиспользован, новый grant не потребовался)
+- Query: `deviceInstallationId` (обязательный UUID, client-generated), `platform` (опционально,
+  максимум 32 символа). `userAgent` берётся ТОЛЬКО из HTTP-заголовка `User-Agent`, никогда из
+  query/body.
+- Bootstrap-семантика: новый `deviceInstallationId` → создаётся `WorkerDeviceInstallation` этого
+  employee; тот же id, тот же employee → обновляются только `lastSeenAt`/`platform`/`userAgent`
+  (никогда `lastProcessedSequence`); тот же id, **другой** employee → `403 DEVICE_NOT_OWNED` (тот
+  же код, что и "не существует" — без oracle владельца); `revokedAt IS NOT NULL` → `403
+  DEVICE_REVOKED`. Конкурентный первый bootstrap одного id создаёт ровно одну строку
+  (`createMany`+`skipDuplicates`, тот же примитив, что использует `POST /sync` для `ClockEvent`).
+- Response `200`:
+```json
+{
+  "serverNow": "ISO", "deviceInstallationId": "uuid",
+  "lastProcessedSequence": "0",
+  "assignments": [
+    { "id": "uuid", "siteId": "uuid", "siteName": "...", "workAreaId": "uuid|null",
+      "workAreaName": "string|null", "isPrimary": boolean,
+      "geofence": { "geofenceVersionId": "uuid", "latitude": "60.170000", "longitude": "24.940000",
+        "radiusMeters": 100 } | null }
+  ]
+}
+```
+`lastProcessedSequence` — decimal-строка (`BigInt`), никогда голое JS-число. `geofence` — ТОЛЬКО
+текущая версия сайта (`WorkSite.currentGeofenceVersionId`), исторические версии никогда не
+отдаются. Ответ никогда не содержит raw GPS сотрудника (этот endpoint вообще не читает
+`ClockEventLocation`).
+- Ошибки: `401 NOT_AUTHENTICATED`, `403 FORBIDDEN`/`NO_EMPLOYEE_PROFILE`/`DEVICE_NOT_OWNED`/
+  `DEVICE_REVOKED`, `400 VALIDATION_ERROR` (malformed `deviceInstallationId`/`platform`)
+
+#### `POST /api/worker/attendance/sync`
+- Permission: `attendance.clock.sync.own` (новая, только `WORKER`); CSRF `X-Requested-With:
+  titanor-time` обязателен; `Idempotency-Key` опционален (кеширует весь HTTP-ответ на точный
+  повтор, существующий механизм `lib/idempotency.ts`); rate limit `20/60s` per `actorUserId`+route
+- Bounded batch size: **100 событий** — явное, задокументированное ограничение (task §C); пустой
+  `events[]` отклоняется.
+- `deviceSequence` wire-контракт: обычное JSON-число, обязано быть положительным safe integer
+  (`1..Number.MAX_SAFE_INTEGER`) — design-документ сам приводит пример `"deviceSequence": 42` как
+  голое число; `BigInt` используется внутри с момента валидации, арифметика никогда не через
+  `Number`.
+- Request:
+```json
+{
+  "deviceInstallationId": "uuid",
+  "events": [
+    { "clientEventId": "uuid", "deviceSequence": 42, "groupId": "uuid|null",
+      "operationType": "CHECK_IN|CHECK_OUT", "siteId": "uuid", "assumedSiteId": "uuid|null",
+      "workAreaId": "uuid|null", "clientCapturedAt": "ISO", "capturedOffline": true,
+      "cachedGeofenceVersionId": "uuid|null", "gps": {...}|null, "gpsUnavailableReason": "..."|null }
+  ]
+}
+```
+`assumedSiteId`: `CHECK_IN` → обязан быть `null`; `CHECK_OUT` → обязательный UUID (используется
+только для detection, авторитетный сайт всегда из `EmployeeOpenShift`, §14). `siteId` присутствует
+и валидируется как UUID для обоих типов (симметрия wire-формата с `CHECK_IN`), но для `CHECK_OUT`
+функционально не используется — тот же принцип, что online `CheckOutInput` вообще не имеет этого
+поля.
+- Обработка — **буквально** §9.11 (не «одна транзакция на событие», не последовательный вызов
+  online-эндпоинтов): одна outer-транзакция на весь батч; `clientEventId`/`deviceSequence`/
+  `groupId`/`operationType` — структурные поля (невалидность любого из них отклоняет ВЕСЬ батч,
+  `400`); остальные поля — «business»-уровень (невалидность даёт `REJECTED`/`VALIDATION_ERROR` для
+  ОДНОГО события, батч остаётся `200`). Structurally valid batch → **всегда `200`**, исход каждого
+  события в `results[]`.
+- Response `200`:
+```json
+{
+  "results": [
+    { "clientEventId": "uuid", "outcome": "ACCEPTED", "processingState": "ACCEPTED"|"NEEDS_REVIEW", "exceptionType": "string"|undefined },
+    { "clientEventId": "uuid", "outcome": "DUPLICATE_ACK", "processingState": "..." },
+    { "clientEventId": "uuid", "outcome": "REJECTED", "code": "VALIDATION_ERROR"|"OUTSIDE_GEOFENCE"|"CLIENT_EVENT_ID_REUSED"|"DEVICE_SEQUENCE_REUSED"|"SWITCH_SITE_GROUP_FAILED"|"SWITCH_SITE_GROUP_INVALID", "groupId": "uuid"|undefined },
+    { "clientEventId": "uuid", "outcome": "RETRYABLE", "code": "SEQUENCE_GAP"|"SWITCH_SITE_GROUP_INCOMPLETE"|"FIFO_LEDGER_INCONSISTENT", "groupId": "uuid"|undefined }
+  ]
+}
+```
+- Ошибки: `400 VALIDATION_ERROR` (malformed JSON, malformed batch shape, пустой/oversized `events`,
+  невалидные структурные поля события), `401 NOT_AUTHENTICATED`, `403 FORBIDDEN`/`CSRF_REJECTED`/
+  `NO_EMPLOYEE_PROFILE`/`DEVICE_NOT_OWNED`/`DEVICE_REVOKED`, `409 IDEMPOTENCY_KEY_REUSED`/
+  `IDEMPOTENCY_KEY_IN_PROGRESS` (только если `Idempotency-Key` использован), `429 RATE_LIMITED`,
+  `503 INGESTION_RETRY_EXHAUSTED` (bounded retry на `40P01`/`40001` исчерпан, **не** для
+  произвольной внутренней ошибки — неожиданная ошибка остаётся необработанным `500`, весь batch
+  attempt откатывается целиком)
+- Audit: `CLOCK_CHECK_IN`/`CLOCK_CHECK_IN_REJECTED_DOUBLE`/`CLOCK_CHECK_OUT`/
+  `CLOCK_CHECK_OUT_ORPHAN` (общие с online, `channel=OFFLINE_SYNC` в `ClockEvent`), плюс новые
+  `SWITCH_SITE_GROUP_FAILED`/`SWITCH_SITE_GROUP_INVALID`/`FIFO_LEDGER_INCONSISTENT`
+  (`actorUserId=NULL`, санитизировано, без координат/raw payload) — все точно по §9.11.
+- **Безопасность**: `employeeId` только из сессии; `deviceInstallationId` — один на весь запрос
+  (не per-event), владение/revocation проверяются один раз под `WorkerDeviceInstallation FOR
+  UPDATE`, до Прохода A; `cachedGeofenceVersionId` никогда не становится authoritative (только
+  сравнение для `GEOFENCE_VERSION_MISMATCH`, живая GPS-оценка — всегда против текущей
+  `WorkSite.currentGeofenceVersionId`); координаты — только в `ClockEventLocation`, никогда в
+  `AuditEvent`/`ClockEventIdConflict.sanitizedConflictingPayload`/HTTP-ошибках/логах.
 
 ## 10. Служебный агрегатор
 

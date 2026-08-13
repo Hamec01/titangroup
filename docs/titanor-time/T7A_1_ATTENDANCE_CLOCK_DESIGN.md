@@ -3895,13 +3895,16 @@ catch-up service реализованы в `lib/attendance-materializer.ts`; Che
 ### 12.2 Endpoints — Worker
 
 ```text
-GET  /api/worker/attendance/context        -- bootstrap: назначения+геозоны для offline-кеша,
-                                               upsert WorkerDeviceInstallation -- не реализовано
+GET  /api/worker/attendance/context        -- [2026-08-16] реализовано, lib/attendance-sync.ts —
+                                               device bootstrap/upsert + assignments + current
+                                               geofence snapshot; attendance.clock.read.own (reused)
 GET  /api/worker/attendance/clock-state    -- [2026-08-14] реализовано, lib/attendance-clock.ts
 POST /api/worker/attendance/check-in       -- [2026-08-14] реализовано, lib/attendance-clock.ts
 POST /api/worker/attendance/check-out      -- [2026-08-14] реализовано, lib/attendance-clock.ts
 POST /api/worker/attendance/switch-site    -- [2026-08-14] реализовано, lib/attendance-clock.ts
-POST /api/worker/attendance/sync           -- offline batch, §7 -- не реализовано
+POST /api/worker/attendance/sync           -- [2026-08-16] реализовано, lib/attendance-sync.ts —
+                                               §9.11 FIFO/SAVEPOINT batch ingestion дословно, не
+                                               упрощённая модель; attendance.clock.sync.own (новая)
 GET  /api/worker/attendance/today          -- не реализовано
 GET  /api/worker/attendance/week           -- не реализовано
 ```
@@ -3918,6 +3921,29 @@ Check Out/Switch теперь вызывают `materializeClockShiftCore` (§9.
 route-функций/`lib/attendance-clock.ts` не изменена этим слайсом. По-прежнему не реализованы:
 `deviceSequence`/`DeviceEventReceipt`-FIFO, `POST /sync`, offline outbox, cron/scheduler,
 exception-review endpoints, `GET /attendance/context|today|week`.
+
+**`[2026-08-16]` T7A.7A Offline Attendance Sync Backend — реализовано.** `GET context` +
+`POST sync` — `lib/attendance-sync.ts` (новый модуль, ~950 строк) реализует §9.11 (`runPreflight` →
+`ON CONFLICT DO NOTHING` INSERT → business effects → `SAVEPOINT`/`ROLLBACK TO SAVEPOINT`/`RELEASE`)
+дословно: одна outer-транзакция на весь батч, один `SAVEPOINT` на независимое событие, один
+`SAVEPOINT` на целую switch-site группу, bounded retry (3 попытки, exponential backoff) только на
+`40P01`/`40001` → `503 INGESTION_RETRY_EXHAUSTED`. `lib/attendance-clock.ts` не переписан — только
+`export` добавлен семи уже протестированным чистым/tx-safe helper'ам
+(`resolveTimesheetForInstant`/`resolveActiveSiteAssignment`/`canonicalizeForHash`/
+`loadCurrentGeofence`/`exceptionDetailForGps`/`validateGpsPayload`/
+`helsinkiCalendarDateAsUtcMidnight`), ни одна online-функция/route не изменена. Overlap-детекция
+(`overlapCandidates`/`overlapExists`/`resolveOverlapTransition`) и материализация
+(`materializeClockShiftCore`) переиспользованы как есть, инлайн, в том же `SAVEPOINT`, что и
+online-путь — не отдельная транзакция. `GEOFENCE_VERSION_MISMATCH` (§3 enum, ранее нигде не
+создававшийся) теперь реально создаётся: сравнение `event.cachedGeofenceVersionId` (request-only
+поле, нигде не хранится) с site-ом текущим `geofenceVersionId`, независимо от accept/reject —
+никогда не заменяет живую GPS-оценку (§5.2 остаётся единственным источником истины для
+`gpsVerification`). Проверено на одноразовом PostgreSQL 16: 65/65 HTTP/DB (permission/context/
+FIFO/replay-conflict/business/groups/HTTP/DB-invariants) + отдельные regression-прогоны
+(online clock core 6/6, `_test-activation.ts`, `_test-corrections.ts`, geofence admin API, worker
+timesheet listing) — все зелёные. По-прежнему не реализованы: IndexedDB/outbox клиент,
+`WorkerClockPanel`-интеграция (T7A.7B), `GET /attendance/today|week`, scheduler/auto-submit,
+exception-review endpoints, admin attendance overview.
 
 ### 12.3 Endpoints — Foreman / Admin
 
@@ -4239,7 +4265,8 @@ Out, worker mobile UI, offline outbox/sync, materializer, scheduler и exception
 | 4 | Online clock backend — **`[2026-08-14] реализовано.`** | `GET clock-state`, `POST check-in`/`check-out`/`switch-site` (`lib/attendance-clock.ts`, §9.1-9.3), только `channel=ONLINE`. `attendance.clock.{read,checkin,checkout,switch_site}.own` — additive DML-миграция `20260814000000_seed_attendance_clock_worker_permissions`, только `WORKER`. Проверено на одноразовом PostgreSQL 16: 153/153 DB-level + полный HTTP-прогон и regressions. Inline materialization была добавлена следующим слайсом (п.6). `+1 microsecond`-clamp адаптирован как `+1 millisecond` из-за JS `Date`; period-boundary свойство теперь покрыто materializer-тестами. Worker UI/offline sync/scheduler/exception review/admin overview остаются будущими. |
 | 5 | Worker mobile UI — **`[2026-08-15] реализовано.`** | `/worker` mobile-first домашняя страница — `app/worker/page.tsx` + `app/worker/WorkerClockPanel.tsx` + `lib/worker-gps.ts`. CLOCKED_OUT (assignment picker, empty state), CLOCKED_IN (authoritative site/workArea, live duration timer, Check Out, Switch Site), online-only idempotent-attempt/network-unknown-reconciliation модель (§6/§7 задачи), GPS UX (§5). Без schema/migration/permission/route изменений. Проверено на одноразовом PostgreSQL 16: 12/12 HTTP/DB (прямые route-handler вызовы) + 33/33 Playwright (мобильный/desktop viewport, GPS inside/outside/denied, switch success/rollback, double-click guard, network-unknown+retry byte-identical replay, mocked error-code UI mapping, keyboard/aria-live, ноль console application errors, ноль координат в DOM/консоли). Меню (`Today`/`My week`/`All hours`/`Corrections`/`Profile`/`Help`/`Logout`) НЕ реализовано этим слайсом — только ссылки на уже существующие `/worker/periods` и `/worker/history`. Offline outbox/sync, scheduler, exception review, admin overview — вне охвата (см. п.7-10 ниже). |
 | 6 | Materialization — **`[2026-08-14] реализовано.`** | `lib/attendance-materializer.ts`: inline core + public canonical-lock wrapper + внутренний catch-up scan/pass без cron. Полные §9.4/§9.5: batch fragments, `TimesheetDraftPlannedShift`, find-only day, per-fragment SETTLED/gate, late-sync reopen, FINAL_APPROVED correction integration. 74/74 DB-level на чистом PostgreSQL 16, включая `pg_stat_activity`-подтверждённую конкуренцию; без schema/migration/permission/route изменений. |
-| 7 | Offline outbox/sync | `POST /api/worker/attendance/sync`, IndexedDB (§6), `deviceSequence`. Тест: offline check-in→restart→offline check-out→sync, потерянный ответ+повтор, две вкладки, два устройства, `CLIENT_EVENT_ID_REUSED`/`DEVICE_SEQUENCE_REUSED`. |
+| 7a | Offline attendance sync backend (T7A.7A) — **`[2026-08-16] реализовано.`** | `GET /api/worker/attendance/context` (device bootstrap/upsert + assignments + current geofence snapshot) + `POST /api/worker/attendance/sync` (§9.11 FIFO/SAVEPOINT batch ingestion, дословно) — `lib/attendance-sync.ts`, `attendance.clock.sync.own` — новая additive DML-миграция `20260815000000_seed_attendance_clock_sync_permission`, только `WORKER`. Проверено на одноразовом PostgreSQL 16: 65/65 HTTP/DB (permission/context/FIFO/replay-conflict/business/groups/HTTP/DB-invariants) + online clock core/activation/corrections/geofence-admin/worker-timesheet regressions зелёные. IndexedDB/outbox клиент и `WorkerClockPanel`-интеграция — следующий слайс (7b). |
+| 7b | Offline outbox/sync — клиент | IndexedDB (§6), `deviceSequence`-счётчик устройства, `WorkerClockPanel`-интеграция (Check In/Out/Switch Site пишут в outbox вместо прямого online-запроса, фоновый sync-воркер вызывает уже реализованный `POST /sync`). Тест: offline check-in→restart→offline check-out→sync, потерянный ответ+повтор, две вкладки, два устройства, `CLIENT_EVENT_ID_REUSED`/`DEVICE_SEQUENCE_REUSED` — backend-контракт для всех этих сценариев уже реализован и протестирован в 7a. |
 | 8 | Exception review | Шесть resolution-действий (§9.7-9.9, §12.4) как отдельные под-шаги. Тест: применимость по матрице §11, scope isolation, `PAIR_ORPHAN_EVENTS` полная валидация. |
 | 9 | Операционный обзор (T7A.9, roadmap) | **Владелец, утверждение 2026-08-12**: отдельная сложная страница для conflict/sequence-аномалий в первом пилоте не нужна — вместо неё `ADMIN`/`SUPER_ADMIN` видят **минимальный список/секцию** этих аномалий (`ClockEventIdConflict`, `DeviceEventReceipt(outcome=REJECTED_TERMINAL)`, `FIFO_LEDGER_INCONSISTENT`-класс `AuditEvent`) как часть общего операционного обзора (кто работает сейчас, GPS/sync/missing-checkout exceptions, recorded-vs-reported diff — уже описано в roadmap T7A.9); `FOREMAN` raw conflict payload не получает (`attendance.conflict.read`, §12.1, не выдаётся `FOREMAN`). Это решение закрывает бывший открытый пункт §18.2 — UI **не реализуется этим документом**, только фиксируется его будущий объём. Тест: доступность списка только `ADMIN`/`SUPER_ADMIN`, `403` для `FOREMAN`/`WORKER`, санитизация (никогда координаты/raw payload в списке). |
 | 10 | Auto-submit | Scheduler (§9.6), `CompanyAttendancePolicy` admin endpoints. Тест: идемпотентный повторный тик, debounce после late sync, `SKIPPED_NOT_ACTIONABLE` для human-returned табеля, атомарность attempt+version. |
