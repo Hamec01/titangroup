@@ -66,11 +66,12 @@ export async function PATCH(request: NextRequest, { params }: RouteParams): Prom
     return jsonError(400, { code: 'VALIDATION_ERROR', message: 'Request body must be valid JSON.' }, requestId);
   }
   const bodyObject = rawBody && typeof rawBody === 'object' ? (rawBody as Record<string, unknown>) : {};
-  const { dayType, confirmedZero, note, segments: rawSegments } = bodyObject as {
+  const { dayType, confirmedZero, note, segments: rawSegments, clockAdjustmentReasons: rawClockAdjustmentReasons } = bodyObject as {
     dayType?: unknown;
     confirmedZero?: unknown;
     note?: unknown;
     segments?: unknown;
+    clockAdjustmentReasons?: unknown;
   };
 
   const fieldErrors: Record<string, string[]> = {};
@@ -108,7 +109,7 @@ export async function PATCH(request: NextRequest, { params }: RouteParams): Prom
           fieldErrors[`segments.${index}`] = ['must be an object'];
           return;
         }
-        const { startAt, endAt, siteId, workAreaId, breaks: rawBreaks } = rawSegment as Record<string, unknown>;
+        const { startAt, endAt, siteId, workAreaId, breaks: rawBreaks, originClockShiftFragmentId } = rawSegment as Record<string, unknown>;
         const startAtDate = parseDateTime(startAt);
         const endAtDate = parseDateTime(endAt);
         if (!startAtDate) {
@@ -126,6 +127,14 @@ export async function PATCH(request: NextRequest, { params }: RouteParams): Prom
             fieldErrors[`segments.${index}.workAreaId`] = ['invalid'];
           } else {
             normalizedWorkAreaId = workAreaId;
+          }
+        }
+        let normalizedOriginId: string | null = null;
+        if (originClockShiftFragmentId !== undefined && originClockShiftFragmentId !== null) {
+          if (typeof originClockShiftFragmentId !== 'string' || !UUID_PATTERN.test(originClockShiftFragmentId)) {
+            fieldErrors[`segments.${index}.originClockShiftFragmentId`] = ['invalid'];
+          } else {
+            normalizedOriginId = originClockShiftFragmentId;
           }
         }
         if (startAtDate && endAtDate && endAtDate <= startAtDate) {
@@ -165,12 +174,30 @@ export async function PATCH(request: NextRequest, { params }: RouteParams): Prom
         }
 
         if (startAtDate && endAtDate && typeof siteId === 'string' && UUID_PATTERN.test(siteId)) {
-          parsedSegments.push({ startAt: startAtDate, endAt: endAtDate, siteId, workAreaId: normalizedWorkAreaId, breaks: parsedBreaks });
+          parsedSegments.push({ startAt: startAtDate, endAt: endAtDate, siteId, workAreaId: normalizedWorkAreaId, breaks: parsedBreaks, originClockShiftFragmentId: normalizedOriginId });
         }
       });
 
       if (Object.keys(fieldErrors).length === 0) {
         input.segments = parsedSegments;
+      }
+    }
+  }
+
+  if (rawClockAdjustmentReasons !== undefined) {
+    if (!rawClockAdjustmentReasons || typeof rawClockAdjustmentReasons !== 'object' || Array.isArray(rawClockAdjustmentReasons)) {
+      fieldErrors.clockAdjustmentReasons = ['must be an object'];
+    } else {
+      const parsedReasons: Record<string, string> = {};
+      for (const [key, value] of Object.entries(rawClockAdjustmentReasons as Record<string, unknown>)) {
+        if (!UUID_PATTERN.test(key) || typeof value !== 'string' || value.trim().length === 0) {
+          fieldErrors[`clockAdjustmentReasons.${key}`] = ['invalid'];
+          continue;
+        }
+        parsedReasons[key] = value;
+      }
+      if (Object.keys(fieldErrors).length === 0) {
+        input.clockAdjustmentReasons = parsedReasons;
       }
     }
   }
@@ -182,7 +209,7 @@ export async function PATCH(request: NextRequest, { params }: RouteParams): Prom
     );
   }
 
-  const result = await patchWorkerTimesheetDay(authenticated.user.employeeId, timesheetId, date, input);
+  const result = await patchWorkerTimesheetDay(authenticated.user.employeeId, authenticated.user.id, timesheetId, date, input, requestId);
 
   if ('code' in result) {
     switch (result.code) {

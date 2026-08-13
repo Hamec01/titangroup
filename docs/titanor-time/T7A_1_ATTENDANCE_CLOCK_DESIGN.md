@@ -3621,6 +3621,12 @@ outbox-механизм — outbox не удаляет ни одно событ�
 
 ## 10. Recorded vs reported / provenance — полная проверка происхождения
 
+**`[2026-08-13] T7A locking slice B — §10.1–10.3 реализовано.`** `lib/worker-timesheets.ts`'s
+`patchWorkerTimesheetDay` принимает оба новых поля, валидирует происхождение строго по
+`previousLive` (403 `FORBIDDEN`, без oracle), пишет `ClockShiftAdjustment` в той же транзакции и
+вызывает общий §9.1a-хук (`lib/attendance-reported-projection.ts`) после delete/recreate — детали
+и тесты см. addendum ниже, §15 пп. 1–2.
+
 ### 10.1 Расширение `PATCH /api/worker/timesheets/:timesheetId/days/:date`
 
 Тело запроса расширяется двумя полями сверх существующего контракта (полностью обратно совместимо —
@@ -4065,9 +4071,21 @@ application-level SYSTEM-guard пути закрыты явной проверк
 standalone-активации, стабильный код `SYSTEM_USER_NOT_ELIGIBLE`), `scripts/reset-password.ts`
 (CLI). Роль/сессия — отдельного HTTP-пути, выдающего произвольному `userId` роль или сессию, в
 проекте сегодня нет; оба реальных `UserSession.create` сайта уже транзитивно защищены логином и
-redemption-guard'ом выше. Пункты **7–9** (correction provenance/adjustments/before-after снимок
-по версии) — отдельный, ещё не начатый T7A locking slice B; ничего из geofence/clock API/worker
-mobile UI/offline sync этим слайсом не затронуто.
+redemption-guard'ом выше.
+
+**`[2026-08-13] T7A locking slice B — реализовано.`** Пункты **7–9** ниже (correction provenance/
+adjustments/overlap-transition по версии), плюс расширенный §10.1–10.3 worker `PATCH`-провенанс,
+реализованы и проверены на новом одноразовом PostgreSQL 16 (111 обязательных проверок, включая
+реальные two-connection concurrency тесты для parallel `PATCH`, `PATCH` vs `submit`, конкурентного
+`decideCorrection` над одной и той же `CorrectionRequest`, и `resolveOverlapTransition` для одной
+пары в противоположной ориентации — все подтверждены прямым запросом к `pg_stat_activity` во время
+гонки). Общие §9.1a-хелперы (`effectiveReportedRanges`/`overlapCandidates`/`canonicalPair`/
+`resolveOverlapTransition`/`resolveOverlapsForAffectedShifts`) вынесены в новый файл
+`lib/attendance-reported-projection.ts`, используемый идентично worker `PATCH` и
+`correction.approve` — ни один из двух путей не дублирует overlap-логику самостоятельно. Locking
+§15 как единое целое теперь закрыт полностью (пп. 1–9); ничего из geofence API/UI, Check In/Check
+Out, worker mobile UI, offline outbox/sync, materializer, scheduler и exception-review endpoints
+этими двумя слайсами не затронуто и не реализовано.
 
 1. **`submitWorkerTimesheet`** (`lib/worker-timesheets.ts`) — разбить на
    `submitWorkerTimesheetCore(tx, ...)` (тело без изменений, кроме `submissionSource`-параметра и

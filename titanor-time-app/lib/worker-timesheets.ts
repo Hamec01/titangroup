@@ -3,6 +3,7 @@ import { Prisma, AbsenceType, DayType, SubmissionSource } from '@prisma/client';
 import { prisma } from '@/lib/prisma';
 import { createAuditEvent } from '@/lib/audit';
 import { helsinkiToday } from '@/lib/workers';
+import { effectiveReportedRangesBatch, resolveOverlapsForAffectedShifts, provenanceValuesEqual, type ProvenanceValues } from '@/lib/attendance-reported-projection';
 
 // docs/titanor-time/04_ADMIN_FIRST_API_CONTRACTS.md §9 — read-only timesheet/draft/version views
 // (ЭТАП 7 sub-task 3a). §9's ownership rule: "сервер проверяет, что этот Timesheet.employeeId
@@ -396,6 +397,7 @@ export interface PatchSegmentInput {
   siteId: string;
   workAreaId: string | null;
   breaks: PatchBreakInput[];
+  originClockShiftFragmentId?: string | null;
 }
 
 export interface PatchDayInput {
@@ -403,6 +405,7 @@ export interface PatchDayInput {
   confirmedZero?: boolean;
   note?: string | null;
   segments?: PatchSegmentInput[];
+  clockAdjustmentReasons?: Record<string, string>;
 }
 
 export type PatchDayError =
@@ -436,14 +439,27 @@ export type PatchDayError =
  * `affectedSitePairs` → TimesheetReviewProposal resolution (03_...§4.6) is NOT implemented here —
  * TimesheetReviewScope/Proposal are not schema yet (a later ЭТАП 7 sub-task); `resolvedProposals`
  * is always `[]`, which is correct today, not a stub — no proposal can exist before that
- * subsystem does. Extended clock-provenance PATCH semantics (§10.2 originClockShiftFragmentId
- * validation/ClockShiftAdjustment/§15 пп.7-9) are a separate, later locking slice — not this one.
+ * subsystem does.
+ *
+ * §10.1-10.3 — clock provenance. `segment.originClockShiftFragmentId` is always an echo of a
+ * fragment already live on THIS day (`previousLive`, read before any mutation) — the server never
+ * creates a new binding here, only the materializer (§9.4) ever does that first insert; an origin
+ * not already in `previousLive` is a forbidden identity guess (403, no oracle), never a 404 (which
+ * would leak whether the id exists at all). Editing or removing a clock-origin segment's
+ * recorded-vs-reported values requires `clockAdjustmentReasons[fragmentId]` and appends one
+ * immutable `ClockShiftAdjustment` (EDITED/RESTORED_TO_RECORDED/REMOVED) attributed to the real
+ * worker `User`, never SYSTEM. After the existing delete/recreate step, the shared §9.1a helper
+ * (`lib/attendance-reported-projection.ts`) resolves OVERLAPPING_SHIFT transitions for every shift
+ * whose reported range could have changed — before/after origin fragments unioned, so a pure
+ * REMOVED is never dropped from the affected set.
  */
 export async function patchWorkerTimesheetDay(
   employeeId: string,
+  actorUserId: string,
   timesheetId: string,
   date: Date,
-  input: PatchDayInput
+  input: PatchDayInput,
+  requestId: string
 ): Promise<(DraftDayView & { resolvedProposals: never[] }) | PatchDayError> {
   if (input.segments !== undefined) {
     const sortedSegments = [...input.segments].sort((a, b) => a.startAt.getTime() - b.startAt.getTime());
@@ -546,6 +562,160 @@ export async function patchWorkerTimesheetDay(
         }
       }
 
+      // §10.2 — previousLive (before any mutation): fragments already live on this day.
+      const previousLiveRows = await tx.timesheetDraftSegment.findMany({
+        where: { draftDayId: currentDay.id, originClockShiftFragmentId: { not: null } },
+        select: { originClockShiftFragmentId: true, startAt: true, endAt: true, siteId: true, workAreaId: true, sourceAssignmentId: true }
+      });
+      const previousLive = new Map(previousLiveRows.map((s) => [s.originClockShiftFragmentId as string, s]));
+
+      const incomingOriginIds: string[] = [];
+      const seenOriginIds = new Set<string>();
+      if (input.segments !== undefined) {
+        for (const segment of input.segments) {
+          const originId = segment.originClockShiftFragmentId;
+          if (!originId) {
+            continue;
+          }
+          if (seenOriginIds.has(originId)) {
+            return { code: 'VALIDATION_ERROR', fieldErrors: { originClockShiftFragmentId: ['duplicate origin in segments[]'] } };
+          }
+          seenOriginIds.add(originId);
+          if (!previousLive.has(originId)) {
+            return { code: 'FORBIDDEN' };
+          }
+          incomingOriginIds.push(originId);
+        }
+      }
+
+      const affectedFragmentIds = [...new Set([...previousLive.keys(), ...incomingOriginIds])];
+
+      const fragmentsById = new Map<
+        string,
+        { id: string; clockShiftId: string; employeeId: string; recordedStartAt: Date; recordedEndAt: Date; siteId: string; workAreaId: string | null; sourceAssignmentId: string | null }
+      >();
+      const lastKnownByFragment = new Map<string, ProvenanceValues>();
+      if (affectedFragmentIds.length > 0) {
+        const fragmentRows = await tx.clockShiftFragment.findMany({
+          where: { id: { in: affectedFragmentIds } },
+          select: { id: true, clockShiftId: true, employeeId: true, recordedStartAt: true, recordedEndAt: true, siteId: true, workAreaId: true, sourceAssignmentId: true }
+        });
+        for (const f of fragmentRows) {
+          fragmentsById.set(f.id, f);
+        }
+
+        const lastAdjustments = await tx.clockShiftAdjustment.findMany({
+          where: { clockShiftFragmentId: { in: affectedFragmentIds } },
+          orderBy: { changedAt: 'desc' },
+          select: { clockShiftFragmentId: true, afterStartAt: true, afterEndAt: true, afterSiteId: true, afterWorkAreaId: true, afterSourceAssignmentId: true }
+        });
+        for (const adj of lastAdjustments) {
+          // previousLive/incoming are always currently-live fragments (never REMOVED — a removed
+          // origin can never reappear, §10.2), so the most recent adjustment for any fragment here
+          // is always EDITED/RESTORED_TO_RECORDED, whose after* fields are never null.
+          if (!lastKnownByFragment.has(adj.clockShiftFragmentId) && adj.afterStartAt && adj.afterEndAt && adj.afterSiteId) {
+            lastKnownByFragment.set(adj.clockShiftFragmentId, {
+              startAt: adj.afterStartAt,
+              endAt: adj.afterEndAt,
+              siteId: adj.afterSiteId,
+              workAreaId: adj.afterWorkAreaId,
+              sourceAssignmentId: adj.afterSourceAssignmentId
+            });
+          }
+        }
+      }
+
+      function lastKnownFor(fragmentId: string): ProvenanceValues {
+        const known = lastKnownByFragment.get(fragmentId);
+        if (known) {
+          return known;
+        }
+        const frag = fragmentsById.get(fragmentId)!;
+        return { startAt: frag.recordedStartAt, endAt: frag.recordedEndAt, siteId: frag.siteId, workAreaId: frag.workAreaId, sourceAssignmentId: frag.sourceAssignmentId };
+      }
+
+      interface AdjustmentDraft {
+        clockShiftFragmentId: string;
+        changeType: 'EDITED' | 'RESTORED_TO_RECORDED' | 'REMOVED';
+        before: ProvenanceValues;
+        after: ProvenanceValues | null;
+        reason: string;
+      }
+      const adjustmentDrafts: AdjustmentDraft[] = [];
+      const clockAdjustmentReasons = input.clockAdjustmentReasons ?? {};
+
+      for (const { segment, sourceAssignmentId } of resolvedSegments) {
+        const originId = segment.originClockShiftFragmentId;
+        if (!originId) {
+          continue;
+        }
+        const lastKnown = lastKnownFor(originId);
+        const after: ProvenanceValues = { startAt: segment.startAt, endAt: segment.endAt, siteId: segment.siteId, workAreaId: segment.workAreaId, sourceAssignmentId };
+        if (provenanceValuesEqual(lastKnown, after)) {
+          continue;
+        }
+        const reason = clockAdjustmentReasons[originId];
+        if (!reason || reason.trim().length === 0) {
+          return { code: 'VALIDATION_ERROR', fieldErrors: { [`clockAdjustmentReasons.${originId}`]: ['required when changing a clock-origin segment'] } };
+        }
+        const frag = fragmentsById.get(originId)!;
+        const recorded: ProvenanceValues = { startAt: frag.recordedStartAt, endAt: frag.recordedEndAt, siteId: frag.siteId, workAreaId: frag.workAreaId, sourceAssignmentId: frag.sourceAssignmentId };
+        adjustmentDrafts.push({
+          clockShiftFragmentId: originId,
+          changeType: provenanceValuesEqual(after, recorded) ? 'RESTORED_TO_RECORDED' : 'EDITED',
+          before: lastKnown,
+          after,
+          reason
+        });
+      }
+
+      if (input.segments !== undefined) {
+        for (const [originId, prev] of previousLive) {
+          if (seenOriginIds.has(originId)) {
+            continue;
+          }
+          const reason = clockAdjustmentReasons[originId];
+          if (!reason || reason.trim().length === 0) {
+            return { code: 'VALIDATION_ERROR', fieldErrors: { [`clockAdjustmentReasons.${originId}`]: ['required when removing a clock-origin segment'] } };
+          }
+          adjustmentDrafts.push({
+            clockShiftFragmentId: originId,
+            changeType: 'REMOVED',
+            before: { startAt: prev.startAt, endAt: prev.endAt, siteId: prev.siteId, workAreaId: prev.workAreaId, sourceAssignmentId: prev.sourceAssignmentId },
+            after: null,
+            reason
+          });
+        }
+      }
+
+      const affectedShiftIds = [...new Set(affectedFragmentIds.map((id) => fragmentsById.get(id)!.clockShiftId))];
+      const beforeRangesByShift = await effectiveReportedRangesBatch(tx, affectedShiftIds);
+
+      for (const adjustment of adjustmentDrafts) {
+        const frag = fragmentsById.get(adjustment.clockShiftFragmentId)!;
+        await tx.clockShiftAdjustment.create({
+          data: {
+            clockShiftFragmentId: adjustment.clockShiftFragmentId,
+            clockShiftId: frag.clockShiftId,
+            employeeId: frag.employeeId,
+            changeType: adjustment.changeType,
+            changedByUserId: actorUserId,
+            beforeStartAt: adjustment.before.startAt,
+            beforeEndAt: adjustment.before.endAt,
+            beforeSiteId: adjustment.before.siteId,
+            beforeWorkAreaId: adjustment.before.workAreaId,
+            beforeSourceAssignmentId: adjustment.before.sourceAssignmentId,
+            afterStartAt: adjustment.after?.startAt ?? null,
+            afterEndAt: adjustment.after?.endAt ?? null,
+            afterSiteId: adjustment.after?.siteId ?? null,
+            afterWorkAreaId: adjustment.after?.workAreaId ?? null,
+            afterSourceAssignmentId: adjustment.after?.sourceAssignmentId ?? null,
+            reason: adjustment.reason,
+            requestId
+          }
+        });
+      }
+
       if (input.segments !== undefined) {
         await tx.timesheetDraftSegment.deleteMany({ where: { draftDayId: currentDay.id } });
       }
@@ -572,7 +742,8 @@ export async function patchWorkerTimesheetDay(
               endAt: segment.endAt,
               siteId: segment.siteId,
               workAreaId: segment.workAreaId,
-              sourceAssignmentId
+              sourceAssignmentId,
+              originClockShiftFragmentId: segment.originClockShiftFragmentId ?? null
             }
           });
           if (segment.breaks.length > 0) {
@@ -584,6 +755,10 @@ export async function patchWorkerTimesheetDay(
       }
 
       await tx.timesheetDraft.update({ where: { id: draft.id }, data: { contentRevision: { increment: 1 } } });
+
+      if (affectedShiftIds.length > 0) {
+        await resolveOverlapsForAffectedShifts(tx, affectedShiftIds, beforeRangesByShift, requestId);
+      }
 
       const updatedDay = await tx.timesheetDraftDay.findUniqueOrThrow({
         where: { id: currentDay.id },

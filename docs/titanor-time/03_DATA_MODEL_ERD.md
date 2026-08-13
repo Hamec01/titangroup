@@ -1614,6 +1614,19 @@ TimesheetVersion` (да), `approvalOverride boolean` (default `false`), `overrid
 кроме `approvalOverride=true` (только `SUPER_ADMIN`, с `overrideReason`,
 `AuditEvent(CORRECTION_SELF_APPROVED_OVERRIDE)`).
 
+**`[T7A locking slice B]` Clock provenance — `T7A_1_ATTENDANCE_CLOCK_DESIGN.md` §15 пп.7–9.**
+`correction.draft.edit` (open) копирует `WorkSegment.originClockShiftFragmentId` в новый
+`CorrectionDraftSegment` — provenance виден в `correction detail`/day-response и переживает обычный
+`PATCH .../days/:date` correction-draft'а. Тот `PATCH` (§15 п.9) принимает то же опциональное
+`segment.originClockShiftFragmentId`, что worker-версия, с той же membership-проверкой (origin
+обязан уже быть live на этом draft/дне → `403 FORBIDDEN`, единый код для чужого и никогда не
+существовавшего id, без oracle); `ClockShiftAdjustment` на этой стадии не пишется — корректировка
+ещё не approved. `correction.approve` (§15 п.7) сохраняет `originClockShiftFragmentId` в
+замораживаемом `WorkSegment` и пишет `ClockShiftAdjustment(EDITED|REMOVED|RESTORED_TO_RECORDED)`
+для реально изменившихся origins той же транзакцией — `changedByUserId =
+CorrectionRequest.decidedByUserId` (реальный approver, не `SYSTEM`), `reason =
+CorrectionRequest.reason`. `REJECTED` не создаёт ни `WorkSegment`, ни `ClockShiftAdjustment`.
+
 **CorrectionDraft** (mutable) — `id`, `correctionRequestId FK` (unique), `employeeId`
 (денормализовано из `CorrectionRequest.timesheetId → Timesheet.employeeId` на момент открытия,
 immutable снимок), `basedOnVersionId FK → TimesheetVersion` (immutable снимок версии-источника на

@@ -101,7 +101,7 @@ export async function PATCH(request: NextRequest, { params }: RouteParams): Prom
           fieldErrors[`segments.${index}`] = ['must be an object'];
           return;
         }
-        const { startAt, endAt, siteId, workAreaId, breaks: rawBreaks } = rawSegment as Record<string, unknown>;
+        const { startAt, endAt, siteId, workAreaId, breaks: rawBreaks, originClockShiftFragmentId } = rawSegment as Record<string, unknown>;
         const startAtDate = parseDateTime(startAt);
         const endAtDate = parseDateTime(endAt);
         if (!startAtDate) {
@@ -119,6 +119,14 @@ export async function PATCH(request: NextRequest, { params }: RouteParams): Prom
             fieldErrors[`segments.${index}.workAreaId`] = ['invalid'];
           } else {
             normalizedWorkAreaId = workAreaId;
+          }
+        }
+        let normalizedOriginId: string | null = null;
+        if (originClockShiftFragmentId !== undefined && originClockShiftFragmentId !== null) {
+          if (typeof originClockShiftFragmentId !== 'string' || !UUID_PATTERN.test(originClockShiftFragmentId)) {
+            fieldErrors[`segments.${index}.originClockShiftFragmentId`] = ['invalid'];
+          } else {
+            normalizedOriginId = originClockShiftFragmentId;
           }
         }
         if (startAtDate && endAtDate && endAtDate <= startAtDate) {
@@ -158,7 +166,7 @@ export async function PATCH(request: NextRequest, { params }: RouteParams): Prom
         }
 
         if (startAtDate && endAtDate && typeof siteId === 'string' && UUID_PATTERN.test(siteId)) {
-          parsedSegments.push({ startAt: startAtDate, endAt: endAtDate, siteId, workAreaId: normalizedWorkAreaId, breaks: parsedBreaks });
+          parsedSegments.push({ startAt: startAtDate, endAt: endAtDate, siteId, workAreaId: normalizedWorkAreaId, breaks: parsedBreaks, originClockShiftFragmentId: normalizedOriginId });
         }
       });
 
@@ -178,6 +186,8 @@ export async function PATCH(request: NextRequest, { params }: RouteParams): Prom
     switch (result.code) {
       case 'NOT_FOUND':
         return jsonError(404, { code: 'CORRECTION_NOT_FOUND', message: 'No correction request with this id.' }, requestId);
+      case 'FORBIDDEN':
+        return jsonError(403, { code: 'FORBIDDEN', message: 'This clock-origin fragment is not part of this correction draft.' }, requestId);
       case 'INVALID_STATE_TRANSITION':
         return jsonError(409, { code: 'INVALID_STATE_TRANSITION', message: 'Correction draft is not open for editing.' }, requestId);
       case 'VALIDATION_ERROR':

@@ -615,6 +615,21 @@ Actionable = `PayrollPeriodParticipant.expected=true` + `PayrollPeriod.status=OP
   `dayType`×`confirmedZero`×сегменты, `03_...` §4.6 «Правило состояния дня» — например
   `confirmedZero=true` при непустых `segments` в этом же запросе, либо `confirmedZero=true` при
   существующих сегментах, которые запрос не тронул)
+- **`T7A_1_ATTENDANCE_CLOCK_DESIGN.md` §10.1–10.3 (locking slice B) — clock provenance, обратно
+  совместимо**: каждый объект в `segments[]` дополнительно принимает опциональный
+  `"originClockShiftFragmentId"?` (UUID `ClockShiftFragment`); верхнеуровневое тело — опциональную
+  карту `"clockAdjustmentReasons"?: { "<clockShiftFragmentId>": "причина" }`. `originClockShiftFragmentId`
+  принимается **только** эхом уже живого на этом дне фрагмента (`previousLive`, читается до любой
+  мутации) — origin, никогда не бывший живым на этом draft/дне, либо принадлежащий чужому
+  employee/timesheet/дню → `403 FORBIDDEN` (тот же код и тело для «существует у другого» и «никогда
+  не существовал» — без UUID-oracle). Повтор одного `originClockShiftFragmentId` дважды в одном
+  `segments[]` → `400 VALIDATION_ERROR`. Реальное изменение start/end/site/workArea clock-origin
+  сегмента (сравнение с последним известным значением) либо его удаление (origin, бывший в
+  `previousLive`, отсутствует среди входящих `segments[]`) требует непустой
+  `clockAdjustmentReasons[fragmentId]`, иначе `400 VALIDATION_ERROR` и полный откат — ни один
+  частичный `ClockShiftAdjustment` не пишется. При успехе — `ClockShiftAdjustment(EDITED|
+  RESTORED_TO_RECORDED|REMOVED)` в той же транзакции, `changedByUserId` = вызывающий `WORKER`,
+  никогда `SYSTEM`. Manual-сегменты без `originClockShiftFragmentId` не затронуты этим расширением.
 - **Побочный эффект**: сервер вычисляет `affectedSitePairs` — множество `siteId`, чей набор
   сегментов реально отличается между состоянием дня до запроса и полным итоговым состоянием после
   запроса (`siteId ∈ (старые ∪ новые)`, где значение по этому `siteId` изменилось — включая «объект

@@ -1,6 +1,125 @@
 # Titanor Time — Implementation Status
 
-Обновлено: 2026-08-13 Europe/Helsinki (feat: harden timesheet locking for attendance)
+Обновлено: 2026-08-13 Europe/Helsinki (feat: preserve clock provenance through corrections)
+
+**T7A locking slice B — recorded-vs-reported provenance, `ClockShiftAdjustment` и overlap
+transitions, НОВЫЙ этап, продолжение slice A.** Реализует `docs/titanor-time/T7A_1_ATTENDANCE_
+CLOCK_DESIGN.md` §10.1–10.3 (расширенный worker `PATCH`-провенанс) и §15 пункты 7–9 (correction
+provenance/adjustments/overlap-transition по версии) — locking §15 как единое целое теперь закрыт
+полностью (пп. 1–9). Никакой новой схемы/миграции — `prisma/schema.prisma` и
+`prisma/migrations/` не тронуты этим слайсом. Geofence API/UI, Check In/Check Out, worker mobile
+UI, offline outbox/sync, materializer, scheduler, exception-review endpoints — не реализованы, как
+и требовалось.
+
+**A. Общий модуль `lib/attendance-reported-projection.ts`** (новый файл) — единая §9.1a-реализация,
+используемая идентично worker `PATCH` и `correction.approve` (ни один путь не дублирует
+overlap-логику самостоятельно): `effectiveReportedRanges`/`effectiveReportedRangesBatch` (per-
+fragment authoritative live projection — `TimesheetDraftSegment` для `DRAFT`/`RETURNED`, `WorkSegment`
+строго при `timesheetVersionId=currentVersionId` для `SUBMITTED+`; raw fallback только пока
+`ClockShiftFragment.reportedProjectionState='PENDING'`; `SETTLED` без live-сегмента — authoritative
+пустой вклад, не raw); `overlapCandidates` (полный employee-scoped скан без 72ч-допущения + уже
+существующие `OPEN`/`DISMISSED` пары); `canonicalPair` (`LEAST`/`GREATEST` по стандартному uuid
+btree-порядку, совпадающему с обычным сравнением строк для canonical lowercase-формы); `provenance
+ValuesEqual`; `resolveOverlapTransition` (тот же occurrence-автомат §9.1a — сам резолвит и
+валидирует SYSTEM-актора непосредственно перед авто-`RESOLVE`, вызывающий никогда не передаёт actor
+явно; пишет `AuditEvent(OVERLAPPING_SHIFT_AUTO_RESOLVED)` на авто-резолюции); `resolveOverlapsFor
+AffectedShifts` (полный affected-shift/candidate/`processedPairs`-цикл §10.2 шаг 6, вызываемый один
+раз из каждого из двух call site'ов).
+
+**B. `patchWorkerTimesheetDay`** (`lib/worker-timesheets.ts`, §10.1–10.3) — контракт расширен
+двумя опциональными полями (`segment.originClockShiftFragmentId`, `clockAdjustmentReasons`),
+полностью обратно совместимо. Внутри уже существующей транзакции/локов (§15 п.2, slice A):
+`previousLive` читается до любой мутации; входящий origin разрешён только если уже присутствует в
+`previousLive` (403 `FORBIDDEN`, без UUID-oracle — тот же код для чужого и никогда не
+существовавшего id); дубли origin в одном запросе → 400 `VALIDATION_ERROR`; реальное изменение
+origin-сегмента (сравнение с `lastKnown` = последний `ClockShiftAdjustment.after*` либо
+`ClockShiftFragment.recorded*`) требует непустой причины, иначе 400 `VALIDATION_ERROR` и полный
+откат; `ClockShiftAdjustment(EDITED|RESTORED_TO_RECORDED|REMOVED)` пишется в той же транзакции,
+`changedByUserId` = реальный worker `User`, никогда `SYSTEM`; `affectedFragmentIds` = before
+(`previousLive`) ∪ after (входящие origin) — чистое `REMOVED` не теряется; recreated
+`TimesheetDraftSegment` сохраняет `originClockShiftFragmentId`; после delete/recreate вызывается
+`resolveOverlapsForAffectedShifts`.
+
+**C. `lib/corrections.ts`** — `openCorrectionDraft` копирует `originClockShiftFragmentId` из
+`WorkSegment` в `CorrectionDraftSegment` (§15 п.8); `getCorrectionDetail` и
+`patchCorrectionDraftDay`'s response возвращают его (round-trip не теряет provenance);
+`patchCorrectionDraftDay` (§15 п.9) — та же membership-проверка, что worker `PATCH` (403
+`FORBIDDEN` для чужого/никогда не существовавшего origin), теперь под явными `Employee` →
+`Timesheet` → `CorrectionDraft FOR UPDATE` локами (первым действием, до этого слайса эта функция
+не брала локов вовсе), pre-lock чтение — только routing (`correctionRequestId → timesheetId/
+employeeId`), никогда не authoritative; `ClockShiftAdjustment` на этой стадии не пишется —
+корректировка ещё не approved. `decideCorrection` (§15 п.7) — тот же канонический lock order
+(`Employee` → `Timesheet` → `CorrectionRequest FOR UPDATE`); status/ownership/`currentVersionId`/
+self-approval перечитываются под локом; до переключения `currentVersionId` — снимок
+`beforeOriginFragmentIds`/`beforeRangesByShift` из OLD `WorkSegment`; при заморозке
+`originClockShiftFragmentId` копируется в новый `WorkSegment`; после freeze+switch —
+`ClockShiftAdjustment` для реально изменённых origins, `changedByUserId` = реальный
+`CorrectionRequest.decidedByUserId`, `reason` = `CorrectionRequest.reason`, никогда `SYSTEM`;
+`resolveOverlapsForAffectedShifts` вызывается тем же образом, что worker `PATCH`. `REJECTED`
+никогда не создаёт `WorkSegment`/`ClockShiftAdjustment`/overlap-transition.
+
+Проверено на новом одноразовом PostgreSQL 16, **111/111 PASS, 0 FAIL** — 5 test-суитов, все с нуля
+из 48 baseline migrations (без создания новой миграции этим слайсом):
+- **Suite 1 (26 PASS) — worker provenance**: unchanged origin не создаёт adjustment; `EDITED`/
+  `RESTORED_TO_RECORDED`/`REMOVED` с причиной создают точный adjustment; изменение/удаление без
+  причины → `VALIDATION_ERROR` и полный rollback (проверено прямым запросом состояния); duplicate
+  origin → `VALIDATION_ERROR`; чужой/никогда не существовавший origin → идентичный `FORBIDDEN`
+  (no oracle); manual-сегмент без origin работает как раньше рядом с нетронутым origin-сегментом;
+  origin переживает patch → submit → admin-override return (reinitialize) → resubmit.
+- **Suite 2 (30 PASS) — correction provenance**: open копирует origin; `getCorrectionDetail` и
+  patch-response его возвращают; PATCH round-trip не теряет; чужой origin отклонён; approve
+  сохраняет origin в новом `WorkSegment`; unrelated-field правка (без изменения origin) не создаёт
+  ложный adjustment; `EDITED`/`REMOVED`/`RESTORED_TO_RECORDED` создают точные adjustments на
+  approve; `changedByUserId` — реальный approver, не `SYSTEM`; `reason` — `CorrectionRequest.
+  reason`; `REJECTED` не создаёт `TimesheetVersion`/`ClockShiftAdjustment`.
+- **Suite 3 (27 PASS) — overlap transitions**: worker edit создаёт новый `OPEN`; worker removal
+  резолвит существующий `OPEN` (`resolvedByUserId=SYSTEM`, `resolvedAt`/`overlapEndedAt` заполнены);
+  correction approve создаёт `OPEN`; correction approve с removed origin резолвит `OPEN`; два
+  раздельных `effectiveReportedRanges` не становятся envelope (`SETTLED`-фрагмент без live-сегмента
+  — пустой вклад, тест доказывает оба свойства одним сетапом); `currentVersionId` исключает старые
+  `WorkSegment`-версии (V1 не участвует после переключения на V2); смена, чей reported-диапазон
+  ушёл на несуществующий раздельный "день" (>72ч от raw), всё равно найдена `overlapCandidates`
+  и подтверждена `overlapExists`; повторный no-op вызов не создаёт дубликат; после `RESOLVED`
+  повторное появление overlap создаёт новую `OPEN`-строку, историческая `RESOLVED` не переписана.
+- **Suite 4 (14 PASS) — РЕАЛЬНАЯ two-connection concurrency**, не последовательная симуляция,
+  каждый сценарий подтверждён прямым запросом `pg_stat_activity` (2 конкурентно активных backend
+  PID, исключая наблюдателя, зафиксировано во всех четырёх сценариях в стабильном прогоне):
+  parallel worker `PATCH` одного draft/day (обе стороны успевают, финальное состояние — ровно один
+  сегмент от одного из писателей, без частичной/задвоенной записи); `PATCH` vs `submit` (обе
+  очерёдности дают самосогласованный результат — либо `DRAFT_NOT_EDITABLE` для patch и одна
+  корректно замороженная версия, либо patch применился и submit подхватил его); два конкурентных
+  `decideCorrection` над одной `CorrectionRequest` (ровно один успех, второй — чистый
+  `INVALID_STATE_TRANSITION`, ровно одна новая `TimesheetVersion`); `resolveOverlapTransition` для
+  одной пары в противоположной ориентации через два независимых `PATCH` одного employee (Инвариант
+  3, §8.3, оба сериализованы `Employee FOR UPDATE`) — ровно одна `OPEN`-строка, без дублей.
+- **Suite 5 (14 PASS) — regression + security**: все не связанные с provenance коды worker `PATCH`
+  (`NOT_FOUND`/ownership `FORBIDDEN`/`SITE_NOT_ASSIGNED`/`WORK_SEGMENT_OVERLAP`/`DAY_TYPE_CONFLICT`)
+  и correction-flow (`SELF_APPROVAL_FORBIDDEN`, `NO_CORRECTION_CHANGES`, draft-patch
+  `WORK_SEGMENT_OVERLAP`/`DAY_TYPE_REQUIRES_ABSENCE`) не изменились; ни один `ClockShiftAdjustment.
+  reason` или auto-resolve `AuditEvent`-payload не содержит GPS/secret-подобного контента; `403`
+  worker PATCH идентичен байт-в-байт для чужого и никогда не существовавшего origin. Дополнительно
+  — живой HTTP-прогон (временный `next dev` на одноразовой БД, не production): CSRF/auth/permission
+  gates обоих изменённых route-файлов подтверждены реальными запросами (401 без сессии — через
+  существующий `proxy.ts`, 403 `CSRF_REJECTED` без заголовка при валидной сессии, permission gate
+  пройден и достигнут код бизнес-логики) — не только по чтению кода.
+
+Технические проверки (все зелёные): `git diff --check`, `prisma validate` (схема не менялась —
+подтверждён diff `prisma/`), `npx tsc --noEmit`, `npm run build`, повторный `prisma migrate deploy`
+на новом disposable Postgres 16 → `No pending migrations to apply` (48 миграций, эта задача не
+создаёт новую), `docker compose -f compose.titanor-time.yaml build app`. Docker image safety:
+production `titanor-time-app-1`/`titanor-time-db-1` подтверждены неизменными (тот же image ID/
+`StartedAt`/`RestartCount` до и после сборки) — read-only `docker inspect` только. Тестовый образ
+`titanor-time-app:latest` удалён после проверки. Disposable Postgres 16 контейнер и все scratch
+test-скрипты (`scripts/_test-slice-b.ts`, `scripts/_test-http-session.ts`) удалены до/после
+использования — не часть финального diff'а.
+
+Production/geofence API/UI/Check In-Out/worker mobile UI/offline sync/materializer/scheduler/
+exception-review endpoints — не затронуты этой правкой, ни в каком виде. Locking-фундамент §15 как
+целое (пп. 1–9) закрыт полностью двумя слайсами (A + B); Attendance Clock/T7A в целом — не
+реализован, только locking/provenance-фундамент под будущие geofence/Check-In-Out/materializer/
+scheduler-слайсы.
+
+---
 
 **T7A locking slice A — безопасная подготовка существующего timesheet-кода к Attendance Clock,
 НОВЫЙ этап (не audit-fix предыдущего).** Реализует `docs/titanor-time/T7A_1_ATTENDANCE_CLOCK_

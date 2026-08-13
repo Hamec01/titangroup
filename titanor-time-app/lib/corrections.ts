@@ -1,6 +1,7 @@
 import { Prisma, AbsenceType, DayType } from '@prisma/client';
 import { prisma } from '@/lib/prisma';
 import { createAuditEvent } from '@/lib/audit';
+import { effectiveReportedRangesBatch, resolveOverlapsForAffectedShifts, provenanceValuesEqual, type ProvenanceValues } from '@/lib/attendance-reported-projection';
 
 // docs/titanor-time/03_DATA_MODEL_ERD.md §4.7 "CorrectionRequest"/"CorrectionDraft*" +
 // 02_ROLE_PERMISSION_MATRIX.md §2.9 — T7.9, first UI slice confirmed ADMIN-only
@@ -134,6 +135,7 @@ export async function openCorrectionDraft(correctionRequestId: string, actorUser
             sourceAssignmentId: true,
             startAt: true,
             endAt: true,
+            originClockShiftFragmentId: true,
             breaks: { select: { startAt: true, endAt: true, paid: true } }
           }
         }
@@ -155,7 +157,11 @@ export async function openCorrectionDraft(correctionRequestId: string, actorUser
             endAt: seg.endAt,
             siteId: seg.siteId,
             workAreaId: seg.workAreaId,
-            sourceAssignmentId: seg.sourceAssignmentId
+            sourceAssignmentId: seg.sourceAssignmentId,
+            // §15 п.8 — without this, clock provenance is lost the moment a correction draft is
+            // opened, before the worker/admin ever touches the day (same lesson as
+            // reinitializeDraftFromVersion, lib/review-scopes.ts).
+            originClockShiftFragmentId: seg.originClockShiftFragmentId
           }
         });
         if (seg.breaks.length > 0) {
@@ -218,6 +224,7 @@ export interface PatchSegmentInput {
   siteId: string;
   workAreaId: string | null;
   breaks: PatchBreakInput[];
+  originClockShiftFragmentId?: string | null;
 }
 
 export interface PatchDayInput {
@@ -234,6 +241,7 @@ export interface CorrectionDaySegmentView {
   siteId: string;
   workAreaId: string | null;
   sourceAssignmentId: string;
+  originClockShiftFragmentId: string | null;
   breaks: { id: string; startAt: string; endAt: string; paid: boolean }[];
 }
 
@@ -246,6 +254,7 @@ export interface CorrectionDayView {
 
 export type PatchCorrectionDayError =
   | { code: 'NOT_FOUND' }
+  | { code: 'FORBIDDEN' }
   | { code: 'INVALID_STATE_TRANSITION' }
   | { code: 'VALIDATION_ERROR'; fieldErrors: Record<string, string[]> }
   | { code: 'DAY_TYPE_REQUIRES_ABSENCE' }
@@ -254,53 +263,24 @@ export type PatchCorrectionDayError =
   | { code: 'SITE_NOT_ASSIGNED'; siteId: string }
   | { code: 'WORK_SEGMENT_OVERLAP' };
 
+/**
+ * §15 п.9 — clock provenance validation for an already-open correction draft: an incoming
+ * `originClockShiftFragmentId` is only accepted if it's already live on THIS draft's THIS day
+ * (`previousLive`, read under lock, before any mutation) — the same membership discipline as
+ * worker PATCH (§10.2 шаг 2a), applied here to `CorrectionDraftSegment` instead of
+ * `TimesheetDraftSegment`. No `ClockShiftAdjustment` is written at this stage — the correction
+ * isn't approved yet (§15 п.7 does that, at freeze time).
+ *
+ * §15 п.9 locking — every DB read that affects ownership/state/day-validation/write happens
+ * inside one transaction, behind `Employee` → `Timesheet` → `CorrectionDraft FOR UPDATE` (same
+ * canonical-order discipline as §10.3/§8.1, `CorrectionDraft` standing in the `TimesheetDraft`
+ * position for this flow) taken first; only the two purely request-shape checks that never touch
+ * the DB (segment-list self-overlap, break bounds, duplicate origin) run before the transaction.
+ * The one unavoidable pre-lock read is `correctionRequestId → timesheetId/employeeId` — routing
+ * information only (which rows to lock), never a status/ownership decision; status and `draftId`
+ * are re-read fresh under the lock below.
+ */
 export async function patchCorrectionDraftDay(correctionRequestId: string, date: Date, input: PatchDayInput): Promise<CorrectionDayView | PatchCorrectionDayError> {
-  const request = await prisma.correctionRequest.findUnique({
-    where: { id: correctionRequestId },
-    select: { status: true, draftId: true, timesheet: { select: { employeeId: true } } }
-  });
-  if (!request) {
-    return { code: 'NOT_FOUND' };
-  }
-  if (request.status !== 'DRAFT_OPEN' || !request.draftId) {
-    return { code: 'INVALID_STATE_TRANSITION' };
-  }
-  const draftId = request.draftId;
-  const employeeId = request.timesheet.employeeId;
-
-  const currentDay = await prisma.correctionDraftDay.findUnique({
-    where: { draftId_date: { draftId, date } },
-    select: { id: true, dayType: true, confirmedZero: true, segments: { select: { id: true } } }
-  });
-  if (!currentDay) {
-    return { code: 'VALIDATION_ERROR', fieldErrors: { date: ["not within this correction draft's base version"] } };
-  }
-
-  const finalDayType = input.dayType ?? currentDay.dayType;
-  const finalConfirmedZero = input.confirmedZero ?? currentDay.confirmedZero;
-  const hasSegments = input.segments !== undefined ? input.segments.length > 0 : currentDay.segments.length > 0;
-
-  const stateViolation = classifyDayStateViolation(finalDayType, finalConfirmedZero, hasSegments);
-  if (stateViolation) {
-    return { code: stateViolation };
-  }
-
-  let resolvedAbsenceId: string | null = null;
-  if (input.dayType !== undefined && input.dayType !== 'WORK') {
-    if (!ABSENCE_DAY_TYPES.has(input.dayType)) {
-      return { code: 'DAY_TYPE_REQUIRES_ABSENCE' };
-    }
-    const absence = await prisma.absence.findFirst({
-      where: { employeeId, status: 'APPROVED', type: input.dayType as AbsenceType, startDate: { lte: date }, endDate: { gte: date } },
-      select: { id: true }
-    });
-    if (!absence) {
-      return { code: 'DAY_TYPE_REQUIRES_ABSENCE' };
-    }
-    resolvedAbsenceId = absence.id;
-  }
-
-  const resolvedSegments: { segment: PatchSegmentInput; sourceAssignmentId: string }[] = [];
   if (input.segments !== undefined) {
     const sortedSegments = [...input.segments].sort((a, b) => a.startAt.getTime() - b.startAt.getTime());
     for (let i = 1; i < sortedSegments.length; i++) {
@@ -309,6 +289,7 @@ export async function patchCorrectionDraftDay(correctionRequestId: string, date:
       }
     }
 
+    const seenOriginIds = new Set<string>();
     for (const segment of input.segments) {
       const sortedBreaks = [...segment.breaks].sort((a, b) => a.startAt.getTime() - b.startAt.getTime());
       for (const b of sortedBreaks) {
@@ -321,29 +302,102 @@ export async function patchCorrectionDraftDay(correctionRequestId: string, date:
           return { code: 'VALIDATION_ERROR', fieldErrors: { breaks: ['must not overlap each other within the same segment'] } };
         }
       }
-
-      // Historical date (a correction may target any past period) — the same validFrom/validTo
-      // window check as the regular draft-day patch resolves correctly regardless of "today",
-      // since it only ever compares against the segment's own `date`, never the current date.
-      const assignment = await prisma.siteAssignment.findFirst({
-        where: {
-          employeeId,
-          siteId: segment.siteId,
-          workAreaId: segment.workAreaId,
-          validFrom: { lte: date },
-          OR: [{ validTo: null }, { validTo: { gte: date } }]
-        },
-        select: { id: true }
-      });
-      if (!assignment) {
-        return { code: 'SITE_NOT_ASSIGNED', siteId: segment.siteId };
+      if (segment.originClockShiftFragmentId) {
+        if (seenOriginIds.has(segment.originClockShiftFragmentId)) {
+          return { code: 'VALIDATION_ERROR', fieldErrors: { originClockShiftFragmentId: ['duplicate origin in segments[]'] } };
+        }
+        seenOriginIds.add(segment.originClockShiftFragmentId);
       }
-      resolvedSegments.push({ segment, sourceAssignmentId: assignment.id });
     }
   }
 
+  const routing = await prisma.correctionRequest.findUnique({
+    where: { id: correctionRequestId },
+    select: { timesheetId: true, timesheet: { select: { employeeId: true } } }
+  });
+  if (!routing) {
+    return { code: 'NOT_FOUND' };
+  }
+  const employeeId = routing.timesheet.employeeId;
+
   try {
     const updatedDay = await prisma.$transaction(async (tx) => {
+      await tx.$queryRaw`SELECT id FROM "Employee" WHERE id = ${employeeId}::uuid FOR UPDATE`;
+      await tx.$queryRaw`SELECT id FROM "Timesheet" WHERE id = ${routing.timesheetId}::uuid FOR UPDATE`;
+
+      const request = await tx.correctionRequest.findUniqueOrThrow({ where: { id: correctionRequestId }, select: { status: true, draftId: true } });
+      if (request.status !== 'DRAFT_OPEN' || !request.draftId) {
+        return { code: 'INVALID_STATE_TRANSITION' as const };
+      }
+      const draftId = request.draftId;
+
+      await tx.$queryRaw`SELECT id FROM "CorrectionDraft" WHERE id = ${draftId}::uuid FOR UPDATE`;
+
+      const currentDay = await tx.correctionDraftDay.findUnique({
+        where: { draftId_date: { draftId, date } },
+        select: { id: true, dayType: true, confirmedZero: true, segments: { select: { id: true } } }
+      });
+      if (!currentDay) {
+        return { code: 'VALIDATION_ERROR' as const, fieldErrors: { date: ["not within this correction draft's base version"] } };
+      }
+
+      const finalDayType = input.dayType ?? currentDay.dayType;
+      const finalConfirmedZero = input.confirmedZero ?? currentDay.confirmedZero;
+      const hasSegments = input.segments !== undefined ? input.segments.length > 0 : currentDay.segments.length > 0;
+
+      const stateViolation = classifyDayStateViolation(finalDayType, finalConfirmedZero, hasSegments);
+      if (stateViolation) {
+        return { code: stateViolation };
+      }
+
+      let resolvedAbsenceId: string | null = null;
+      if (input.dayType !== undefined && input.dayType !== 'WORK') {
+        if (!ABSENCE_DAY_TYPES.has(input.dayType)) {
+          return { code: 'DAY_TYPE_REQUIRES_ABSENCE' as const };
+        }
+        const absence = await tx.absence.findFirst({
+          where: { employeeId, status: 'APPROVED', type: input.dayType as AbsenceType, startDate: { lte: date }, endDate: { gte: date } },
+          select: { id: true }
+        });
+        if (!absence) {
+          return { code: 'DAY_TYPE_REQUIRES_ABSENCE' as const };
+        }
+        resolvedAbsenceId = absence.id;
+      }
+
+      const previousLiveRows = await tx.correctionDraftSegment.findMany({
+        where: { draftDayId: currentDay.id, originClockShiftFragmentId: { not: null } },
+        select: { originClockShiftFragmentId: true }
+      });
+      const previousLiveOriginIds = new Set(previousLiveRows.map((s) => s.originClockShiftFragmentId as string));
+
+      const resolvedSegments: { segment: PatchSegmentInput; sourceAssignmentId: string }[] = [];
+      if (input.segments !== undefined) {
+        for (const segment of input.segments) {
+          if (segment.originClockShiftFragmentId && !previousLiveOriginIds.has(segment.originClockShiftFragmentId)) {
+            return { code: 'FORBIDDEN' as const };
+          }
+
+          // Historical date (a correction may target any past period) — the same validFrom/validTo
+          // window check as the regular draft-day patch resolves correctly regardless of "today",
+          // since it only ever compares against the segment's own `date`, never the current date.
+          const assignment = await tx.siteAssignment.findFirst({
+            where: {
+              employeeId,
+              siteId: segment.siteId,
+              workAreaId: segment.workAreaId,
+              validFrom: { lte: date },
+              OR: [{ validTo: null }, { validTo: { gte: date } }]
+            },
+            select: { id: true }
+          });
+          if (!assignment) {
+            return { code: 'SITE_NOT_ASSIGNED' as const, siteId: segment.siteId };
+          }
+          resolvedSegments.push({ segment, sourceAssignmentId: assignment.id });
+        }
+      }
+
       if (input.segments !== undefined) {
         await tx.correctionDraftSegment.deleteMany({ where: { draftDayId: currentDay.id } });
       }
@@ -370,7 +424,8 @@ export async function patchCorrectionDraftDay(correctionRequestId: string, date:
               endAt: segment.endAt,
               siteId: segment.siteId,
               workAreaId: segment.workAreaId,
-              sourceAssignmentId
+              sourceAssignmentId,
+              originClockShiftFragmentId: segment.originClockShiftFragmentId ?? null
             }
           });
           if (segment.breaks.length > 0) {
@@ -396,12 +451,17 @@ export async function patchCorrectionDraftDay(correctionRequestId: string, date:
               siteId: true,
               workAreaId: true,
               sourceAssignmentId: true,
+              originClockShiftFragmentId: true,
               breaks: { orderBy: { startAt: 'asc' }, select: { id: true, startAt: true, endAt: true, paid: true } }
             }
           }
         }
       });
     });
+
+    if ('code' in updatedDay) {
+      return updatedDay;
+    }
 
     return {
       date: formatDate(updatedDay.date),
@@ -414,6 +474,7 @@ export async function patchCorrectionDraftDay(correctionRequestId: string, date:
         siteId: s.siteId,
         workAreaId: s.workAreaId,
         sourceAssignmentId: s.sourceAssignmentId,
+        originClockShiftFragmentId: s.originClockShiftFragmentId,
         breaks: s.breaks.map((b) => ({ id: b.id, startAt: b.startAt.toISOString(), endAt: b.endAt.toISOString(), paid: b.paid }))
       }))
     };
@@ -618,13 +679,26 @@ export interface DecideCorrectionResult {
  * REJECTED) — both are exercised through the same decision action, and self-review defeats the
  * "second pair of eyes" purpose either way.
  *
+ * §15 п.7 locking — `Employee` → `Timesheet` → `CorrectionRequest FOR UPDATE` (canonical order,
+ * §8.1, `CorrectionRequest` standing in the "draft/correction rows" position) taken first; status,
+ * ownership, `currentVersionId`, and the self-approval check are all re-read fresh under the lock,
+ * never trusted from the pre-lock routing read.
+ *
  * On APPROVED: freezes the draft into a new TimesheetVersion(source=CORRECTION) — same
  * day/segment/break freeze order as lib/worker-timesheets.ts's submitWorkerTimesheet (no
- * TimesheetPlannedShift step here, CorrectionDraft has none). Timesheet.status stays
- * FINAL_APPROVED (§4.7) — no TimesheetReviewScope is created, corrections don't re-enter review.
- * If PayrollPeriod.status = EXPORTED at this moment, CorrectionRequest.pendingExport is set —
- * ExportBatch itself isn't built yet (period.export, deferred), so this just marks the row for
- * whenever that lands.
+ * TimesheetPlannedShift step here, CorrectionDraft has none), now also copying
+ * `originClockShiftFragmentId` onto each frozen WorkSegment. Timesheet.status stays FINAL_APPROVED
+ * (§4.7) — no TimesheetReviewScope is created, corrections don't re-enter review. Before switching
+ * `currentVersionId`, `beforeOriginFragmentIds` (from the OLD current version's WorkSegment) and
+ * `beforeRangesByShift` (§9.1a snapshot) are captured; after the freeze and switch,
+ * `ClockShiftAdjustment` rows are written for every provenance origin that actually changed
+ * (EDITED/REMOVED/RESTORED_TO_RECORDED, attributed to the real `deciderUserId` — never SYSTEM),
+ * and the shared `resolveOverlapsForAffectedShifts` (§9.1a) resolves OVERLAPPING_SHIFT transitions
+ * for every affected shift — SYSTEM is used only inside that helper's own automatic resolution,
+ * never as the ClockShiftAdjustment author. If PayrollPeriod.status = EXPORTED at this moment,
+ * CorrectionRequest.pendingExport is set — ExportBatch itself isn't built yet (period.export,
+ * deferred), so this just marks the row for whenever that lands. REJECTED never reaches any of
+ * this — no WorkSegment, ClockShiftAdjustment, or overlap-transition is ever created for it.
  */
 export async function decideCorrection(
   correctionRequestId: string,
@@ -638,29 +712,42 @@ export async function decideCorrection(
     return { code: 'VALIDATION_ERROR', fieldErrors: { overrideReason: ['required when approvalOverride is true'] } };
   }
 
-  const request = await prisma.correctionRequest.findUnique({
+  const routing = await prisma.correctionRequest.findUnique({
     where: { id: correctionRequestId },
-    select: {
-      status: true,
-      timesheetId: true,
-      draftOwner: { select: { id: true, employeeId: true, basedOnVersionId: true, openedByUserId: true } },
-      timesheet: { select: { employeeId: true, periodId: true, period: { select: { status: true } } } }
-    }
+    select: { timesheetId: true, timesheet: { select: { employeeId: true } } }
   });
-  if (!request || !request.draftOwner) {
+  if (!routing) {
     return { code: 'NOT_FOUND' };
   }
-  if (request.status !== 'SUBMITTED') {
-    return { code: 'INVALID_STATE_TRANSITION' };
-  }
-  if (!approvalOverride && deciderUserId === request.draftOwner.openedByUserId) {
-    return { code: 'SELF_APPROVAL_FORBIDDEN' };
-  }
+  const employeeId = routing.timesheet.employeeId;
 
-  const draftId = request.draftOwner.id;
-  const employeeId = request.draftOwner.employeeId;
+  const outcome = await prisma.$transaction(async (tx): Promise<DecideCorrectionError | { status: 'REJECTED' | 'APPROVED'; resultingVersionId: string | null }> => {
+    await tx.$queryRaw`SELECT id FROM "Employee" WHERE id = ${employeeId}::uuid FOR UPDATE`;
+    await tx.$queryRaw`SELECT id FROM "Timesheet" WHERE id = ${routing.timesheetId}::uuid FOR UPDATE`;
+    await tx.$queryRaw`SELECT id FROM "CorrectionRequest" WHERE id = ${correctionRequestId}::uuid FOR UPDATE`;
 
-  const outcome = await prisma.$transaction(async (tx) => {
+    const request = await tx.correctionRequest.findUniqueOrThrow({
+      where: { id: correctionRequestId },
+      select: {
+        status: true,
+        reason: true,
+        timesheetId: true,
+        draftOwner: { select: { id: true, employeeId: true, openedByUserId: true } },
+        timesheet: { select: { employeeId: true, currentVersionId: true, periodId: true, period: { select: { status: true } } } }
+      }
+    });
+    if (!request.draftOwner) {
+      return { code: 'NOT_FOUND' as const };
+    }
+    if (request.status !== 'SUBMITTED') {
+      return { code: 'INVALID_STATE_TRANSITION' as const };
+    }
+    if (!approvalOverride && deciderUserId === request.draftOwner.openedByUserId) {
+      return { code: 'SELF_APPROVAL_FORBIDDEN' as const };
+    }
+
+    const draftId = request.draftOwner.id;
+
     if (decision === 'REJECTED') {
       await tx.correctionRequest.update({
         where: { id: correctionRequestId },
@@ -680,16 +767,21 @@ export async function decideCorrection(
       return { status: 'REJECTED' as const, resultingVersionId: null };
     }
 
-    const lastVersion = await tx.timesheetVersion.findFirst({
-      where: { timesheetId: request.timesheetId },
-      orderBy: { versionNumber: 'desc' },
-      select: { versionNumber: true }
-    });
-    const versionNumber = (lastVersion?.versionNumber ?? 0) + 1;
+    const oldVersionId = request.timesheet.currentVersionId;
 
-    const version = await tx.timesheetVersion.create({
-      data: { timesheetId: request.timesheetId, employeeId, versionNumber, source: 'CORRECTION', createdByUserId: deciderUserId }
-    });
+    // §15 п.7 — before-origin snapshot, from the OLD current version's WorkSegment, taken before
+    // any mutation. Every origin appearing in the correction draft is already guaranteed (§15 п.9
+    // membership check, applied when the draft's segments were edited) to trace back to a
+    // fragment that was live in this same OLD version — so beforeOriginFragmentIds always
+    // includes every afterOriginFragmentId, and no fragment ever appears only in "after" (no new
+    // origin binding is ever created outside the materializer).
+    const beforeWorkSegments = oldVersionId
+      ? await tx.workSegment.findMany({
+          where: { timesheetVersionId: oldVersionId, originClockShiftFragmentId: { not: null } },
+          select: { originClockShiftFragmentId: true, startAt: true, endAt: true, siteId: true, workAreaId: true, sourceAssignmentId: true }
+        })
+      : [];
+    const beforeByFragment = new Map(beforeWorkSegments.map((s) => [s.originClockShiftFragmentId as string, s]));
 
     const days = await tx.correctionDraftDay.findMany({
       where: { draftId },
@@ -706,10 +798,48 @@ export async function decideCorrection(
             sourceAssignmentId: true,
             startAt: true,
             endAt: true,
+            originClockShiftFragmentId: true,
             breaks: { select: { startAt: true, endAt: true, paid: true } }
           }
         }
       }
+    });
+
+    const afterByFragment = new Map<string, ProvenanceValues>();
+    for (const day of days) {
+      for (const seg of day.segments) {
+        if (seg.originClockShiftFragmentId) {
+          afterByFragment.set(seg.originClockShiftFragmentId, { startAt: seg.startAt, endAt: seg.endAt, siteId: seg.siteId, workAreaId: seg.workAreaId, sourceAssignmentId: seg.sourceAssignmentId });
+        }
+      }
+    }
+
+    const affectedFragmentIds = [...new Set([...beforeByFragment.keys(), ...afterByFragment.keys()])];
+    const fragmentsById = new Map<
+      string,
+      { id: string; clockShiftId: string; employeeId: string; recordedStartAt: Date; recordedEndAt: Date; siteId: string; workAreaId: string | null; sourceAssignmentId: string | null }
+    >();
+    if (affectedFragmentIds.length > 0) {
+      const fragmentRows = await tx.clockShiftFragment.findMany({
+        where: { id: { in: affectedFragmentIds } },
+        select: { id: true, clockShiftId: true, employeeId: true, recordedStartAt: true, recordedEndAt: true, siteId: true, workAreaId: true, sourceAssignmentId: true }
+      });
+      for (const f of fragmentRows) {
+        fragmentsById.set(f.id, f);
+      }
+    }
+    const affectedShiftIds = [...new Set(affectedFragmentIds.map((id) => fragmentsById.get(id)!.clockShiftId))];
+    const beforeRangesByShift = await effectiveReportedRangesBatch(tx, affectedShiftIds);
+
+    const lastVersion = await tx.timesheetVersion.findFirst({
+      where: { timesheetId: request.timesheetId },
+      orderBy: { versionNumber: 'desc' },
+      select: { versionNumber: true }
+    });
+    const versionNumber = (lastVersion?.versionNumber ?? 0) + 1;
+
+    const version = await tx.timesheetVersion.create({
+      data: { timesheetId: request.timesheetId, employeeId, versionNumber, source: 'CORRECTION', createdByUserId: deciderUserId }
     });
 
     for (const day of days) {
@@ -738,7 +868,8 @@ export async function decideCorrection(
             siteId: seg.siteId,
             workAreaId: seg.workAreaId,
             sourceAssignmentId: seg.sourceAssignmentId,
-            crossesMidnight: formatDate(seg.endAt) !== formatDate(day.date)
+            crossesMidnight: formatDate(seg.endAt) !== formatDate(day.date),
+            originClockShiftFragmentId: seg.originClockShiftFragmentId
           }
         });
         if (seg.breaks.length > 0) {
@@ -750,6 +881,46 @@ export async function decideCorrection(
     }
 
     await tx.timesheet.update({ where: { id: request.timesheetId }, data: { currentVersionId: version.id } });
+
+    // §15 п.7 — after the freeze/switch: write ClockShiftAdjustment for every origin whose
+    // provenance-relevant values actually changed, attributed to the real approver, never SYSTEM.
+    for (const fragmentId of affectedFragmentIds) {
+      const before = beforeByFragment.get(fragmentId);
+      const after = afterByFragment.get(fragmentId);
+      if (before && after && provenanceValuesEqual(before, after)) {
+        continue;
+      }
+      const frag = fragmentsById.get(fragmentId)!;
+      const recorded: ProvenanceValues = { startAt: frag.recordedStartAt, endAt: frag.recordedEndAt, siteId: frag.siteId, workAreaId: frag.workAreaId, sourceAssignmentId: frag.sourceAssignmentId };
+      const beforeValues: ProvenanceValues = before ?? recorded;
+      const changeType: 'EDITED' | 'RESTORED_TO_RECORDED' | 'REMOVED' = !after ? 'REMOVED' : provenanceValuesEqual(after, recorded) ? 'RESTORED_TO_RECORDED' : 'EDITED';
+
+      await tx.clockShiftAdjustment.create({
+        data: {
+          clockShiftFragmentId: fragmentId,
+          clockShiftId: frag.clockShiftId,
+          employeeId: frag.employeeId,
+          changeType,
+          changedByUserId: deciderUserId,
+          beforeStartAt: beforeValues.startAt,
+          beforeEndAt: beforeValues.endAt,
+          beforeSiteId: beforeValues.siteId,
+          beforeWorkAreaId: beforeValues.workAreaId,
+          beforeSourceAssignmentId: beforeValues.sourceAssignmentId,
+          afterStartAt: after?.startAt ?? null,
+          afterEndAt: after?.endAt ?? null,
+          afterSiteId: after?.siteId ?? null,
+          afterWorkAreaId: after?.workAreaId ?? null,
+          afterSourceAssignmentId: after?.sourceAssignmentId ?? null,
+          reason: request.reason,
+          requestId
+        }
+      });
+    }
+
+    if (affectedShiftIds.length > 0) {
+      await resolveOverlapsForAffectedShifts(tx, affectedShiftIds, beforeRangesByShift, requestId);
+    }
 
     const pendingExport = request.timesheet.period.status === 'EXPORTED';
 
@@ -791,6 +962,10 @@ export async function decideCorrection(
 
     return { status: 'APPROVED' as const, resultingVersionId: version.id };
   });
+
+  if ('code' in outcome) {
+    return outcome;
+  }
 
   return { correctionRequestId, status: outcome.status, resultingVersionId: outcome.resultingVersionId };
 }
@@ -884,6 +1059,7 @@ export async function getCorrectionDetail(correctionRequestId: string): Promise<
                   siteId: true,
                   workAreaId: true,
                   sourceAssignmentId: true,
+                  originClockShiftFragmentId: true,
                   breaks: { orderBy: { startAt: 'asc' }, select: { id: true, startAt: true, endAt: true, paid: true } }
                 }
               }
@@ -922,6 +1098,7 @@ export async function getCorrectionDetail(correctionRequestId: string): Promise<
         siteId: s.siteId,
         workAreaId: s.workAreaId,
         sourceAssignmentId: s.sourceAssignmentId,
+        originClockShiftFragmentId: s.originClockShiftFragmentId,
         breaks: s.breaks.map((b) => ({ id: b.id, startAt: b.startAt.toISOString(), endAt: b.endAt.toISOString(), paid: b.paid }))
       }))
     }))
