@@ -1,8 +1,101 @@
 # Titanor Time — Implementation Status
 
-Обновлено: 2026-08-14 Europe/Helsinki (feat: materialize attendance clock shifts)
+Обновлено: 2026-08-15 Europe/Helsinki (feat: add worker online clock UI)
 
-**T7A attendance materialization — новый завершённый backend-слайс поверх online clock core.**
+**T7A Worker Online Clock UI — новый завершённый frontend-слайс поверх online clock core +
+materialization.** Реализует `docs/titanor-time/T7A_1_ATTENDANCE_CLOCK_DESIGN.md` decomposition п.5
+(`01_SCREEN_MAP.md` §3 `/worker`) — mobile-first `/worker` как основной экран после логина работника,
+строго online (offline outbox/§6 IndexedDB-протокол намеренно не реализован этим слайсом).
+
+**Файлы**: `app/worker/page.tsx` (server component — session/role/`employeeId` из сессии, НИКОГДА из
+query/body; `getClockState`/`listWorkerCurrentAssignments`/`listActionablePeriods`/`getWorkerContext`
+через один `Promise.all`, без лишнего client-side GET сразу после hydration), новый
+`app/worker/WorkerClockPanel.tsx` (client component — вся интерактивная логика) и новый
+`lib/worker-gps.ts` (браузерный GPS helper: `getCurrentPosition` одноразово, `enableHighAccuracy`,
+`timeout=12s`, `maximumAge=0`, никогда `watchPosition`, координаты округляются до той же точности,
+что валидирует `lib/attendance-clock.ts`, чтобы не словить ложный `VALIDATION_ERROR`). Расширение
+`.wk-*` в `app/globals.css` — новые классы, ни один существующий класс не изменён.
+**`lib/attendance-clock.ts` и все четыре route-файла НЕ изменены этим слайсом** — UI работает строго
+поверх уже существующего контракта (`GET clock-state`, `POST check-in`/`check-out`/`switch-site`).
+
+**Состояния UI**: `Clocked out` (assignment picker — primary выбран по умолчанию, единственное
+назначение выбрано автоматически, пустой список → понятный empty state + disabled `Check In`);
+`Clocked in` (authoritative `siteName`/`workAreaName`/`openedAt` из `clock-state`, живой таймер —
+`serverNow`/client offset, никогда не отрицательный, `setInterval` всегда чистится, обновление раз в
+секунду); `Switch site` (явное подтверждение, старый/новый объект показаны, текущий объект исключён
+из списка целей); progress (`Getting location…`/`Submitting…`/`Result unknown, checking current
+state…`, всё через `aria-live`); человеческие сообщения для `OUTSIDE_GEOFENCE`/`SITE_NOT_FOUND`/
+`CLIENT_EVENT_ID_REUSED`/`NO_OPEN_SHIFT_TO_SWITCH`/`RATE_LIMITED`/`CSRF_REJECTED`/
+`NO_EMPLOYEE_PROFILE`/`NOT_AUTHENTICATED`/`VALIDATION_ERROR`/network-timeout.
+
+**Idempotency/network-reconciliation модель** (только React memory, никакого durable outbox/service
+worker/IndexedDB): каждый клик создаёт один immutable "attempt" — свежие `clientEventId`(ы)/
+`clientCapturedAt`/выбранный site-workArea/один снятый GPS snapshot (используется для ОБЕИХ половин
+switch-site, включая одинаковую `gpsUnavailableReason` при сбое). Успех → durable `GET clock-state`
+перечитывается заново (состояние никогда не собирается только из локальных предположений). `429
+RATE_LIMITED` — тот же attempt остаётся retryable. Любая другая ошибка ответа сервера — attempt
+сбрасывается, `clock-state` перечитывается, но выбранное назначение НЕ стирается. Сетевой сбой/
+timeout/невалидный JSON → "Result unknown" → `GET clock-state`; если состояние подтверждает результат
+(по `openedByClockEventId`/переходу `CLOCKED_IN`↔`CLOCKED_OUT`) — успех без повторной мутации; если
+нет — предлагается `Retry` тем же attempt (те же id/payload, GPS не перезапрашивается). Двойной клик
+блокируется синхронным ref-guard'ом (не только `disabled`), проверено гонкой из двух параллельных
+кликов.
+
+**Тесты, реально выполненные на одноразовом PostgreSQL 16** (контейнер `postgres:16`, `--rm`, tmpfs,
+случайные credentials/порт, удалён по завершении):
+- Static: `git diff --check`, `prisma validate`, `tsc --noEmit`, `npm run build` — все зелёные.
+  `docker compose -f compose.titanor-time.yaml build app` — успешный build (мандаторный тест этого
+  слайса); повторный `prisma migrate deploy` — "No pending migrations to apply" (50 миграций, как и
+  было — новых миграций этот слайс не добавляет).
+- HTTP/DB (12/12 PASS, прямые вызовы route-функций, как в `scripts/_test-activation.ts`): исходное
+  `CLOCKED_OUT`; check-in внутри geofence; точный natural replay того же `clientEventId`/payload без
+  дублей; check-out закрывает смену и материализует инлайн (`materializationState=MATERIALIZED`,
+  `TimesheetDraftSegment` создан); `GET clock-state` после checkout → `CLOCKED_OUT`; GPS unavailable →
+  `NOT_VERIFIED`, ноль строк в `ClockEventLocation`; outside-geofence → `403`, ноль новых строк, состояние
+  не меняется; гонка из двух параллельных идентичных check-in → ровно один `ClockEvent`/
+  `EmployeeOpenShift`; switch-site success → старая смена materialized-closed, новая открыта на новом
+  сайте; switch-site failure (новый сайт outside) → полный rollback, старая смена без изменений;
+  CSRF/auth/permission → `CSRF_REJECTED`/`NOT_AUTHENTICATED`/`FORBIDDEN`; rate limit 20/60s → `429` на
+  21-й попытке.
+- Browser (Playwright, headless Chromium, 33/33 PASS): CLOCKED_OUT с одним/несколькими/нулём
+  назначений; happy path (mobile 390×844 → check-in внутри geofence → таймер увеличивается и не
+  отрицателен → reload восстанавливает `CLOCKED_IN` из БД → desktop viewport без горизонтального
+  scroll → switch-site → check-out → reload восстанавливает `CLOCKED_OUT`); keyboard focus + `aria-live`
+  region присутствует; GPS permission denied → check-in всё равно проходит (`NOT_VERIFIED`), ноль
+  координат в DOM; outside-geofence → понятная ошибка, состояние/выбор сохранены; network-unknown
+  (перехват fetch, `route.abort`) → "Result unknown…" → `Retry` → успех, **оба** HTTP-запроса несли
+  байт-в-байт идентичный payload (тот же `clientEventId`); rapid double-click → ровно один POST;
+  mocked `RATE_LIMITED`/`NOT_AUTHENTICATED` → корректный человеческий текст и retry-состояние. Ноль
+  `pageerror` (application-level) во всех сценариях; три ожидаемых браузерных
+  `console.error("Failed to load resource")` — стандартный лог Chromium для намеренно вызванных
+  403/429/aborted сетевых ответов, не application-исключения.
+- Regression: `scripts/_test-activation.ts` и `scripts/_test-corrections.ts` — оба зелёные на чистом
+  PostgreSQL 16 (запускались по отдельности — их собственные фикстуры с фиксированными датами периода
+  конфликтуют друг с другом при последовательном запуске на одной БД, это ожидаемо тем же exclusion
+  constraint, что и в проде, не баг). `/worker/periods`, `/worker/history` — рендерятся, без console
+  errors, не бросают на `/login`. `GET /api/admin/sites/:id/geofence-versions` — не сломан (не
+  изменялся этим слайсом).
+
+**Production**: `titanor-time-app-1`/`titanor-time-db-1` — только read-only `docker inspect` до и
+после; `RestartCount=0`, `StartedAt` и image ID контейнеров не изменились, `/api/health` отвечает
+`200` на протяжении всей работы. Мандаторный `docker compose build app` (без `up`) перевесил локальный
+тег `titanor-time-app:latest` на новый build-артефакт этого слайса — сам контейнер это не затрагивает
+(контейнеры ссылаются на образ по ID, не по тегу, `docker inspect` подтверждает тот же ID до/после), но
+локальный тег `latest` теперь указывает не на прежний production-образ — стоит иметь в виду перед
+следующим explicit rebuild+redeploy (вне scope этого слайса, не выполнялся).
+
+**Остаётся вне этого слайса** (явно, по границам задачи): offline outbox/PWA/IndexedDB,
+`deviceInstallationId`/`deviceSequence`/`DeviceEventReceipt`-FIFO, `POST /attendance/sync`,
+`GET /attendance/context|today|week`, scheduler/auto-submit, exception-review UI/API, admin attendance
+overview, полное меню (`Today`/`My week`/`All hours`/`Corrections`/`Profile`/`Help`/`Logout` — только
+ссылки на уже существующие `/worker/periods`/`/worker/history`), `Add break`, GPS/sync-state summary
+badge. Prisma schema/migrations/permissions/route surface не изменены — подтверждено: 50 миграций до и
+после, `git diff` затрагивает только `app/worker/page.tsx` (переписан), `app/globals.css` (только
+добавления), плюс два новых файла (`app/worker/WorkerClockPanel.tsx`, `lib/worker-gps.ts`).
+
+---
+
+**T7A attendance materialization — предыдущий завершённый backend-слайс поверх online clock core.**
 Реализованы §9.2(k), §9.4, §9.5 и §8.4 design-документа без изменения Prisma schema, migrations,
 permissions или HTTP route surface. Новый `lib/attendance-materializer.ts` содержит tx-safe
 `materializeClockShiftCore`, публичную обёртку с canonical locks и внутренний read-only catch-up

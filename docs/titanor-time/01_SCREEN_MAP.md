@@ -622,26 +622,43 @@ touch target ≥ 48px), `/foreman/*` — desktop-first с поддержкой �
 `periodId`+сессии). Работник может иметь несколько actionable периодов одновременно — навигация
 между ними явная, но обычный Check In/Out всегда доступен с домашней страницы.
 
-#### `/worker` 🟢 (после ЭТАП 7A — основной экран после логина)
+#### `/worker` 🟢 (после ЭТАП 7A — основной экран после логина) — **`[2026-08-15] реализовано
+(T7A Worker Online Clock UI, online-only).`**
 - Роли: `WORKER`
-- Приоритет: mobile-first, 375px, touch-target ≥48px, основное действие доступно одной рукой
+- Приоритет: mobile-first, 390×844 проверено, touch-target ≥48px, основное действие доступно одной
+  рукой; responsive до desktop без горизонтального scroll
 - Назначение: максимально простой ежедневный clock без плотной таблицы и бухгалтерских терминов
-- Данные: имя работника, локальная дата/день/время, активные назначения и основной объект, открытая
-  clock-смена, GPS/sync-state, компактные интервалы `Today`, итог `This week`, ближайший cutoff
-- Действия: доминирующая `Check In`; при активной смене — таймер и доминирующая `Check Out`;
-  `Switch site` (атомарные Check Out старого + Check In нового); `Add break`; открыть меню
-- Меню: `Today`, `My week`, `All hours`, `Corrections`, `Profile`, `Help`, `Logout`
-- Состояния: `ready to check in`; `working`; `saved on device — waiting for sync`;
-  `GPS_NOT_VERIFIED`; `outside geofence`; `no assignment`; `missing checkout`; error. Активная смена
-  и несинхронизированное событие не теряются после закрытия/перезапуска PWA
-- Откуда: логин `WORKER`, worker-nav
-- Куда: `/worker/periods/[periodId]/hours`, `/worker/history`, `/worker/profile`
-- API: после schema checkpoint — worker clock/context/sync endpoints; существующие context,
-  assignments и timesheet endpoints переиспользуются для summary
-- DoD: при одном назначении `Check In` не требует выбора объекта; при нескольких выбор понятен до
-  старта; после нажатия пользователь сразу видит локально сохранённое состояние даже offline;
-  `Switch site` создаёт два последовательных события без пересечения; ни один warning не скрыт
-  только внутри меню
+- Данные (реализовано): имя работника, локальная дата, список текущих `SiteAssignment` (primary
+  отмечен и выбран по умолчанию), authoritative `siteName`/`workAreaName`/время начала открытой
+  смены и живая продолжительность — всё из `getClockState`/`listWorkerCurrentAssignments`
+  (`app/worker/page.tsx`, server-side, `Promise.all`). GPS/sync-state summary, `Today`/`This week`
+  интервалы, ближайший cutoff — **не реализованы** этим слайсом (не входили в его scope)
+- Действия (реализовано): доминирующая `Check In` (disabled без назначения/во время запроса);
+  `Check Out`; `Switch site` (атомарная пара, явное подтверждение, старый/новый объект показаны);
+  ссылки на `/worker/periods` (или сразу единственный actionable период) и `/worker/history`.
+  `Add break` — не реализовано (вне текущего scope, не online-clock функциональность)
+- Меню (`Today`/`My week`/`All hours`/`Corrections`/`Profile`/`Help`/`Logout`) — **не реализовано**
+  этим слайсом; вместо него — два прямых текстовых линка, см. выше
+- Состояния (реализовано): `Clocked out` (с empty state, если назначений нет); `Clocked in`
+  (таймер, никогда не отрицательный); `Getting location…`/`Submitting…`/`Result unknown, checking
+  current state…` (`aria-live`); человеческие сообщения для `OUTSIDE_GEOFENCE`/`SITE_NOT_FOUND`/
+  `CLIENT_EVENT_ID_REUSED`/`NO_OPEN_SHIFT_TO_SWITCH`/`RATE_LIMITED`/`CSRF_REJECTED`/
+  `NO_EMPLOYEE_PROFILE`/`NOT_AUTHENTICATED`/`VALIDATION_ERROR`/network-timeout. `GPS_NOT_VERIFIED`/
+  `outside geofence` не блокируют локально — тот же online-канал контракт, что и бэкенд
+  (T7A_1_ATTENDANCE_CLOCK_DESIGN.md §5.3).
+  Reload восстанавливает durable state через server render (не через PWA/offline cache — offline
+  outbox не реализован, см. ниже)
+- Откуда: логин `WORKER`
+- Куда: `/worker/periods/[periodId]` (или список `/worker/periods`), `/worker/history`
+- API: `GET clock-state`, `POST check-in`/`check-out`/`switch-site` (все четыре — уже существовавший
+  online clock core, `lib/attendance-clock.ts`, не изменены этим слайсом)
+- DoD: при одном назначении `Check In` не требует выбора объекта (подтверждено тестом); при
+  нескольких выбор понятен до старта; `Switch site` создаёт атомарную пару без промежуточного
+  «нигде не отмечен» состояния (подтверждено успехом и rollback-тестом); двойной клик не создаёт два
+  разных attempt (подтверждено); network-unknown retry повторяет тот же payload/id (подтверждено)
+- **Явно НЕ реализовано этим слайсом**: offline outbox/PWA/IndexedDB, `deviceInstallationId`/
+  `deviceSequence`, `POST /attendance/sync`, GPS/sync-state summary badge, `Today`/`This week`
+  сводка, `Add break`, полное меню, scheduler/auto-submit, exception-review UI, admin overview
 
 #### `/worker/periods` ⚪ (список actionable периодов, точка входа при нескольких)
 - Роли: `WORKER`

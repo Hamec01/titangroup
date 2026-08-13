@@ -773,9 +773,10 @@ Actionable = `PayrollPeriodParticipant.expected=true` + `PayrollPeriod.status=OP
 `capturedOffline=false`. `employeeId` всегда из сессии, никогда из тела запроса. **Materialization
 реализована следующим backend-слайсом:** успешный `check-out`/`switch-site` при resolved assignment
 и без OPEN overlap вызывает `materializeClockShiftCore` инлайн в той же транзакции; иначе shift
-остаётся `PENDING` для внутреннего catch-up. По-прежнему отложены:
-`deviceInstallationId`/`deviceSequence`/`DeviceEventReceipt`-FIFO,
-`POST /attendance/sync`, offline outbox, `GET /attendance/context|today|week`, worker mobile UI,
+остаётся `PENDING` для внутреннего catch-up. **`[2026-08-15]`** Worker mobile UI (`/worker`,
+`app/worker/page.tsx` + `WorkerClockPanel.tsx`) реализован поверх этих же четырёх эндпоинтов без их
+изменения. По-прежнему отложены: `deviceInstallationId`/`deviceSequence`/`DeviceEventReceipt`-FIFO,
+`POST /attendance/sync`, offline outbox, `GET /attendance/context|today|week`,
 scheduler, exception-review-эндпоинты, admin attendance overview.
 
 **GPS shape** (переиспользуется всеми телами ниже):

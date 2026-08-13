@@ -806,3 +806,159 @@ button:disabled {
   font-size: 0.85rem;
   justify-self: start;
 }
+
+/* T7A Worker Online Clock UI (/worker) — extends the .wk-* language above, does not replace it. */
+
+.wk-clock-card {
+  gap: 14px;
+}
+
+.wk-clock-header {
+  display: grid;
+  gap: 2px;
+}
+
+.wk-clock-worker-name {
+  margin: 0;
+  font-weight: 600;
+  font-size: 1.05rem;
+}
+
+.wk-clock-today {
+  margin: 0;
+  color: var(--text-soft);
+  font-size: 0.85rem;
+}
+
+.wk-clock-status-label {
+  margin: 4px 0 0;
+  font-size: 1.6rem;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+}
+
+.wk-clock-status-out {
+  color: var(--text-soft);
+}
+
+.wk-clock-status-in {
+  color: #86efac;
+}
+
+.wk-clock-site {
+  margin: 0;
+  font-size: 1.1rem;
+  font-weight: 600;
+}
+
+.wk-clock-workarea {
+  margin: 0;
+  color: var(--text-soft);
+  font-size: 0.9rem;
+}
+
+.wk-clock-since {
+  margin: 0;
+  color: var(--text-soft);
+  font-size: 0.85rem;
+}
+
+.wk-clock-timer {
+  margin: 4px 0;
+  font-size: 2.4rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.02em;
+}
+
+.wk-assignment-options {
+  display: grid;
+  gap: 8px;
+}
+
+.wk-assignment-option {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 52px;
+  padding: 10px 14px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 6px;
+  background: rgba(7, 11, 17, 0.5);
+}
+
+.wk-assignment-option.selected {
+  border-color: var(--accent-light);
+  background: rgba(82, 130, 168, 0.14);
+}
+
+.wk-assignment-option input {
+  width: 20px;
+  height: 20px;
+  flex-shrink: 0;
+}
+
+.wk-assignment-option-body {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.wk-clock-secondary-button {
+  min-height: 48px;
+  border: 1px solid var(--accent-light);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--accent-light);
+  font-weight: 600;
+  font-size: 0.95rem;
+}
+
+.wk-clock-cancel-button {
+  min-height: 48px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-soft);
+  font-weight: 600;
+  font-size: 0.95rem;
+}
+
+.wk-switch-panel {
+  display: grid;
+  gap: 10px;
+  padding: 14px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 6px;
+  background: rgba(7, 11, 17, 0.5);
+}
+
+.wk-switch-summary {
+  margin: 0;
+  font-size: 0.9rem;
+  color: var(--text-soft);
+}
+
+.wk-switch-actions {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.wk-switch-actions > * {
+  flex: 1;
+  min-width: 120px;
+}
+
+.wk-status-live {
+  margin: 0;
+  color: var(--text-soft);
+  font-size: 0.9rem;
+}
+
+.wk-clock-nav {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 4px;
+}
