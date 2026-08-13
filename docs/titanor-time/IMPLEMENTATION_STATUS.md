@@ -1,9 +1,52 @@
 # Titanor Time — Implementation Status
 
-Обновлено: 2026-08-14 Europe/Helsinki (feat: add online attendance clock core)
+Обновлено: 2026-08-14 Europe/Helsinki (feat: materialize attendance clock shifts)
 
-**T7A online clock core — GPS evaluation, clock-state, Check In, Check Out, atomic Switch Site,
-НОВЫЙ этап, продолжение T7A.2 Geofence admin.** Реализует
+**T7A attendance materialization — новый завершённый backend-слайс поверх online clock core.**
+Реализованы §9.2(k), §9.4, §9.5 и §8.4 design-документа без изменения Prisma schema, migrations,
+permissions или HTTP route surface. Новый `lib/attendance-materializer.ts` содержит tx-safe
+`materializeClockShiftCore`, публичную обёртку с canonical locks и внутренний read-only catch-up
+scan/per-candidate runner (без cron/API wiring). Online Check Out и Switch Site вызывают core
+инлайн в своей существующей транзакции: обычная закрытая смена с assignment и без OPEN overlap
+коммитится уже с полным `ClockShiftFragment` → `TimesheetDraftSegment` projection и
+`materializationState=MATERIALIZED`.
+
+Фаза 1 строит DST-safe half-open план по Helsinki payroll boundaries до первой записи, блокирует
+сначала все `Timesheet` по `id`, затем все `TimesheetDraft` в том же порядке и вставляет все
+отсутствующие fragments одной multi-row командой (statement-level coverage trigger всегда видит
+полный набор). Фаза 2 независимо резолвит assignment каждого fragment, переиспользует общую
+`computePlannedShiftForAssignmentDate`, только находит (никогда не изобретает)
+`TimesheetDraftDay`, проверяет day state, создаёт live segment, увеличивает `contentRevision` и
+переводит per-fragment projection в `SETTLED`; shift-wide gate дублирован существующим DB trigger.
+
+Late sync status matrix закрыта полностью: `DRAFT`/обычный `RETURNED` проецируются напрямую;
+`SUBMITTED`/`FOREMAN_APPROVED` системно возвращаются в `RETURNED` с generation/audit и
+`LATE_SYNC_AFTER_SUBMIT`; повторный fragment того же episode не делает второй reopen; resubmit
+структурно резолвит исключения. `FINAL_APPROVED` не reopen-ится и не получает live draft segment:
+fragment явно `SETTLED`, создаются late-sync exception + skipped-reopen audit, а существующий
+correction flow теперь может привязать именно этот OPEN fragment и резолвит исключение при
+approval. Точное recorded-value binding не создаёт ложный `ClockShiftAdjustment`.
+
+Проверено на чистом disposable PostgreSQL 16: **74/74 PASS** — inline atomic path, replay-safe
+state, 1/2/3-period split, exact boundary и `+1ms` chronology clamp, winter/summer DST,
+multi-row coverage rejection, idempotent repeat, nullable template, missing draft day/day conflict,
+per-fragment stale assignment, вся late-sync matrix, correction approval, overlap gate/dismiss,
+chronology exception linking, прямой DB gate, catch-up isolation и concurrent materializer passes
+(два реально активных backend PID подтверждены через `pg_stat_activity`).
+Новая migration отсутствует: на чистой базе по-прежнему ровно 50 migrations.
+`git diff --check`, `prisma validate`, `tsc --noEmit`, `npm run build`, compose Docker build и
+повторный `prisma migrate deploy` зелёные. Production app/db проверены только read-only inspect:
+image IDs, `RestartCount=0` и `StartedAt` не изменились; disposable DB/image/scripts удалены.
+
+**Остаётся вне этого слайса:** worker mobile UI, `GET /attendance/context|today|week`, offline
+outbox, `deviceInstallationId`/`deviceSequence`/`DeviceEventReceipt` FIFO, `POST /attendance/sync`,
+cron/scheduler/auto-submit, exception-review endpoints, admin attendance overview и production
+deploy.
+
+---
+
+**T7A online clock core — предыдущий завершённый этап: GPS evaluation, clock-state, Check In,
+Check Out, atomic Switch Site.** Реализует
 `docs/titanor-time/T7A_1_ATTENDANCE_CLOCK_DESIGN.md` §9.1 (Online Check In), §9.2 (Online Check
 Out с хронологической защитой), §9.3 (Switch site), §9.1a (`resolveOverlapTransition`/
 `overlapCandidates`/`effectiveReportedRanges` — переиспользованы из slice B без дублирования),
@@ -15,10 +58,9 @@ model). Единственная новая migration — `20260814000000_seed_a
 и все ранее применённые migrations, включая `20260812000000_add_attendance_clock_schema_foundation`,
 не тронуты.
 
-**Явно НЕ реализовано этим слайсом (§9.2 шаг k и далее — следующий отдельный слайс):**
-`materializeClockShift` — каждый `ClockShift`, создаваемый `check-out`/`switch-site`, остаётся
-`materializationState=PENDING`, без единого `ClockShiftFragment`/`TimesheetDraftSegment`;
-`CHECKOUT_CHRONOLOGY_ANOMALY.clockShiftFragmentId` остаётся `NULL`. Также не реализовано: worker
+**На момент этого предыдущего коммита отдельно откладывалось, но теперь реализовано новым слайсом
+выше:** `materializeClockShift`, inline projection и linking chronology exception. По-прежнему не
+реализовано: worker
 mobile UI, `GET /attendance/context|today|week`, `deviceInstallationId`/`deviceSequence`/
 `DeviceEventReceipt`-FIFO, `POST /attendance/sync`, offline outbox, scheduler (auto-submit),
 exception-review-эндпоинты, admin attendance overview, production deploy. **Нельзя утверждать, что
@@ -166,11 +208,11 @@ permission-seed). Production (`titanor-time-app-1`/`titanor-time-db-1`) — то
 `docker inspect`, не тронут. Disposable Postgres 16 контейнер, тестовый docker-образ, dev-сервер и
 scratch test-скрипты удалены после проверки.
 
-Check In/Check Out/Switch Site online-контур закрыт; **`materializeClockShift` (§9.2 шаг k),
-`ClockShiftFragment`/`TimesheetDraftSegment`-проекция, worker mobile UI, `GET /attendance/
+Check In/Check Out/Switch Site online-контур закрыт; materialization/projection теперь также закрыты
+следующим слайсом, описанным в начале документа. **Worker mobile UI, `GET /attendance/
 context|today|week`, offline outbox/`deviceSequence`/`DeviceEventReceipt`-FIFO, `POST /
-attendance/sync`, scheduler, exception-review-эндпоинты, admin attendance overview, production —
-не реализованы и не затронуты этим слайсом.** Attendance Clock/T7A в целом — не завершён.
+attendance/sync`, scheduler, exception-review-эндпоинты, admin attendance overview и production
+по-прежнему не реализованы.** Attendance Clock/T7A в целом — не завершён.
 
 ---
 

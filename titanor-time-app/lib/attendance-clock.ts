@@ -3,6 +3,7 @@ import { Prisma } from '@prisma/client';
 import { prisma } from '@/lib/prisma';
 import { createAuditEvent } from '@/lib/audit';
 import { overlapCandidates, overlapExists, resolveOverlapTransition } from '@/lib/attendance-reported-projection';
+import { materializeClockShiftCore } from '@/lib/attendance-materializer';
 
 // docs/titanor-time/T7A_1_ATTENDANCE_CLOCK_DESIGN.md §9.1/§9.2/§9.3/§9.1a — Online clock core
 // (T7A online clock core slice). Route files do HTTP/auth/CSRF/idempotency/validation mapping;
@@ -11,11 +12,14 @@ import { overlapCandidates, overlapExists, resolveOverlapTransition } from '@/li
 // only the top-level `perform*` wrappers open a `prisma.$transaction(...)`, so a caller composing
 // two core steps (Switch Site) can share one transaction, one commit/rollback.
 //
-// EXPLICITLY DEFERRED to a future slice (do not implement here): materializeClockShift (§9.2 step
-// k / §9.4), ClockShiftFragment/TimesheetDraftSegment projection, worker mobile UI,
+// checkOutCore/performSwitchSite call materializeClockShiftCore (lib/attendance-materializer.ts)
+// inline, in this same transaction, once sourceAssignmentId is resolved and no OPEN
+// OVERLAPPING_SHIFT blocks it (§9.2 step k/§9.3) — never a nested transaction.
+//
+// EXPLICITLY DEFERRED to a future slice (do not implement here): worker mobile UI,
 // GET /attendance/context|today|week, deviceInstallationId/deviceSequence/DeviceEventReceipt FIFO
-// (§9.11), POST /attendance/sync, offline outbox, scheduler, exception resolution endpoints, admin
-// attendance overview. ClockShift rows created here always stay materializationState=PENDING.
+// (§9.11), POST /attendance/sync, offline outbox, scheduler/cron, exception resolution endpoints,
+// admin attendance overview.
 
 const MAX_ACCEPTABLE_ACCURACY_METERS = 75;
 const EARTH_RADIUS_METERS = 6371000;
@@ -35,9 +39,8 @@ const SKEW_TOLERANCE_MS = BigInt(5 * 60000); // §5.5 rules 2/3
 // 1ms instead of 1µs preserves the clamp's actual purpose (a minimal, provably-period-safe nudge
 // past `openedAt`) — 1ms is still many orders of magnitude smaller than any realistic payroll
 // period, so the "never crosses a period boundary" property the design proves for 1µs holds
-// identically for 1ms. The exact-microsecond boundary tests (#66/#67 in §17) are about
-// *materialization* fragment-splitting, which this slice does not implement (deferred, see above);
-// they apply to the future materializer slice, not here.
+// identically for 1ms. lib/attendance-materializer.ts's own fragment-planning tests exercise this
+// adaptation directly at a period boundary (openedAt = periodEndExclusive - 1ms).
 const CHRONOLOGY_CLAMP_MS = 1;
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -510,9 +513,17 @@ export interface ClockEventResponseBody {
   sourceAssignmentId: string | null;
   groupId: string | null;
   clockShiftId: string | null;
+  materializationState: 'PENDING' | 'MATERIALIZED' | null;
   exceptions: string[];
 }
 
+/**
+ * Reads live, not frozen at creation time — a natural `clientEventId` replay of an old checkout must reflect
+ * materializationState as it stands NOW (§B "durable response отражает актуальное
+ * materializationState"), e.g. a shift that was PENDING (overlap-blocked) when first created but
+ * later materialized by a catch-up pass shows MATERIALIZED on a subsequent replay of the same
+ * clientEventId, without ever re-running the checkout's own business mutation.
+ */
 async function buildEventResponse(tx: Prisma.TransactionClient, clockEventId: string): Promise<ClockEventResponseBody> {
   const event = await tx.clockEvent.findUniqueOrThrow({
     where: { id: clockEventId },
@@ -527,7 +538,7 @@ async function buildEventResponse(tx: Prisma.TransactionClient, clockEventId: st
       workAreaId: true,
       sourceAssignmentId: true,
       groupId: true,
-      checkOutForShift: { select: { id: true } }
+      checkOutForShift: { select: { id: true, materializationState: true } }
     }
   });
   const exceptions = await tx.attendanceException.findMany({ where: { clockEventId }, select: { type: true }, orderBy: { type: 'asc' } });
@@ -542,6 +553,7 @@ async function buildEventResponse(tx: Prisma.TransactionClient, clockEventId: st
     workAreaId: event.workAreaId,
     sourceAssignmentId: event.sourceAssignmentId,
     groupId: event.groupId,
+    materializationState: event.checkOutForShift?.materializationState ?? null,
     clockShiftId: event.checkOutForShift?.id ?? null,
     exceptions: exceptions.map((e) => e.type)
   };
@@ -1048,7 +1060,10 @@ async function checkOutCore(tx: Prisma.TransactionClient, employeeId: string, ac
         siteId: authoritativeSiteId,
         clockEventId: input.clientEventId,
         clockShiftId: clockShift.id,
-        clockShiftFragmentId: null, // materialization deferred to a future slice — see module header.
+        // Created before Phase 1; materializeClockShiftCore links it to the final fragment in the
+        // same transaction once the complete coverage batch exists. It remains NULL only while
+        // materialization is legitimately deferred (e.g. missing assignment/open overlap).
+        clockShiftFragmentId: null,
         status: 'OPEN',
         detail: { claimedEffectiveAt: effectiveAt.toISOString(), openedAt: openedAt.toISOString(), clampedTo: recordedEndAtForShift.toISOString() }
       }
@@ -1092,8 +1107,16 @@ async function checkOutCore(tx: Prisma.TransactionClient, employeeId: string, ac
     afterValue: { operationType: 'CHECK_OUT', processingState: 'ACCEPTED', clockShiftId: clockShift.id }
   });
 
-  // (k) materializeClockShift is DEFERRED to a future slice — ClockShift stays PENDING here,
-  // regardless of overlapBlocking/sourceAssignmentId. See module header.
+  // (k) — inline materialization, same transaction, no nested transaction. Mirrors the design's
+  // own `overlapBlocking` direct EXISTS check (distinct from the resolveOverlapTransition loop
+  // just above, which may itself have just opened a fresh OPEN pair for this shift).
+  const overlapBlocking =
+    (await tx.attendanceException.count({ where: { type: 'OVERLAPPING_SHIFT', status: 'OPEN', OR: [{ clockShiftId: clockShift.id }, { relatedClockShiftId: clockShift.id }] } })) > 0;
+  if (authoritativeSourceAssignmentId !== null && !overlapBlocking) {
+    await materializeClockShiftCore(tx, clockShift.id, requestId);
+  }
+  // else: ClockShift stays PENDING — either no sourceAssignmentId to resolve fragments against,
+  // or an OPEN OVERLAPPING_SHIFT still blocks materialization (§9.4 step 0/9.2 step k).
 
   return { kind: 'CREATED', body: await buildEventResponse(tx, input.clientEventId) };
 }

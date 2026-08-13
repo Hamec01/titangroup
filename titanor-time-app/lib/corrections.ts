@@ -265,11 +265,13 @@ export type PatchCorrectionDayError =
 
 /**
  * §15 п.9 — clock provenance validation for an already-open correction draft: an incoming
- * `originClockShiftFragmentId` is only accepted if it's already live on THIS draft's THIS day
+ * `originClockShiftFragmentId` is accepted when it's already live on THIS draft's THIS day
  * (`previousLive`, read under lock, before any mutation) — the same membership discipline as
- * worker PATCH (§10.2 шаг 2a), applied here to `CorrectionDraftSegment` instead of
- * `TimesheetDraftSegment`. No `ClockShiftAdjustment` is written at this stage — the correction
- * isn't approved yet (§15 п.7 does that, at freeze time).
+ * worker PATCH (§10.2 шаг 2a). The single narrow extension is §9.5 FINAL_APPROVED late sync: a
+ * fragment with a matching OPEN `LATE_SYNC_AFTER_SUBMIT` for this employee/timesheet/date may be
+ * bound for the first time here because the automatic materializer intentionally created no live
+ * segment. No `ClockShiftAdjustment` is written at this stage — the correction isn't approved
+ * yet (§15 п.7 does that, at freeze time).
  *
  * §15 п.9 locking — every DB read that affects ownership/state/day-validation/write happens
  * inside one transaction, behind `Employee` → `Timesheet` → `CorrectionDraft FOR UPDATE` (same
@@ -375,7 +377,27 @@ export async function patchCorrectionDraftDay(correctionRequestId: string, date:
       if (input.segments !== undefined) {
         for (const segment of input.segments) {
           if (segment.originClockShiftFragmentId && !previousLiveOriginIds.has(segment.originClockShiftFragmentId)) {
-            return { code: 'FORBIDDEN' as const };
+            // §9.5 "FINAL_APPROVED — явно не reopen" / task §I — a genuinely new late-arriving
+            // fragment was never live in any prior version (so it can never appear in
+            // previousLiveOriginIds), but is still legitimately referenceable here if it's the
+            // origin of an OPEN LATE_SYNC_AFTER_SUBMIT exception belonging to THIS employee/
+            // timesheet/date. Any other foreign fragment remains FORBIDDEN — this does not weaken
+            // the ordinary provenance-membership check above, only adds one narrowly-scoped
+            // additional allowance.
+            const lateSyncMatch = await tx.attendanceException.findFirst({
+              where: {
+                type: 'LATE_SYNC_AFTER_SUBMIT',
+                status: 'OPEN',
+                employeeId,
+                timesheetId: routing.timesheetId,
+                clockShiftFragmentId: segment.originClockShiftFragmentId,
+                clockShiftFragment: { date }
+              },
+              select: { id: true }
+            });
+            if (!lateSyncMatch) {
+              return { code: 'FORBIDDEN' as const };
+            }
           }
 
           // Historical date (a correction may target any past period) — the same validFrom/validTo
@@ -770,11 +792,10 @@ export async function decideCorrection(
     const oldVersionId = request.timesheet.currentVersionId;
 
     // §15 п.7 — before-origin snapshot, from the OLD current version's WorkSegment, taken before
-    // any mutation. Every origin appearing in the correction draft is already guaranteed (§15 п.9
-    // membership check, applied when the draft's segments were edited) to trace back to a
-    // fragment that was live in this same OLD version — so beforeOriginFragmentIds always
-    // includes every afterOriginFragmentId, and no fragment ever appears only in "after" (no new
-    // origin binding is ever created outside the materializer).
+    // any mutation. Ordinarily every after-origin was already live in this version. The one
+    // intentional exception is §9.5's FINAL_APPROVED late-sync flow: an OPEN
+    // LATE_SYNC_AFTER_SUBMIT permits the correction draft to bind a newly arrived fragment that
+    // the automatic materializer was explicitly forbidden to insert into the final draft.
     const beforeWorkSegments = oldVersionId
       ? await tx.workSegment.findMany({
           where: { timesheetVersionId: oldVersionId, originClockShiftFragmentId: { not: null } },
@@ -887,11 +908,15 @@ export async function decideCorrection(
     for (const fragmentId of affectedFragmentIds) {
       const before = beforeByFragment.get(fragmentId);
       const after = afterByFragment.get(fragmentId);
-      if (before && after && provenanceValuesEqual(before, after)) {
-        continue;
-      }
       const frag = fragmentsById.get(fragmentId)!;
       const recorded: ProvenanceValues = { startAt: frag.recordedStartAt, endAt: frag.recordedEndAt, siteId: frag.siteId, workAreaId: frag.workAreaId, sourceAssignmentId: frag.sourceAssignmentId };
+      // Binding a FINAL_APPROVED late fragment at its exact recorded values changes no effective
+      // reported provenance: before correction, a SETTLED fragment with no adjustment already
+      // projects its recorded range; after correction the frozen segment says the same thing.
+      // Do not manufacture a RESTORED_TO_RECORDED adjustment for that no-op binding.
+      if (after && provenanceValuesEqual(before ?? recorded, after)) {
+        continue;
+      }
       const beforeValues: ProvenanceValues = before ?? recorded;
       const changeType: 'EDITED' | 'RESTORED_TO_RECORDED' | 'REMOVED' = !after ? 'REMOVED' : provenanceValuesEqual(after, recorded) ? 'RESTORED_TO_RECORDED' : 'EDITED';
 
@@ -920,6 +945,34 @@ export async function decideCorrection(
 
     if (affectedShiftIds.length > 0) {
       await resolveOverlapsForAffectedShifts(tx, affectedShiftIds, beforeRangesByShift, requestId);
+    }
+
+    // §9.5 "Разрешение LATE_SYNC_AFTER_SUBMIT" / task §I — the FINAL_APPROVED counterpart of
+    // lib/worker-timesheets.ts's own resubmit-time resolution: a fragment's exception resolves
+    // the moment it's actually frozen into a live WorkSegment of a new (CORRECTION) version.
+    // `afterByFragment` already IS the set of origins this new version actually contains.
+    const frozenOriginFragmentIds = new Set(afterByFragment.keys());
+    if (frozenOriginFragmentIds.size > 0) {
+      const openLateSyncExceptions = await tx.attendanceException.findMany({
+        where: { type: 'LATE_SYNC_AFTER_SUBMIT', status: 'OPEN', employeeId, timesheetId: request.timesheetId },
+        select: { id: true, clockShiftFragmentId: true }
+      });
+      const resolvableIds = openLateSyncExceptions.filter((e) => e.clockShiftFragmentId !== null && frozenOriginFragmentIds.has(e.clockShiftFragmentId)).map((e) => e.id);
+      if (resolvableIds.length > 0) {
+        // §13 — same reserved SYSTEM actor guard as everywhere else this project resolves an
+        // exception structurally rather than through a human resolution action.
+        const systemActor = await tx.user.findFirst({
+          where: { userKind: 'SYSTEM', username: 'system.scheduler' },
+          select: { id: true, status: true, passwordHash: true, employeeId: true }
+        });
+        if (!systemActor || systemActor.status !== 'DEACTIVATED' || systemActor.passwordHash !== null || systemActor.employeeId !== null) {
+          throw new Error('SYSTEM_SCHEDULER_ACTOR_MISSING_OR_INVALID');
+        }
+        await tx.attendanceException.updateMany({
+          where: { id: { in: resolvableIds } },
+          data: { status: 'RESOLVED', resolvedByUserId: systemActor.id, resolvedAt: new Date(), resolutionNote: 'resolved by correction approval' }
+        });
+      }
     }
 
     const pendingExport = request.timesheet.period.status === 'EXPORTED';

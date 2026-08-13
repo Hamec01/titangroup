@@ -1701,14 +1701,16 @@ true`. Повторный `export.create` для уже `EXPORTED` период�
 `int`). Категории — сервисная функция от `WorkSegment`/`BreakSegment`/`TimesheetDay` в `Europe/
 Helsinki`, вычисляется на момент экспорта; TES-правила не зашиты в схему.
 
-### 4.9 Attendance Clock (T7A) — schema foundation implemented, API/UI/offline sync not yet
+### 4.9 Attendance Clock (T7A) — schema, geofence admin, online clock and materialization implemented
 
 Source of truth for this area is a separate, owner-approved design document —
 `T7A_1_ATTENDANCE_CLOCK_DESIGN.md` — not this file's own 5.4.1 "proposed architecture" track. This
 subsection is a compact index only; full field lists, immutability contracts, trigger SQL, GPS/
 geofence algorithm, offline-sync protocol, and materialization algorithm live in that document.
-Implemented by `prisma/migrations/20260812000000_add_attendance_clock_schema_foundation` (schema
-only — see `docs/titanor-time/IMPLEMENTATION_STATUS.md` for what is and isn't built on top of it).
+Schema implemented by `prisma/migrations/20260812000000_add_attendance_clock_schema_foundation`;
+geofence admin, online Check In/Out/Switch and the materialization service are now built on top of
+it without further schema changes. See `docs/titanor-time/IMPLEMENTATION_STATUS.md` for the exact
+slice boundaries.
 
 Thirteen new tables, raw device facts flowing down to payroll-period-scoped projections:
 
@@ -1767,9 +1769,11 @@ a `ClockEvent` cannot reference a `WorkerDeviceInstallation` belonging to a diff
 `WorkSite`'s active geofence version belonging to a different site) — full register in
 `docs/titanor-time/05_RAW_SQL_REGISTER.md` §11.3.
 
-Not yet built on this foundation: geofence admin API/UI, Check In/Check Out endpoints, `/worker`
-clock UI, IndexedDB offline outbox, sync/materialization/exception-resolution/auto-submit service
-code. See `docs/titanor-time/IMPLEMENTATION_STATUS.md`.
+Now built on this foundation: geofence admin API/UI; online clock-state/Check In/Check Out/Switch;
+inline and catch-up-service materialization into payroll-period fragments/live draft segments,
+including late-sync reopen and FINAL_APPROVED correction integration. Not yet built: `/worker`
+clock UI, IndexedDB offline outbox, sync/FIFO ingestion, exception-resolution endpoints,
+auto-submit scheduler and attendance overview. See `docs/titanor-time/IMPLEMENTATION_STATUS.md`.
 
 ## 5. Break-инварианты (применимо к `BreakSegment`, `TimesheetDraftBreakSegment`,
 `CorrectionDraftBreakSegment` и `proposedSegments[].breaks`)

@@ -88,8 +88,8 @@ export interface PlannedShiftComputation {
  * assignment has no template, or the template has no row for that weekday) — resolving which row
  * that is stays the caller's job, since `createPeriod` looks it up across many assignments/
  * template versions at once while `createAssignment` looks it up for a single template version;
- * only the pure "what does this templateDay mean for this date" formula is shared here. A future
- * materializer (§9.4) is meant to call this same function, not reimplement the formula again.
+ * only the pure "what does this templateDay mean for this date" formula is shared here. The
+ * attendance materializer (§9.4) calls this same function rather than reimplementing the formula.
  */
 export function computePlannedShiftForAssignmentDate(templateDay: TemplateDayInput | null | undefined, date: Date): PlannedShiftComputation {
   const isWorking = templateDay?.isWorkingDay ?? false;

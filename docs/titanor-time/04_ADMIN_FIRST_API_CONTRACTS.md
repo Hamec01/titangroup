@@ -770,10 +770,11 @@ Actionable = `PayrollPeriodParticipant.expected=true` + `PayrollPeriod.status=OP
 §9.1-9.3/§12.1-12.2 — **реализовано**) — `lib/attendance-clock.ts`
 
 Все четыре эндпоинта — только `channel=ONLINE`: `deviceInstallationId`/`deviceSequence=NULL`,
-`capturedOffline=false`. `employeeId` всегда из сессии, никогда из тела запроса. **Отложено на
-следующий слайс** (не реализовано этими эндпоинтами): `materializeClockShift` (§9.2 шаг k) —
-каждый `ClockShift`, создаваемый `check-out`/`switch-site`, остаётся `materializationState=PENDING`
-без единого `ClockShiftFragment`; `deviceInstallationId`/`deviceSequence`/`DeviceEventReceipt`-FIFO,
+`capturedOffline=false`. `employeeId` всегда из сессии, никогда из тела запроса. **Materialization
+реализована следующим backend-слайсом:** успешный `check-out`/`switch-site` при resolved assignment
+и без OPEN overlap вызывает `materializeClockShiftCore` инлайн в той же транзакции; иначе shift
+остаётся `PENDING` для внутреннего catch-up. По-прежнему отложены:
+`deviceInstallationId`/`deviceSequence`/`DeviceEventReceipt`-FIFO,
 `POST /attendance/sync`, offline outbox, `GET /attendance/context|today|week`, worker mobile UI,
 scheduler, exception-review-эндпоинты, admin attendance overview.
 
@@ -823,11 +824,14 @@ scheduler, exception-review-эндпоинты, admin attendance overview.
 { "clockEventId": "uuid", "operationType": "CHECK_IN", "processingState": "ACCEPTED"|"NEEDS_REVIEW",
   "gpsVerification": "VERIFIED_INSIDE"|"VERIFIED_OUTSIDE"|"NOT_VERIFIED", "effectiveAt": "ISO",
   "siteId": "uuid", "assumedSiteId": null, "workAreaId": "uuid|null", "sourceAssignmentId": "uuid|null",
-  "groupId": "uuid|null", "clockShiftId": null, "exceptions": ["TYPE", ...] }
+  "groupId": "uuid|null", "clockShiftId": null, "materializationState": null,
+  "exceptions": ["TYPE", ...] }
 ```
 `exceptions` — типы `AttendanceException`, созданные для ЭТОГО события (стабильный список,
-переживает изменение `status` позже) — так replay воспроизводит тот же ответ детерминированно, без
-хранения отдельного response-снапшота.
+переживает изменение `status` позже). `materializationState` читается live из закрытой смены, если
+она есть: natural `clientEventId` replay после успешного catch-up честно показывает актуальный
+`MATERIALIZED`, не старый response snapshot. Повтор с тем же опциональным HTTP
+`Idempotency-Key` по общему контракту этого слоя возвращает исходный cached HTTP response.
 - Ошибки: `400 VALIDATION_ERROR` (включая невалидный `workAreaId` для этого `siteId`), `401
   NOT_AUTHENTICATED`, `403 FORBIDDEN`/`CSRF_REJECTED`/`NO_EMPLOYEE_PROFILE`, `403
   OUTSIDE_GEOFENCE`, `404 SITE_NOT_FOUND` (malformed и несуществующий `siteId` — идентично, no
@@ -849,15 +853,19 @@ scheduler, exception-review-эндпоинты, admin attendance overview.
   `assumedSiteId` для detection); `effectiveAt <= openedAt` → `ClockShift.recordedEndAt = openedAt +
   1ms` (design specifies `+1 microsecond`; здесь `+1ms` — минимальная точность JS `Date`/Prisma
   `DateTime`, свойство «не пересекает границу периода» сохраняется), `endAtProvisional=true`,
-  `CHECKOUT_CHRONOLOGY_ANOMALY` (`clockShiftFragmentId=NULL` — материализация отложена); `ClockShift
-  (materializationState=PENDING)` создаётся, `EmployeeOpenShift` удаляется той же транзакцией;
+  `CHECKOUT_CHRONOLOGY_ANOMALY` сначала создаётся с `clockShiftFragmentId=NULL`, затем materializer
+  связывает его с последним созданным fragment; `ClockShift(materializationState=PENDING)`
+  создаётся, `EmployeeOpenShift` удаляется и, при resolved assignment/отсутствии OPEN overlap,
+  полная fragment/draft projection выполняется инлайн той же транзакцией;
   применимые `SITE_MISMATCH_CHECKOUT`/`OUTSIDE_GEOFENCE_CHECKOUT`/`GPS_NOT_VERIFIED`/
   `EXCESSIVE_CLOCK_SKEW`/`EXCESSIVE_SHIFT_DURATION` (порог из `CompanyAttendancePolicy.
   maxShiftDurationHours`); overlap-детекция — общие `overlapCandidates`/`overlapExists`/
   `resolveOverlapTransition` (`lib/attendance-reported-projection.ts`, тот же код, что worker
   `PATCH`/`correction.approve`), без temporal pre-filter.
 - Response `201`/`200` (exact replay): та же форма, что check-in, плюс `clockShiftId` (заполнен для
-  обычного закрытия, `null` для orphan)
+  обычного закрытия, `null` для orphan) и `materializationState: "PENDING"|"MATERIALIZED"|null`.
+  Поле отражает актуальное durable-состояние на момент ответа/natural `clientEventId` replay;
+  `Idempotency-Key` replay остаётся cached-response семантикой общего HTTP-слоя.
 - Ошибки: `400 VALIDATION_ERROR`, `401 NOT_AUTHENTICATED`, `403 FORBIDDEN`/`CSRF_REJECTED`/
   `NO_EMPLOYEE_PROFILE`, `404 SITE_NOT_FOUND` (malformed/несуществующий `assumedSiteId`, no oracle),
   `409 CLIENT_EVENT_ID_REUSED`, `429 RATE_LIMITED`
