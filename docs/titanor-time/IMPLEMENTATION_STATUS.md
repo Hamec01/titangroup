@@ -1,6 +1,119 @@
 # Titanor Time — Implementation Status
 
-Обновлено: 2026-08-14 Europe/Helsinki (feat: add attendance exception read APIs)
+Обновлено: 2026-08-14 Europe/Helsinki (feat: add base attendance exception resolution)
+
+**T7A.8B.1 Base Attendance Exception Resolution (DISMISS/ACKNOWLEDGE_AS_VALID) — новый
+завершённый write-слайс поверх T7A.8A.** Реализует `docs/titanor-time/T7A_1_ATTENDANCE_CLOCK_DESIGN.md`
+§8.5 (resolver-паттерн, дословно), §11 (матрица «тип → допустимые действия», только эти два
+действия из шести), §12.1/§12.3. **Только `DISMISS`/`ACKNOWLEDGE_AS_VALID`** — `PAIR_ORPHAN_EVENTS`,
+`CONFIRM_SOURCE_ASSIGNMENT`, `REASON_EDIT`, `FORCE_CLOSE_OPEN_SHIFT` не реализованы; попытка любого
+из них → `400 VALIDATION_ERROR` по полю `action` с точным перечнем двух реализованных значений, не
+временная заглушка. Exception-review UI, operational overview, scheduler не затронуты.
+
+**Файлы**: новая additive DML-миграция `20260817000000_seed_attendance_exception_base_resolution_permissions`
+(`attendance.exception.resolve.assigned`→`FOREMAN`, `attendance.exception.resolve.all`→`ADMIN`/
+`SUPER_ADMIN`; ни четыре нереализованных action-specific permission, ни `attendance.gps.read.raw`,
+ни `attendance.conflict.read`, ни `timesheet.draft.edit.exception`, ни `attendance.policy.*` не
+сеются — подтверждено прямым SQL). Новый `lib/attendance-exception-resolution.ts` (единственный
+владелец транзакции/lock-order/scope-проверки для мутации — намеренно отдельный файл от read-only
+`lib/attendance-exceptions.ts`, разный concurrency-контракт) + два новых route-файла
+(`app/api/{admin,foreman}/attendance/exceptions/[exceptionId]/resolve/route.ts`). **Минимальные
+additive-правки к трём существующим файлам** (регрессия подтверждена отдельно, см. ниже):
+`lib/foreman-review.ts`'s `getForemanSiteIds` получил необязательный третий параметр `client`
+(по умолчанию — прежний глобальный `prisma`, все 8 существующих call site не изменены) для
+переиспользования внутри мутационной транзакции; `lib/api-error.ts`'s `ApiErrorBody` получил
+необязательное поле `allowedActions?` (тот же паттерн, что уже существующий `blockers?`); `lib/
+attendance-exceptions.ts`'s `actorDisplayName` экспортирован (было приватным) для переиспользования
+в `resolvedBy` мутации.
+
+**Resolver-паттерн (§8.5), дословно**: read-only pre-read (`exceptionId` → `employeeId`/`type`/
+`status`/site-relations, без лока) → `prisma.$transaction`: `Employee FOR UPDATE` →
+`AttendanceException FOR UPDATE` (тот самый canonical order §8.1: `Employee`(1) перед
+`AttendanceException`(7), ни разу не в обратном порядке) → перечитать status/type/scope заново
+из транзакции (`getForemanSiteIds(..., tx)` — не из pre-read кэша) → единственный `UPDATE
+AttendanceException` → один `AuditEvent` в той же транзакции → `COMMIT`. Любой исход, найденный
+ДО мутации (уже не `OPEN`, неприменимое действие, scope не сходится, смена всё ещё открыта),
+завершает транзакцию нормальным `COMMIT` без единой записи — нечего откатывать.
+
+**FOREMAN mutation scope строже read-scope**: `GET` (T7A.8A) считает исключение видимым при
+непустом пересечении `scopeSiteIds`(пяти связей)∩`ownCurrentSiteIds`; мутация требует, чтобы
+**все** `scopeSiteIds` были собственными — иначе `403 FOREMAN_SCOPE_INCOMPLETE` (own↔foreign
+`OVERLAPPING_SHIFT`: видно через `GET`, резолюция запрещена, ноль мутаций/`AuditEvent`). Пустое
+пересечение (foreign/no-scope) → тот же безопасный `404 EXCEPTION_NOT_FOUND`, что и в `GET`.
+Dual-role self-exclusion — тот же `404`. Scope перепроверяется на **каждый** запрос заново внутри
+транзакции — доказано реальной гонкой (см. concurrency ниже), не декларативно.
+
+**Матрица действий (§11)** реализована как статическая таблица (`DISMISS`: 12 типов разрешено,
+`STALE_ASSIGNMENT`/`LATE_SYNC_AFTER_SUBMIT` — нет; `ACK`: 7 типов разрешено, 7 — нет) плюс три
+динамических инварианта: `CHECKOUT_CHRONOLOGY_ANOMALY`+`DISMISS` требует непустой
+`resolutionNote`; `MISSING_CHECKOUT_AT_CUTOFF`+`DISMISS` проверяет `EmployeeOpenShift` именно по
+`openedByClockEventId` исходного события (не любую открытую смену — более новый Check In создаёт
+НЕСВЯЗАННУЮ `EmployeeOpenShift`, не блокирующую dismissal старого исключения); `OVERLAPPING_SHIFT`
+`DISMISS` обновляет только `status`/`resolvedBy*`/`resolutionNote` конкретной canonical-пары —
+`overlapEndedAt` никогда не трогается этим действием, оставлен уже существующему
+`resolveOverlapTransition` (`lib/attendance-reported-projection.ts`, не изменён), который при
+последующем физическом исчезновении overlap заполняет **только** `overlapEndedAt`, не переписывая
+human `resolvedByUserId`/`resolvedAt`/`resolutionNote` — подтверждено прямым вызовом той же
+production-функции в тесте. `409 ACTION_NOT_APPLICABLE` возвращает `allowedActions` — полную
+domain-матрицу §11 (может включать нереализованные действия, чисто информационно).
+
+**Тесты, реально выполненные на одноразовом PostgreSQL 16** (120/120 PASS, прямые HTTP-вызовы
+`fetch` против живого dev-сервера): permissions (точные 6 grants, resolve независим от read в обе
+стороны — временно отозван `resolve.assigned` у `FOREMAN`, `GET` продолжил работать, `POST
+.../resolve` немедленно вернул `403`, грант восстановлен); HTTP/security (CSRF/auth/permission/
+malformed JSON·body·action·note/unknown-fields-ignored/whitespace-note-as-absent/malformed vs
+missing id → идентичный `404`); полная матрица — **все 14 типов × оба действия**, включая
+`allowedActions` дословно по §11 (58 проверок); `CHECKOUT_CHRONOLOGY_ANOMALY` note-инвариант (с/без
+note, `ACK` всегда `ACTION_NOT_APPLICABLE`); `MISSING_CHECKOUT_AT_CUTOFF` динамический guard (shift
+уже закрыт → `DISMISS` проходит; shift всё ещё открыт → `409 OPEN_SHIFT_STILL_PENDING`, ничего не
+меняется; другая, не относящаяся к делу открытая смена не блокирует); FOREMAN mutation scope (все
+восемь под-сценариев — all-sites/expired/own↔foreign-forbidden/no-scope/standalone/dual-role-self/
+different-foreman-can/admin-no-restriction); state-инварианты (terminal replay — второй `DISMISS`/
+`ACK` не меняет уже записанные `resolvedBy`/`resolvedAt`/`resolutionNote`, ровно один `AuditEvent`
+навсегда; rollback без audit — `OPEN_SHIFT_STILL_PENDING` не пишет ничего; per-period independence
+— `PERIOD_BOUNDARY_SPAN` одного `clockShiftId`, разных периодов, решение одной строки не трогает
+другую); `OVERLAPPING_SHIFT` pair independence — X одновременно пересекается с Y и Z, `DISMISS`
+X↔Y оставляет X `BLOCKED_OVERLAP` (реальный вызов `materializeClockShift`, design-doc тесты
+#63/#64-эквивалент), только после `DISMISS` обеих пар X перестаёт быть `BLOCKED_OVERLAP` (тест
+#52-эквивалент); human-DISMISS-переживает-auto-overlapEndedAt (design-doc тест #106-эквивалент,
+прямой вызов `resolveOverlapTransition`). **Реальная многосессионная конкурентность** (не
+Promise-only — собственный `lockBlocker` открывает interactive-транзакцию, держит те же
+`Employee`+`AttendanceException FOR UPDATE` локи `holdMs`, конкурентные HTTP-запросы физически
+блокируются на этом же locке; `pg_stat_activity`-поллинг во время гонки подтвердил ≥2 одновременно
+активных backend PID): два одновременных `DISMISS` — ровно один `200`, один `409`, один
+`AuditEvent`; `DISMISS` vs `ACK` — ровно один победитель, итог соответствует победившему действию;
+`ForemanAssignment` истекает МЕЖДУ pre-read и транзакционной проверкой — мутация не проходит,
+исключение остаётся `OPEN`, ноль `AuditEvent`; `MISSING_CHECKOUT_AT_CUTOFF DISMISS` против
+реального `POST check-out` (тот же `Employee`-лок сериализует оба) — ровно одна из двух
+самосогласованных interleaving, никогда испорченного промежуточного состояния.
+
+**Regression**: `getForemanSiteIds`'s расширенная сигнатура — 2-arg/3-arg-`prisma`/3-arg-`tx`
+формы дают идентичный результат (отдельный direct-call тест); все T7A.8A `GET`-роуты (list/detail,
+включая новый `resolvedBy` в ответе detail) — зелёные на живом сервере; `scripts/_test-activation.ts`,
+`scripts/_test-corrections.ts` — зелёные на отдельной чистой БД; online clock (`POST check-out`
+реально вызван и успешно выполнен внутри concurrency-теста #4) и materializer (`materializeClockShift`
+реально вызван внутри overlap-тестов) — эмпирически упражнены как часть основного набора тестов, не
+отдельным прогоном; offline sync/outbox/geofence-admin/worker-timesheets HTTP-прогон отдельно не
+перезапущен — риск структурно почти нулевой (`git status` подтверждает: из существующих файлов
+изменены только `lib/foreman-review.ts`(+10/-2 строк, backward-compatible),
+`lib/api-error.ts`(+5 строк, только тип), `lib/attendance-exceptions.ts`(+4/-1, только export) —
+ни один из этих трёх файлов не участвует в offline-sync/outbox/geofence-admin/worker-timesheets
+путях выполнения кода вовсе).
+
+Static: `git diff --check`/`prisma validate`/`tsc --noEmit`/`npm run build` (все шесть роутов, включая
+два новых `/resolve`, видны в build-манифесте) — зелёные; `docker compose build app` — успешный build
+(мандаторный тест, снова только перевесил локальный тег `titanor-time-app:latest`, `docker inspect`
+до/после подтверждает тот же image ID/`StartedAt`/`RestartCount=0`/`healthy` у обоих
+production-контейнеров); `prisma migrate deploy` на чистом одноразовом PostgreSQL 16 — 53/53
+миграции (52 было + одна новая), повторный запуск — «No pending migrations to apply».
+
+**Остаётся вне этого слайса** (явно, по границам задачи): `PAIR_ORPHAN_EVENTS`,
+`CONFIRM_SOURCE_ASSIGNMENT`, `REASON_EDIT`, `FORCE_CLOSE_OPEN_SHIFT` (T7A.8B.2/8B.3),
+exception-review UI, `attendance.gps.read.raw`/raw coordinate access, `attendance.conflict.read`,
+`attendance.policy.*`, admin attendance operational overview (T7A.9), scheduler/auto-submit
+(T7A.10). Schema/migrations (кроме одной additive DML)/online route surface не изменены.
+
+---
 
 **T7A.8A Attendance Exception Review — Read Foundation — новый завершённый read-only слайс.**
 Реализует `docs/titanor-time/T7A_1_ATTENDANCE_CLOCK_DESIGN.md` §11 (матрица «тип исключения →

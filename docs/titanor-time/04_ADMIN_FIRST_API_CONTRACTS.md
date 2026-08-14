@@ -1006,8 +1006,7 @@ Check In/Out/Switch Site пишут в outbox и синкаются через `
 ### 9.1b Attendance exception review — read foundation (T7A.8A, `T7A_1_ATTENDANCE_CLOCK_DESIGN.md`
 §11/§12.1/§12.3 — **реализовано, только чтение**) — `lib/attendance-exceptions.ts`
 
-Только чтение — ни одно из шести resolution-действий (§11) не реализовано этим слайсом, ни один
-`AttendanceException.status` не мутируется через эти эндпоинты.
+Только чтение — мутация вынесена в отдельный §9.1c ниже (T7A.8B.1).
 
 #### `GET /api/admin/attendance/exceptions`
 - Permission: `attendance.exception.read.all`
@@ -1077,6 +1076,72 @@ object/array-значения даже под разрешённым ключо�
 `payloadHash`, `requestId`, `deviceInstallationId`, `deviceSequence`,
 `sanitizedConflictingPayload`, произвольный несанитизированный `detail`. Raw GPS не реализован ни
 для кого этим слайсом — `attendance.gps.read.raw` не засеян.
+
+### 9.1c Base attendance exception resolution (T7A.8B.1, `T7A_1_ATTENDANCE_CLOCK_DESIGN.md`
+§8.5/§11/§12.1/§12.3 — **реализовано, только `DISMISS`/`ACKNOWLEDGE_AS_VALID`**) —
+`lib/attendance-exception-resolution.ts`
+
+Остальные четыре resolution-действия (`PAIR_ORPHAN_EVENTS`, `CONFIRM_SOURCE_ASSIGNMENT`,
+`REASON_EDIT`, `FORCE_CLOSE_OPEN_SHIFT`) не реализованы — `action` с любым из этих значений
+(включая любую другую строку) → `400 VALIDATION_ERROR`, `fieldErrors.action` перечисляет ровно
+два реализованных значения. Нет временной заглушки, мутирующей данные для этих четырёх.
+
+#### `POST /api/admin/attendance/exceptions/:exceptionId/resolve`
+#### `POST /api/foreman/attendance/exceptions/:exceptionId/resolve`
+- Permission: **оба** — `attendance.exception.read.{all,assigned}` **и**
+  `attendance.exception.resolve.{all,assigned}` (resolve не подразумевает read и наоборот —
+  временный отзыв одного не даёт доступа через другой)
+- CSRF: `X-Requested-With: titanor-time` обязателен
+- Request:
+```json
+{ "action": "DISMISS" | "ACKNOWLEDGE_AS_VALID", "resolutionNote": "optional string, max 2000" }
+```
+  `resolutionNote` — `trim()`; пустая строка после trim считается отсутствующей (`null`);
+  неизвестные поля тела игнорируются, не влияют на действие.
+- Response `200`:
+```json
+{ "id": "uuid", "type": "GPS_NOT_VERIFIED", "status": "DISMISSED" | "RESOLVED",
+  "resolutionAction": "DISMISS" | "ACKNOWLEDGE_AS_VALID", "resolvedAt": "iso",
+  "resolvedBy": { "id": "uuid", "name": "Admin Name" }, "resolutionNote": "string" | null }
+```
+  Никогда `AttendanceException.detail` напрямую, raw GPS, `payloadHash`/device-поля, внутренности
+  `AuditEvent`.
+- Ошибки: `400 VALIDATION_ERROR` (malformed JSON/body, `action` отсутствует/не из двух
+  реализованных значений, `resolutionNote` не строка/>2000 символов, `CHECKOUT_CHRONOLOGY_ANOMALY`+
+  `DISMISS` без непустого `resolutionNote`), `401 NOT_AUTHENTICATED`, `403 CSRF_REJECTED`,
+  `403 FORBIDDEN` (нет одного из двух требуемых permission), `403 FOREMAN_SCOPE_INCOMPLETE`
+  (видно через `GET`, но часть доказуемых site-связей исключения — не текущий объект прораба),
+  `404 EXCEPTION_NOT_FOUND` (malformed UUID, несуществующий id, foreman out-of-scope/self-exception
+  — один и тот же код для всех трёх), `409 EXCEPTION_ALREADY_RESOLVED` (терминальный статус,
+  ничего не переписывается, второй `AuditEvent` не создаётся), `409 ACTION_NOT_APPLICABLE`
+  (`allowedActions` — полная domain-матрица §11 для этого типа, включает нереализованные действия
+  информационно, не обещание доступности), `409 OPEN_SHIFT_STILL_PENDING`
+  (`MISSING_CHECKOUT_AT_CUTOFF`+`DISMISS`, originating `EmployeeOpenShift` всё ещё открыта)
+- Матрица (§11): `DISMISS` — `GPS_NOT_VERIFIED`/`OUTSIDE_GEOFENCE_CHECKOUT`/
+  `SITE_MISMATCH_CHECKOUT`/`DOUBLE_CHECK_IN`/`CHECKOUT_WITHOUT_OPEN_SHIFT`/
+  `GEOFENCE_VERSION_MISMATCH`/`MISSING_CHECKOUT_AT_CUTOFF`(динамически)/`EXCESSIVE_CLOCK_SKEW`/
+  `CHECKOUT_CHRONOLOGY_ANOMALY`(с обязательной note)/`EXCESSIVE_SHIFT_DURATION`/
+  `PERIOD_BOUNDARY_SPAN`/`OVERLAPPING_SHIFT`; НЕ `STALE_ASSIGNMENT`/`LATE_SYNC_AFTER_SUBMIT`.
+  `ACKNOWLEDGE_AS_VALID` — только `GPS_NOT_VERIFIED`/`OUTSIDE_GEOFENCE_CHECKOUT`/
+  `SITE_MISMATCH_CHECKOUT`/`GEOFENCE_VERSION_MISMATCH`/`EXCESSIVE_CLOCK_SKEW`/
+  `EXCESSIVE_SHIFT_DURATION`/`PERIOD_BOUNDARY_SPAN`.
+- `OVERLAPPING_SHIFT` `DISMISS` меняет только `status`/`resolvedBy*`/`resolutionNote` конкретной
+  canonical-пары — `overlapEndedAt` не трогается (оставлен существующему
+  `resolveOverlapTransition`, который при последующем физическом исчезновении overlap заполняет
+  только его, не переписывая human resolution metadata).
+- FOREMAN scope для мутации строже `GET`: требует, чтобы **все** доказуемые site-связи исключения
+  были текущими объектами прораба, не только пересечение — own↔foreign `OVERLAPPING_SHIFT` видна
+  через `GET`, но резолюция → `403 FOREMAN_SCOPE_INCOMPLETE`.
+- Транзакция (§8.5): read-only pre-read (без лока) → `Employee FOR UPDATE` → `AttendanceException
+  FOR UPDATE` (canonical order §8.1) → повторная проверка status/type/scope из транзакции (scope —
+  свежий запрос `ForemanAssignment`, не pre-read кэш) → один `UPDATE` → один `AuditEvent` → COMMIT.
+  Любой исход, обнаруженный до мутации, коммитит без единой записи.
+- Audit: `ATTENDANCE_EXCEPTION_DISMISSED` / `ATTENDANCE_EXCEPTION_ACKNOWLEDGED_AS_VALID`,
+  `entityType=ATTENDANCE_EXCEPTION`, `beforeValue={status,type}`, `afterValue={status,
+  resolutionAction}`, `reason=resolutionNote` — никогда `detail`/GPS/device-поля.
+- DoD: реальная многосессионная конкуренция (не `Promise.all`-таймингом) подтверждена
+  `pg_stat_activity` — два `DISMISS` одного исключения дают ровно один `200`/один `409`/один
+  `AuditEvent`; scope, истекающий между pre-read и транзакцией, гарантированно блокирует мутацию.
 
 ## 10. Служебный агрегатор
 

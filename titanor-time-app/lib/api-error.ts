@@ -13,6 +13,11 @@ export interface ApiErrorBody {
   // participants are still holding the lock back, so the UI can render the list without a
   // second round-trip.
   blockers?: { employeeId: string; employeeName: string; timesheetId: string | null; status: string | null }[];
+  // attendance exception resolve's 409 ACTION_NOT_APPLICABLE (T7A_1_ATTENDANCE_CLOCK_DESIGN.md
+  // §11) — the full domain-level allowed-actions list for this exceptionType, which may include
+  // actions this endpoint doesn't implement yet (informational only, never a promise that POSTing
+  // one of them will succeed).
+  allowedActions?: string[];
 }
 
 // requestId is optional so existing callers keep working unchanged, but every

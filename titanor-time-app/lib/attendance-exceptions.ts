@@ -66,7 +66,9 @@ function employeeDisplayName(e: { firstName: string; lastName: string }): string
   return `${e.firstName} ${e.lastName}`;
 }
 
-function actorDisplayName(u: { username: string; employee: { firstName: string; lastName: string } | null }): string {
+/** Exported for reuse by lib/attendance-exception-resolution.ts's response `resolvedBy` — the
+ * exact same display-name rule as GET detail's `resolvedBy`/`employee`, never duplicated. */
+export function actorDisplayName(u: { username: string; employee: { firstName: string; lastName: string } | null }): string {
   return u.employee ? employeeDisplayName(u.employee) : u.username;
 }
 

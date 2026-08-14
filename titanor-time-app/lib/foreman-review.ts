@@ -1,3 +1,4 @@
+import { Prisma } from '@prisma/client';
 import { prisma } from '@/lib/prisma';
 import { createAuditEvent } from '@/lib/audit';
 import { computeSiteScopeHasException } from '@/lib/review-scopes';
@@ -13,8 +14,13 @@ function formatDate(date: Date): string {
   return date.toISOString().slice(0, 10);
 }
 
-export async function getForemanSiteIds(foremanUserId: string, today: Date): Promise<string[]> {
-  const assignments = await prisma.foremanAssignment.findMany({
+/** `client` defaults to the global singleton for every pre-existing read-only caller; T7A.8B.1's
+ * resolution transactions pass their own `tx` so the re-check inside the mutation transaction sees
+ * ForemanAssignment rows exactly as of that statement, not a value captured before the transaction
+ * opened (docs/titanor-time/T7A_1_ATTENDANCE_CLOCK_DESIGN.md §8.5 "Scope перепроверять внутри
+ * mutation transaction"). */
+export async function getForemanSiteIds(foremanUserId: string, today: Date, client: Prisma.TransactionClient | typeof prisma = prisma): Promise<string[]> {
+  const assignments = await client.foremanAssignment.findMany({
     where: {
       foremanUserId,
       validFrom: { lte: today },
