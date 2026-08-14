@@ -1,6 +1,99 @@
 # Titanor Time — Implementation Status
 
-Обновлено: 2026-08-15 Europe/Helsinki (feat: confirm attendance source assignments)
+Обновлено: 2026-08-15 Europe/Helsinki (feat: force close open attendance shifts)
+
+**T7A.8B.4A FORCE_CLOSE_OPEN_SHIFT — новый завершённый write-слайс поверх T7A.8B.3 (и его
+follow-up fix `6c066c3` "serialize source assignment confirmation").** Реализует
+`docs/titanor-time/T7A_1_ATTENDANCE_CLOCK_DESIGN.md` §8.5 (resolver-паттерн, тот же
+задокументированный паттерн вторичного лока, что у `CONFIRM_SOURCE_ASSIGNMENT`)/§9.9 (полный
+алгоритм FORCE_CLOSE_OPEN_SHIFT, дословно, плюс уточнение target identity)/§11/§12.1-12.3. Пятое
+и последнее ADMIN/SUPER_ADMIN-специфичное resolution-действие на уже существующем `POST
+/api/{admin,foreman}/attendance/exceptions/:exceptionId/resolve` — из шести действий §11 остаётся
+нереализованным только `REASON_EDIT`; попытка любого другого/несуществующего значения по-прежнему
+даёт `400 VALIDATION_ERROR` с точным перечнем пяти реализованных значений, не заглушка. **Новых
+permissions/миграций не потребовалось** — переиспользованы уже существующие `attendance.exception.
+resolve.all`/`.read.all` (та же ADMIN/SUPER_ADMIN-only структура, что и `CONFIRM_SOURCE_
+ASSIGNMENT`).
+
+**Файлы**: расширены те же три файла, что и в T7A.8B.3 (не новые) — `lib/attendance-exception-
+resolution.ts` (+~230 строк: `forceCloseOpenShift`, `parseStrictIsoInstant`, новая
+`FORCE_CLOSE_OPEN_SHIFT`-ветка в `validateResolveRequestBody` + симметричное запрещение
+`explicitEndAt`/`reason` для остальных четырёх действий), admin `.../resolve/route.ts` (dispatch
+на `forceCloseOpenShift`, шесть новых HTTP-исходов), foreman `.../resolve/route.ts` (тот же
+403-паттерн, что уже был у `CONFIRM_SOURCE_ASSIGNMENT`, расширен на оба ADMIN-only действия через
+`Set`). Ни один другой файл не изменён — подтверждено `git status`.
+
+**Контракт**: `{action:"FORCE_CLOSE_OPEN_SHIFT", explicitEndAt, reason}` → `201
+{resolutionAction, clockShift:{...force-closed форма...}, resolvedAt, resolvedBy,
+resolutionNote}`. `explicitEndAt` — строгий ISO-8601 с обязательным `Z`/numeric UTC offset
+(отдельный, более строгий парсер, чем существующий `parseIsoInstant`, который просто отдаёт
+значение в `new Date()` и потому тихо принимает date-only/timezone-less строки как локальное
+время — здесь это неприемлемо для административной записи с реальными payroll-последствиями).
+`reason` обязателен, `resolutionNote` для этого действия явно запрещён — единственный источник
+причины, во избежание двух расходящихся полей; нормализованное значение `reason` одновременно
+пишется в `ClockShift.forceClosedReason`/`AttendanceException.resolutionNote`/`AuditEvent.reason`.
+
+**Target identity (уточнение реализации относительно буквального §9.9)**: design doc буквально
+предписывает `SELECT EmployeeOpenShift WHERE employeeId FOR UPDATE` — голый lookup по employeeId.
+Реализация дополнительно проверяет `openedByClockEventId === exception.clockEventId`, та же
+дисциплина, что уже применяет `CONFIRM_SOURCE_ASSIGNMENT` (§9.7) к своей `EmployeeOpenShift`-ветке
+— без этой проверки FORCE_CLOSE мог бы закрыть более новую, никак не связанную с исключением
+открытую смену того же работника, если бы она случайно существовала на момент вызова. Любое
+несовпадение (не найдена / найдена другая / у исключения нет `clockEventId`) даёт единый `409
+OPEN_SHIFT_ALREADY_CLOSED`, ничего не меняется.
+
+**Mutation**: `INSERT ClockShift` в force-closed форме (`checkOutEventId=NULL`,
+`forceClosedByUserId`/`forceClosedReason`/`forceClosedAt` все три non-null —
+`ck_clock_shift_close_mechanism` удовлетворён по построению) → `DELETE EmployeeOpenShift` → RESOLVE
+exception → один `AuditEvent(CLOCK_SHIFT_FORCE_CLOSED)`, только безопасные идентификаторы и
+`reason`, без GPS/device/секретов. Ни один `ClockEvent` не создаётся — таблица сырых
+device-фактов остаётся честной (design doc, §9.9 проза). Материализация не запускается инлайн —
+`ClockShift.materializationState` остаётся `PENDING`, подхватывается следующим catch-up проходом
+(§8.4), без изменений в самом материализаторе.
+
+**Тесты, реально выполненные на одноразовом PostgreSQL 16** (206/206 PASS, дважды подряд для
+проверки детерминизма конкурентных тестов, прямые HTTP-вызовы против живого dev-сервера): permissions/
+CSRF/body-shape (ADMIN/SUPER_ADMIN success, WORKER/anonymous forbidden, FOREMAN — well-formed/
+malformed body оба дают `403`, не `400`/`404`, до чтения тела; malformed JSON; `resolutionNote`
+запрещён отдельно от `reason`; cross-action поля запрещены в обе стороны для всех пяти действий;
+timezone-less и date-only `explicitEndAt` отклонены; blank/too-long `reason` отклонены); applicability
+(12 неприменимых типов через полную матрицу §11); terminal exception (`409
+EXCEPTION_ALREADY_RESOLVED`, без дубля `ClockShift` при replay); originating shift уже закрыта
+реальным Check Out (`409 OPEN_SHIFT_ALREADY_CLOSED`); новая несвязанная open shift не закрывается
+(и последовательно, и под реальной блокировкой Employee-лока — `holdLock`-техника с раздельными
+acquired/release-сигналами, `pg_stat_activity.wait_event_type='Lock'` как доказательство блокировки
+для обеих сторон гонки); точное копирование `recordedStartAt`/site/workArea/sourceAssignmentId
+(включая nullable), `endAtProvisional=false`, все force-поля; отсутствие нового `ClockEvent`,
+исходный `ClockEvent` побайтово неизменен; строгая хронология (equal/earlier отклонены, far-future
+принят без самовольного clamp/лимита); один sanitized `AuditEvent`; отсутствие GPS/device/секретов
+в HTTP-ответе и audit; реальная многосессионная конкуренция A–E (детали — см. отчёт по коммиту);
+materializer catch-up regression (с/без `sourceAssignmentId` — второй случай доказан через
+композицию с `CONFIRM_SOURCE_ASSIGNMENT`'s graceful fallback, ни материализатор, ни резолвер не
+изменены; overlap-сценарий — существующий overlap-детектор ловит пересечение без вмешательства
+этого действия; идемпотентность повторного прохода). Полная regression DISMISS/
+ACKNOWLEDGE_AS_VALID/PAIR_ORPHAN_EVENTS/CONFIRM_SOURCE_ASSIGNMENT — 24/24 отдельным прогоном,
+включая FOREMAN 403-ordering для обоих ADMIN-only действий, CONFIRM vs реальный checkout, CONFIRM
+`FOR SHARE`-lock (T7A.8B.3 follow-up fix `6c066c3`) regression, изоляцию action-specific полей для
+всех пяти действий в обе стороны.
+
+Static: `git diff --check`/`prisma validate`/`tsc --noEmit` — зелёные; `npm run build` выполнен в
+полностью изолированной временной detached-worktree копии (отдельный `node_modules`/`.next`, не
+пересекается с работающим preview-сервером на `127.0.0.1:3244`) — успешный build, оба
+`.../resolve` роута видны в build-манифесте; временная worktree удалена после проверки.
+`docker compose build app` — успешный build из основного worktree (единственный побочный эффект —
+локальный тег `titanor-time-app:latest` перевешен на новый ID, production-контейнер не тронут,
+подтверждено тем же image ID/`RestartCount`/`StartedAt` до и после). `prisma migrate deploy` на
+чистом одноразовом PostgreSQL 16 — 53/53 миграции (новых миграций этот слайс не добавляет),
+повторный запуск — «No pending migrations to apply».
+
+**Остаётся вне этого слайса** (явно, по границам задачи): `REASON_EDIT` (T7A.8B.4B, последнее
+resolution-действие §11), exception-review UI, `attendance.gps.read.raw`,
+`attendance.conflict.read`, `attendance.policy.*`, admin operational overview (T7A.9),
+scheduler/auto-submit (T7A.10). Schema/permission-миграции не менялись. Preview на
+`127.0.0.1:3244` и его одноразовая БД на `127.0.0.1:55432` не останавливались этим слайсом
+(production `titanor-time-app-1`/`titanor-time-db-1` — только read-only inspect, не тронуты).
+
+---
 
 **T7A.8B.3 CONFIRM_SOURCE_ASSIGNMENT — новый завершённый write-слайс поверх T7A.8B.2.** Реализует
 `docs/titanor-time/T7A_1_ATTENDANCE_CLOCK_DESIGN.md` §8.5 (resolver-паттерн, с задокументированным

@@ -1077,10 +1077,10 @@ object/array-значения даже под разрешённым ключо�
 `sanitizedConflictingPayload`, произвольный несанитизированный `detail`. Raw GPS не реализован ни
 для кого этим слайсом — `attendance.gps.read.raw` не засеян.
 
-### 9.1c Attendance exception resolution (T7A.8B.1 + T7A.8B.2 + T7A.8B.3,
-`T7A_1_ATTENDANCE_CLOCK_DESIGN.md` §8.5/§9.7/§9.8/§11/§12.1/§12.3 — **реализовано:
-`DISMISS`/`ACKNOWLEDGE_AS_VALID`/`PAIR_ORPHAN_EVENTS`/`CONFIRM_SOURCE_ASSIGNMENT`**) —
-`lib/attendance-exception-resolution.ts`
+### 9.1c Attendance exception resolution (T7A.8B.1 + T7A.8B.2 + T7A.8B.3 + T7A.8B.4A,
+`T7A_1_ATTENDANCE_CLOCK_DESIGN.md` §8.5/§9.7/§9.8/§9.9/§11/§12.1/§12.3 — **реализовано:
+`DISMISS`/`ACKNOWLEDGE_AS_VALID`/`PAIR_ORPHAN_EVENTS`/`CONFIRM_SOURCE_ASSIGNMENT`/
+`FORCE_CLOSE_OPEN_SHIFT`**) — `lib/attendance-exception-resolution.ts`
 
 **`[2026-08-15]` T7A.8B.3 — `CONFIRM_SOURCE_ASSIGNMENT` добавлен, только на admin-роуте.**
 `ADMIN`/`SUPER_ADMIN` — единственные держатели (§12.1); `FOREMAN` это действие не получает вовсе —
@@ -1088,10 +1088,25 @@ foreman-роут распознаёт `action="CONFIRM_SOURCE_ASSIGNMENT"` в т
 разбора `chosenAssignmentId`/поиска target (не `409`/`404`, никаких данных о target не читается).
 `WORKER` и анонимные запросы — как и для остальных действий (`403`/`401`).
 
-Остальные два resolution-действия (`REASON_EDIT`, `FORCE_CLOSE_OPEN_SHIFT`) не реализованы —
-`action` с любым из этих значений (включая любую другую строку) → `400 VALIDATION_ERROR`,
-`fieldErrors.action` перечисляет ровно четыре реализованных значения. Нет временной заглушки,
-мутирующей данные для этих двух.
+**`[2026-08-15]` T7A.8B.4A — `FORCE_CLOSE_OPEN_SHIFT` добавлен, только на admin-роуте.**
+`ADMIN`/`SUPER_ADMIN` — единственные держатели (§12.1), тот же паттерн, что
+`CONFIRM_SOURCE_ASSIGNMENT`: foreman-роут распознаёт `action="FORCE_CLOSE_OPEN_SHIFT"` на сыром
+теле запроса и отвечает `403 FORBIDDEN` ДО разбора `explicitEndAt`/`reason`, до чтения exception
+или `EmployeeOpenShift`. Применимо только к `MISSING_CHECKOUT_AT_CUTOFF`. Единственная цель —
+`EmployeeOpenShift` этого же работника, у которой `openedByClockEventId` совпадает с
+`exception.clockEventId` — ни автоматического fallback на закрытую `ClockShift` (как у
+`CONFIRM_SOURCE_ASSIGNMENT`), ни закрытия более новой несвязанной смены: любое несовпадение
+идентичности цели (либо смена уже закрыта реальным Check Out, либо это другая, не связанная смена)
+даёт один и тот же `409 OPEN_SHIFT_ALREADY_CLOSED`. Создаёт новую `ClockShift` в
+force-closed-форме (`checkOutEventId=NULL`, все три `forceClosed*`-поля заполнены —
+`ck_clock_shift_close_mechanism`), удаляет `EmployeeOpenShift`, резолвит исключение — ни один
+`ClockEvent` не создаётся, инлайн-материализация не запускается (созданная смена остаётся
+`PENDING`, подхватывается обычным catch-up проходом).
+
+Единственное оставшееся resolution-действие (`REASON_EDIT`) не реализовано — `action` со
+значением `REASON_EDIT` (либо любой другой неизвестной строкой) → `400 VALIDATION_ERROR`,
+`fieldErrors.action` перечисляет ровно пять реализованных значений. Нет временной заглушки,
+мутирующей данные для `REASON_EDIT`.
 
 #### `POST /api/admin/attendance/exceptions/:exceptionId/resolve`
 #### `POST /api/foreman/attendance/exceptions/:exceptionId/resolve`
@@ -1122,8 +1137,21 @@ foreman-роут распознаёт `action="CONFIRM_SOURCE_ASSIGNMENT"` в т
   `chosenAssignmentId` обязателен, должен быть валидным UUID (форма проверяется на уровне тела,
   до транзакции; принадлежность/сайт/дата — внутри транзакции, §9.7 шаг 5).
   `checkInEventId`/`checkOutEventId` для этого действия явно **запрещены** — `400
-  VALIDATION_ERROR` с `fieldErrors`, как и `chosenAssignmentId` явно запрещён для остальных трёх
+  VALIDATION_ERROR` с `fieldErrors`, как и `chosenAssignmentId` явно запрещён для остальных четырёх
   действий (симметрично).
+- Request (FORCE_CLOSE_OPEN_SHIFT, T7A.8B.4A, только admin-роут):
+```json
+{ "action": "FORCE_CLOSE_OPEN_SHIFT", "explicitEndAt": "2026-08-15T17:30:00.000Z",
+  "reason": "Worker forgot to check out" }
+```
+  `explicitEndAt` обязателен — строгий ISO-8601 timestamp с обязательным `Z` или явным numeric UTC
+  offset (`+HH:MM`/`-HH:MM`); date-only и timezone-less значения отклоняются целиком, не
+  интерпретируются как локальное время. `reason` обязателен — `trim()`, пустая после trim строка
+  отклоняется, максимум 2000 символов; нормализованное значение одновременно пишется в
+  `ClockShift.forceClosedReason`, `AttendanceException.resolutionNote` и `AuditEvent.reason`.
+  `resolutionNote` для этого действия явно **запрещено** (`400 VALIDATION_ERROR`) — единственный
+  источник причины — `reason`, во избежание двух потенциально расходящихся полей.
+  `chosenAssignmentId`/`checkInEventId`/`checkOutEventId` для этого действия тоже явно запрещены.
 - Response `200` (DISMISS/ACKNOWLEDGE_AS_VALID):
 ```json
 { "id": "uuid", "type": "GPS_NOT_VERIFIED", "status": "DISMISSED" | "RESOLVED",
@@ -1158,18 +1186,35 @@ foreman-роут распознаёт `action="CONFIRM_SOURCE_ASSIGNMENT"` в т
   `clockEventId` живая `EmployeeOpenShift`, иначе graceful fallback на уже закрывшуюся `ClockShift`
   по `checkInEventId`). Материализация не запускается инлайн — `ClockShift.materializationState`
   остаётся как было (обычно `PENDING`), следующий periodic catch-up (§8.4) подхватывает нормально.
-- Ошибки, общие для всех четырёх действий: `400 VALIDATION_ERROR` (malformed JSON/body, `action`
-  отсутствует/не из четырёх реализованных значений, `resolutionNote` не строка/>2000 символов,
+- Response `201` (FORCE_CLOSE_OPEN_SHIFT, T7A.8B.4A):
+```json
+{ "resolutionAction": "FORCE_CLOSE_OPEN_SHIFT",
+  "clockShift": { "id": "uuid", "employeeId": "uuid", "checkInEventId": "uuid",
+    "checkOutEventId": null, "siteId": "uuid", "workAreaId": "uuid" | null,
+    "sourceAssignmentId": "uuid" | null, "recordedStartAt": "iso", "recordedEndAt": "iso",
+    "endAtProvisional": false, "forceClosedByUserId": "uuid", "forceClosedReason": "string",
+    "forceClosedAt": "iso", "materializationState": "PENDING" },
+  "resolvedAt": "iso", "resolvedBy": { "id": "uuid", "name": "Admin Name" },
+  "resolutionNote": "string" }
+```
+  `checkOutEventId` всегда `null`, все три `forceClosed*` поля всегда non-null (§4.1
+  `ck_clock_shift_close_mechanism` — ровно один механизм закрытия). `recordedStartAt` — точная
+  копия `EmployeeOpenShift.openedAt`; `recordedEndAt` — точная копия `explicitEndAt`, без clamp/
+  округления. `resolutionNote` в ответе — то же нормализованное значение, что и `reason`. Ни один
+  `ClockEvent` не создаётся этим действием. Материализация не запускается инлайн (та же причина,
+  что у `CONFIRM_SOURCE_ASSIGNMENT`) — созданная `ClockShift` остаётся `PENDING` до catch-up.
+- Ошибки, общие для всех пяти действий: `400 VALIDATION_ERROR` (malformed JSON/body, `action`
+  отсутствует/не из пяти реализованных значений, `resolutionNote` не строка/>2000 символов,
   `CHECKOUT_CHRONOLOGY_ANOMALY`+`DISMISS` без непустого `resolutionNote`), `401
   NOT_AUTHENTICATED`, `403 CSRF_REJECTED`, `403 FORBIDDEN` (нет одного из двух требуемых
   permission), `403 FOREMAN_SCOPE_INCOMPLETE` (видно через `GET`, но часть доказуемых site-связей
-  — не текущий объект прораба; для `CONFIRM_SOURCE_ASSIGNMENT` на foreman-роуте это НЕ применимо —
-  см. отдельный `403 FORBIDDEN` ниже), `404 EXCEPTION_NOT_FOUND` (malformed UUID, несуществующий
-  id, foreman out-of-scope/self-exception — один и тот же код для всех четырёх), `409
-  EXCEPTION_ALREADY_RESOLVED` (терминальный статус, ничего не переписывается, второй `AuditEvent`
-  не создаётся), `409 ACTION_NOT_APPLICABLE` (`allowedActions` — полная domain-матрица §11 для
-  этого типа, включает нереализованные действия информационно, не обещание доступности), `409
-  OPEN_SHIFT_STILL_PENDING` (`MISSING_CHECKOUT_AT_CUTOFF`+`DISMISS`, originating
+  — не текущий объект прораба; для `CONFIRM_SOURCE_ASSIGNMENT`/`FORCE_CLOSE_OPEN_SHIFT` на
+  foreman-роуте это НЕ применимо — см. отдельный `403 FORBIDDEN` ниже), `404 EXCEPTION_NOT_FOUND`
+  (malformed UUID, несуществующий id, foreman out-of-scope/self-exception — один и тот же код для
+  всех пяти), `409 EXCEPTION_ALREADY_RESOLVED` (терминальный статус, ничего не переписывается,
+  второй `AuditEvent` не создаётся), `409 ACTION_NOT_APPLICABLE` (`allowedActions` — полная
+  domain-матрица §11 для этого типа, включает нереализованные действия информационно, не обещание
+  доступности), `409 OPEN_SHIFT_STILL_PENDING` (`MISSING_CHECKOUT_AT_CUTOFF`+`DISMISS`, originating
   `EmployeeOpenShift` всё ещё открыта).
 - Ошибки, специфичные для `CONFIRM_SOURCE_ASSIGNMENT` (T7A.8B.3): foreman-роут — `403 FORBIDDEN`
   для `action="CONFIRM_SOURCE_ASSIGNMENT"` независимо от прав/scope/существования исключения,
@@ -1182,6 +1227,17 @@ foreman-роут распознаёт `action="CONFIRM_SOURCE_ASSIGNMENT"` в т
   `EmployeeOpenShift`, ни fallback `ClockShift` не найдены по FK исключения); `409
   TARGET_ALREADY_RESOLVED` (target.sourceAssignmentId уже не `NULL` — сервисный precheck до
   `UPDATE`, DB-триггер как defense-in-depth, не единственная линия защиты).
+- Ошибки, специфичные для `FORCE_CLOSE_OPEN_SHIFT` (T7A.8B.4A): foreman-роут — тот же паттерн, что
+  `CONFIRM_SOURCE_ASSIGNMENT` — `403 FORBIDDEN` для `action="FORCE_CLOSE_OPEN_SHIFT"` независимо
+  от прав/существования исключения, на сыром теле, до чтения `explicitEndAt`/`reason`/target;
+  `400 VALIDATION_ERROR` с `fieldErrors.explicitEndAt` (не строка/не строгий ISO-8601 с
+  обязательным UTC offset/не позже `EmployeeOpenShift.openedAt` — без clamp, будущее значение
+  принимается без ограничения) и/или `fieldErrors.reason` (не строка/пусто после trim/>2000
+  символов) и/или `fieldErrors.resolutionNote` (это поле для данного действия запрещено целиком);
+  `409 OPEN_SHIFT_ALREADY_CLOSED` — единый код на все три случая: originating `EmployeeOpenShift`
+  не найдена вовсе, найдена другая (несвязанная) открытая смена этого работника
+  (`openedByClockEventId` не совпадает с `exception.clockEventId`), либо у исключения нет
+  консистентного `clockEventId`; ничего не меняется, клиенту предлагается `DISMISS`.
 - Ошибки, специфичные для `PAIR_ORPHAN_EVENTS`: `400 VALIDATION_ERROR` с `fieldErrors` на
   конкретном event id — form/type mismatch (`operationType`), employee mismatch между событиями
   или с named exception (защита от использования видимого чужого orphan-exception как
@@ -1203,7 +1259,8 @@ foreman-роут распознаёт `action="CONFIRM_SOURCE_ASSIGNMENT"` в т
   `CHECKOUT_WITHOUT_OPEN_SHIFT`, и только пока `status=OPEN`. `CONFIRM_SOURCE_ASSIGNMENT` — только
   `STALE_ASSIGNMENT` (единственное разрешённое действие для этого типа — `DISMISS`/
   `ACKNOWLEDGE_AS_VALID` дали бы `409 ACTION_NOT_APPLICABLE`, оставили бы смену навсегда
-  неспособной материализоваться).
+  неспособной материализоваться). `FORCE_CLOSE_OPEN_SHIFT` — только `MISSING_CHECKOUT_AT_CUTOFF`
+  (единственное действие, помимо динамически-условного `DISMISS`, разрешённое для этого типа).
 - `OVERLAPPING_SHIFT` `DISMISS` меняет только `status`/`resolvedBy*`/`resolutionNote` конкретной
   canonical-пары — `overlapEndedAt` не трогается (оставлен существующему
   `resolveOverlapTransition`, который при последующем физическом исчезновении overlap заполняет
@@ -1247,14 +1304,27 @@ foreman-роут распознаёт `action="CONFIRM_SOURCE_ASSIGNMENT"` в т
   AttendanceException` (→`RESOLVED`) → один `AuditEvent` → COMMIT. `ClockEvent`/
   `ClockEventLocation` никогда не изменяются (immutability-триггеры не участвуют — этот путь их
   не касается вовсе). Материализация не запускается инлайн, как и у PAIR.
+- Транзакция (§9.9, FORCE_CLOSE_OPEN_SHIFT, T7A.8B.4A): read-only pre-read (exceptionId →
+  employeeId/type/status/clockEventId, без лока) → `Employee FOR UPDATE` → `AttendanceException
+  FOR UPDATE` (canonical order §8.1) → повторная проверка status/type → `EmployeeOpenShift FOR
+  UPDATE` по `employeeId` → проверка target identity (`openedByClockEventId ===
+  exception.clockEventId`, иначе `409 OPEN_SHIFT_ALREADY_CLOSED` без мутации — уточнение
+  реализации относительно буквального текста §9.9, см. design doc) → повторная, уже под локом,
+  проверка `explicitEndAt > openedAt` → один `INSERT ClockShift` (force-closed форма) → один
+  `DELETE EmployeeOpenShift` → один `UPDATE AttendanceException` (→`RESOLVED`) → один `AuditEvent`
+  → COMMIT. Блокировка `EmployeeOpenShift` (позиция 3) ПОСЛЕ `AttendanceException` (позиция 7) —
+  тот же задокументированный, уже доказанный безопасным паттерн, что и у `CONFIRM_SOURCE_
+  ASSIGNMENT`. Ни один `ClockEvent` не создаётся. Материализация не запускается инлайн.
 - Audit: `ATTENDANCE_EXCEPTION_DISMISSED` / `ATTENDANCE_EXCEPTION_ACKNOWLEDGED_AS_VALID` /
-  `ATTENDANCE_EXCEPTION_PAIRED` / `CLOCK_SHIFT_ASSIGNMENT_RESOLVED`, `entityType=
-  ATTENDANCE_EXCEPTION`, `entityId=named exceptionId`, `beforeValue={status,type}`,
+  `ATTENDANCE_EXCEPTION_PAIRED` / `CLOCK_SHIFT_ASSIGNMENT_RESOLVED` / `CLOCK_SHIFT_FORCE_CLOSED`,
+  `entityType=ATTENDANCE_EXCEPTION`, `entityId=named exceptionId`, `beforeValue={status,type}`,
   `afterValue={status,resolutionAction}` (PAIR: плюс `clockShiftId`, `resolvedExceptionIds` —
-  стабильно отсортированные; CONFIRM: плюс `targetType`/`targetId`/`chosenAssignmentId`, никогда
-  GPS/координаты/`payloadHash`/device id/sequence/токены/секреты), `reason=resolutionNote` —
-  никогда `detail`/GPS/raw event payload/`payloadHash`/device-поля/request-тела/персональные
-  данные работника. Ровно один `AuditEvent` на вызов, в той же транзакции, что и мутация.
+  стабильно отсортированные; CONFIRM: плюс `targetType`/`targetId`/`chosenAssignmentId`; FORCE_CLOSE:
+  плюс `clockShiftId`/`employeeId`/`checkInEventId`/`siteId`/`workAreaId`/`sourceAssignmentId`/
+  `recordedStartAt`/`recordedEndAt` — никогда GPS/координаты/`payloadHash`/device id/sequence/
+  токены/секреты/сырой request body), `reason=resolutionNote` — никогда `detail`/GPS/raw event
+  payload/`payloadHash`/device-поля/request-тела/персональные данные работника. Ровно один
+  `AuditEvent` на вызов, в той же транзакции, что и мутация.
 - DoD: реальная многосессионная конкуренция (не `Promise.all`-таймингом) подтверждена
   `pg_stat_activity` — два `DISMISS` одного исключения дают ровно один `200`/один `409`/один
   `AuditEvent`; scope, истекающий между pre-read и транзакцией, гарантированно блокирует мутацию.
@@ -1268,7 +1338,19 @@ foreman-роут распознаёт `action="CONFIRM_SOURCE_ASSIGNMENT"` в т
   один target, дают ровно один `200`/один `409 TARGET_ALREADY_RESOLVED`, вторая exception остаётся
   `OPEN` (не ложно `RESOLVED`); принудительный сбой (реальный FK-violation при `AuditEvent`) после
   `UPDATE` target и `UPDATE` exception, но до `COMMIT` → полный откат: target возвращается к
-  `sourceAssignmentId=NULL`, exception остаётся `OPEN`, `AuditEvent` не создаётся.
+  `sourceAssignmentId=NULL`, exception остаётся `OPEN`, `AuditEvent` не создаётся. Для
+  FORCE_CLOSE_OPEN_SHIFT (T7A.8B.4A) — FORCE_CLOSE vs реальный online Check Out одного работника
+  (≥2 backend PID через `pg_stat_activity`, Employee-лок сериализует) → ровно один canonical
+  `ClockShift` из этого check-in, независимо от порядка (проигравший check-out получает
+  существующую orphan-checkout семантику, не ошибку); два параллельных FORCE_CLOSE одного
+  исключения → ровно один `201`/один `409 EXCEPTION_ALREADY_RESOLVED`, одна `ClockShift`, один
+  `AuditEvent`, `EmployeeOpenShift` удалена ровно один раз; FORCE_CLOSE старого исключения при
+  новой несвязанной open shift, подставленной под реальной блокировкой Employee-лока → `409
+  OPEN_SHIFT_ALREADY_CLOSED`, новая смена не тронута; FORCE_CLOSE vs CONFIRM_SOURCE_ASSIGNMENT на
+  связанных исключениях одной смены → без потерянных обновлений в любом порядке; принудительный
+  сбой (реальный FK-violation при `AuditEvent`) после `INSERT ClockShift`+`DELETE
+  EmployeeOpenShift`, но до `COMMIT` → полный откат: `EmployeeOpenShift` на месте, exception
+  остаётся `OPEN`, ни `ClockShift`, ни `AuditEvent` не создаются.
 
 ## 10. Служебный агрегатор
 

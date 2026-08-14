@@ -141,26 +141,27 @@ SQL — ровно 3 гранта: `read.assigned`→`FOREMAN`, `read.all`→`AD
 | `attendance.exception.read.assigned` | `FOREMAN` | исключения с доказуемой связью хотя бы с одним ТЕКУЩИМ объектом прораба (`ForemanAssignment`, тот же паттерн `validFrom<=today<=validTo\|NULL`, что `timesheet.foreman_review`) | `GET /api/foreman/attendance/exceptions[/:exceptionId]` — scope собирается из ПЯТИ связей (`siteId`, `clockEvent.siteId`, `clockShift.siteId`, `clockShiftFragment.siteId`, `relatedClockShift.siteId`), не только собственного поля исключения (`OVERLAPPING_SHIFT` держит его `NULL`); dual-role `FOREMAN`+`WORKER` не видит собственные исключения (`404`, не `403` — не отличим от «не существует»); чужой `siteId`-фильтр — пустой `200`, не `403`/`404`; чужая половина own↔foreign `OVERLAPPING_SHIFT` редактируется в `null` целиком | нет | нет (read-only) | — |
 | `attendance.exception.read.all` | `ADMIN`, `SUPER_ADMIN` | вся компания | `GET /api/admin/attendance/exceptions[/:exceptionId]` — тот же DTO/redaction, без scope-ограничения; `employeeId`-фильтр доступен только здесь | нет | нет (read-only) | — |
 
-### 2.4c Attendance exception resolution (T7A.8B.1 + T7A.8B.2 + T7A.8B.3) — **`[2026-08-15]
-реализовано для DISMISS/ACKNOWLEDGE_AS_VALID/PAIR_ORPHAN_EVENTS/CONFIRM_SOURCE_ASSIGNMENT`**
-(`T7A_1_ATTENDANCE_CLOCK_DESIGN.md` §8.5/§9.7/§9.8/§11/§12.1/§12.3)
+### 2.4c Attendance exception resolution (T7A.8B.1 + T7A.8B.2 + T7A.8B.3 + T7A.8B.4A) — **`[2026-08-15]
+реализовано для DISMISS/ACKNOWLEDGE_AS_VALID/PAIR_ORPHAN_EVENTS/CONFIRM_SOURCE_ASSIGNMENT/
+FORCE_CLOSE_OPEN_SHIFT`** (`T7A_1_ATTENDANCE_CLOCK_DESIGN.md` §8.5/§9.7/§9.8/§9.9/§11/§12.1/§12.3)
 
 Засеяны миграцией `20260817000000_seed_attendance_exception_base_resolution_permissions`
 (проверено прямым SQL — ровно 2 новых гранта: `resolve.assigned`→`FOREMAN`,
 `resolve.all`→`ADMIN`+`SUPER_ADMIN`; всего 6 grants по обоим exception-миграциям вместе,
-`WORKER`/`SYSTEM` — ни одного). `PAIR_ORPHAN_EVENTS` (T7A.8B.2) и `CONFIRM_SOURCE_ASSIGNMENT`
-(T7A.8B.3) переиспользуют те же два granta без новой миграции — **`CONFIRM_SOURCE_ASSIGNMENT`
-доступен только через `resolve.all` (только `ADMIN`/`SUPER_ADMIN`)**, `resolve.assigned`
-(`FOREMAN`) на это действие не распространяется структурно: foreman-роут отклоняет его `403
-FORBIDDEN` на уровне кода, до любой проверки scope, независимо от того, держит ли вызывающий
-`resolve.assigned` или нет. Остальные два resolution-действия (`REASON_EDIT`,
-`FORCE_CLOSE_OPEN_SHIFT`) НЕ засеяны — `action` с любым из них → `400 VALIDATION_ERROR`, не
+`WORKER`/`SYSTEM` — ни одного). `PAIR_ORPHAN_EVENTS` (T7A.8B.2), `CONFIRM_SOURCE_ASSIGNMENT`
+(T7A.8B.3) и `FORCE_CLOSE_OPEN_SHIFT` (T7A.8B.4A) переиспользуют те же два granta без новой
+миграции — **оба `CONFIRM_SOURCE_ASSIGNMENT` и `FORCE_CLOSE_OPEN_SHIFT` доступны только через
+`resolve.all` (только `ADMIN`/`SUPER_ADMIN`)**, `resolve.assigned` (`FOREMAN`) на оба этих
+действия не распространяется структурно: foreman-роут отклоняет оба `403 FORBIDDEN` на уровне
+кода, на сыром теле запроса, до любой проверки scope/чтения target, независимо от того, держит ли
+вызывающий `resolve.assigned` или нет. Единственное оставшееся resolution-действие
+(`REASON_EDIT`) НЕ засеяно — `action` со значением `REASON_EDIT` → `400 VALIDATION_ERROR`, не
 временная заглушка.
 
 | Permission | Держатели | Область | Ограничения | Причина | Аудит | Массовое |
 |---|---|---|---|---|---|---|
-| `attendance.exception.resolve.assigned` | `FOREMAN` | исключения, чьи ВСЕ доказуемые site-связи — текущие объекты прораба (строже read-scope, где достаточно пересечения); для `PAIR_ORPHAN_EVENTS` — объединение пяти собственных site-связей named exception ∪ `checkInEvent.siteId` ∪ `checkOutEvent.siteId` | `POST /api/foreman/attendance/exceptions/:exceptionId/resolve` — `DISMISS`/`ACKNOWLEDGE_AS_VALID`/`PAIR_ORPHAN_EVENTS` ТОЛЬКО — `CONFIRM_SOURCE_ASSIGNMENT` этой permission НЕ покрывается (структурно `ADMIN`/`SUPER_ADMIN`-only, §12.1); не подразумевает read — оба permission нужны независимо; own↔foreign `OVERLAPPING_SHIFT` видна через `GET`, резолюция → `403 FOREMAN_SCOPE_INCOMPLETE`; для PAIR тот же код, если хотя бы один выбранный event на чужом сайте; scope перепроверяется внутри транзакции по свежим `ForemanAssignment`, не по данным `GET` | нет | да (`ATTENDANCE_EXCEPTION_DISMISSED`/`ATTENDANCE_EXCEPTION_ACKNOWLEDGED_AS_VALID`/`ATTENDANCE_EXCEPTION_PAIRED`, без `detail`/GPS/device-полей) | нет |
-| `attendance.exception.resolve.all` | `ADMIN`, `SUPER_ADMIN` | вся компания | `POST /api/admin/attendance/exceptions/:exceptionId/resolve` — та же матрица §11, без site-ограничения; `CONFIRM_SOURCE_ASSIGNMENT` — только здесь; не подразумевает read | нет | да (то же плюс `CLOCK_SHIFT_ASSIGNMENT_RESOLVED`, без GPS/device-полей/`chosenAssignmentId`-неймспейса за пределами target/assignment id) | нет |
+| `attendance.exception.resolve.assigned` | `FOREMAN` | исключения, чьи ВСЕ доказуемые site-связи — текущие объекты прораба (строже read-scope, где достаточно пересечения); для `PAIR_ORPHAN_EVENTS` — объединение пяти собственных site-связей named exception ∪ `checkInEvent.siteId` ∪ `checkOutEvent.siteId` | `POST /api/foreman/attendance/exceptions/:exceptionId/resolve` — `DISMISS`/`ACKNOWLEDGE_AS_VALID`/`PAIR_ORPHAN_EVENTS` ТОЛЬКО — ни `CONFIRM_SOURCE_ASSIGNMENT`, ни `FORCE_CLOSE_OPEN_SHIFT` этой permission НЕ покрываются (оба структурно `ADMIN`/`SUPER_ADMIN`-only, §12.1); не подразумевает read — оба permission нужны независимо; own↔foreign `OVERLAPPING_SHIFT` видна через `GET`, резолюция → `403 FOREMAN_SCOPE_INCOMPLETE`; для PAIR тот же код, если хотя бы один выбранный event на чужом сайте; scope перепроверяется внутри транзакции по свежим `ForemanAssignment`, не по данным `GET` | нет | да (`ATTENDANCE_EXCEPTION_DISMISSED`/`ATTENDANCE_EXCEPTION_ACKNOWLEDGED_AS_VALID`/`ATTENDANCE_EXCEPTION_PAIRED`, без `detail`/GPS/device-полей) | нет |
+| `attendance.exception.resolve.all` | `ADMIN`, `SUPER_ADMIN` | вся компания | `POST /api/admin/attendance/exceptions/:exceptionId/resolve` — та же матрица §11, без site-ограничения; `CONFIRM_SOURCE_ASSIGNMENT` и `FORCE_CLOSE_OPEN_SHIFT` — только здесь; не подразумевает read | нет | да (то же плюс `CLOCK_SHIFT_ASSIGNMENT_RESOLVED`/`CLOCK_SHIFT_FORCE_CLOSED`, без GPS/device-полей/`chosenAssignmentId`-неймспейса/сырых координат) | нет |
 
 ### 2.5 Назначения
 
@@ -380,8 +381,8 @@ reactivate шаблона — нет утверждённого контракт
 | `/api/admin/attendance/exceptions/:exceptionId` | GET | `attendance.exception.read.all` — **`[2026-08-14] реализовано`** |
 | `/api/foreman/attendance/exceptions` | GET | `attendance.exception.read.assigned` — **`[2026-08-14] реализовано`** |
 | `/api/foreman/attendance/exceptions/:exceptionId` | GET | `attendance.exception.read.assigned` — **`[2026-08-14] реализовано`** |
-| `/api/admin/attendance/exceptions/:exceptionId/resolve` | POST | `attendance.exception.read.all` + `attendance.exception.resolve.all` — **`[2026-08-15] реализовано (DISMISS/ACKNOWLEDGE_AS_VALID/PAIR_ORPHAN_EVENTS/CONFIRM_SOURCE_ASSIGNMENT)`** |
-| `/api/foreman/attendance/exceptions/:exceptionId/resolve` | POST | `attendance.exception.read.assigned` + `attendance.exception.resolve.assigned` — **`[2026-08-15] реализовано (DISMISS/ACKNOWLEDGE_AS_VALID/PAIR_ORPHAN_EVENTS только — CONFIRM_SOURCE_ASSIGNMENT структурно недоступен, 403 FORBIDDEN)`** |
+| `/api/admin/attendance/exceptions/:exceptionId/resolve` | POST | `attendance.exception.read.all` + `attendance.exception.resolve.all` — **`[2026-08-15] реализовано (DISMISS/ACKNOWLEDGE_AS_VALID/PAIR_ORPHAN_EVENTS/CONFIRM_SOURCE_ASSIGNMENT/FORCE_CLOSE_OPEN_SHIFT)`** |
+| `/api/foreman/attendance/exceptions/:exceptionId/resolve` | POST | `attendance.exception.read.assigned` + `attendance.exception.resolve.assigned` — **`[2026-08-15] реализовано (DISMISS/ACKNOWLEDGE_AS_VALID/PAIR_ORPHAN_EVENTS только — CONFIRM_SOURCE_ASSIGNMENT и FORCE_CLOSE_OPEN_SHIFT структурно недоступны, оба 403 FORBIDDEN)`** |
 
 Эндпоинты домена `absence.*` (§2.3) **не входят в первый вертикальный срез** — permission-контракт
 определён полностью, но route/API contracts для создания/одобрения отсутствий спроектированы позже

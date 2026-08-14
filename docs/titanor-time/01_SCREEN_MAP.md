@@ -916,12 +916,12 @@ FOREMAN_APPROVED` только когда все scope версии подтве
   прямое чтение `AttendanceException`. **`[2026-08-14]`** read-only backend для самого
   `AttendanceException` — `GET /api/{admin,foreman}/attendance/exceptions[/:exceptionId]`
   (T7A.8A) — реализован; **`[2026-08-15]`** резолюция — `POST .../resolve` с
-  `DISMISS`/`ACKNOWLEDGE_AS_VALID` (T7A.8B.1), `PAIR_ORPHAN_EVENTS` (T7A.8B.2) и
-  `CONFIRM_SOURCE_ASSIGNMENT` (T7A.8B.3, `ADMIN`/`SUPER_ADMIN`-only — `FOREMAN` не получает это
-  действие) — реализованы backend-only. **Экрана для всего этого по-прежнему нет** ни здесь, ни
-  где-либо ещё; оставшиеся два resolution-действия (`REASON_EDIT`/`FORCE_CLOSE_OPEN_SHIFT`) тоже
-  не реализованы. Будущий Exception Review UI (T7A.8B.4/8C) — отдельный, ещё не спроектированный
-  экран, не расширение этой страницы.
+  `DISMISS`/`ACKNOWLEDGE_AS_VALID` (T7A.8B.1), `PAIR_ORPHAN_EVENTS` (T7A.8B.2),
+  `CONFIRM_SOURCE_ASSIGNMENT` (T7A.8B.3) и `FORCE_CLOSE_OPEN_SHIFT` (T7A.8B.4A) — последние два
+  `ADMIN`/`SUPER_ADMIN`-only, `FOREMAN` не получает ни одно из них — реализованы backend-only.
+  **Экрана для всего этого по-прежнему нет** ни здесь, ни где-либо ещё; из шести resolution-действий
+  §11 остаётся нереализованным только `REASON_EDIT` (T7A.8B.4B). Будущий Exception Review UI
+  (T7A.8B.4B/8C) — отдельный, ещё не спроектированный экран, не расширение этой страницы.
 
 #### `/foreman/review/[timesheetId]` ⚪
 - Роли: `FOREMAN`

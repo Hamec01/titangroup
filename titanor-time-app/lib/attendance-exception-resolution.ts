@@ -6,19 +6,20 @@ import { helsinkiCalendarDateAsUtcMidnight } from '@/lib/attendance-clock';
 import { actorDisplayName, UUID_PATTERN, type ExceptionTypeFilter } from '@/lib/attendance-exceptions';
 
 // docs/titanor-time/T7A_1_ATTENDANCE_CLOCK_DESIGN.md §8.5 (resolver pattern) / §9.7
-// (CONFIRM_SOURCE_ASSIGNMENT, full algorithm) / §9.8 (PAIR_ORPHAN_EVENTS full validation) / §11
-// (action matrix) / §12.1/§12.3 — T7A.8B.1 shipped DISMISS/ACKNOWLEDGE_AS_VALID; T7A.8B.2 added
-// PAIR_ORPHAN_EVENTS; T7A.8B.3 adds CONFIRM_SOURCE_ASSIGNMENT (ADMIN/SUPER_ADMIN only — FOREMAN
-// is rejected at the route layer, before this module is ever reached for this action). The
-// remaining two actions (REASON_EDIT, FORCE_CLOSE_OPEN_SHIFT) are deliberately not implemented
-// here — see IMPLEMENTED_RESOLUTION_ACTIONS below. Kept in a separate file from
-// lib/attendance-exceptions.ts on purpose: that module is read-only (owns scope enforcement,
-// filtering, pagination, DTO/redaction for GET); this one owns the mutating transactions, with a
-// materially different lock-order/concurrency contract.
+// (CONFIRM_SOURCE_ASSIGNMENT, full algorithm) / §9.8 (PAIR_ORPHAN_EVENTS full validation) / §9.9
+// (FORCE_CLOSE_OPEN_SHIFT, full algorithm) / §11 (action matrix) / §12.1/§12.3 — T7A.8B.1 shipped
+// DISMISS/ACKNOWLEDGE_AS_VALID; T7A.8B.2 added PAIR_ORPHAN_EVENTS; T7A.8B.3 added
+// CONFIRM_SOURCE_ASSIGNMENT; T7A.8B.4A adds FORCE_CLOSE_OPEN_SHIFT (ADMIN/SUPER_ADMIN only —
+// FOREMAN is rejected at the route layer, before this module is ever reached for this action,
+// same pattern as CONFIRM_SOURCE_ASSIGNMENT). The one remaining action (REASON_EDIT) is
+// deliberately not implemented here — see IMPLEMENTED_RESOLUTION_ACTIONS below. Kept in a
+// separate file from lib/attendance-exceptions.ts on purpose: that module is read-only (owns
+// scope enforcement, filtering, pagination, DTO/redaction for GET); this one owns the mutating
+// transactions, with a materially different lock-order/concurrency contract.
 
 export type SimpleResolutionAction = 'DISMISS' | 'ACKNOWLEDGE_AS_VALID';
-export type ResolutionAction = SimpleResolutionAction | 'PAIR_ORPHAN_EVENTS' | 'CONFIRM_SOURCE_ASSIGNMENT';
-export const IMPLEMENTED_RESOLUTION_ACTIONS: ResolutionAction[] = ['DISMISS', 'ACKNOWLEDGE_AS_VALID', 'PAIR_ORPHAN_EVENTS', 'CONFIRM_SOURCE_ASSIGNMENT'];
+export type ResolutionAction = SimpleResolutionAction | 'PAIR_ORPHAN_EVENTS' | 'CONFIRM_SOURCE_ASSIGNMENT' | 'FORCE_CLOSE_OPEN_SHIFT';
+export const IMPLEMENTED_RESOLUTION_ACTIONS: ResolutionAction[] = ['DISMISS', 'ACKNOWLEDGE_AS_VALID', 'PAIR_ORPHAN_EVENTS', 'CONFIRM_SOURCE_ASSIGNMENT', 'FORCE_CLOSE_OPEN_SHIFT'];
 
 const MAX_RESOLUTION_NOTE_LENGTH = 2000;
 
@@ -87,10 +88,28 @@ function allowedActionsFor(type: string): string[] {
 // so a stale UI can never send an ambiguous body.
 // ---------------------------------------------------------------------------------------------
 
+// Strict ISO-8601 datetime with a MANDATORY explicit UTC designator (`Z` or `+HH:MM`/`-HH:MM`) —
+// deliberately stricter than lib/attendance-clock.ts's parseIsoInstant (which feeds `new Date()`
+// directly and so silently accepts date-only and timezone-less strings, interpreting the latter as
+// local time). FORCE_CLOSE_OPEN_SHIFT needs the stricter form because `explicitEndAt` is a
+// human-typed administrative timestamp with real payroll consequences — an ambiguous local-time
+// value must be rejected outright, not silently reinterpreted. Not reused/exported elsewhere;
+// parseIsoInstant's existing (looser) behavior is left untouched for its existing callers.
+const STRICT_ISO_UTC_OFFSET_PATTERN = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{1,9})?(Z|[+-]\d{2}:\d{2})$/;
+
+function parseStrictIsoInstant(value: unknown): Date | null {
+  if (typeof value !== 'string' || !STRICT_ISO_UTC_OFFSET_PATTERN.test(value)) {
+    return null;
+  }
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
 export type ParsedResolveRequest =
   | { ok: true; action: SimpleResolutionAction; resolutionNote: string | null }
   | { ok: true; action: 'PAIR_ORPHAN_EVENTS'; checkInEventId: string; checkOutEventId: string; resolutionNote: string | null }
   | { ok: true; action: 'CONFIRM_SOURCE_ASSIGNMENT'; chosenAssignmentId: string; resolutionNote: string | null }
+  | { ok: true; action: 'FORCE_CLOSE_OPEN_SHIFT'; explicitEndAt: Date; reason: string }
   | { ok: false; fieldErrors: Record<string, string[]> };
 
 export function validateResolveRequestBody(raw: unknown): ParsedResolveRequest {
@@ -142,6 +161,12 @@ export function validateResolveRequestBody(raw: unknown): ParsedResolveRequest {
     if (body.chosenAssignmentId !== undefined) {
       fieldErrors.chosenAssignmentId = ['not allowed for this action'];
     }
+    if (body.explicitEndAt !== undefined) {
+      fieldErrors.explicitEndAt = ['not allowed for this action'];
+    }
+    if (body.reason !== undefined) {
+      fieldErrors.reason = ['not allowed for this action'];
+    }
     if (Object.keys(fieldErrors).length > 0 || !checkInEventId || !checkOutEventId) {
       return { ok: false, fieldErrors };
     }
@@ -161,10 +186,64 @@ export function validateResolveRequestBody(raw: unknown): ParsedResolveRequest {
     if (body.checkOutEventId !== undefined) {
       fieldErrors.checkOutEventId = ['not allowed for this action'];
     }
+    if (body.explicitEndAt !== undefined) {
+      fieldErrors.explicitEndAt = ['not allowed for this action'];
+    }
+    if (body.reason !== undefined) {
+      fieldErrors.reason = ['not allowed for this action'];
+    }
     if (Object.keys(fieldErrors).length > 0 || !chosenAssignmentId) {
       return { ok: false, fieldErrors };
     }
     return { ok: true, action: 'CONFIRM_SOURCE_ASSIGNMENT', chosenAssignmentId, resolutionNote };
+  }
+
+  if (action === 'FORCE_CLOSE_OPEN_SHIFT') {
+    // resolutionNote is explicitly FORBIDDEN for this action (not just ignored) — `reason` is the
+    // single source of truth for why the shift was force-closed, written to
+    // ClockShift.forceClosedReason / AttendanceException.resolutionNote / the audit event alike; a
+    // second, independent resolutionNote field would create two possibly-conflicting reasons.
+    if (body.resolutionNote !== undefined) {
+      fieldErrors.resolutionNote = ['not allowed for this action — use reason instead'];
+    }
+    if (body.chosenAssignmentId !== undefined) {
+      fieldErrors.chosenAssignmentId = ['not allowed for this action'];
+    }
+    if (body.checkInEventId !== undefined) {
+      fieldErrors.checkInEventId = ['not allowed for this action'];
+    }
+    if (body.checkOutEventId !== undefined) {
+      fieldErrors.checkOutEventId = ['not allowed for this action'];
+    }
+
+    let explicitEndAt: Date | null = null;
+    if (typeof body.explicitEndAt !== 'string') {
+      fieldErrors.explicitEndAt = ['required, must be a string'];
+    } else {
+      explicitEndAt = parseStrictIsoInstant(body.explicitEndAt);
+      if (!explicitEndAt) {
+        fieldErrors.explicitEndAt = ['must be a strict ISO-8601 timestamp with an explicit UTC offset (Z or +HH:MM/-HH:MM) — date-only and timezone-less values are rejected'];
+      }
+    }
+
+    let reason: string | null = null;
+    if (typeof body.reason !== 'string') {
+      fieldErrors.reason = ['required'];
+    } else {
+      const trimmedReason = body.reason.trim();
+      if (trimmedReason.length === 0) {
+        fieldErrors.reason = ['required'];
+      } else if (trimmedReason.length > MAX_RESOLUTION_NOTE_LENGTH) {
+        fieldErrors.reason = [`must be at most ${MAX_RESOLUTION_NOTE_LENGTH} characters`];
+      } else {
+        reason = trimmedReason;
+      }
+    }
+
+    if (Object.keys(fieldErrors).length > 0 || !explicitEndAt || !reason) {
+      return { ok: false, fieldErrors };
+    }
+    return { ok: true, action: 'FORCE_CLOSE_OPEN_SHIFT', explicitEndAt, reason };
   }
 
   if (action === 'DISMISS' || action === 'ACKNOWLEDGE_AS_VALID') {
@@ -176,6 +255,12 @@ export function validateResolveRequestBody(raw: unknown): ParsedResolveRequest {
     }
     if (body.chosenAssignmentId !== undefined) {
       fieldErrors.chosenAssignmentId = ['not allowed for this action'];
+    }
+    if (body.explicitEndAt !== undefined) {
+      fieldErrors.explicitEndAt = ['not allowed for this action'];
+    }
+    if (body.reason !== undefined) {
+      fieldErrors.reason = ['not allowed for this action'];
     }
     if (Object.keys(fieldErrors).length > 0) {
       return { ok: false, fieldErrors };
@@ -964,6 +1049,223 @@ export async function confirmSourceAssignment(exceptionId: string, chosenAssignm
         resolvedAt: resolvedAt.toISOString(),
         resolvedBy: { id: actorUserId, name: actorDisplayName(actor) },
         resolutionNote
+      }
+    };
+  });
+}
+
+// ---------------------------------------------------------------------------------------------
+// FORCE_CLOSE_OPEN_SHIFT (§9.9) — ADMIN/SUPER_ADMIN only (enforced at the route layer, same
+// pattern as CONFIRM_SOURCE_ASSIGNMENT; this function carries no scope parameter and is never
+// called by the foreman route). Applicable only to MISSING_CHECKOUT_AT_CUTOFF. Unlike
+// CONFIRM_SOURCE_ASSIGNMENT (which resolves one of three possible target shapes), the target here
+// is always exactly the EmployeeOpenShift that this exception's own clockEventId opened — never a
+// newer, unrelated open shift, and never a fallback to an already-closed ClockShift (there is
+// nothing to "gracefully fall back" to: if the originating shift already closed for real, this
+// action simply no longer applies — the client is told to DISMISS instead, per §11/§9.9). No
+// ClockEvent is created by this action — the raw device-fact table stays honest; the fact that no
+// real Check Out ever arrived, and that a human administratively supplied a time instead, lives
+// only on ClockShift.forceClosed* (§9.9 prose, verbatim).
+// ---------------------------------------------------------------------------------------------
+
+export interface ForceCloseClockShiftResult {
+  id: string;
+  employeeId: string;
+  checkInEventId: string;
+  checkOutEventId: null;
+  siteId: string;
+  workAreaId: string | null;
+  sourceAssignmentId: string | null;
+  recordedStartAt: string;
+  recordedEndAt: string;
+  endAtProvisional: false;
+  forceClosedByUserId: string;
+  forceClosedReason: string;
+  forceClosedAt: string;
+  materializationState: string;
+}
+
+export interface ForceCloseResult {
+  resolutionAction: 'FORCE_CLOSE_OPEN_SHIFT';
+  clockShift: ForceCloseClockShiftResult;
+  resolvedAt: string;
+  resolvedBy: { id: string; name: string };
+  resolutionNote: string;
+}
+
+export type ForceCloseOutcome =
+  | { kind: 'CREATED'; result: ForceCloseResult }
+  | { kind: 'NOT_FOUND' }
+  | { kind: 'ALREADY_RESOLVED' }
+  | { kind: 'ACTION_NOT_APPLICABLE'; allowedActions: string[] }
+  | { kind: 'OPEN_SHIFT_ALREADY_CLOSED' }
+  | { kind: 'VALIDATION_ERROR'; fieldErrors: Record<string, string[]> };
+
+const FORCE_CLOSE_PRE_READ_SELECT = {
+  employeeId: true,
+  type: true,
+  status: true,
+  clockEventId: true
+} satisfies Prisma.AttendanceExceptionSelect;
+
+type ForceClosePreRead = Prisma.AttendanceExceptionGetPayload<{ select: typeof FORCE_CLOSE_PRE_READ_SELECT }>;
+
+function isForceCloseApplicable(type: string): boolean {
+  return type === 'MISSING_CHECKOUT_AT_CUTOFF';
+}
+
+/**
+ * docs/titanor-time/T7A_1_ATTENDANCE_CLOCK_DESIGN.md §9.9, literally:
+ *   Read-only: exceptionId -> employeeId. type must be MISSING_CHECKOUT_AT_CUTOFF.
+ *   Transaction: Employee FOR UPDATE -> AttendanceException FOR UPDATE -> re-check status/type ->
+ *   EmployeeOpenShift FOR UPDATE by employeeId, then verified to be the SAME shift this exception
+ *   was raised about (openedByClockEventId === exception.clockEventId) -> re-check
+ *   explicitEndAt > openedAt under lock -> INSERT ClockShift(force-closed shape) -> DELETE
+ *   EmployeeOpenShift -> RESOLVE exception -> one AuditEvent -> COMMIT.
+ *
+ * Target identity (task brief §3, a refinement of §9.9's literal "SELECT EmployeeOpenShift WHERE
+ * employeeId FOR UPDATE" that the design doc's own prose leaves under-specified): a bare
+ * employeeId lookup would find ANY open shift for this employee, including one opened by an
+ * unrelated, later Check In that has nothing to do with this exception. Verifying
+ * openedByClockEventId === exception.clockEventId before proceeding is the same target-identity
+ * discipline §9.7 already applies to CONFIRM_SOURCE_ASSIGNMENT's EmployeeOpenShift branch,
+ * applied here for the same reason: never act on the wrong shift just because SOME shift happens
+ * to be open. A mismatch (or no open shift at all) uniformly means the originating shift is no
+ * longer the live one, standing in for both "already closed for real" and "not this shift" ->
+ * 409 OPEN_SHIFT_ALREADY_CLOSED either way (§9.9: "резолверу предлагается DISMISS вместо этого").
+ */
+export async function forceCloseOpenShift(exceptionId: string, explicitEndAt: Date, reason: string, actorUserId: string, requestId: string): Promise<ForceCloseOutcome> {
+  const pre = await prisma.attendanceException.findUnique({ where: { id: exceptionId }, select: FORCE_CLOSE_PRE_READ_SELECT });
+  if (!pre) {
+    return { kind: 'NOT_FOUND' };
+  }
+  if (pre.status !== 'OPEN') {
+    return { kind: 'ALREADY_RESOLVED' };
+  }
+  if (!isForceCloseApplicable(pre.type)) {
+    return { kind: 'ACTION_NOT_APPLICABLE', allowedActions: allowedActionsFor(pre.type) };
+  }
+
+  return prisma.$transaction(async (tx) => {
+    // Canonical order (§8.1): Employee(1) before AttendanceException(7) — never the reverse. The
+    // EmployeeOpenShift lock (position 3) that follows comes AFTER AttendanceException here, the
+    // same documented exception to strict ascending order already used by CONFIRM_SOURCE_ASSIGNMENT
+    // (§8.5: "no more than one additional row at position 3" for resolver-form actions other than
+    // REASON_EDIT) — not re-derived here, applied as already proven safe.
+    await tx.$queryRaw`SELECT id FROM "Employee" WHERE id = ${pre.employeeId}::uuid FOR UPDATE`;
+    await tx.$queryRaw`SELECT id FROM "AttendanceException" WHERE id = ${exceptionId}::uuid FOR UPDATE`;
+
+    const fresh: ForceClosePreRead | null = await tx.attendanceException.findUnique({ where: { id: exceptionId }, select: FORCE_CLOSE_PRE_READ_SELECT });
+    if (!fresh) {
+      return { kind: 'NOT_FOUND' as const };
+    }
+    if (fresh.status !== 'OPEN') {
+      return { kind: 'ALREADY_RESOLVED' as const };
+    }
+    if (!isForceCloseApplicable(fresh.type)) {
+      return { kind: 'ACTION_NOT_APPLICABLE' as const, allowedActions: allowedActionsFor(fresh.type) };
+    }
+    if (!fresh.clockEventId) {
+      // No consistent originating clockEventId to identify a target with at all — treat the same
+      // as "the shift this exception was about is not identifiable/no longer live".
+      return { kind: 'OPEN_SHIFT_ALREADY_CLOSED' as const };
+    }
+
+    const openRows = await tx.$queryRaw<{ id: string; siteId: string; workAreaId: string | null; sourceAssignmentId: string | null; openedAt: Date; openedByClockEventId: string }[]>`
+      SELECT id, "siteId", "workAreaId", "sourceAssignmentId", "openedAt", "openedByClockEventId"
+      FROM "EmployeeOpenShift" WHERE "employeeId" = ${fresh.employeeId}::uuid
+      FOR UPDATE
+    `;
+    const openShift = openRows[0];
+    if (!openShift || openShift.openedByClockEventId !== fresh.clockEventId) {
+      return { kind: 'OPEN_SHIFT_ALREADY_CLOSED' as const };
+    }
+
+    // Re-checked HERE, under lock, against the just-locked row — not the pre-read snapshot. Even
+    // an administrative force-close cannot violate basic chronology; no clamp, a plain rejection
+    // (§9.9: "человек обязан ввести правдоподобное значение").
+    if (!(explicitEndAt.getTime() > openShift.openedAt.getTime())) {
+      return { kind: 'VALIDATION_ERROR' as const, fieldErrors: { explicitEndAt: ['must be strictly after the open shift\'s openedAt'] } };
+    }
+
+    const now = new Date();
+
+    const clockShift = await tx.clockShift.create({
+      data: {
+        employeeId: fresh.employeeId,
+        checkInEventId: openShift.openedByClockEventId,
+        checkOutEventId: null,
+        siteId: openShift.siteId,
+        workAreaId: openShift.workAreaId,
+        sourceAssignmentId: openShift.sourceAssignmentId,
+        recordedStartAt: openShift.openedAt,
+        recordedEndAt: explicitEndAt,
+        endAtProvisional: false,
+        forceClosedByUserId: actorUserId,
+        forceClosedReason: reason,
+        forceClosedAt: now,
+        materializationState: 'PENDING'
+      }
+    });
+
+    // Same employeeId already locked above — a plain delete-by-PK, not a race (§9.9 step 6).
+    await tx.employeeOpenShift.delete({ where: { employeeId: fresh.employeeId } });
+
+    await tx.attendanceException.update({
+      where: { id: exceptionId },
+      data: { status: 'RESOLVED', resolvedByUserId: actorUserId, resolvedAt: now, resolutionNote: reason }
+    });
+
+    // Sanitized: only ids, site/workArea/assignment ids, recorded interval, and reason — never GPS,
+    // accuracy, payloadHash, raw request body, deviceInstallationId/deviceSequence, or any
+    // exception.detail passthrough.
+    await createAuditEvent(tx, {
+      actorUserId,
+      eventType: 'CLOCK_SHIFT_FORCE_CLOSED',
+      entityType: 'ATTENDANCE_EXCEPTION',
+      entityId: exceptionId,
+      requestId,
+      beforeValue: { status: 'OPEN', type: fresh.type },
+      afterValue: {
+        status: 'RESOLVED',
+        resolutionAction: 'FORCE_CLOSE_OPEN_SHIFT',
+        clockShiftId: clockShift.id,
+        employeeId: fresh.employeeId,
+        checkInEventId: clockShift.checkInEventId,
+        siteId: clockShift.siteId,
+        workAreaId: clockShift.workAreaId,
+        sourceAssignmentId: clockShift.sourceAssignmentId,
+        recordedStartAt: clockShift.recordedStartAt.toISOString(),
+        recordedEndAt: clockShift.recordedEndAt.toISOString()
+      },
+      reason
+    });
+
+    const actor = await tx.user.findUniqueOrThrow({ where: { id: actorUserId }, select: { username: true, employee: { select: { firstName: true, lastName: true } } } });
+
+    return {
+      kind: 'CREATED' as const,
+      result: {
+        resolutionAction: 'FORCE_CLOSE_OPEN_SHIFT' as const,
+        clockShift: {
+          id: clockShift.id,
+          employeeId: clockShift.employeeId,
+          checkInEventId: clockShift.checkInEventId,
+          checkOutEventId: null,
+          siteId: clockShift.siteId,
+          workAreaId: clockShift.workAreaId,
+          sourceAssignmentId: clockShift.sourceAssignmentId,
+          recordedStartAt: clockShift.recordedStartAt.toISOString(),
+          recordedEndAt: clockShift.recordedEndAt.toISOString(),
+          endAtProvisional: false as const,
+          forceClosedByUserId: clockShift.forceClosedByUserId as string,
+          forceClosedReason: clockShift.forceClosedReason as string,
+          forceClosedAt: (clockShift.forceClosedAt as Date).toISOString(),
+          materializationState: clockShift.materializationState
+        },
+        resolvedAt: now.toISOString(),
+        resolvedBy: { id: actorUserId, name: actorDisplayName(actor) },
+        resolutionNote: reason
       }
     };
   });

@@ -11,11 +11,11 @@ import { resolveAttendanceException, pairOrphanEvents, validateResolveRequestBod
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
 
-// docs/titanor-time/T7A_1_ATTENDANCE_CLOCK_DESIGN.md §8.5/§9.7/§9.8/§11/§12.1/§12.3 — T7A.8B.1
-// shipped DISMISS/ACKNOWLEDGE_AS_VALID; T7A.8B.2 added PAIR_ORPHAN_EVENTS. T7A.8B.3 adds
-// CONFIRM_SOURCE_ASSIGNMENT but deliberately NOT to this route — FOREMAN never gets it (§12.1),
-// rejected below with 403 before the body is even shape-validated, let alone before any
-// chosenAssignmentId/target row is read.
+// docs/titanor-time/T7A_1_ATTENDANCE_CLOCK_DESIGN.md §8.5/§9.7/§9.8/§9.9/§11/§12.1/§12.3 —
+// T7A.8B.1 shipped DISMISS/ACKNOWLEDGE_AS_VALID; T7A.8B.2 added PAIR_ORPHAN_EVENTS. T7A.8B.3 added
+// CONFIRM_SOURCE_ASSIGNMENT and T7A.8B.4A adds FORCE_CLOSE_OPEN_SHIFT, but deliberately NOT to
+// this route — FOREMAN never gets either (§12.1), both rejected below with 403 before the body is
+// even shape-validated, let alone before any action-specific/target row is read.
 // POST /api/foreman/attendance/exceptions/:exceptionId/resolve.
 const REQUIRED_CSRF_HEADER_VALUE = 'titanor-time';
 type RouteParams = { params: Promise<{ exceptionId: string }> };
@@ -56,12 +56,14 @@ export async function POST(request: NextRequest, { params }: RouteParams): Promi
     return NextResponse.json(errorBody({ code: 'VALIDATION_ERROR', message: 'Request body must be valid JSON.' }, requestId), { status: 400, headers: successHeaders(requestId) });
   }
 
-  // CONFIRM_SOURCE_ASSIGNMENT is ADMIN/SUPER_ADMIN only (§12.1) — rejected here, on the raw body,
-  // before validateResolveRequestBody (which would otherwise happily accept a well-formed
-  // chosenAssignmentId) and long before any target/assignment row is touched. Checked ahead of
-  // full shape validation on purpose, so a malformed chosenAssignmentId can never turn this into a
-  // 400 instead of 403 for a foreman who was never going to be allowed this action regardless.
-  if (rawBody !== null && typeof rawBody === 'object' && !Array.isArray(rawBody) && (rawBody as Record<string, unknown>).action === 'CONFIRM_SOURCE_ASSIGNMENT') {
+  // CONFIRM_SOURCE_ASSIGNMENT and FORCE_CLOSE_OPEN_SHIFT are ADMIN/SUPER_ADMIN only (§12.1) —
+  // rejected here, on the raw body, before validateResolveRequestBody (which would otherwise
+  // happily accept a well-formed body for either) and long before any target/assignment/open-shift
+  // row is touched. Checked ahead of full shape validation on purpose, so a malformed
+  // chosenAssignmentId/explicitEndAt/reason can never turn this into a 400 instead of 403 for a
+  // foreman who was never going to be allowed either action regardless.
+  const ADMIN_ONLY_ACTIONS = new Set(['CONFIRM_SOURCE_ASSIGNMENT', 'FORCE_CLOSE_OPEN_SHIFT']);
+  if (rawBody !== null && typeof rawBody === 'object' && !Array.isArray(rawBody) && ADMIN_ONLY_ACTIONS.has((rawBody as Record<string, unknown>).action as string)) {
     return jsonError(403, { code: 'FORBIDDEN', message: 'Missing required permission.' }, requestId);
   }
 
@@ -69,8 +71,8 @@ export async function POST(request: NextRequest, { params }: RouteParams): Promi
   if (!validated.ok) {
     return NextResponse.json(errorBody({ code: 'VALIDATION_ERROR', message: 'Invalid request body.', fieldErrors: validated.fieldErrors }, requestId), { status: 400, headers: successHeaders(requestId) });
   }
-  if (validated.action === 'CONFIRM_SOURCE_ASSIGNMENT') {
-    // Unreachable in practice (the raw-body check above already returned 403 for this action) —
+  if (validated.action === 'CONFIRM_SOURCE_ASSIGNMENT' || validated.action === 'FORCE_CLOSE_OPEN_SHIFT') {
+    // Unreachable in practice (the raw-body check above already returned 403 for both actions) —
     // kept so this narrows validated.action for the code below and stays correct even if the
     // raw-body check is ever changed.
     return jsonError(403, { code: 'FORBIDDEN', message: 'Missing required permission.' }, requestId);
