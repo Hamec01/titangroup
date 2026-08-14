@@ -25,7 +25,9 @@
 import { prisma } from '../lib/prisma';
 import { hasRealTty, promptHidden } from '../lib/tty-prompt';
 
-const MIN_PASSWORD_LENGTH = 16;
+// This privileged, local-only recovery CLI follows the owner-approved administrative
+// password minimum. Public worker/foreman activation flows remain at 16 characters.
+const MIN_PASSWORD_LENGTH = 8;
 
 class UsageError extends Error {}
 class NotFoundError extends Error {}
@@ -85,7 +87,7 @@ function requireRealTty(): void {
 }
 
 async function promptForNewPassword(): Promise<string> {
-  const first = await promptHidden('New password (min 16 characters, hidden): ');
+  const first = await promptHidden(`New password (min ${MIN_PASSWORD_LENGTH} characters, hidden): `);
   if (first.length < MIN_PASSWORD_LENGTH) {
     throw new UsageError(`Password must be at least ${MIN_PASSWORD_LENGTH} characters.`);
   }
