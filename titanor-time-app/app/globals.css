@@ -956,6 +956,57 @@ button:disabled {
   font-size: 0.9rem;
 }
 
+/* T7A.7B offline outbox UI. */
+
+.wk-offline-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: rgba(7, 11, 17, 0.5);
+  font-size: 0.85rem;
+  color: var(--text-soft);
+}
+
+.wk-connectivity-dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--error);
+  flex-shrink: 0;
+}
+
+.wk-connectivity-dot.online {
+  background: #86efac;
+}
+
+.wk-pending-count {
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: rgba(82, 130, 168, 0.25);
+  color: var(--text);
+  font-weight: 600;
+  font-size: 0.78rem;
+}
+
+.wk-sync-now-button {
+  margin-left: auto;
+  padding: 5px 12px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text);
+  font-size: 0.8rem;
+  cursor: pointer;
+}
+
+.wk-sync-now-button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
 .wk-clock-nav {
   display: flex;
   justify-content: space-between;

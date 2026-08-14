@@ -1,6 +1,130 @@
 # Titanor Time — Implementation Status
 
-Обновлено: 2026-08-16 Europe/Helsinki (feat: add offline attendance sync backend)
+Обновлено: 2026-08-14 Europe/Helsinki (feat: add offline attendance outbox)
+
+**T7A.7B Offline Attendance Outbox Client — новый завершённый frontend-слайс поверх T7A.7A
+(offline sync backend) и T7A Worker Online Clock UI.** Реализует
+`docs/titanor-time/T7A_1_ATTENDANCE_CLOCK_DESIGN.md` §6 (IndexedDB outbox client протокол — схема,
+atomic enqueue, sync runner, backoff, response application) и §7 (batch API contract с клиентской
+стороны). `WorkerClockPanel` больше не online-only: Check In/Check Out/Switch Site сначала
+атомарно пишутся в IndexedDB, затем отправляются исключительно через уже существующий
+`POST /api/worker/attendance/sync` (T7A.7A); прямые вызовы `/check-in`/`/check-out`/`/switch-site`
+из UI убраны, но сами эти три online-роута и их backend-логика не тронуты и остаются отдельно
+протестированной regression-поверхностью.
+
+**Файлы**: новая директория `lib/offline-outbox/` (browser-only, без Prisma/`node:crypto`/next
+server-импортов) — `sha256.ts` (синхронная чистая SHA-256, необходима именно потому, что
+`payloadHash` включает только что зарезервированный `deviceSequence`, известный лишь внутри
+IndexedDB-транзакции — `await` Web Crypto внутри открытой транзакции недопустим), `db.ts` (схема
+`titanor-time-outbox` v1: `clockOutbox`(keyPath `clientEventId`, индексы `by-state`/
+`by-nextAttemptAt`), `localClockState`(singleton), `deviceState`(singleton) — ровно три store, как
+предписано, четвёртый не добавлен), `device.ts` (`ensureDeviceBootstrapped`/`retryBootstrap`,
+`nextDeviceSequence = max(текущий, lastProcessedSequence+1, max(outbox)+1)`, безопасная
+одноразовая ротация `deviceInstallationId` при `DEVICE_NOT_OWNED` только когда outbox пуст),
+`outbox.ts` (`atomicEnqueue` — одна readwrite-транзакция на `clockOutbox`+`localClockState`+
+`deviceState`, ноль `await` не-IDB промисов внутри; `enqueueCheckIn`/`enqueueCheckOut`/
+`enqueueSwitchSite`(пара CHECK_OUT+CHECK_IN с общим `groupId`, `nextDeviceSequence += 2` в той же
+транзакции); `applySingleEventResult`/`applyGroupResult`(перечитывает актуальные строки по
+`groupId`, а не кэш вызывающего — двусмысленный/неполный/смешанный по категории group-ответ не
+трогает ни одну половину)), `sync-runner.ts` (`buildBatch` — чистая функция, backward-scan trim,
+никогда не режет switch-site пару границей batch; `runSyncOnce(force?)` — полный HTTP dispatch
+401/403/429/503/5xx/malformed, backoff-лестница 5s/30s/2min/10min-cap), `broadcast.ts`
+(`BroadcastChannel`, только UX-инвалидация, ноль бизнес-данных в сообщении), `projection.ts`
+(`projectClockState` — накладывает только PENDING/SENDING хвост поверх последнего
+`GET /clock-state`, `FAILED_TERMINAL` никогда не проецируется). Переписан
+`app/worker/WorkerClockPanel.tsx` (online/offline индикатор, счётчик pending, кнопка «Sync now»,
+баннер paused-состояния, список «Needs attention» для `FAILED_TERMINAL`); дополнение
+`.wk-offline-bar`/`.wk-connectivity-dot`/`.wk-pending-count`/`.wk-sync-now-button` в
+`app/globals.css`, ни один существующий класс не изменён. **Schema/migrations/permissions/online
+route surface не изменены** — ноль новых миграций, ноль новых permission, все три online-роута и
+`lib/attendance-sync.ts` не тронуты.
+
+**Найдено и исправлено три реальных бага этого слайса (не пре-существующих):**
+1. React hydration mismatch на `isOnline` — `useState(() => navigator.onLine)` расходился с SSR
+   (`navigator` не существует на сервере, фолбэк всегда `true`), тогда как клиентский
+   `navigator.onLine` на момент гидратации иногда `false`; поймано mandatory-требованием «ноль
+   console errors» через живой Playwright. Исправлено: `useState(true)` + коррекция в
+   `useEffect(() => setIsOnline(navigator.onLine), [])` после mount — стандартный паттерн.
+2. Кнопка «Sync now» игнорировала `nextAttemptAt` backoff-гейт наравне с автоматическими
+   попытками — клик во время окна backoff молча ничего не делал (batch пуст, `NOTHING_TO_SYNC`),
+   пользователь не получал ни ошибки, ни результата. Добавлен `force`-параметр
+   (`runSyncOnce(force)`/`getEligibleRecords(force)`), проброшенный только из ручной кнопки — не
+   из автоматических триггеров (mount/online-event/visibilitychange/таймер), чтобы не сломать
+   сам backoff.
+3. Pause (DEVICE_NOT_OWNED/DEVICE_REVOKED/auth expired), обнаруженный ВО ВРЕМЯ sync-попытки (а не
+   при начальном bootstrap), не отражался в UI — React-состояние `bootstrap` обновлялось только
+   `ensureDeviceBootstrapped`/`retryBootstrap`, `runSyncOnce`'s `pauseDevice()` писал paused
+   исключительно в IndexedDB. Очередь физически сохранялась верно (доказано тестами), но баннер
+   «устройство отключено»/кнопка Retry/скрытие Check In/Out не появлялись — пользователь видел
+   только общее сообщение об ошибке. Исправлено: `triggerSync` теперь синхронизирует React
+   `bootstrap` из исхода `DEVICE_PAUSED`/`AUTH_EXPIRED`.
+
+**Тесты, реально выполненные в живом браузере (Playwright/Chromium, headless, реальный IndexedDB,
+не только моки) поверх одноразового PostgreSQL 16 + dev-сервера** (84/84 PASS в сумме):
+- Suite 1 (8/8): online happy path — Check In→outbox→sync→ACK→`clock-state`, Switch Site (обе
+  половины ACK атомарно), Check Out, DB-проверка ровно 2 `ClockShift`, ноль console errors.
+- Suite 2 (10/10): offline Check In → reload/remount (IndexedDB durability подтверждена реальным
+  `context.route(...).abort()` только на `/sync`, не блокирующим саму навигацию — генуинный
+  `context.setOffline(true)` через reload несовместим с приложением без service worker) → offline
+  Check Out → reconnect → FIFO-sync → ровно один закрытый `ClockShift`.
+  Suite 3 (2/2): потерянный HTTP-ответ после реального commit → повтор того же immutable-события
+  напрямую → `DUPLICATE_ACK`, ноль дублей `ClockEvent`. Suite 6 (2/2): тройной rapid-click →
+  ровно один `ClockEvent`/`EmployeeOpenShift` (`busyRef`-guard). Suite 20 (3/3): координаты
+  отсутствуют в DOM/console/`BroadcastChannel`.
+- Suite 7 (4/4): две вкладки одного контекста (общий IndexedDB) конкурентно enqueue — уникальные
+  последовательные `deviceSequence`, ни одна запись не потеряна/не столкнулась. Suite 8 (3/3): две
+  вкладки конкурентно шлют один и тот же batch — сходится через серверный replay-ledger, ровно
+  один `ClockEvent`. Suite 9 (3/3): два независимых browser context получают разный
+  `deviceInstallationId` и независимые sequence. Suite 10 (1/1, best-effort): 6 итераций
+  abrupt-teardown гонки на persistent-профиле (`chromium.launchPersistentContext` +
+  `context.close()` без ожидания клика) вокруг Switch Site enqueue — ни разу не найдена группа
+  ровно с одной уцелевшей половиной; честно отмечено — буквальный OS-level kill середины
+  IndexedDB-транзакции недостижим через публичный Playwright API, гарантия опирается на нативную
+  атомарность IndexedDB-транзакции плюс однотранзакционный дизайн `enqueueSwitchSite`.
+- Suite 12 (3/3): неполный group-ответ (результат только для одной половины) не трогает ни одну
+  половину (обе остаются `SENDING`, не `PENDING` — корректно, `SENDING` уже всегда eligible для
+  повтора, тот же инвариант, что и crash-recovery), при снятии мока вся группа успешно
+  ретраится и сходится. Suite 13 (1/1): `ACCEPTED`+`DUPLICATE_ACK` — одна категория SUCCESS, обе
+  половины удалены атомарно. Suite 14 (6/6): 503→429→network error подряд — `PENDING`, retryCount
+  инкрементируется на каждом шаге, immutable-поля (`clientEventId`/`deviceSequence`/
+  `clientCapturedAt`/gps) не меняются, `nextAttemptAt` строго растёт. Suite 15 (4/4): terminal
+  `REJECTED`(`OUTSIDE_GEOFENCE`) → `FAILED_TERMINAL`, переживает reload, «Needs attention» виден
+  до и после. Suite 16 (3/3): запись, напрямую посаженная в `SENDING` (симуляция краша
+  mid-flight), восстанавливается после reload и успешно досылается, ровно один реальный
+  `ClockEvent`. Suite 17 (9/9): `DEVICE_REVOKED`/`DEVICE_NOT_OWNED`(непустой outbox, без ротации
+  identity)/`401` — очередь не стирается ни в одном случае, UI показывает безопасное действие.
+  Suite 18 (4/4): первый запуск полностью offline без предыдущего bootstrap — «Offline setup is
+  not ready yet», ноль кнопок действий, ноль записей в outbox. Suite 19 (2/2): явная проверка
+  `GET /clock-state` после ACK (не только оптимистичная проекция). Suite 23 (6/6): десктопный
+  viewport 1280×800, `role="status" aria-live="polite"`, Check In/Check Out активируются Enter
+  на сфокусированной кнопке (нативная keyboard-семантика `<button>`).
+- `buildBatch` unit-тесты вне браузера (11/11): batch >100 режется ровно на 100 для standalone
+  событий; switch-site пара, пересекающая границу 100/101, границу 99/100 (влезает целиком),
+  границу 101/102 (после cap), несколько последовательных пар подряд у границы — ни разу
+  orphaned-половина в результирующем batch.
+- Regression: `git diff --check`, `prisma validate`, `tsc --noEmit`, `npm run build` — все зелёные;
+  `docker compose -f compose.titanor-time.yaml build app` — успешный build (мандаторный тест,
+  снова только перевесил локальный тег `titanor-time-app:latest`, работающий production-контейнер
+  не затронут — подтверждено `docker inspect` до/после: тот же image ID/`StartedAt`/
+  `RestartCount=0`/`healthy`); `prisma migrate deploy` на чистом одноразовом PostgreSQL 16 — 51/51
+  миграция (без новых — этот слайс не добавляет ни одной), повторный запуск — «No pending
+  migrations to apply»; `scripts/_test-activation.ts` и `scripts/_test-corrections.ts` (уже
+  существующие regression-скрипты прежних слайсов) — зелёные на отдельной чистой БД.
+- Не выполнено эмпирически (честно отмечено): буквальный OS-level process-kill середины
+  IndexedDB-транзакции (см. Suite 10 выше — заменён best-effort abrupt-teardown гонкой);
+  выделенный функциональный regression-прогон admin geofence CRUD и worker timesheet UI (риск
+  структурно нулевой — этот diff не касается ни одного файла в этих областях, подтверждено
+  `git status`; сами geofence-версии и назначения интенсивно использовались косвенно всеми 84
+  Playwright-проверками через `/context`).
+
+**Остаётся вне этого слайса** (явно, по границам задачи): scheduler/auto-submit, exception review
+UI, admin attendance overview, полноценный service worker/PWA offline-shell, offline navigation
+shell для самого `/worker` (reload при полностью недоступной сети — вне охвата, задокументировано
+в Suite 2 выше). Background Sync API не добавлен (design допускает его только как ДОПОЛНИТЕЛЬНЫЙ
+механизм, этот слайс сознательно ограничивается mandatory-триггерами: mount/online-event/
+visibilitychange/ручная кнопка/bounded-таймер).
+
+---
 
 **T7A.7A Offline Attendance Sync Backend — новый завершённый backend-слайс поверх online clock
 core + materialization.** Реализует `docs/titanor-time/T7A_1_ATTENDANCE_CLOCK_DESIGN.md` §7 (batch

@@ -776,9 +776,11 @@ Actionable = `PayrollPeriodParticipant.expected=true` + `PayrollPeriod.status=OP
 остаётся `PENDING` для внутреннего catch-up. **`[2026-08-15]`** Worker mobile UI (`/worker`,
 `app/worker/page.tsx` + `WorkerClockPanel.tsx`) реализован поверх этих же четырёх эндпоинтов без их
 изменения. **`[2026-08-16]`** `GET /attendance/context` и `POST /attendance/sync` теперь тоже
-реализованы (§9.1a ниже) — по-прежнему отложены: IndexedDB/outbox клиент,
-`WorkerClockPanel`-интеграция с offline-путём, `GET /attendance/today|week`, scheduler,
-exception-review-эндпоинты, admin attendance overview.
+реализованы (§9.1a ниже). **`[2026-08-14]` T7A.7B:** IndexedDB/outbox клиент и
+`WorkerClockPanel`-интеграция с offline-путём тоже реализованы — `lib/offline-outbox/`,
+Check In/Out/Switch Site пишут в outbox и синкаются через `POST /attendance/sync` выше, прямых
+вызовов online-эндпоинтов из UI больше нет (сами online-роуты не изменены). По-прежнему отложены:
+`GET /attendance/today|week`, scheduler, exception-review-эндпоинты, admin attendance overview.
 
 **GPS shape** (переиспользуется всеми телами ниже):
 ```json
