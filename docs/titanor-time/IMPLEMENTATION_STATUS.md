@@ -1,6 +1,122 @@
 # Titanor Time — Implementation Status
 
-Обновлено: 2026-08-14 Europe/Helsinki (feat: add base attendance exception resolution)
+Обновлено: 2026-08-14 Europe/Helsinki (feat: pair orphan attendance events)
+
+**T7A.8B.2 PAIR_ORPHAN_EVENTS — новый завершённый write-слайс поверх T7A.8B.1.** Реализует
+`docs/titanor-time/T7A_1_ATTENDANCE_CLOCK_DESIGN.md` §8.5 (resolver-паттерн)/§9.8 (полная
+валидация PAIR_ORPHAN_EVENTS, дословно)/§11/§12.1-12.3. Третье реализованное resolution-действие
+на уже существующих `POST /api/{admin,foreman}/attendance/exceptions/:exceptionId/resolve` —
+`CONFIRM_SOURCE_ASSIGNMENT`/`FORCE_CLOSE_OPEN_SHIFT`/`REASON_EDIT` по-прежнему дают `400
+VALIDATION_ERROR` с точным перечнем трёх реализованных значений, не заглушка. **Новых
+permissions/миграций не потребовалось** — переиспользованы уже существующие `attendance.exception.
+resolve.{assigned,all}` + read-эквиваленты.
+
+**Файлы**: расширены три уже существующих файла (не новые) — `lib/attendance-exception-
+resolution.ts` (+~330 строк: `pairOrphanEvents`, объединённый `validateResolveRequestBody`,
+`checkForemanScopeForPair`), оба `.../resolve/route.ts` (dispatch по `action` на
+`resolveAttendanceException` либо новый `pairOrphanEvents`, шесть новых HTTP-исходов). Ни
+`lib/attendance-exceptions.ts` (read), ни `lib/foreman-review.ts`, ни `lib/api-error.ts`, ни
+`lib/attendance-materializer.ts`, ни `lib/attendance-clock.ts` не изменены этим слайсом —
+подтверждено `git status`.
+
+**Расширенный контракт**: `{action:"PAIR_ORPHAN_EVENTS", checkInEventId, checkOutEventId,
+resolutionNote?}` → `201 {resolutionAction, clockShift, resolvedExceptions[], resolvedAt,
+resolvedBy, resolutionNote}`. `checkInEventId`/`checkOutEventId` обязательны и должны отличаться
+для PAIR; для DISMISS/ACK эти же поля теперь явно ЗАПРЕЩЕНЫ (`400`, не тихо игнорируются) — stale
+UI не может отправить двусмысленное тело. Новые ошибки: `404 CLOCK_EVENT_NOT_FOUND`, `409
+EVENT_ALREADY_PAIRED`, `409 PAIRED_SHIFT_OVERLAP`.
+
+**Применимость (§9.8)**: только `DOUBLE_CHECK_IN`/`CHECKOUT_WITHOUT_OPEN_SHIFT`, OPEN. Named
+exception обязан быть связан с выбранной парой (`clockEventId` совпадает с соответствующим
+event id) — иначе `400`, не позволяя использовать видимое чужое исключение как authorization
+anchor для произвольной пары другого работника (проверено отдельным security-тестом: события
+совпадают друг с другом, но принадлежат ДРУГОМУ employee, чем named exception → `400`, ни одна
+строка для другого employee не создаётся/не трогается).
+
+**Валидация ClockEvent (7 пунктов §4 задания, все — read-only pre-check + идентичный re-check
+внутри транзакции)**: существование обоих событий, `operationType` (CHECK_IN/CHECK_OUT
+соответственно), общий `employeeId` для обоих событий, `employeeId` совпадает с named exception,
+строгая хронология БЕЗ clamp (`checkOutEvent.effectiveAt > checkInEvent.effectiveAt`, автоматический
+clamp §9.2 — только для online Check Out), различные id, raw `ClockEvent` НИ РАЗУ не изменяется
+(доказано побайтовым сравнением до/после). `ClockShift` создаётся напрямую из immutable-событий,
+не из тела запроса: `siteId`/`workAreaId`/`sourceAssignmentId` — из `checkInEvent`, `sourceAssignmentId
+= NULL` копируется как есть, не обходя существующую `STALE_ASSIGNMENT`-семантику материализатора
+(проверено — catch-up после такой пары возвращает `PENDING_SOURCE_ASSIGNMENT`, не материализуется
+тихо).
+
+**Event reuse/overlap (§5)**: явный precheck `SELECT` перед `INSERT` (не только `UNIQUE`-constraint
+defense-in-depth) — `409 EVENT_ALREADY_PAIRED`. Overlap — `tstzrange`'ов `&&` с дефолтными
+`[)`-границами (проверено: точное касание `end===start` разрешено, реальное пересечение —
+`409 PAIRED_SHIFT_OVERLAP`, ничего не создаётся/не мутируется). `PAIR_ORPHAN_EVENTS` не создаёт
+`OVERLAPPING_SHIFT` — пара при существующем overlap отклоняется целиком, до `INSERT`.
+
+**Транзакция/lock order**: `Employee FOR UPDATE` → named `AttendanceException FOR UPDATE` →
+(Employee уже держится → свежий, race-free поиск complementary OPEN-исключения тем же tx-клиентом)
+→ `AttendanceException FOR UPDATE` комплементарной, если найдена → event-reuse → overlap → `INSERT
+ClockShift(PENDING)` → `UPDATE` каждой резолвящейся exception (named + комплементарная, если ещё
+OPEN — историческая `DISMISSED`/`RESOLVED` НЕ переписывается) → один `AuditEvent` → `COMMIT`.
+**Осознанное упрощение относительно первоначального черновика**: два exception-лока не сортируются
+в canonical-порядке между собой — доказано, что это не нужно, поскольку `AttendanceException`
+всегда single-employee-owned, а Employee-лок уже держится ПЕРВЫМ КАЖДОЙ resolver-транзакцией в
+этой кодовой базе, так что держание Employee уже полностью сериализует любые две resolver-транзакции
+одного employee — деталь явно задокументирована в коде и отчёте, не тихое расхождение.
+**Единственное расхождение с буквальным текстом §9.8**: `403 FOREMAN_SCOPE_INCOMPLETE` вместо
+`403 FORBIDDEN` из §9.8 для неполного scope — намеренно, ради консистентности с уже установленным
+в T7A.8B.1 кодом ошибки для той же самой ситуации (`OVERLAPPING_SHIFT` own↔foreign); доменный
+инвариант («FOREMAN недоступно, если хотя бы один сайт чужой») сохранён дословно.
+
+**FOREMAN all-sites scope**: объединение named exception'а собственных пяти связей ∪
+`checkInEvent.siteId` ∪ `checkOutEvent.siteId` — переиспользует ту же `anyOwn`/`allOwn`-функцию
+T7A.8B.1 (вынесена в общий `checkForemanScopeForSiteIds`), не дублирует логику. Базовая видимость
+(только собственный scope named exception) проверяется ДО чтения событий — невидимое исключение
+не дифференцирует ответ по присланным event id.
+
+**Тесты, реально выполненные на одноразовом PostgreSQL 16** (126/126 PASS, прямые HTTP-вызовы
+против живого dev-сервера): HTTP (admin/foreman positive, WORKER/CSRF/auth negative, malformed
+JSON/action/eventId/note, DISMISS/ACK регрессия, три будущих действия по-прежнему `400` с
+обновлённым перечнем из трёх значений); applicability (все 14 типов — 2 положительных + 12
+`ACTION_NOT_APPLICABLE` с `allowedActions` по §11, linked-event mismatch, named terminal,
+комплементарная OPEN резолвится вместе, комплементарная terminal НЕ переписывается побайтово);
+event validation (missing event, wrong operation type, разные employee, employee расходится с
+exception, равные/обратные timestamps, boundary-touching разрешён, true overlap запрещён); state
+(точные поля `ClockShift`, `ClockEvent` побайтово неизменны, ровно резолвятся выбранные exceptions,
+ровно один `AuditEvent`, rollback без частичных строк — реальный `AuditEvent.actorUserId`
+FK-violation форсирует настоящий Postgres-откат ПОСЛЕ `INSERT`+`UPDATE`, catch-up материализатор
+подхватывает нормальную пару отдельным проходом, `sourceAssignmentId=NULL` не обходит
+`STALE_ASSIGNMENT`); FOREMAN scope+security (standalone, dual-role self, both-own, checkout-foreign
+→ `FOREMAN_SCOPE_INCOMPLETE` без утечки id/имени чужого сайта, named-own+other-foreign, полностью
+невидимое исключение → `404`, ноль GPS/device-полей в response/audit). **Реальная многосессионная
+конкурентность** (`lockBlocker` + `pg_stat_activity`, не `Promise.all`-тайминг): два одновременных
+PAIR одной пары через РАЗНЫЕ orphan-исключения → ровно одна `ClockShift`, один `201`, один `409`
+(`EXCEPTION_ALREADY_RESOLVED`/`EVENT_ALREADY_PAIRED`), один `AuditEvent`, ≥2 подтверждённых
+конкурентных backend PID; две разные пары, переиспользующие один event → одна побеждает, вторая
+`EVENT_ALREADY_PAIRED`, ноль partial exceptions; PAIR против реального online `POST check-out`
+того же employee (не связанных друг с другом смен) → оба успешны, Employee-lock сериализует,
+ноль cross-contamination; `ForemanAssignment` истекает МЕЖДУ pre-read и transactional recheck →
+мутация не проходит, ноль writes.
+
+**Regression**: T7A.8A `GET`-роуты (включая `resolvedBy` от новых мутаций) — зелёные; T7A.8B.1
+DISMISS/ACK — не регрессировали (собственные проверки внутри этого же прогона, код обеих веток не
+менялся, только сигнатура типа сужена); online clock (`POST check-out`, реально вызван и успешен
+внутри concurrency-теста #3) и materializer (`materializeClockShift`, реально вызван внутри
+state-тестов) — эмпирически упражнены; `scripts/_test-activation.ts`/`_test-corrections.ts` —
+зелёные на отдельной чистой БД; offline sync/outbox/geofence-admin/worker-timesheets HTTP-прогон
+отдельно не перезапущен — риск структурно нулевой (`git status`: изменены только те же три файла,
+что и в T7A.8B.1, ни один не участвует в этих путях выполнения).
+
+Static: `git diff --check`/`prisma validate`/`tsc --noEmit`/`npm run build` (оба `.../resolve`
+роута видны в build-манифесте) — зелёные; `docker compose build app` — успешный build (снова
+только перевесил локальный тег, `docker inspect` до/после подтверждает тот же image ID/
+`StartedAt`/`RestartCount=0`/`healthy`); `prisma migrate deploy` на чистом одноразовом PostgreSQL
+16 — 53/53 миграции (новых миграций этот слайс не добавляет), повторный запуск — «No pending
+migrations to apply».
+
+**Остаётся вне этого слайса** (явно, по границам задачи): `CONFIRM_SOURCE_ASSIGNMENT`,
+`FORCE_CLOSE_OPEN_SHIFT`, `REASON_EDIT` (T7A.8B.3/8B.4), exception-review UI, `attendance.gps.
+read.raw`, `attendance.conflict.read`, `attendance.policy.*`, admin operational overview (T7A.9),
+scheduler/auto-submit (T7A.10). Schema/permission-миграции не менялись.
+
+---
 
 **T7A.8B.1 Base Attendance Exception Resolution (DISMISS/ACKNOWLEDGE_AS_VALID) — новый
 завершённый write-слайс поверх T7A.8A.** Реализует `docs/titanor-time/T7A_1_ATTENDANCE_CLOCK_DESIGN.md`

@@ -915,12 +915,12 @@ FOREMAN_APPROVED` только когда все scope версии подтве
   здесь — производный флаг `TimesheetReviewScope`, вычисляемый `computeSiteScopeHasException`, не
   прямое чтение `AttendanceException`. **`[2026-08-14]`** read-only backend для самого
   `AttendanceException` — `GET /api/{admin,foreman}/attendance/exceptions[/:exceptionId]`
-  (T7A.8A) — реализован; **`[2026-08-14]`** базовая резолюция — `POST .../resolve` с
-  `DISMISS`/`ACKNOWLEDGE_AS_VALID` (T7A.8B.1) — тоже реализована backend-only. **Экрана для
-  всего этого по-прежнему нет** ни здесь, ни где-либо ещё; остальные четыре resolution-действия
-  (`PAIR_ORPHAN_EVENTS`/`CONFIRM_SOURCE_ASSIGNMENT`/`REASON_EDIT`/`FORCE_CLOSE_OPEN_SHIFT`) тоже не
-  реализованы. Будущий Exception Review UI (T7A.8B.2/8B.3/8C) — отдельный, ещё не спроектированный
-  экран, не расширение этой страницы.
+  (T7A.8A) — реализован; **`[2026-08-14]`** резолюция — `POST .../resolve` с
+  `DISMISS`/`ACKNOWLEDGE_AS_VALID` (T7A.8B.1) и `PAIR_ORPHAN_EVENTS` (T7A.8B.2) — тоже реализована
+  backend-only. **Экрана для всего этого по-прежнему нет** ни здесь, ни где-либо ещё; остальные
+  три resolution-действия (`CONFIRM_SOURCE_ASSIGNMENT`/`REASON_EDIT`/`FORCE_CLOSE_OPEN_SHIFT`)
+  тоже не реализованы. Будущий Exception Review UI (T7A.8B.3/8B.4/8C) — отдельный, ещё не
+  спроектированный экран, не расширение этой страницы.
 
 #### `/foreman/review/[timesheetId]` ⚪
 - Роли: `FOREMAN`

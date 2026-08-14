@@ -1077,14 +1077,14 @@ object/array-значения даже под разрешённым ключо�
 `sanitizedConflictingPayload`, произвольный несанитизированный `detail`. Raw GPS не реализован ни
 для кого этим слайсом — `attendance.gps.read.raw` не засеян.
 
-### 9.1c Base attendance exception resolution (T7A.8B.1, `T7A_1_ATTENDANCE_CLOCK_DESIGN.md`
-§8.5/§11/§12.1/§12.3 — **реализовано, только `DISMISS`/`ACKNOWLEDGE_AS_VALID`**) —
-`lib/attendance-exception-resolution.ts`
+### 9.1c Attendance exception resolution (T7A.8B.1 + T7A.8B.2, `T7A_1_ATTENDANCE_CLOCK_DESIGN.md`
+§8.5/§9.8/§11/§12.1/§12.3 — **реализовано: `DISMISS`/`ACKNOWLEDGE_AS_VALID`/
+`PAIR_ORPHAN_EVENTS`**) — `lib/attendance-exception-resolution.ts`
 
-Остальные четыре resolution-действия (`PAIR_ORPHAN_EVENTS`, `CONFIRM_SOURCE_ASSIGNMENT`,
-`REASON_EDIT`, `FORCE_CLOSE_OPEN_SHIFT`) не реализованы — `action` с любым из этих значений
-(включая любую другую строку) → `400 VALIDATION_ERROR`, `fieldErrors.action` перечисляет ровно
-два реализованных значения. Нет временной заглушки, мутирующей данные для этих четырёх.
+Остальные три resolution-действия (`CONFIRM_SOURCE_ASSIGNMENT`, `REASON_EDIT`,
+`FORCE_CLOSE_OPEN_SHIFT`) не реализованы — `action` с любым из этих значений (включая любую
+другую строку) → `400 VALIDATION_ERROR`, `fieldErrors.action` перечисляет ровно три реализованных
+значения. Нет временной заглушки, мутирующей данные для этих трёх.
 
 #### `POST /api/admin/attendance/exceptions/:exceptionId/resolve`
 #### `POST /api/foreman/attendance/exceptions/:exceptionId/resolve`
@@ -1092,31 +1092,64 @@ object/array-значения даже под разрешённым ключо�
   `attendance.exception.resolve.{all,assigned}` (resolve не подразумевает read и наоборот —
   временный отзыв одного не даёт доступа через другой)
 - CSRF: `X-Requested-With: titanor-time` обязателен
-- Request:
+- Request (DISMISS/ACKNOWLEDGE_AS_VALID, неизменно с T7A.8B.1):
 ```json
 { "action": "DISMISS" | "ACKNOWLEDGE_AS_VALID", "resolutionNote": "optional string, max 2000" }
 ```
+  `checkInEventId`/`checkOutEventId` для этих двух действий теперь явно **запрещены** —
+  `400 VALIDATION_ERROR` с `fieldErrors`, не тихо игнорируются (защита от stale-UI, отправившего
+  двусмысленное тело).
+- Request (PAIR_ORPHAN_EVENTS, T7A.8B.2):
+```json
+{ "action": "PAIR_ORPHAN_EVENTS", "checkInEventId": "uuid", "checkOutEventId": "uuid",
+  "resolutionNote": "optional string, max 2000" }
+```
+  Оба event id обязательны, должны быть валидными UUID и отличаться друг от друга.
   `resolutionNote` — `trim()`; пустая строка после trim считается отсутствующей (`null`);
   неизвестные поля тела игнорируются, не влияют на действие.
-- Response `200`:
+- Response `200` (DISMISS/ACKNOWLEDGE_AS_VALID):
 ```json
 { "id": "uuid", "type": "GPS_NOT_VERIFIED", "status": "DISMISSED" | "RESOLVED",
   "resolutionAction": "DISMISS" | "ACKNOWLEDGE_AS_VALID", "resolvedAt": "iso",
   "resolvedBy": { "id": "uuid", "name": "Admin Name" }, "resolutionNote": "string" | null }
 ```
+- Response `201` (PAIR_ORPHAN_EVENTS):
+```json
+{ "resolutionAction": "PAIR_ORPHAN_EVENTS",
+  "clockShift": { "id": "uuid", "employeeId": "uuid", "checkInEventId": "uuid",
+    "checkOutEventId": "uuid", "siteId": "uuid", "workAreaId": "uuid" | null,
+    "sourceAssignmentId": "uuid" | null, "recordedStartAt": "iso", "recordedEndAt": "iso",
+    "materializationState": "PENDING" },
+  "resolvedExceptions": [{ "id": "uuid", "type": "DOUBLE_CHECK_IN", "status": "RESOLVED" }],
+  "resolvedAt": "iso", "resolvedBy": { "id": "uuid", "name": "Admin Name" },
+  "resolutionNote": "string" | null }
+```
+  `resolvedExceptions` содержит именованное исключение плюс второе OPEN orphan-исключение
+  комплементарного типа/события, если оно существует, стабильно отсортировано по `id`.
   Никогда `AttendanceException.detail` напрямую, raw GPS, `payloadHash`/device-поля, внутренности
   `AuditEvent`.
-- Ошибки: `400 VALIDATION_ERROR` (malformed JSON/body, `action` отсутствует/не из двух
-  реализованных значений, `resolutionNote` не строка/>2000 символов, `CHECKOUT_CHRONOLOGY_ANOMALY`+
-  `DISMISS` без непустого `resolutionNote`), `401 NOT_AUTHENTICATED`, `403 CSRF_REJECTED`,
-  `403 FORBIDDEN` (нет одного из двух требуемых permission), `403 FOREMAN_SCOPE_INCOMPLETE`
-  (видно через `GET`, но часть доказуемых site-связей исключения — не текущий объект прораба),
-  `404 EXCEPTION_NOT_FOUND` (malformed UUID, несуществующий id, foreman out-of-scope/self-exception
-  — один и тот же код для всех трёх), `409 EXCEPTION_ALREADY_RESOLVED` (терминальный статус,
-  ничего не переписывается, второй `AuditEvent` не создаётся), `409 ACTION_NOT_APPLICABLE`
-  (`allowedActions` — полная domain-матрица §11 для этого типа, включает нереализованные действия
-  информационно, не обещание доступности), `409 OPEN_SHIFT_STILL_PENDING`
-  (`MISSING_CHECKOUT_AT_CUTOFF`+`DISMISS`, originating `EmployeeOpenShift` всё ещё открыта)
+- Ошибки, общие для всех трёх действий: `400 VALIDATION_ERROR` (malformed JSON/body, `action`
+  отсутствует/не из трёх реализованных значений, `resolutionNote` не строка/>2000 символов,
+  `CHECKOUT_CHRONOLOGY_ANOMALY`+`DISMISS` без непустого `resolutionNote`), `401
+  NOT_AUTHENTICATED`, `403 CSRF_REJECTED`, `403 FORBIDDEN` (нет одного из двух требуемых
+  permission), `403 FOREMAN_SCOPE_INCOMPLETE` (видно через `GET`, но часть доказуемых site-связей
+  — не текущий объект прораба), `404 EXCEPTION_NOT_FOUND` (malformed UUID, несуществующий id,
+  foreman out-of-scope/self-exception — один и тот же код для всех трёх), `409
+  EXCEPTION_ALREADY_RESOLVED` (терминальный статус, ничего не переписывается, второй `AuditEvent`
+  не создаётся), `409 ACTION_NOT_APPLICABLE` (`allowedActions` — полная domain-матрица §11 для
+  этого типа, включает нереализованные действия информационно, не обещание доступности), `409
+  OPEN_SHIFT_STILL_PENDING` (`MISSING_CHECKOUT_AT_CUTOFF`+`DISMISS`, originating
+  `EmployeeOpenShift` всё ещё открыта).
+- Ошибки, специфичные для `PAIR_ORPHAN_EVENTS`: `400 VALIDATION_ERROR` с `fieldErrors` на
+  конкретном event id — form/type mismatch (`operationType`), employee mismatch между событиями
+  или с named exception (защита от использования видимого чужого orphan-exception как
+  authorization anchor для произвольной пары другого работника), нарушенная строгая хронология
+  (`checkOutEvent.effectiveAt <= checkInEvent.effectiveAt`, без clamp), named exception не связан
+  с выбранной парой (`clockEventId` не совпадает с ожидаемым событием по типу); `404
+  CLOCK_EVENT_NOT_FOUND` (один или оба event id не существуют); `409 EVENT_ALREADY_PAIRED` (одно
+  или оба события уже участвуют в любой существующей `ClockShift`, явный precheck, не только
+  `UNIQUE`-constraint); `409 PAIRED_SHIFT_OVERLAP` (новая пара пересекается по времени с уже
+  существующей `ClockShift` этого работника — точное касание границ разрешено).
 - Матрица (§11): `DISMISS` — `GPS_NOT_VERIFIED`/`OUTSIDE_GEOFENCE_CHECKOUT`/
   `SITE_MISMATCH_CHECKOUT`/`DOUBLE_CHECK_IN`/`CHECKOUT_WITHOUT_OPEN_SHIFT`/
   `GEOFENCE_VERSION_MISMATCH`/`MISSING_CHECKOUT_AT_CUTOFF`(динамически)/`EXCESSIVE_CLOCK_SKEW`/
@@ -1124,24 +1157,50 @@ object/array-значения даже под разрешённым ключо�
   `PERIOD_BOUNDARY_SPAN`/`OVERLAPPING_SHIFT`; НЕ `STALE_ASSIGNMENT`/`LATE_SYNC_AFTER_SUBMIT`.
   `ACKNOWLEDGE_AS_VALID` — только `GPS_NOT_VERIFIED`/`OUTSIDE_GEOFENCE_CHECKOUT`/
   `SITE_MISMATCH_CHECKOUT`/`GEOFENCE_VERSION_MISMATCH`/`EXCESSIVE_CLOCK_SKEW`/
-  `EXCESSIVE_SHIFT_DURATION`/`PERIOD_BOUNDARY_SPAN`.
+  `EXCESSIVE_SHIFT_DURATION`/`PERIOD_BOUNDARY_SPAN`. `PAIR_ORPHAN_EVENTS` — только `DOUBLE_CHECK_IN`/
+  `CHECKOUT_WITHOUT_OPEN_SHIFT`, и только пока `status=OPEN`.
 - `OVERLAPPING_SHIFT` `DISMISS` меняет только `status`/`resolvedBy*`/`resolutionNote` конкретной
   canonical-пары — `overlapEndedAt` не трогается (оставлен существующему
   `resolveOverlapTransition`, который при последующем физическом исчезновении overlap заполняет
-  только его, не переписывая human resolution metadata).
+  только его, не переписывая human resolution metadata). `PAIR_ORPHAN_EVENTS` никогда не создаёт
+  `OVERLAPPING_SHIFT` — пара при обнаруженном overlap отклоняется целиком, до `INSERT`.
 - FOREMAN scope для мутации строже `GET`: требует, чтобы **все** доказуемые site-связи исключения
   были текущими объектами прораба, не только пересечение — own↔foreign `OVERLAPPING_SHIFT` видна
-  через `GET`, но резолюция → `403 FOREMAN_SCOPE_INCOMPLETE`.
-- Транзакция (§8.5): read-only pre-read (без лока) → `Employee FOR UPDATE` → `AttendanceException
-  FOR UPDATE` (canonical order §8.1) → повторная проверка status/type/scope из транзакции (scope —
-  свежий запрос `ForemanAssignment`, не pre-read кэш) → один `UPDATE` → один `AuditEvent` → COMMIT.
-  Любой исход, обнаруженный до мутации, коммитит без единой записи.
-- Audit: `ATTENDANCE_EXCEPTION_DISMISSED` / `ATTENDANCE_EXCEPTION_ACKNOWLEDGED_AS_VALID`,
-  `entityType=ATTENDANCE_EXCEPTION`, `beforeValue={status,type}`, `afterValue={status,
-  resolutionAction}`, `reason=resolutionNote` — никогда `detail`/GPS/device-поля.
+  через `GET`, но резолюция → `403 FOREMAN_SCOPE_INCOMPLETE`. Для `PAIR_ORPHAN_EVENTS` scope —
+  объединение пяти собственных site-связей named exception **∪** `checkInEvent.siteId` **∪**
+  `checkOutEvent.siteId`; базовая видимость исключения проверяется до чтения событий, чтобы
+  невидимое исключение не дифференцировало ответ по присланным event id.
+- Транзакция (§8.5, DISMISS/ACKNOWLEDGE_AS_VALID): read-only pre-read (без лока) → `Employee FOR
+  UPDATE` → `AttendanceException FOR UPDATE` (canonical order §8.1) → повторная проверка
+  status/type/scope из транзакции (scope — свежий запрос `ForemanAssignment`, не pre-read кэш) →
+  один `UPDATE` → один `AuditEvent` → COMMIT. Любой исход, обнаруженный до мутации, коммитит без
+  единой записи.
+- Транзакция (§9.8, PAIR_ORPHAN_EVENTS): read-only pre-read (named exception + оба события, без
+  лока) → `Employee FOR UPDATE` → named `AttendanceException FOR UPDATE` → повторная проверка
+  status/type/link/employee/хронологии + свежий, race-free поиск комплементарного OPEN-исключения
+  тем же tx-клиентом (Employee-лок уже держится) → `AttendanceException FOR UPDATE` комплементарной,
+  если найдена → повторная проверка FOREMAN scope из транзакции → event-reuse precheck → overlap
+  precheck (`tstzrange`, дефолтные `[)`-границы) → `INSERT ClockShift(PENDING)` → `UPDATE` каждой
+  резолвящейся exception (named + комплементарная, если ещё OPEN — терминальная не переписывается)
+  → один `AuditEvent` → COMMIT. Два `AttendanceException`-лока (named + комплементарная) не
+  требуют canonical сортировки между собой: строки single-employee-owned, а держание `Employee`-
+  лока первым уже полностью сериализует все resolver-транзакции этого работника.
+  `materializeClockShiftCore` внутри этой транзакции НЕ вызывается — созданная `ClockShift` остаётся
+  `PENDING`, подхватывается отдельным catch-up проходом материализатора с его собственным
+  canonical lock contract (§9.4/§9.5), без дублирования логики.
+- Audit: `ATTENDANCE_EXCEPTION_DISMISSED` / `ATTENDANCE_EXCEPTION_ACKNOWLEDGED_AS_VALID` /
+  `ATTENDANCE_EXCEPTION_PAIRED`, `entityType=ATTENDANCE_EXCEPTION`, `entityId=named exceptionId`,
+  `beforeValue={status,type}`, `afterValue={status,resolutionAction}` (PAIR: плюс `clockShiftId`,
+  `resolvedExceptionIds` — стабильно отсортированные), `reason=resolutionNote` — никогда
+  `detail`/GPS/raw event payload/`payloadHash`/device-поля/request-тела/персональные данные
+  работника. Ровно один `AuditEvent` на PAIR-вызов, в той же транзакции, что и мутация.
 - DoD: реальная многосессионная конкуренция (не `Promise.all`-таймингом) подтверждена
   `pg_stat_activity` — два `DISMISS` одного исключения дают ровно один `200`/один `409`/один
   `AuditEvent`; scope, истекающий между pre-read и транзакцией, гарантированно блокирует мутацию.
+  Для PAIR — те же гарантии плюс: два одновременных PAIR одной пары через разные orphan-исключения
+  → ровно одна `ClockShift`; две разные пары, переиспользующие один event → одна побеждает, вторая
+  `409 EVENT_ALREADY_PAIRED`; принудительный сбой между `INSERT` и `UPDATE`/`AuditEvent` (реальный
+  Postgres FK-violation, не тестовый backdoor) → полный откат, без orphan `ClockShift`.
 
 ## 10. Служебный агрегатор
 

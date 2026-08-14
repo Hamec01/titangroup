@@ -5,13 +5,14 @@ import { resolveAuthenticatedSession } from '@/lib/auth';
 import { hasPermission } from '@/lib/permissions';
 import { SESSION_COOKIE_NAME } from '@/lib/session';
 import { UUID_PATTERN } from '@/lib/attendance-exceptions';
-import { resolveAttendanceException, validateResolveRequestBody } from '@/lib/attendance-exception-resolution';
+import { resolveAttendanceException, pairOrphanEvents, validateResolveRequestBody } from '@/lib/attendance-exception-resolution';
 
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
 
-// docs/titanor-time/T7A_1_ATTENDANCE_CLOCK_DESIGN.md §8.5/§11/§12.1/§12.3 — T7A.8B.1.
-// POST /api/admin/attendance/exceptions/:exceptionId/resolve — DISMISS/ACKNOWLEDGE_AS_VALID only.
+// docs/titanor-time/T7A_1_ATTENDANCE_CLOCK_DESIGN.md §8.5/§9.8/§11/§12.1/§12.3 — T7A.8B.1 shipped
+// DISMISS/ACKNOWLEDGE_AS_VALID; T7A.8B.2 adds PAIR_ORPHAN_EVENTS.
+// POST /api/admin/attendance/exceptions/:exceptionId/resolve.
 const REQUIRED_CSRF_HEADER_VALUE = 'titanor-time';
 type RouteParams = { params: Promise<{ exceptionId: string }> };
 
@@ -53,6 +54,31 @@ export async function POST(request: NextRequest, { params }: RouteParams): Promi
   const validated = validateResolveRequestBody(rawBody);
   if (!validated.ok) {
     return NextResponse.json(errorBody({ code: 'VALIDATION_ERROR', message: 'Invalid request body.', fieldErrors: validated.fieldErrors }, requestId), { status: 400, headers: successHeaders(requestId) });
+  }
+
+  if (validated.action === 'PAIR_ORPHAN_EVENTS') {
+    const outcome = await pairOrphanEvents(exceptionId, validated.checkInEventId, validated.checkOutEventId, validated.resolutionNote, authenticated.user.id, null, requestId);
+    switch (outcome.kind) {
+      case 'CREATED':
+        return NextResponse.json(outcome.result, { status: 201, headers: successHeaders(requestId) });
+      case 'NOT_FOUND':
+        return jsonError(404, { code: 'EXCEPTION_NOT_FOUND', message: 'No attendance exception with this id.' }, requestId);
+      case 'ALREADY_RESOLVED':
+        return jsonError(409, { code: 'EXCEPTION_ALREADY_RESOLVED', message: 'This exception has already been resolved.' }, requestId);
+      case 'ACTION_NOT_APPLICABLE':
+        return NextResponse.json(errorBody({ code: 'ACTION_NOT_APPLICABLE', message: 'This action is not applicable to this exception type.', allowedActions: outcome.allowedActions }, requestId), { status: 409, headers: successHeaders(requestId) });
+      case 'FOREMAN_SCOPE_INCOMPLETE':
+        // ADMIN/SUPER_ADMIN have no site restriction — structurally unreachable on this route.
+        return jsonError(403, { code: 'FOREMAN_SCOPE_INCOMPLETE', message: 'Incomplete scope for this exception.' }, requestId);
+      case 'CLOCK_EVENT_NOT_FOUND':
+        return jsonError(404, { code: 'CLOCK_EVENT_NOT_FOUND', message: 'One or both clock events do not exist.' }, requestId);
+      case 'EVENT_ALREADY_PAIRED':
+        return jsonError(409, { code: 'EVENT_ALREADY_PAIRED', message: 'One or both events are already part of a shift.' }, requestId);
+      case 'PAIRED_SHIFT_OVERLAP':
+        return jsonError(409, { code: 'PAIRED_SHIFT_OVERLAP', message: 'This pair would overlap an existing shift for this employee.' }, requestId);
+      case 'VALIDATION_ERROR':
+        return NextResponse.json(errorBody({ code: 'VALIDATION_ERROR', message: 'Invalid request body.', fieldErrors: outcome.fieldErrors }, requestId), { status: 400, headers: successHeaders(requestId) });
+    }
   }
 
   const outcome = await resolveAttendanceException(exceptionId, validated.action, validated.resolutionNote, authenticated.user.id, null, requestId);
