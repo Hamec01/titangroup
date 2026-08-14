@@ -910,6 +910,14 @@ FOREMAN_APPROVED` только когда все scope версии подтве
   unresolved sync conflict и auto-submit неполных данных
 - Действия: → карточка табеля
 - API: `GET /api/foreman/review-scopes?status=PENDING&hasException=true`
+- **Не путать с `AttendanceException`** (отдельная сущность — GPS/geofence/switch-site/overlap и
+  т.п. аномалии самого clock-события, `T7A_1_ATTENDANCE_CLOCK_DESIGN.md` §11): `hasException`
+  здесь — производный флаг `TimesheetReviewScope`, вычисляемый `computeSiteScopeHasException`, не
+  прямое чтение `AttendanceException`. **`[2026-08-14]`** read-only backend для самого
+  `AttendanceException` — `GET /api/{admin,foreman}/attendance/exceptions[/:exceptionId]`
+  (T7A.8A) — реализован, но **экрана для него ещё нет** ни здесь, ни где-либо ещё; resolution-
+  действия (§11) тоже не реализованы. Будущий Exception Review UI (T7A.8B/8C) — отдельный, ещё не
+  спроектированный экран, не расширение этой страницы.
 
 #### `/foreman/review/[timesheetId]` ⚪
 - Роли: `FOREMAN`

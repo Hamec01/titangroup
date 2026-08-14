@@ -127,6 +127,20 @@ Check In/Out (нереализовано), геозона объекта — е�
 | `attendance.clock.switch_site.own` | `WORKER` | собственная смена | `POST /api/worker/attendance/switch-site` — один HTTP-запрос/одна транзакция; `VERIFIED_OUTSIDE` нового сайта откатывает ОБЕ половины; нет открытой смены → `409 NO_OPEN_SHIFT_TO_SWITCH` | нет | да (общий с check-in/check-out — обе половины) | нет |
 | `attendance.clock.sync.own` | `WORKER` | собственные offline-события | **`[2026-08-16] реализовано`** — `POST /api/worker/attendance/sync` — `GET /api/worker/attendance/context` переиспользует `attendance.clock.read.own` вместо нового granta; §9.11 FIFO/`SAVEPOINT`-модель, bounded batch (100), bounded retry на `40P01`/`40001` → `503`; засеяна миграцией `20260815000000_seed_attendance_clock_sync_permission`, только `WORKER` (проверено прямым SQL — ровно 1 грант) | нет | да (общий с check-in/check-out + новые `SWITCH_SITE_GROUP_FAILED`/`SWITCH_SITE_GROUP_INVALID`/`FIFO_LEDGER_INCONSISTENT`, `actorUserId=NULL`, без координат) | нет |
 
+### 2.4b Attendance exception review — read foundation (T7A.8A) — **`[2026-08-14] реализовано`**
+(`T7A_1_ATTENDANCE_CLOCK_DESIGN.md` §11/§12.1/§12.3 "Exception review", read-only слайс)
+
+Засеяны миграцией `20260816000000_seed_attendance_exception_read_permissions` (проверено прямым
+SQL — ровно 3 гранта: `read.assigned`→`FOREMAN`, `read.all`→`ADMIN`+`SUPER_ADMIN`, `WORKER` не
+получает ни одного). Только чтение — `attendance.exception.resolve.{assigned,all}`,
+`attendance.gps.read.raw`, `attendance.conflict.read`, `timesheet.draft.edit.exception` этим
+слайсом НЕ засеяны (подтверждено тем же прямым SQL-запросом — ноль лишних строк).
+
+| Permission | Держатели | Область | Ограничения | Причина | Аудит | Массовое |
+|---|---|---|---|---|---|---|
+| `attendance.exception.read.assigned` | `FOREMAN` | исключения с доказуемой связью хотя бы с одним ТЕКУЩИМ объектом прораба (`ForemanAssignment`, тот же паттерн `validFrom<=today<=validTo\|NULL`, что `timesheet.foreman_review`) | `GET /api/foreman/attendance/exceptions[/:exceptionId]` — scope собирается из ПЯТИ связей (`siteId`, `clockEvent.siteId`, `clockShift.siteId`, `clockShiftFragment.siteId`, `relatedClockShift.siteId`), не только собственного поля исключения (`OVERLAPPING_SHIFT` держит его `NULL`); dual-role `FOREMAN`+`WORKER` не видит собственные исключения (`404`, не `403` — не отличим от «не существует»); чужой `siteId`-фильтр — пустой `200`, не `403`/`404`; чужая половина own↔foreign `OVERLAPPING_SHIFT` редактируется в `null` целиком | нет | нет (read-only) | — |
+| `attendance.exception.read.all` | `ADMIN`, `SUPER_ADMIN` | вся компания | `GET /api/admin/attendance/exceptions[/:exceptionId]` — тот же DTO/redaction, без scope-ограничения; `employeeId`-фильтр доступен только здесь | нет | нет (read-only) | — |
+
 ### 2.5 Назначения
 
 | Permission | Держатели | Область | Ограничения | Причина | Аудит | Массовое |
@@ -341,6 +355,10 @@ reactivate шаблона — нет утверждённого контракт
 | `/api/worker/attendance/switch-site` | POST | `attendance.clock.switch_site.own` — **`[2026-08-14] реализовано`** |
 | `/api/worker/attendance/context` | GET | `attendance.clock.read.own` (переиспользован) — **`[2026-08-16] реализовано`** |
 | `/api/worker/attendance/sync` | POST | `attendance.clock.sync.own` — **`[2026-08-16] реализовано`** |
+| `/api/admin/attendance/exceptions` | GET | `attendance.exception.read.all` — **`[2026-08-14] реализовано`** |
+| `/api/admin/attendance/exceptions/:exceptionId` | GET | `attendance.exception.read.all` — **`[2026-08-14] реализовано`** |
+| `/api/foreman/attendance/exceptions` | GET | `attendance.exception.read.assigned` — **`[2026-08-14] реализовано`** |
+| `/api/foreman/attendance/exceptions/:exceptionId` | GET | `attendance.exception.read.assigned` — **`[2026-08-14] реализовано`** |
 
 Эндпоинты домена `absence.*` (§2.3) **не входят в первый вертикальный срез** — permission-контракт
 определён полностью, но route/API contracts для создания/одобрения отсутствий спроектированы позже

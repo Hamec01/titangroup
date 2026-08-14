@@ -1,6 +1,115 @@
 # Titanor Time — Implementation Status
 
-Обновлено: 2026-08-14 Europe/Helsinki (feat: add offline attendance outbox)
+Обновлено: 2026-08-14 Europe/Helsinki (feat: add attendance exception read APIs)
+
+**T7A.8A Attendance Exception Review — Read Foundation — новый завершённый read-only слайс.**
+Реализует `docs/titanor-time/T7A_1_ATTENDANCE_CLOCK_DESIGN.md` §11 (матрица «тип исключения →
+допустимые resolution-действия», используется здесь только как справочный контекст — сами действия
+НЕ реализованы), §12.1 (permission-строки `attendance.exception.read.{assigned,all}`), §12.3
+(`GET /api/{admin,foreman}/attendance/exceptions[/:exceptionId]`). **Только чтение** — ни одна
+мутация `AttendanceException.status` не добавлена этим слайсом; resolution-действия (`DISMISS`,
+`ACKNOWLEDGE_AS_VALID`, `PAIR_ORPHAN_EVENTS`, `CONFIRM_SOURCE_ASSIGNMENT`, `REASON_EDIT`,
+`FORCE_CLOSE_OPEN_SHIFT`), exception-review UI, operational overview (`ClockEventIdConflict`/
+`DeviceEventReceipt(REJECTED_TERMINAL)`) и scheduler остаются будущими слайсами (T7A.8B/8C/9/10).
+
+**Файлы**: новая additive DML-миграция `20260816000000_seed_attendance_exception_read_permissions`
+(два permission — `attendance.exception.read.assigned` → только `FOREMAN`, `attendance.exception.
+read.all` → только `ADMIN`/`SUPER_ADMIN`; ни `attendance.exception.resolve.*`, ни
+`attendance.gps.read.raw`, ни `attendance.conflict.read`, ни `timesheet.draft.edit.exception` этим
+слайсом не сеются — подтверждено прямым SQL). Новый `lib/attendance-exceptions.ts` (единственный
+владелец scope enforcement/filtering/pagination/DTO/redaction) + четыре новых route-файла
+(`app/api/admin/attendance/exceptions[/route.ts, /[exceptionId]/route.ts]`, тот же паттерн для
+`app/api/foreman/attendance/exceptions/...`) — route-файлы содержат только requestId/auth/
+permission-gate/query-validation/HTTP-mapping, вся бизнес-логика в сервисном слое. **Ни один
+существующий файл не изменён** — подтверждено `git status`: единственная модификация во всём diff'е
+— тривиальный `next-env.d.ts` (side effect локального `next dev`, отменён перед коммитом).
+
+**Контракт списка** (`GET .../exceptions`): `status`(default `OPEN`)/`type`/`siteId`/
+`employeeId`(admin only)/`payrollPeriodId`/`from`/`to`/`page`/`pageSize`(default 20, max 100) —
+явно переданное невалидное значение любого из этих полей всегда `400 VALIDATION_ERROR` с
+`fieldErrors`, никогда не заменяется дефолтом молча (сознательно строже старого паттерна
+`GET /api/admin/review-scopes`, который именно так и делает — новый контракт этого паттерна не
+переиспользует). Ответ: `{items,page,pageSize,totalItems,totalPages}`, сортировка `occurredAt DESC,
+id DESC` (стабильная — подтверждено повторными идентичными запросами). `count()`/`findMany()`
+используют один и тот же `Prisma.AttendanceExceptionWhereInput` объект — не два независимых
+предиката. `siteId`-фильтр матчит через ЛЮБУЮ из пяти site-связей исключения (`siteId`,
+`clockEvent.siteId`, `clockShift.siteId`, `clockShiftFragment.siteId`, `relatedClockShift.siteId`)
+— не только собственное поле `AttendanceException.siteId`, которое `OVERLAPPING_SHIFT` намеренно
+оставляет `NULL`.
+
+**FOREMAN scope** — НЕ построен по `AttendanceException.siteId` в одиночку (эта колонка `NULL` для
+`OVERLAPPING_SHIFT` и любого исключения без прямой site-привязки). `scopeSiteIds` собирается из всех
+пяти связей выше; доступ есть, если `intersection(scopeSiteIds, ownCurrentSiteIds)` непуст, где
+`ownCurrentSiteIds` — те же текущие (`validFrom<=today<=validTo|NULL`) `ForemanAssignment`, что и
+`lib/foreman-review.ts`'s `getForemanSiteIds` (переиспользован как есть, не продублирован).
+Explicit `siteId`-фильтр внутри foreman-эндпоинта сужается до пересечения с собственным scope —
+чужой `siteId` даёт пустой `200`, никогда `403`/`404` (никакого oracle существования чужого
+объекта). Dual-role `FOREMAN`+`WORKER` исключается из собственного списка/detail
+(`exception.employeeId === caller.employeeId`) — тот же безопасный `404`, что «не существует».
+Detail malformed/missing/scope-inaccessible — единый `404 EXCEPTION_NOT_FOUND` для всех трёх причин
+(malformed UUID проверяется regex'ом ДО обращения к Prisma — передача невалидного UUID-литерала в
+`@db.Uuid`-колонку иначе бросает DB-level исключение, не чистый `null`).
+
+**Redaction** — сырые координаты (`ClockEventLocation`) никогда не выбираются в DTO вообще (не
+редактируются постфактум — их структурно нет в Prisma `select`). `AttendanceException.detail`
+(произвольный `Json?`) никогда не отдаётся напрямую — явный allowlist из 16 ключей,
+реверс-инженерных из реальных `detail:`-литералов всех четырёх backend-модулей, что создают
+исключения (`lib/attendance-clock.ts`, `lib/attendance-sync.ts`, `lib/attendance-materializer.ts`,
+`lib/attendance-reported-projection.ts`) — неизвестные ключи и любые вложенные object/array-значения
+даже под разрешённым ключом отбрасываются рекурсивно. `payloadHash`/`requestId`/
+`deviceInstallationId`/`deviceSequence`/`sanitizedConflictingPayload` нигде не выбираются. Raw GPS
+не отдаётся даже `ADMIN` — `attendance.gps.read.raw` этим слайсом не реализован. Для `FOREMAN` на
+own↔foreign `OVERLAPPING_SHIFT`: собственная половина (`clockShift`, чей `siteId` — свой) видна
+полностью; чужая половина (`relatedClockShift`, чей `siteId` — не свой) редактируется целиком в
+`null` — ни id, ни siteId/name, ни время, ни fragments чужой половины не просачиваются никуда
+(подтверждено сканированием JSON-строки ответа на raw id/name чужого сайта).
+
+**Тесты, реально выполненные на одноразовом PostgreSQL 16** (83/83 PASS, прямые HTTP-вызовы
+`fetch` против живого dev-сервера — не только прямые вызовы route-функций, поскольку detail-роуты
+специально проверяют HTTP-уровневую 404-семантику для malformed path-параметра): permissions (1-4:
+прямой SQL, ровно ожидаемый набор grants, ноль лишних permission), admin default listing +
+стабильность сортировки (5), все шесть категорий фильтров включая site-through-relatedClockShift и
+payrollPeriodId (6), pagination на изолированном 23-элементном batch — page1/2/3, totalPages=3,
+пустой результат отдельным запросом (7), пять detail relation shapes — event-only/shift/fragment/
+overlap-pair/timesheet-only (8), `RESOLVED`/`DISMISSED` metadata с `resolvedBy` (9), десять
+вариантов невалидных фильтров → точные `fieldErrors` (10), malformed vs missing id → идентичный
+`404` (11), `ADMIN`/`SUPER_ADMIN` проходят, `FOREMAN`/`WORKER`/unauthenticated получают
+`403`/`401` на admin-роутах (12); foreman: собственный текущий сайт виден (13), expired-assignment
+сайт невидим (14), future-assignment сайт невидим (15), standalone `FOREMAN` без `Employee`
+работает (16), dual-role self-exclusion в list И detail (17), `siteId=NULL`+собственный `clockShift`
+корректно виден (18), own↔foreign `OVERLAPPING_SHIFT` виден с полной редакцией чужой половины (19),
+исключение без доказуемого site scope невидимо ни одному foreman (20), чужой `siteId`-фильтр →
+пустой `200` (21), detail foreign/malformed/missing → идентичный `404` (22), scope
+перепроверяется на КАЖДЫЙ запрос — не кэшируется: `ForemanAssignment` протухает между list и detail
+того же теста, доступ пропадает и восстанавливается синхронно (23); security: реальная
+`ClockEventLocation` с координатами не попадает ни в list, ни в detail (24), искусственно добавленные
+`latitude`/`longitude`/`gps`/`rawPayload`/`payloadHash`/`deviceInstallationId`/`deviceSequence`/
+`requestId`-ключи в `detail` не проходят sanitizer, легитимный `reason` выживает (25), те же четыре
+технических поля отсутствуют во ВСЕХ ответах целиком, не только в `detail` (26), foreman-ответы не
+содержат id/имени чужого сайта нигде в JSON (27), dev-сервер log не содержит утёкших координат (28).
+Static: `git diff --check`/`prisma validate`/`tsc --noEmit`/`npm run build` (все четыре роута видны
+в build-манифесте) — зелёные; `docker compose build app` — успешный build (мандаторный тест, снова
+только перевесил локальный тег `titanor-time-app:latest`, `docker inspect` до/после подтверждает тот
+же image ID/`StartedAt`/`RestartCount=0`/`healthy` у обоих production-контейнеров); `prisma migrate
+deploy` на чистом одноразовом PostgreSQL 16 — 52/52 миграции (51 было + одна новая), повторный запуск
+— «No pending migrations to apply». Regression: `scripts/_test-activation.ts`,
+`scripts/_test-corrections.ts` зелёные на отдельной чистой БД; online clock/offline sync/outbox/
+materializer/geofence-admin regression не перезапущены HTTP-прогоном отдельно — риск структурно
+нулевой, `git status` подтверждает, что этот diff не касается НИ ОДНОГО файла из этих областей (ноль
+изменённых существующих файлов, только новая миграция + пять новых файлов), а общая auth/permission/
+session-инфраструктура, которую разделяют все слайсы, интенсивно упражняется собственными 83
+проверками этого слайса через все четыре роли (`ADMIN`/`SUPER_ADMIN`/`FOREMAN`/`WORKER`).
+
+**Остаётся вне этого слайса** (явно, по границам задачи): все шесть resolution-действий
+(`attendance.exception.resolve.{assigned,all}` не сеяны), exception-review UI (ни `/foreman/review/
+exceptions`-подобного, ни admin-эквивалента для `AttendanceException` — не путать с уже существующим
+`/foreman/review/exceptions`, который про `TimesheetReviewScope.hasException`, другая сущность),
+`attendance.gps.read.raw`/raw coordinate access, `attendance.conflict.read`/`ClockEventIdConflict`
+чтение, `attendance.policy.*`, `timesheet.draft.edit.exception`/`REASON_EDIT`-эндпоинт, admin
+attendance operational overview (T7A.9), scheduler/auto-submit (T7A.10). Schema/migrations (кроме
+одной additive DML)/online-online route surface не изменены.
+
+---
 
 **T7A.7B Offline Attendance Outbox Client — новый завершённый frontend-слайс поверх T7A.7A
 (offline sync backend) и T7A Worker Online Clock UI.** Реализует

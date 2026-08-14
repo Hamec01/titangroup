@@ -1003,6 +1003,81 @@ Check In/Out/Switch Site пишут в outbox и синкаются через `
   `WorkSite.currentGeofenceVersionId`); координаты — только в `ClockEventLocation`, никогда в
   `AuditEvent`/`ClockEventIdConflict.sanitizedConflictingPayload`/HTTP-ошибках/логах.
 
+### 9.1b Attendance exception review — read foundation (T7A.8A, `T7A_1_ATTENDANCE_CLOCK_DESIGN.md`
+§11/§12.1/§12.3 — **реализовано, только чтение**) — `lib/attendance-exceptions.ts`
+
+Только чтение — ни одно из шести resolution-действий (§11) не реализовано этим слайсом, ни один
+`AttendanceException.status` не мутируется через эти эндпоинты.
+
+#### `GET /api/admin/attendance/exceptions`
+- Permission: `attendance.exception.read.all`
+- Query: `status`(`OPEN`\|`RESOLVED`\|`DISMISSED`, default `OPEN`), `type`(один из 14
+  `AttendanceExceptionType`), `siteId`, `employeeId`, `payrollPeriodId`, `from`/`to`
+  (ISO-8601 дата/timestamp, `occurredAt`-диапазон), `page`(default 1), `pageSize`(default 20,
+  максимум 100) — **явно переданное невалидное значение любого поля → `400 VALIDATION_ERROR` с
+  `fieldErrors`, никогда не заменяется дефолтом молча**
+- Response `200`:
+```json
+{ "items": [{ "id": "uuid", "type": "GPS_NOT_VERIFIED", "status": "OPEN",
+  "occurredAt": "iso", "createdAt": "iso",
+  "employee": { "id": "uuid", "name": "Juha Korhonen" },
+  "site": { "id": "uuid", "name": "Kamppi Renovation" } | null,
+  "payrollPeriod": { "id": "uuid", "startDate": "2026-08-01", "endDate": "2026-08-15" } | null,
+  "clockEventSummary": { "channel": "ONLINE", "capturedOffline": false, "gpsVerification": "NOT_VERIFIED", "gpsAccuracyMeters": null } | null,
+  "summary": "GPS location could not be verified",
+  "resolvedAt": null, "resolutionNote": null }],
+  "page": 1, "pageSize": 20, "totalItems": 1, "totalPages": 1 }
+```
+- `siteId`-фильтр матчит через любую из пяти site-связей исключения (`siteId`,
+  `clockEvent.siteId`, `clockShift.siteId`, `clockShiftFragment.siteId`,
+  `relatedClockShift.siteId`) — не только собственное поле, которое `OVERLAPPING_SHIFT` оставляет
+  `NULL`. `employeeId` — только здесь, недоступен foreman-эндпоинту ниже.
+- Сортировка: `occurredAt DESC, id DESC` (стабильная). `count()`/`findMany()` — один и тот же
+  `where`.
+- DoD: страница/count/пустой результат согласованы одним и тем же предикатом; повторный
+  идентичный запрос даёт идентичный порядок
+
+#### `GET /api/admin/attendance/exceptions/:exceptionId`
+- Permission: `attendance.exception.read.all`
+- Response `200`: всё из списка + `timesheet: {id,status}|null`, `clockEvent` (полные метаданные:
+  `operationType`/`effectiveAt`/`serverReceivedAt`/`capturedOffline`/`channel`/
+  `gpsVerification`/`gpsAccuracyMeters`/`gpsUnavailableReason`) `|null`, `clockShift`/
+  `relatedClockShift` (`site`/`workArea`/`recordedStartAt`/`recordedEndAt`/`endAtProvisional`/
+  `materializationState`/`fragments[]`) `|null`, `detail` (см. sanitizer ниже) `|null`,
+  `resolvedBy: {id,name}|null`
+- Ошибки: `404 EXCEPTION_NOT_FOUND` — единый код для malformed UUID, несуществующего id, и (на
+  foreman-эндпоинте ниже) существующего, но вне scope исключения — ни одна из трёх причин не
+  отличима снаружи
+
+#### `GET /api/foreman/attendance/exceptions` / `GET /api/foreman/attendance/exceptions/:exceptionId`
+- Permission: `attendance.exception.read.assigned`
+- Тот же query/response contract, кроме: `employeeId`-фильтр недоступен (тихо игнорируется, если
+  передан); `siteId`-фильтр сужается до пересечения с собственным текущим scope — чужой `siteId`
+  даёт пустой `200`, никогда `403`/`404`
+- Scope: `scopeSiteIds` исключения (собранные из тех же пяти связей выше) должны пересекаться с
+  текущими (`validFrom<=today<=validTo|NULL`) `ForemanAssignment.siteId` вызывающего
+  (`lib/foreman-review.ts`'s `getForemanSiteIds`, переиспользован). Dual-role `FOREMAN`+`WORKER`
+  не видит собственные исключения (`exception.employeeId === caller.employeeId`) — тот же `404`,
+  что «не существует», не отдельный код. Own↔foreign `OVERLAPPING_SHIFT`: своя половина
+  (`clockShift`, чей `siteId` — свой текущий объект) полностью видна; чужая половина
+  (`relatedClockShift`) редактируется в `null` целиком — ни id, ни `siteId`/name, ни время
+  чужого объекта не просачиваются
+- DoD: scope перепроверяется на каждый запрос заново (истёкший/добавленный `ForemanAssignment`
+  между list и detail немедленно меняет видимость, ничего не кэшируется)
+
+**`detail`-sanitizer** — `AttendanceException.detail` (произвольный `Json?`) никогда не отдаётся
+напрямую: явный allowlist из 16 ключей (`distanceMeters`, `accuracyMeters`, `thresholdMeters`,
+`reason`, `clockSkewMs`, `assumedSiteId`, `authoritativeSiteId`, `claimedEffectiveAt`, `openedAt`,
+`clampedTo`, `durationHours`, `thresholdHours`, `timesheetStatus`, `triggeringClockShiftId`,
+`cachedGeofenceVersionId`, `currentGeofenceVersionId`), реверс-инженерных из реальных
+`detail:`-литералов всех модулей, что создают исключения. Неизвестные ключи и любые вложенные
+object/array-значения даже под разрешённым ключом отбрасываются рекурсивно.
+
+**Никогда не отдаются** (ни `ADMIN`, ни `FOREMAN`): `latitude`/`longitude`/`ClockEventLocation`,
+`payloadHash`, `requestId`, `deviceInstallationId`, `deviceSequence`,
+`sanitizedConflictingPayload`, произвольный несанитизированный `detail`. Raw GPS не реализован ни
+для кого этим слайсом — `attendance.gps.read.raw` не засеян.
+
 ## 10. Служебный агрегатор
 
 #### `GET /api/admin/setup-status`
