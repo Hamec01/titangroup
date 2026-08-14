@@ -2932,7 +2932,8 @@ BEGIN:
      триггером (WHERE sourceAssignmentId IS NULL уже в semantics триггера -- повторный вызов над уже
      резолвленной целью -> RAISE EXCEPTION -> сервисный слой ловит ДО похода в БД: если
      target.sourceAssignmentId уже не NULL к моменту step 5 (перечитано под локом target) -> 409
-     ALREADY_RESOLVED, не пытается UPDATE вовсе.
+     TARGET_ALREADY_RESOLVED (не просто "ALREADY_RESOLVED" — однозначно отличим от 409
+     EXCEPTION_ALREADY_RESOLVED, канонизировано T7A.8B.3), не пытается UPDATE вовсе.
      Цель = EmployeeOpenShift -> UPDATE EmployeeOpenShift SET sourceAssignmentId = chosenAssignmentId
      (обычная mutable-таблица, без immutability-триггера).
   7. AttendanceException.status -> RESOLVED, resolvedByUserId, resolvedAt, resolutionNote.
@@ -4330,7 +4331,7 @@ Out, worker mobile UI, offline outbox/sync, materializer, scheduler и exception
 | 18 | `PAIR_ORPHAN_EVENTS` с попыткой переиспользовать уже спаренное событие | `409 EVENT_ALREADY_PAIRED` |
 | 19 | `PAIR_ORPHAN_EVENTS`, пересекающийся по времени с существующим `ClockShift` того же работника | `409 PAIRED_SHIFT_OVERLAP` |
 | 20 | `CONFIRM_SOURCE_ASSIGNMENT` для смены, которая ещё открыта (`EmployeeOpenShift`) | `EmployeeOpenShift.sourceAssignmentId` обновлён; при последующем Check Out — `ClockShift`/фрагмент наследуют это назначение |
-| 21 | `CONFIRM_SOURCE_ASSIGNMENT` повторно над уже резолвленной целью | `409 ALREADY_RESOLVED`, `UPDATE` не выполняется, триггер не срабатывает (проверено сервисным precheck) |
+| 21 | `CONFIRM_SOURCE_ASSIGNMENT` повторно над уже резолвленной целью | `409 TARGET_ALREADY_RESOLVED` (не `EXCEPTION_ALREADY_RESOLVED` — canonical, T7A.8B.3), `UPDATE` не выполняется, триггер не срабатывает (проверено сервисным precheck) |
 | 22 | `FORCE_CLOSE_OPEN_SHIFT` для смены, которая уже закрылась реальным Check Out до вызова | `409 OPEN_SHIFT_ALREADY_CLOSED` |
 | 23 | `MISSING_CHECKOUT_AT_CUTOFF`, попытка `DISMISS` при всё ещё открытой смене | `409 OPEN_SHIFT_STILL_PENDING` |
 | 24 | `STALE_ASSIGNMENT`, попытка `DISMISS` | `409 ACTION_NOT_APPLICABLE` |

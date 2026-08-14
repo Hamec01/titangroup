@@ -824,20 +824,49 @@ async function lockConfirmTarget(tx: Prisma.TransactionClient, fresh: ConfirmPre
   return null;
 }
 
-/** §9.7 step 5 — server-side re-check inside the transaction, never trusted from the client
+/**
+ * §9.7 step 5 — server-side re-check inside the transaction, never trusted from the client
  * beyond its UUID shape (already checked in validateResolveRequestBody). No workAreaId filter —
- * §9.7 does not gate on it, unlike the online check-in path's resolveActiveSiteAssignment. */
+ * §9.7 does not gate on it, unlike the online check-in path's resolveActiveSiteAssignment.
+ *
+ * `FOR SHARE`, not a plain `SELECT` (T7A.8B.3 follow-up fix, review-found race): without a lock,
+ * a concurrent `POST /api/admin/assignments/:assignmentId/end` (`app/api/admin/assignments/
+ * [assignmentId]/end/route.ts`) could shrink this exact row's `validTo` between this read and this
+ * transaction's `COMMIT`, letting CONFIRM durably attach a `sourceAssignmentId` that is already
+ * stale by the time anyone can observe the result. `FOR SHARE` (not `FOR UPDATE`) because this
+ * transaction only ever READS the assignment — it never writes to `SiteAssignment` itself — so a
+ * shared lock is the minimal strength that still conflicts with `end`'s implicit row-level `UPDATE`
+ * lock: whichever transaction reaches this row first is serialized ahead of the other, and the
+ * loser re-reads the row's actual post-commit values once granted (not a stale snapshot — plain
+ * `SELECT`/`UPDATE` under READ COMMITTED, this codebase's default, always re-reads after a lock
+ * wait). Deadlock-freedom: `SiteAssignment` has no position in the §8.1 canonical order table at
+ * all, and none of `end`/the plain `PATCH`/`split`/`promote` assignment-mutation routes ever touch
+ * `Employee`/`AttendanceException`/any clock-shift table — each of those transactions only ever
+ * locks `SiteAssignment` row(s) (verified directly in all four route files). This lock is therefore
+ * acquired strictly AFTER Employee(1)/AttendanceException(7)/target in THIS transaction and is
+ * never waited on BY a transaction that could in turn be held up by something CONFIRM already
+ * holds — a one-directional edge, not a cycle.
+ */
 async function isChosenAssignmentValid(tx: Prisma.TransactionClient, employeeId: string, chosenAssignmentId: string, targetSiteId: string, targetDate: Date): Promise<boolean> {
-  const rows = await tx.$queryRaw<{ id: string }[]>`
-    SELECT id FROM "SiteAssignment"
+  const rows = await tx.$queryRaw<{ id: string; employeeId: string; siteId: string; validFrom: Date; validTo: Date | null }[]>`
+    SELECT id, "employeeId", "siteId", "validFrom", "validTo" FROM "SiteAssignment"
     WHERE id = ${chosenAssignmentId}::uuid
-      AND "employeeId" = ${employeeId}::uuid
-      AND "siteId" = ${targetSiteId}::uuid
-      AND "validFrom" <= ${targetDate}::date
-      AND ("validTo" IS NULL OR "validTo" >= ${targetDate}::date)
-    LIMIT 1
+    FOR SHARE
   `;
-  return rows.length > 0;
+  const row = rows[0];
+  if (!row) {
+    return false;
+  }
+  if (row.employeeId !== employeeId || row.siteId !== targetSiteId) {
+    return false;
+  }
+  if (row.validFrom.getTime() > targetDate.getTime()) {
+    return false;
+  }
+  if (row.validTo !== null && row.validTo.getTime() < targetDate.getTime()) {
+    return false;
+  }
+  return true;
 }
 
 /**
