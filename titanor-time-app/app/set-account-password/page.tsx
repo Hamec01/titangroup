@@ -4,7 +4,7 @@ import { Suspense, useState, type FormEvent } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 
 const CSRF_HEADER_VALUE = 'titanor-time';
-const MIN_PASSWORD_LENGTH = 16;
+const MIN_PASSWORD_LENGTH = 8;
 const MAX_PASSWORD_LENGTH = 256;
 
 function describeError(code: string | undefined): string {

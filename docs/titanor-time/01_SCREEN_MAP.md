@@ -598,7 +598,7 @@ touch target ≥ 48px), `/foreman/*` — desktop-first с поддержкой �
 - Роли: неаутентифицированный, только с валидным `UserActivationToken`
 - Приоритет: mobile-first
 - Назначение: установить первый пароль standalone `FOREMAN`
-- Данные: требования к паролю (16–256 символов)
+- Данные: требования к паролю (8–256 символов)
 - Действия: submit пароля дважды (mismatch-валидация)
 - Состояния: loading; error (валидация пароля, `TOKEN_EXPIRED`/`TOKEN_USED`/`TOKEN_INVALID`,
   `ACCOUNT_NOT_ELIGIBLE`, `RATE_LIMITED`)

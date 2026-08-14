@@ -16,9 +16,8 @@ const CROCKFORD_ALPHABET = '0123456789ABCDEFGHJKMNPQRSTVWXYZ';
 const CODE_LENGTH = 10;
 const CROCKFORD_PATTERN = new RegExp(`^[${CROCKFORD_ALPHABET}]{${CODE_LENGTH}}$`);
 const TOKEN_TTL_MS = 72 * 60 * 60 * 1000;
-// Public worker/standalone-foreman activation policy. The privileged local SUPER_ADMIN
-// bootstrap/recovery CLIs intentionally use their own owner-approved 8-character minimum.
-export const MIN_PASSWORD_LENGTH = 16;
+// Owner-approved minimum shared by worker/foreman activation and administrative CLI flows.
+export const MIN_PASSWORD_LENGTH = 8;
 
 export function generateActivationCode(): string {
   let code = '';

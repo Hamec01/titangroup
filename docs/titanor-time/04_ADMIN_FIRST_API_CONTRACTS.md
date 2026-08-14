@@ -1408,7 +1408,7 @@ Backend-срез (`02_...`, §2.12): создание/пополнение то�
 #### `POST /api/auth/set-account-password`
 - Публичный, mutating — CSRF (`X-Requested-With: titanor-time`) обязателен; rate-limit по IP —
   отдельный namespace от `POST /api/auth/set-initial-password` (worker)
-- Request: `{ "token": "...", "password": "..." }` — `password` 16–256 символов, иначе
+- Request: `{ "token": "...", "password": "..." }` — `password` 8–256 символов, иначе
   `400 VALIDATION_ERROR`
 - Lock order (совпадает с issuance/reissue, чтобы не было deadlock): сначала `User FOR UPDATE`
   (через дешёвый unlocked preflight lookup `UserActivationToken.userId` по `tokenHash`, ничего из

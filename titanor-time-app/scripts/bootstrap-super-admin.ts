@@ -21,8 +21,7 @@ import { prisma } from '../lib/prisma';
 import { hasRealTty, promptHidden } from '../lib/tty-prompt';
 
 const SUPER_ADMIN_ROLE_NAME = 'SUPER_ADMIN';
-// Owner-approved policy for the administrative bootstrap CLI. Public worker/foreman
-// activation flows intentionally keep their separate 16-character minimum.
+// Owner-approved password minimum shared with public worker/foreman activation flows.
 const MIN_PASSWORD_LENGTH = 8;
 const ALLOWED_LOCALES = ['FI', 'EN', 'RU'] as const;
 type Locale = (typeof ALLOWED_LOCALES)[number];

@@ -25,8 +25,7 @@
 import { prisma } from '../lib/prisma';
 import { hasRealTty, promptHidden } from '../lib/tty-prompt';
 
-// This privileged, local-only recovery CLI follows the owner-approved administrative
-// password minimum. Public worker/foreman activation flows remain at 16 characters.
+// This privileged, local-only recovery CLI follows the owner-approved shared password minimum.
 const MIN_PASSWORD_LENGTH = 8;
 
 class UsageError extends Error {}

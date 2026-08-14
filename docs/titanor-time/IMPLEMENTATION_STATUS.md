@@ -1884,7 +1884,7 @@ E2E (`SUPER_ADMIN`/`FOREMAN`/`WORKER` вместе, включая табели)
 PostgreSQL 16: навигация, список, standalone/dual-role создание, дубликаты username/email,
 автовыпуск+QR+copy+print, refresh скрывает код, ручной reissue отзывает старый, `ACTIVE` без
 кнопки выпуска, dual-role select без UUID в видимом тексте, unauthorized/`FOREMAN`-only блокируются,
-375px mobile layout, mismatch/`<16`/`>256` валидация пароля, успешная активация + cookie + `Continue`
+375px mobile layout, mismatch/`<8`/`>256` валидация пароля, успешная активация + cookie + `Continue`
 → `/foreman`, повтор кода → `TOKEN_USED`, expired/invalid состояния, регрессия worker `/activate`+
 `/set-password`. `npx tsc --noEmit`, `npm run build`, production Docker build — все чисты.
 **Production ещё не обновлён — миграции из предыдущих задач НЕ применены к реальной БД, деплоя не
@@ -2709,8 +2709,8 @@ Time (production или dev), concurrency/многосессионное пов�
   не выполнялся, Next.js/React/прочее не менялись.
 - Пароль: только интерактивный скрытый (no-echo) TTY-ввод дважды подряд с подтверждением совпадения;
   никогда не через CLI-аргумент (явно отклоняется с ошибкой) или environment; нигде не записывается
-  на диск; текущий owner-approved минимум для административного CLI — 8 символов (публичная
-  активация WORKER/FOREMAN сохраняет отдельный минимум 16); хешируется Argon2id (`$argon2id$...`)
+  на диск; текущий owner-approved минимум для всех HUMAN-аккаунтов — 8 символов; хешируется
+  Argon2id (`$argon2id$...`)
   непосредственно перед вызовом транзакции — plaintext нигде не логируется и не хранится.
 - `requireRealTty()` отклоняет запуск без настоящего TTY на обоих stdin/stdout.
 - `username`: обязателен, 3-64 символа, нормализуется в lowercase (и внутри `parseArgs`, и
@@ -2928,8 +2928,8 @@ login-эндпоинта): корневой `tsconfig.json` через `**/*.ts`
 (`PasswordResetToken`/доставка — более поздняя, ещё не начатая фича), а bootstrap CLI намеренно
 одноразовый и второй раз не запускается:
 - Тот же security-паттерн, что bootstrap: новый пароль только через скрытый real-TTY double-prompt,
-  никогда не CLI-аргументом/env var; текущий owner-approved минимум административного recovery CLI —
-  8 символов. Публичные activation-flow для WORKER/FOREMAN по-прежнему требуют минимум 16.
+  никогда не CLI-аргументом/env var; текущий owner-approved минимум для всех HUMAN-аккаунтов —
+  8 символов.
 - Общий TTY-код (`promptHidden`) вынесен в `lib/tty-prompt.ts`, чтобы не дублироваться между
   скриптами; `bootstrap-super-admin.ts` отдельно перепроверен — неизменное поведение (non-TTY
   отклонение даёт тот же `Usage error`, exit 1).
