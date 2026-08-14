@@ -1,6 +1,132 @@
 # Titanor Time — Implementation Status
 
-Обновлено: 2026-08-14 Europe/Helsinki (feat: pair orphan attendance events)
+Обновлено: 2026-08-15 Europe/Helsinki (feat: confirm attendance source assignments)
+
+**T7A.8B.3 CONFIRM_SOURCE_ASSIGNMENT — новый завершённый write-слайс поверх T7A.8B.2.** Реализует
+`docs/titanor-time/T7A_1_ATTENDANCE_CLOCK_DESIGN.md` §8.5 (resolver-паттерн, с задокументированным
+исключением из строгого lock order — «не более одной дополнительной строки позиции 3»)/§9.7
+(полный алгоритм CONFIRM_SOURCE_ASSIGNMENT, дословно)/§11/§12.1-12.3. Четвёртое реализованное
+resolution-действие на уже существующих `POST /api/{admin,foreman}/attendance/exceptions/
+:exceptionId/resolve` — `FORCE_CLOSE_OPEN_SHIFT`/`REASON_EDIT` по-прежнему дают `400
+VALIDATION_ERROR` с точным перечнем четырёх реализованных значений, не заглушка. **Новых
+permissions/миграций не потребовалось** — переиспользованы уже существующие `attendance.exception.
+resolve.all` (единственный держатель — `CONFIRM_SOURCE_ASSIGNMENT` структурно `ADMIN`/
+`SUPER_ADMIN`-only) + `attendance.exception.read.all`.
+
+**Файлы**: расширены три уже существующих файла (не новые) — `lib/attendance-exception-
+resolution.ts` (+~280 строк: `confirmSourceAssignment`, `lockConfirmTarget`,
+`isChosenAssignmentValid`, расширенный `validateResolveRequestBody`/`ParsedResolveRequest`/
+`IMPLEMENTED_RESOLUTION_ACTIONS`), admin `.../resolve/route.ts` (dispatch на `confirmSourceAssignment`,
+семь новых HTTP-исходов), foreman `.../resolve/route.ts` (403 FORBIDDEN на сыром теле для этого
+action, до `validateResolveRequestBody`). Ни `lib/attendance-exceptions.ts` (read), ни
+`lib/foreman-review.ts`, ни `lib/api-error.ts`, ни `lib/attendance-materializer.ts`, ни
+`lib/attendance-clock.ts` не изменены этим слайсом — подтверждено `git status` (единственный новый
+`import` в `lib/attendance-exception-resolution.ts` — уже экспортированная
+`helsinkiCalendarDateAsUtcMidnight` из T7A.7A, переиспользована как есть).
+
+**Контракт**: `{action:"CONFIRM_SOURCE_ASSIGNMENT", chosenAssignmentId, resolutionNote?}` → `200
+{resolutionAction, target:{type, id, sourceAssignmentId}, resolvedAt, resolvedBy,
+resolutionNote}`. `chosenAssignmentId` обязателен и должен быть UUID для этого действия;
+`checkInEventId`/`checkOutEventId` для него явно запрещены (`400`); `chosenAssignmentId` явно
+запрещён для остальных трёх действий (симметрично уже существующей защите PAIR-полей от
+DISMISS/ACK) — stale UI не может отправить двусмысленное тело ни в одну сторону.
+
+**Target resolution (§9.7 шаг 4), все три формы доказаны отдельно**: `clockShiftFragmentId` →
+`ClockShiftFragment`; иначе `clockShiftId` → `ClockShift`; иначе `clockEventId` → живая
+`EmployeeOpenShift` (`openedByClockEventId` совпадает), а если смена с тех пор закрылась реальным
+Check Out — graceful fallback на `ClockShift` по `checkInEventId`. Ни один валидный target не
+найден → стабильный `409 TARGET_NOT_FOUND`, без частичных изменений. Target-дата: fragment —
+собственное поле `date`; ClockShift/EmployeeOpenShift — Helsinki calendar date
+(`helsinkiCalendarDateAsUtcMidnight`, не UTC truncate) от `recordedStartAt`/`openedAt`
+соответственно.
+
+**Assignment/date-валидация (§9.7 шаг 5)**: `SiteAssignment(chosenAssignmentId)` внутри
+транзакции — `employeeId` совпадает, `siteId` совпадает с target, `validFrom <= targetDate <=
+COALESCE(validTo, 'infinity')` (включительно с обеих сторон, доказано отдельным тестом на точной
+границе). `workAreaId` НЕ добавлен как ограничение (в §9.7 его нет — намеренно не как у online
+check-in). Единое `400 VALIDATION_ERROR` для «не найдена»/«чужой employee»/«чужой site»/«вне
+диапазона дат» — не раскрывает, какая именно причина, ни тем более данные чужого employee/site.
+Helsinki-полночь и DST-переход (2026-10-25, Europe/Helsinki) проверены прямыми тестами с
+инстантами по разные стороны границы.
+
+**Mutation/immutability**: `sourceAssignmentId` допускает только переход `NULL`→value — сервисный
+precheck (`target.sourceAssignmentId !== null` → `409 TARGET_ALREADY_RESOLVED`, без похода в
+`UPDATE`) ДО DB-триггера, который остаётся defense-in-depth, не единственной линией защиты
+(подтверждено прямой raw-SQL попыткой повторного `UPDATE` — `CLOCK_SHIFT_SOURCE_ASSIGNMENT_
+ALREADY_RESOLVED`/`CLOCK_SHIFT_FRAGMENT_SOURCE_ASSIGNMENT_ALREADY_RESOLVED`, P0001). `ClockEvent`/
+`ClockEventLocation` никогда не изменяются — подтверждено побайтовым сравнением до/после.
+Материализатор НЕ запускается инлайн — `ClockShift.materializationState` не трогается этой
+транзакцией; следующий periodic catch-up (§8.4) подхватывает нормально (доказано: для
+fragment-цели catch-up создаёт ровно один сегмент, повторный проход идемпотентен — ноль дублей).
+
+**Транзакция/lock order**: `Employee FOR UPDATE` → `AttendanceException FOR UPDATE` (canonical
+order §8.1) → перечитать status/type → определить и заблокировать target (`FOR UPDATE` на
+`ClockShiftFragment`/`ClockShift` по id, либо на `EmployeeOpenShift` по `(employeeId,
+openedByClockEventId)`) → если уже resolved — `409` без мутации → проверить `chosenAssignmentId` →
+один `UPDATE` target → один `UPDATE AttendanceException` (→`RESOLVED`) → один
+`AuditEvent(CLOCK_SHIFT_ASSIGNMENT_RESOLVED)` → `COMMIT`. **Осознанное, задокументированное
+отклонение от строгого возрастающего §8.1-порядка**: target (`EmployeeOpenShift`/`ClockShift` —
+позиции 3/4) блокируется ПОСЛЕ `AttendanceException` (позиция 7) — это в точности сценарий, уже
+явно санкционированный §8.5 («для остальных действий — не более одной дополнительной строки
+позиции 3»), тот же паттерн, что уже используют `pairOrphanEvents`/`resolveAttendanceException` для
+своих вторичных локов; не переоткрыт заново, применён как есть.
+
+**Тесты, реально выполненные на одноразовом PostgreSQL 16** (152/152 PASS, прямые HTTP-вызовы
+против живого dev-сервера, дважды подряд на чистой БД для проверки детерминизма конкурентных
+тестов): permissions/CSRF/body-shape (ADMIN/SUPER_ADMIN success, WORKER/anonymous forbidden,
+FOREMAN — well-formed/malformed/missing `chosenAssignmentId` все три дают `403 FORBIDDEN`, не
+`400`, до чтения тела; malformed JSON; `chosenAssignmentId` запрещён для DISMISS/ACK/PAIR;
+checkIn/checkOutEventId запрещены для CONFIRM); все 14 типов исключений через полную матрицу §11
+(только `STALE_ASSIGNMENT` применимо); assignment-валидация (чужой employee — id не утекает в
+ответ, чужой site, вне диапазона дат, несуществующий id, включительно `validFrom==validTo==
+targetDate`, Helsinki-vs-UTC календарная дата, DST-переход); все три формы target (доказаны
+отдельно, включая графовый fallback open→closed shift через РЕАЛЬНЫЙ online Check Out); target
+already resolved; exception already resolved; target not found; nonexistent exceptionId;
+immutable `ClockEvent` побайтово; DB-триггер отклоняет прямой raw-SQL повтор; ровно один sanitized
+`AuditEvent` (проверено отсутствие GPS/координат/device id/sequence/payloadHash/token/secret и в
+audit, и в HTTP-ответе); regression DISMISS/ACK/PAIR (все три по-прежнему `200`/`201`);
+materializer catch-up + идемпотентность (ровно один сегмент, повторный проход — ноль дублей);
+реальный `POST check-out` (после CONFIRM'а на живой `EmployeeOpenShift`) наследует
+`sourceAssignmentId` в результирующую `ClockShift`.
+
+**Реальная многосессионная конкуренция** (`pg_stat_activity`, ≥2 подтверждённых конкурентных
+backend PID, не `Promise.all`-тайминг): два одновременных CONFIRM одного исключения → ровно один
+`200`/один `409`, одно изменение target, exception резолвится ровно один раз; две разные `OPEN`
+`STALE_ASSIGNMENT`-строки, указывающие на одну и ту же цель → ровно один `200`/один `409
+TARGET_ALREADY_RESOLVED`, проигравшая exception остаётся `OPEN` (не ложно `RESOLVED`).
+
+**Rollback**: принудительный реальный FK-violation при `AuditEvent` (несуществующий `actorUserId`,
+вызвано напрямую через `confirmSourceAssignment`, не HTTP-роут — та же техника, что уже
+использовалась для T7A.8B.1/8B.2) ПОСЛЕ `UPDATE` target и `UPDATE` exception, но до `COMMIT` →
+подтверждённый полный откат: target возвращается к `sourceAssignmentId=NULL`, exception остаётся
+`OPEN`, `AuditEvent` не создан — ноль частичных строк.
+
+**Regression**: DISMISS/ACKNOWLEDGE_AS_VALID/PAIR_ORPHAN_EVENTS — не регрессировали (собственные
+проверки внутри этого же прогона, код всех трёх веток не менялся, только добавлена симметричная
+проверка `chosenAssignmentId`-запрета в `validateResolveRequestBody`); online check-in/check-out —
+реально вызваны и успешны внутри section 5 (fallback/inheritance тесты); `scripts/
+_test-activation.ts` — зелёный на отдельной чистой БД; `scripts/_test-corrections.ts` (fixture
+generator, не изменённый этим слайсом функционал) — фикстуры создаются без ошибок на текущей
+схеме. Offline sync/outbox/geofence-admin HTTP-прогон отдельно не перезапущен — риск структурно
+нулевой (`git status`: изменены только три файла, ни один не участвует в этих путях выполнения).
+
+Static: `git diff --check`/`prisma validate`/`tsc --noEmit` — зелёные; `npm run build` выполнен в
+полностью изолированной временной worktree-копии (detached HEAD + скопированный
+`node_modules`, отдельный `.next`, НЕ пересекается с работающим preview-сервером на
+`127.0.0.1:3244`) — успешный build, оба `.../resolve` роута видны в build-манифесте
+(`/api/admin/attendance/exceptions/[exceptionId]/resolve`, `/api/foreman/attendance/exceptions/
+[exceptionId]/resolve`); временная worktree удалена после проверки. `prisma migrate deploy` на
+чистом одноразовом PostgreSQL 16 — 53/53 миграции (новых миграций этот слайс не добавляет),
+повторный запуск — «No pending migrations to apply».
+
+**Остаётся вне этого слайса** (явно, по границам задачи): `FORCE_CLOSE_OPEN_SHIFT`, `REASON_EDIT`
+(T7A.8B.4), exception-review UI, `attendance.gps.read.raw`, `attendance.conflict.read`,
+`attendance.policy.*`, admin operational overview (T7A.9), scheduler/auto-submit (T7A.10).
+Schema/permission-миграции не менялись. Preview на `127.0.0.1:3244` и его одноразовая БД на
+`127.0.0.1:55432` не останавливались этим слайсом (production `titanor-time-app-1`/
+`titanor-time-db-1` — только read-only inspect, не тронуты).
+
+---
 
 **T7A.8B.2 PAIR_ORPHAN_EVENTS — новый завершённый write-слайс поверх T7A.8B.1.** Реализует
 `docs/titanor-time/T7A_1_ATTENDANCE_CLOCK_DESIGN.md` §8.5 (resolver-паттерн)/§9.8 (полная

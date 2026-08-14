@@ -2,20 +2,23 @@ import { Prisma } from '@prisma/client';
 import { prisma } from '@/lib/prisma';
 import { createAuditEvent } from '@/lib/audit';
 import { getForemanSiteIds } from '@/lib/foreman-review';
+import { helsinkiCalendarDateAsUtcMidnight } from '@/lib/attendance-clock';
 import { actorDisplayName, UUID_PATTERN, type ExceptionTypeFilter } from '@/lib/attendance-exceptions';
 
-// docs/titanor-time/T7A_1_ATTENDANCE_CLOCK_DESIGN.md §8.5 (resolver pattern) / §9.8 (PAIR_ORPHAN_EVENTS
-// full validation) / §11 (action matrix) / §12.1/§12.3 — T7A.8B.1 shipped DISMISS/
-// ACKNOWLEDGE_AS_VALID; T7A.8B.2 adds PAIR_ORPHAN_EVENTS. The remaining three actions
-// (CONFIRM_SOURCE_ASSIGNMENT, REASON_EDIT, FORCE_CLOSE_OPEN_SHIFT) are deliberately not
-// implemented here — see IMPLEMENTED_RESOLUTION_ACTIONS below. Kept in a separate file from
+// docs/titanor-time/T7A_1_ATTENDANCE_CLOCK_DESIGN.md §8.5 (resolver pattern) / §9.7
+// (CONFIRM_SOURCE_ASSIGNMENT, full algorithm) / §9.8 (PAIR_ORPHAN_EVENTS full validation) / §11
+// (action matrix) / §12.1/§12.3 — T7A.8B.1 shipped DISMISS/ACKNOWLEDGE_AS_VALID; T7A.8B.2 added
+// PAIR_ORPHAN_EVENTS; T7A.8B.3 adds CONFIRM_SOURCE_ASSIGNMENT (ADMIN/SUPER_ADMIN only — FOREMAN
+// is rejected at the route layer, before this module is ever reached for this action). The
+// remaining two actions (REASON_EDIT, FORCE_CLOSE_OPEN_SHIFT) are deliberately not implemented
+// here — see IMPLEMENTED_RESOLUTION_ACTIONS below. Kept in a separate file from
 // lib/attendance-exceptions.ts on purpose: that module is read-only (owns scope enforcement,
 // filtering, pagination, DTO/redaction for GET); this one owns the mutating transactions, with a
 // materially different lock-order/concurrency contract.
 
 export type SimpleResolutionAction = 'DISMISS' | 'ACKNOWLEDGE_AS_VALID';
-export type ResolutionAction = SimpleResolutionAction | 'PAIR_ORPHAN_EVENTS';
-export const IMPLEMENTED_RESOLUTION_ACTIONS: ResolutionAction[] = ['DISMISS', 'ACKNOWLEDGE_AS_VALID', 'PAIR_ORPHAN_EVENTS'];
+export type ResolutionAction = SimpleResolutionAction | 'PAIR_ORPHAN_EVENTS' | 'CONFIRM_SOURCE_ASSIGNMENT';
+export const IMPLEMENTED_RESOLUTION_ACTIONS: ResolutionAction[] = ['DISMISS', 'ACKNOWLEDGE_AS_VALID', 'PAIR_ORPHAN_EVENTS', 'CONFIRM_SOURCE_ASSIGNMENT'];
 
 const MAX_RESOLUTION_NOTE_LENGTH = 2000;
 
@@ -87,6 +90,7 @@ function allowedActionsFor(type: string): string[] {
 export type ParsedResolveRequest =
   | { ok: true; action: SimpleResolutionAction; resolutionNote: string | null }
   | { ok: true; action: 'PAIR_ORPHAN_EVENTS'; checkInEventId: string; checkOutEventId: string; resolutionNote: string | null }
+  | { ok: true; action: 'CONFIRM_SOURCE_ASSIGNMENT'; chosenAssignmentId: string; resolutionNote: string | null }
   | { ok: false; fieldErrors: Record<string, string[]> };
 
 export function validateResolveRequestBody(raw: unknown): ParsedResolveRequest {
@@ -135,10 +139,32 @@ export function validateResolveRequestBody(raw: unknown): ParsedResolveRequest {
     if (checkInEventId && checkOutEventId && checkInEventId === checkOutEventId) {
       fieldErrors.checkOutEventId = ['must differ from checkInEventId'];
     }
+    if (body.chosenAssignmentId !== undefined) {
+      fieldErrors.chosenAssignmentId = ['not allowed for this action'];
+    }
     if (Object.keys(fieldErrors).length > 0 || !checkInEventId || !checkOutEventId) {
       return { ok: false, fieldErrors };
     }
     return { ok: true, action: 'PAIR_ORPHAN_EVENTS', checkInEventId, checkOutEventId, resolutionNote };
+  }
+
+  if (action === 'CONFIRM_SOURCE_ASSIGNMENT') {
+    let chosenAssignmentId: string | null = null;
+    if (typeof body.chosenAssignmentId !== 'string' || !UUID_PATTERN.test(body.chosenAssignmentId)) {
+      fieldErrors.chosenAssignmentId = ['required, must be a UUID'];
+    } else {
+      chosenAssignmentId = body.chosenAssignmentId;
+    }
+    if (body.checkInEventId !== undefined) {
+      fieldErrors.checkInEventId = ['not allowed for this action'];
+    }
+    if (body.checkOutEventId !== undefined) {
+      fieldErrors.checkOutEventId = ['not allowed for this action'];
+    }
+    if (Object.keys(fieldErrors).length > 0 || !chosenAssignmentId) {
+      return { ok: false, fieldErrors };
+    }
+    return { ok: true, action: 'CONFIRM_SOURCE_ASSIGNMENT', chosenAssignmentId, resolutionNote };
   }
 
   if (action === 'DISMISS' || action === 'ACKNOWLEDGE_AS_VALID') {
@@ -147,6 +173,9 @@ export function validateResolveRequestBody(raw: unknown): ParsedResolveRequest {
     }
     if (body.checkOutEventId !== undefined) {
       fieldErrors.checkOutEventId = ['not allowed for this action'];
+    }
+    if (body.chosenAssignmentId !== undefined) {
+      fieldErrors.chosenAssignmentId = ['not allowed for this action'];
     }
     if (Object.keys(fieldErrors).length > 0) {
       return { ok: false, fieldErrors };
@@ -680,6 +709,229 @@ export async function pairOrphanEvents(exceptionId: string, checkInEventId: stri
           materializationState: newShift.materializationState
         },
         resolvedExceptions: toResolve.map((r) => ({ id: r.id, type: r.type, status: 'RESOLVED' as const })),
+        resolvedAt: resolvedAt.toISOString(),
+        resolvedBy: { id: actorUserId, name: actorDisplayName(actor) },
+        resolutionNote
+      }
+    };
+  });
+}
+
+// ---------------------------------------------------------------------------------------------
+// CONFIRM_SOURCE_ASSIGNMENT (§9.7) — ADMIN/SUPER_ADMIN only (enforced at the route layer; this
+// function never receives a foreman scope and is never called by the foreman route at all, so it
+// carries no scope parameter). Applicable only to STALE_ASSIGNMENT, which has no other allowed
+// action (§11) — leaving one permanently un-materializable would strand the shift forever.
+// Materialization is intentionally NOT triggered inline here (§9.7 step 9): the next periodic
+// materializer catch-up pass (§8.4) picks up the now-resolvable fragment/shift on its own.
+// ---------------------------------------------------------------------------------------------
+
+export type ConfirmTargetType = 'EMPLOYEE_OPEN_SHIFT' | 'CLOCK_SHIFT' | 'CLOCK_SHIFT_FRAGMENT';
+
+export interface ConfirmResult {
+  resolutionAction: 'CONFIRM_SOURCE_ASSIGNMENT';
+  target: { type: ConfirmTargetType; id: string; sourceAssignmentId: string };
+  resolvedAt: string;
+  resolvedBy: { id: string; name: string };
+  resolutionNote: string | null;
+}
+
+export type ConfirmOutcome =
+  | { kind: 'OK'; result: ConfirmResult }
+  | { kind: 'NOT_FOUND' }
+  | { kind: 'ALREADY_RESOLVED' }
+  | { kind: 'ACTION_NOT_APPLICABLE'; allowedActions: string[] }
+  | { kind: 'TARGET_NOT_FOUND' }
+  | { kind: 'TARGET_ALREADY_RESOLVED' }
+  | { kind: 'VALIDATION_ERROR'; fieldErrors: Record<string, string[]> };
+
+const CONFIRM_PRE_READ_SELECT = {
+  employeeId: true,
+  type: true,
+  status: true,
+  clockEventId: true,
+  clockShiftId: true,
+  clockShiftFragmentId: true
+} satisfies Prisma.AttendanceExceptionSelect;
+
+type ConfirmPreRead = Prisma.AttendanceExceptionGetPayload<{ select: typeof CONFIRM_PRE_READ_SELECT }>;
+
+function isConfirmApplicable(type: string): boolean {
+  return type === 'STALE_ASSIGNMENT';
+}
+
+interface LockedTarget {
+  type: ConfirmTargetType;
+  id: string;
+  siteId: string;
+  targetDate: Date;
+  sourceAssignmentId: string | null;
+}
+
+/**
+ * §9.7 step 4 — exactly one of the three FK columns on the exception determines the target,
+ * mutually exclusively, checked in this fixed order. For the clockEventId branch: if the shift is
+ * still open (EmployeeOpenShift row still points at this exact check-in event), that row IS the
+ * target; otherwise the shift has since closed for real (a genuine Check Out raced ahead of this
+ * resolution) and the graceful fallback is the resulting ClockShift, located by its checkInEventId
+ * — the EmployeeOpenShift row itself is not kept as a long-lived pointer once a shift closes
+ * (§2.1), so there is nothing further to look up if neither matches.
+ */
+async function lockConfirmTarget(tx: Prisma.TransactionClient, fresh: ConfirmPreRead): Promise<LockedTarget | null> {
+  if (fresh.clockShiftFragmentId) {
+    const rows = await tx.$queryRaw<{ id: string; siteId: string; date: Date; sourceAssignmentId: string | null }[]>`
+      SELECT id, "siteId", date, "sourceAssignmentId" FROM "ClockShiftFragment" WHERE id = ${fresh.clockShiftFragmentId}::uuid FOR UPDATE
+    `;
+    const row = rows[0];
+    if (!row) {
+      return null;
+    }
+    return { type: 'CLOCK_SHIFT_FRAGMENT', id: row.id, siteId: row.siteId, targetDate: row.date, sourceAssignmentId: row.sourceAssignmentId };
+  }
+
+  if (fresh.clockShiftId) {
+    const rows = await tx.$queryRaw<{ id: string; siteId: string; recordedStartAt: Date; sourceAssignmentId: string | null }[]>`
+      SELECT id, "siteId", "recordedStartAt", "sourceAssignmentId" FROM "ClockShift" WHERE id = ${fresh.clockShiftId}::uuid FOR UPDATE
+    `;
+    const row = rows[0];
+    if (!row) {
+      return null;
+    }
+    return { type: 'CLOCK_SHIFT', id: row.id, siteId: row.siteId, targetDate: helsinkiCalendarDateAsUtcMidnight(row.recordedStartAt), sourceAssignmentId: row.sourceAssignmentId };
+  }
+
+  if (fresh.clockEventId) {
+    const openRows = await tx.$queryRaw<{ id: string; siteId: string; openedAt: Date; sourceAssignmentId: string | null }[]>`
+      SELECT id, "siteId", "openedAt", "sourceAssignmentId" FROM "EmployeeOpenShift"
+      WHERE "employeeId" = ${fresh.employeeId}::uuid AND "openedByClockEventId" = ${fresh.clockEventId}::uuid
+      FOR UPDATE
+    `;
+    const openRow = openRows[0];
+    if (openRow) {
+      return { type: 'EMPLOYEE_OPEN_SHIFT', id: openRow.id, siteId: openRow.siteId, targetDate: helsinkiCalendarDateAsUtcMidnight(openRow.openedAt), sourceAssignmentId: openRow.sourceAssignmentId };
+    }
+
+    const shiftRows = await tx.$queryRaw<{ id: string; siteId: string; recordedStartAt: Date; sourceAssignmentId: string | null }[]>`
+      SELECT id, "siteId", "recordedStartAt", "sourceAssignmentId" FROM "ClockShift" WHERE "checkInEventId" = ${fresh.clockEventId}::uuid FOR UPDATE
+    `;
+    const shiftRow = shiftRows[0];
+    if (shiftRow) {
+      return { type: 'CLOCK_SHIFT', id: shiftRow.id, siteId: shiftRow.siteId, targetDate: helsinkiCalendarDateAsUtcMidnight(shiftRow.recordedStartAt), sourceAssignmentId: shiftRow.sourceAssignmentId };
+    }
+    return null;
+  }
+
+  return null;
+}
+
+/** §9.7 step 5 — server-side re-check inside the transaction, never trusted from the client
+ * beyond its UUID shape (already checked in validateResolveRequestBody). No workAreaId filter —
+ * §9.7 does not gate on it, unlike the online check-in path's resolveActiveSiteAssignment. */
+async function isChosenAssignmentValid(tx: Prisma.TransactionClient, employeeId: string, chosenAssignmentId: string, targetSiteId: string, targetDate: Date): Promise<boolean> {
+  const rows = await tx.$queryRaw<{ id: string }[]>`
+    SELECT id FROM "SiteAssignment"
+    WHERE id = ${chosenAssignmentId}::uuid
+      AND "employeeId" = ${employeeId}::uuid
+      AND "siteId" = ${targetSiteId}::uuid
+      AND "validFrom" <= ${targetDate}::date
+      AND ("validTo" IS NULL OR "validTo" >= ${targetDate}::date)
+    LIMIT 1
+  `;
+  return rows.length > 0;
+}
+
+/**
+ * docs/titanor-time/T7A_1_ATTENDANCE_CLOCK_DESIGN.md §9.7, literally:
+ *   Read-only: exceptionId -> employeeId, no lock.
+ *   Transaction: Employee FOR UPDATE -> AttendanceException FOR UPDATE -> re-check status/type ->
+ *   lock target (EmployeeOpenShift/ClockShift/ClockShiftFragment, exactly one, by FK) -> validate
+ *   chosenAssignmentId against target's siteId/date -> UPDATE target.sourceAssignmentId (NULL ->
+ *   value only; a target whose sourceAssignmentId is already set is rejected by a service-level
+ *   precheck before any UPDATE is attempted, not left to the DB trigger alone) -> RESOLVE
+ *   exception -> one AuditEvent -> COMMIT. No FOREMAN_SCOPE_INCOMPLETE case exists here (unlike
+ *   resolveAttendanceException/pairOrphanEvents) — this action is never reachable with a foreman
+ *   scope at all, since the foreman route rejects it with 403 before calling this function.
+ */
+export async function confirmSourceAssignment(exceptionId: string, chosenAssignmentId: string, resolutionNote: string | null, actorUserId: string, requestId: string): Promise<ConfirmOutcome> {
+  const pre = await prisma.attendanceException.findUnique({ where: { id: exceptionId }, select: CONFIRM_PRE_READ_SELECT });
+  if (!pre) {
+    return { kind: 'NOT_FOUND' };
+  }
+  if (pre.status !== 'OPEN') {
+    return { kind: 'ALREADY_RESOLVED' };
+  }
+  if (!isConfirmApplicable(pre.type)) {
+    return { kind: 'ACTION_NOT_APPLICABLE', allowedActions: allowedActionsFor(pre.type) };
+  }
+
+  return prisma.$transaction(async (tx) => {
+    // Canonical order (§8.1): Employee(1) before AttendanceException(7) — never the reverse. The
+    // target lock that follows (EmployeeOpenShift/ClockShift/ClockShiftFragment, positions 3/4)
+    // comes AFTER AttendanceException here — the one documented exception to strict ascending
+    // order for resolver-form transactions (§8.5: "no more than one additional row at position 3"
+    // for actions other than REASON_EDIT), proven safe there, not re-derived here.
+    await tx.$queryRaw`SELECT id FROM "Employee" WHERE id = ${pre.employeeId}::uuid FOR UPDATE`;
+    await tx.$queryRaw`SELECT id FROM "AttendanceException" WHERE id = ${exceptionId}::uuid FOR UPDATE`;
+
+    const fresh = await tx.attendanceException.findUnique({ where: { id: exceptionId }, select: CONFIRM_PRE_READ_SELECT });
+    if (!fresh) {
+      return { kind: 'NOT_FOUND' as const };
+    }
+    if (fresh.status !== 'OPEN') {
+      return { kind: 'ALREADY_RESOLVED' as const };
+    }
+    if (!isConfirmApplicable(fresh.type)) {
+      return { kind: 'ACTION_NOT_APPLICABLE' as const, allowedActions: allowedActionsFor(fresh.type) };
+    }
+
+    const target = await lockConfirmTarget(tx, fresh);
+    if (!target) {
+      return { kind: 'TARGET_NOT_FOUND' as const };
+    }
+    if (target.sourceAssignmentId !== null) {
+      return { kind: 'TARGET_ALREADY_RESOLVED' as const };
+    }
+
+    const assignmentValid = await isChosenAssignmentValid(tx, fresh.employeeId, chosenAssignmentId, target.siteId, target.targetDate);
+    if (!assignmentValid) {
+      // Deliberately generic — never distinguishes "wrong employee" from "wrong site" from
+      // "out-of-date-range" from "doesn't exist at all" (§4 "не раскрывать данные чужого
+      // employee/site").
+      return { kind: 'VALIDATION_ERROR' as const, fieldErrors: { chosenAssignmentId: ['must reference an active SiteAssignment for this employee, site, and date'] } };
+    }
+
+    if (target.type === 'CLOCK_SHIFT_FRAGMENT') {
+      await tx.clockShiftFragment.update({ where: { id: target.id }, data: { sourceAssignmentId: chosenAssignmentId } });
+    } else if (target.type === 'CLOCK_SHIFT') {
+      await tx.clockShift.update({ where: { id: target.id }, data: { sourceAssignmentId: chosenAssignmentId } });
+    } else {
+      await tx.employeeOpenShift.update({ where: { employeeId: fresh.employeeId }, data: { sourceAssignmentId: chosenAssignmentId } });
+    }
+
+    const resolvedAt = new Date();
+    await tx.attendanceException.update({
+      where: { id: exceptionId },
+      data: { status: 'RESOLVED', resolvedByUserId: actorUserId, resolvedAt, resolutionNote }
+    });
+
+    await createAuditEvent(tx, {
+      actorUserId,
+      eventType: 'CLOCK_SHIFT_ASSIGNMENT_RESOLVED',
+      entityType: 'ATTENDANCE_EXCEPTION',
+      entityId: exceptionId,
+      requestId,
+      beforeValue: { status: 'OPEN', type: fresh.type, targetType: target.type, targetId: target.id },
+      afterValue: { status: 'RESOLVED', resolutionAction: 'CONFIRM_SOURCE_ASSIGNMENT', targetType: target.type, targetId: target.id, chosenAssignmentId },
+      reason: resolutionNote
+    });
+
+    const actor = await tx.user.findUniqueOrThrow({ where: { id: actorUserId }, select: { username: true, employee: { select: { firstName: true, lastName: true } } } });
+
+    return {
+      kind: 'OK' as const,
+      result: {
+        resolutionAction: 'CONFIRM_SOURCE_ASSIGNMENT' as const,
+        target: { type: target.type, id: target.id, sourceAssignmentId: chosenAssignmentId },
         resolvedAt: resolvedAt.toISOString(),
         resolvedBy: { id: actorUserId, name: actorDisplayName(actor) },
         resolutionNote

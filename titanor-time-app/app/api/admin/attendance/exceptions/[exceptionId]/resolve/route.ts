@@ -5,13 +5,14 @@ import { resolveAuthenticatedSession } from '@/lib/auth';
 import { hasPermission } from '@/lib/permissions';
 import { SESSION_COOKIE_NAME } from '@/lib/session';
 import { UUID_PATTERN } from '@/lib/attendance-exceptions';
-import { resolveAttendanceException, pairOrphanEvents, validateResolveRequestBody } from '@/lib/attendance-exception-resolution';
+import { resolveAttendanceException, pairOrphanEvents, confirmSourceAssignment, validateResolveRequestBody } from '@/lib/attendance-exception-resolution';
 
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
 
-// docs/titanor-time/T7A_1_ATTENDANCE_CLOCK_DESIGN.md §8.5/§9.8/§11/§12.1/§12.3 — T7A.8B.1 shipped
-// DISMISS/ACKNOWLEDGE_AS_VALID; T7A.8B.2 adds PAIR_ORPHAN_EVENTS.
+// docs/titanor-time/T7A_1_ATTENDANCE_CLOCK_DESIGN.md §8.5/§9.7/§9.8/§11/§12.1/§12.3 — T7A.8B.1
+// shipped DISMISS/ACKNOWLEDGE_AS_VALID; T7A.8B.2 added PAIR_ORPHAN_EVENTS; T7A.8B.3 adds
+// CONFIRM_SOURCE_ASSIGNMENT (ADMIN/SUPER_ADMIN only — this route has no foreman scope at all).
 // POST /api/admin/attendance/exceptions/:exceptionId/resolve.
 const REQUIRED_CSRF_HEADER_VALUE = 'titanor-time';
 type RouteParams = { params: Promise<{ exceptionId: string }> };
@@ -76,6 +77,26 @@ export async function POST(request: NextRequest, { params }: RouteParams): Promi
         return jsonError(409, { code: 'EVENT_ALREADY_PAIRED', message: 'One or both events are already part of a shift.' }, requestId);
       case 'PAIRED_SHIFT_OVERLAP':
         return jsonError(409, { code: 'PAIRED_SHIFT_OVERLAP', message: 'This pair would overlap an existing shift for this employee.' }, requestId);
+      case 'VALIDATION_ERROR':
+        return NextResponse.json(errorBody({ code: 'VALIDATION_ERROR', message: 'Invalid request body.', fieldErrors: outcome.fieldErrors }, requestId), { status: 400, headers: successHeaders(requestId) });
+    }
+  }
+
+  if (validated.action === 'CONFIRM_SOURCE_ASSIGNMENT') {
+    const outcome = await confirmSourceAssignment(exceptionId, validated.chosenAssignmentId, validated.resolutionNote, authenticated.user.id, requestId);
+    switch (outcome.kind) {
+      case 'OK':
+        return NextResponse.json(outcome.result, { status: 200, headers: successHeaders(requestId) });
+      case 'NOT_FOUND':
+        return jsonError(404, { code: 'EXCEPTION_NOT_FOUND', message: 'No attendance exception with this id.' }, requestId);
+      case 'ALREADY_RESOLVED':
+        return jsonError(409, { code: 'EXCEPTION_ALREADY_RESOLVED', message: 'This exception has already been resolved.' }, requestId);
+      case 'ACTION_NOT_APPLICABLE':
+        return NextResponse.json(errorBody({ code: 'ACTION_NOT_APPLICABLE', message: 'This action is not applicable to this exception type.', allowedActions: outcome.allowedActions }, requestId), { status: 409, headers: successHeaders(requestId) });
+      case 'TARGET_NOT_FOUND':
+        return jsonError(409, { code: 'TARGET_NOT_FOUND', message: 'No resolvable target row was found for this exception.' }, requestId);
+      case 'TARGET_ALREADY_RESOLVED':
+        return jsonError(409, { code: 'TARGET_ALREADY_RESOLVED', message: 'The target already has a source assignment.' }, requestId);
       case 'VALIDATION_ERROR':
         return NextResponse.json(errorBody({ code: 'VALIDATION_ERROR', message: 'Invalid request body.', fieldErrors: outcome.fieldErrors }, requestId), { status: 400, headers: successHeaders(requestId) });
     }
