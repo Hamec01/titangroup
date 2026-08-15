@@ -3894,12 +3894,12 @@ catch-up service реализованы в `lib/attendance-materializer.ts`; Che
 | `attendance.clock.sync.own` | `WORKER` | batch offline endpoint — не реализовано |
 | `attendance.exception.read.assigned` | `FOREMAN` | только свои объекты, без raw координат — **`[2026-08-14] T7A.8A реализовано`** |
 | `attendance.exception.read.all` | `ADMIN`, `SUPER_ADMIN` | **`[2026-08-14] T7A.8A реализовано`** |
-| `attendance.exception.resolve.assigned` | `FOREMAN` | только `DISMISS`/`ACKNOWLEDGE_AS_VALID`/`PAIR_ORPHAN_EVENTS` своих объектов — см. v1-рекомендацию §12.4 — **`[2026-08-15] T7A.8B.2/8B.3 реализовано для DISMISS/ACKNOWLEDGE_AS_VALID/PAIR_ORPHAN_EVENTS`**, `CONFIRM_SOURCE_ASSIGNMENT` и `FORCE_CLOSE_OPEN_SHIFT` реализованы (T7A.8B.3/8B.4A) но НЕ для этой роли — оба `ADMIN`/`SUPER_ADMIN`-only структурно, foreman-роут отвечает `403 FORBIDDEN` для обоих на сыром теле запроса, до какой-либо валидации; `REASON_EDIT` остаётся будущим T7A.8B.4B |
-| `attendance.exception.resolve.all` | `ADMIN`, `SUPER_ADMIN` | все шесть действий, включая `CONFIRM_SOURCE_ASSIGNMENT`/`FORCE_CLOSE_OPEN_SHIFT` — **`[2026-08-15] T7A.8B.4A реализовано для DISMISS/ACKNOWLEDGE_AS_VALID/PAIR_ORPHAN_EVENTS/CONFIRM_SOURCE_ASSIGNMENT/FORCE_CLOSE_OPEN_SHIFT`**, остаётся только `REASON_EDIT` (будущий T7A.8B.4B) |
+| `attendance.exception.resolve.assigned` | `FOREMAN` | только `DISMISS`/`ACKNOWLEDGE_AS_VALID`/`PAIR_ORPHAN_EVENTS` своих объектов — см. v1-рекомендацию §12.4 — **`[2026-08-15] T7A.8B.2/8B.3 реализовано для DISMISS/ACKNOWLEDGE_AS_VALID/PAIR_ORPHAN_EVENTS`**, `CONFIRM_SOURCE_ASSIGNMENT` и `FORCE_CLOSE_OPEN_SHIFT` реализованы (T7A.8B.3/8B.4A) но НЕ для этой роли, `REASON_EDIT` (T7A.8B.4B) — аналогично, foreman-роут `/edit` **`[2026-08-18]`** отвечает `403 FORBIDDEN` безусловно, до парсинга тела/валидации exceptionId |
+| `attendance.exception.resolve.all` | `ADMIN`, `SUPER_ADMIN` | все шесть действий — **`[2026-08-18] T7A.8B.4B реализовано, все шесть действий матрицы §11 теперь реализованы`** (вместе с `attendance.exception.read.all` и `timesheet.draft.edit.exception`, обязательны одновременно для `REASON_EDIT`) |
 | `attendance.gps.read.raw` | `ADMIN`, `SUPER_ADMIN` | доступ к `ClockEventLocation` |
 | `attendance.conflict.read` | `ADMIN`, `SUPER_ADMIN` | чтение `ClockEventIdConflict` |
 | `attendance.policy.read` / `.update` | `ADMIN`, `SUPER_ADMIN` | `CompanyAttendancePolicy` |
-| `timesheet.draft.edit.exception` | **v1-рекомендация: только `ADMIN`, `SUPER_ADMIN`** (не `FOREMAN`) | см. §12.4 — жёстко ограничено origin-фрагментом конкретного `AttendanceException` |
+| `timesheet.draft.edit.exception` | `ADMIN`, `SUPER_ADMIN` (не `FOREMAN`) | см. §12.4 — жёстко привязано к целевому origin-фрагменту, подтверждённому `resolveTargetFragmentId` — **`[2026-08-18] T7A.8B.4B реализовано`**, семя `prisma/migrations/20260818000000_seed_timesheet_draft_edit_exception_permission` (проверено прямым SQL: ровно 2 строки `RolePermission`, `ADMIN`+`SUPER_ADMIN`, `FOREMAN`/`WORKER` отсутствуют) |
 
 ### 12.2 Endpoints — Worker
 
@@ -3993,7 +3993,14 @@ POST /api/foreman/attendance/exceptions/:id/resolve
      -- CONFIRM_SOURCE_ASSIGNMENT/FORCE_CLOSE_OPEN_SHIFT здесь ОТСУТСТВУЮТ для FOREMAN, v1-default.
 
 GET/POST /api/admin/attendance/exceptions/:id/resolve
-     body: { action: любое из шести, ...action-specific }
+     body: { action: одно из пяти -- DISMISS/ACKNOWLEDGE_AS_VALID/PAIR_ORPHAN_EVENTS/
+             CONFIRM_SOURCE_ASSIGNMENT/FORCE_CLOSE_OPEN_SHIFT, ...action-specific }
+     -- REASON_EDIT сюда НЕ добавлено -- отдельный endpoint ниже, другая форма тела/ответа (§12.4).
+
+POST /api/foreman/attendance/exceptions/:id/edit   -- [2026-08-18] T7A.8B.4B реализовано, fail-closed
+     -- 403 FORBIDDEN безусловно (§12.4) -- FOREMAN не получает timesheet.draft.edit.exception в v1.
+POST /api/admin/attendance/exceptions/:id/edit     -- [2026-08-18] T7A.8B.4B реализовано (§12.4)
+     body: { clockShiftFragmentId: uuid, startAt?, endAt?, siteId?, workAreaId?, reason: string }
 
 GET  /api/admin/sites/:siteId/geofence-versions   -- [2026-08-13] реализовано (T7A.2), lib/geofences.ts
 POST /api/admin/sites/:siteId/geofence-versions   -- [2026-08-13] реализовано (T7A.2), lib/geofences.ts
@@ -4003,6 +4010,105 @@ GET/PATCH /api/admin/attendance/policy
 ```
 
 ### 12.4 `REASON_EDIT` — отдельный scoped endpoint (не переиспользует worker-`PATCH`)
+
+**`[2026-08-18] T7A.8B.4B — реализовано.`** `REASON_EDIT` — шестое и последнее действие матрицы
+§11, backend завершён. Реализация в целом следует нижеописанному дизайну (общее транзакционное
+ядро + два отдельных scoped-маршрута), с одним обязательным архитектурным уточнением, принятым
+владельцем до реализации (design ниже был неполон для `OVERLAPPING_SHIFT`, см. ниже), и одним
+сознательным сужением объёма (`FOREMAN`-маршрут — только fail-closed 403, не полноценная ветка
+логики, как и было v1-рекомендовано ниже).
+
+**Архитектурное уточнение — `clockShiftFragmentId` в теле запроса (обязательное поле).**
+Оригинальный дизайн ниже (шаг 2 транзакции) предполагал, что `REASON_EDIT` всегда правит
+`exception.clockShiftFragmentId` — поле, которое, как выяснилось при реализации, `OVERLAPPING_SHIFT`
+никогда не заполняет (у него `clockShiftId`/`relatedClockShiftId` вместо прямой ссылки на фрагмент,
+§2.1 п.9), и которое дизайн ниже не предусматривал позволять выбирать явно. Принятое решение:
+`clockShiftFragmentId` — **обязательное** поле тела запроса, а не выводится из исключения. Целевой
+фрагмент подтверждается сервером по следующим правилам (реализовано в
+`lib/attendance-exception-edit.ts`, `resolveTargetFragmentId`):
+
+- **Обычные типы** (`SITE_MISMATCH_CHECKOUT`, `EXCESSIVE_CLOCK_SKEW`, `CHECKOUT_CHRONOLOGY_ANOMALY`,
+  `EXCESSIVE_SHIFT_DURATION`): (1) если `exception.clockShiftFragmentId` заполнено — требуется точное
+  совпадение с запрошенным id; (2) иначе требуется доказуемая связь — либо
+  `fragment.clockShiftId === exception.clockShiftId`, либо `exception.clockEventId` привязан к
+  `ClockShift.checkInEventId`/`checkOutEventId`, и этот `ClockShift` и есть `fragment.clockShiftId`;
+  (3) фрагмент обязан принадлежать `exception.employeeId`, и — если эти поля заполнены —
+  `exception.timesheetId`/`payrollPeriodId`.
+- **`OVERLAPPING_SHIFT`**: `fragment.clockShiftId` обязан быть **либо** `exception.clockShiftId`,
+  **либо** `exception.relatedClockShiftId` (проверка симметрична — какая из двух сторон пары
+  реально имеет живой `TimesheetDraftSegment` на момент резолюции, заранее не определено — это
+  зависит от того, какая из двух смен материализовалась первой; см. §9.1a). Дополнительно:
+  `fragment.reportedProjectionState = SETTLED` и существует живой `TimesheetDraftSegment` с
+  `originClockShiftFragmentId = fragment.id`; после применения правки транзакция явно
+  перепроверяет, что названная пара `(exception.clockShiftId, exception.relatedClockShiftId)`
+  реально перестала пересекаться (`overlapExists`, §9.1a) — иначе весь transaction откатывается,
+  `409 OVERLAP_STILL_PRESENT`.
+
+Никакого изменения схемы это уточнение не потребовало — `clockShiftFragmentId` уже существовал как
+опциональное поле тела в оригинальном дизайне ниже, здесь оно стало обязательным, и добавлен
+описанный выше алгоритм подтверждения.
+
+**Реализованный контракт** (отличия от псевдокода ниже отмечены явно):
+
+```text
+POST /api/admin/attendance/exceptions/:exceptionId/edit
+  permission: attendance.exception.read.all + attendance.exception.resolve.all +
+              timesheet.draft.edit.exception (все три одновременно; отзыв любой -> 403)
+  body: { clockShiftFragmentId: uuid,        -- ОБЯЗАТЕЛЬНО, см. уточнение выше
+          startAt?, endAt?, siteId?, workAreaId?, reason: string }
+        -- reason обязателен всегда; хотя бы одно из startAt/endAt/siteId/workAreaId обязательно;
+        -- workAreaId может быть null, но при смене siteId обязан быть передан явно (включая null)
+
+POST /api/foreman/attendance/exceptions/:exceptionId/edit
+  -- v1: НЕ реализована полноценная логика — маршрут существует, но безусловно отвечает
+  -- 403 FORBIDDEN сразу после проверки CSRF/аутентификации (до парсинга тела, до валидации
+  -- exceptionId, до какого-либо чтения БД) — тот же исход, что и v1-рекомендация ниже, только
+  -- реализован явным быстрым fail-closed путём, а не полным дублированием admin-логики со
+  -- scope-фильтром, который был бы после этого недостижим при текущей матрице permissions.
+```
+
+Транзакция (`lib/attendance-exception-edit.ts:editAttendanceExceptionReason`) — 17 шагов, замок
+§8.1/§8.5 «resolver-форма с продолжением» (Employee(1) → AttendanceException(7) → откат к
+Timesheet(5)/TimesheetDraft(6), а не вперёд к позиции 3/4, как у остальных пяти действий матрицы
+§11 — единственное исключение такого рода, обоснованное в §8.2/§8.3): read-only exceptionId→
+employeeId → Employee FOR UPDATE → AttendanceException FOR UPDATE → повторная проверка
+status/type/identity под локом → Timesheet/TimesheetDraft FOR UPDATE → повторная проверка
+DRAFT/RETURNED и SETTLED → `applyClockShiftFragmentReasonEdit` (общее ядро, теперь в
+`lib/clock-shift-fragment-edit.ts`, шарит только чистые формулы `computeChangeType`/
+`buildClockShiftAdjustmentData` с worker-`PATCH`, не полную структуру — см. ниже) →
+`OVERLAP_STILL_PRESENT`-проверка для `OVERLAPPING_SHIFT` → `AttendanceException` → `RESOLVED` с
+**реальным** `resolvedByUserId` (админ, никогда `SYSTEM`) → **только затем**
+`resolveOverlapsForAffectedShifts` (§9.1a) для ОСТАЛЬНЫХ пар — порядок «сначала резолвим названное
+исключение реальным актором, потом общий overlap-hook» гарантирует, что `resolveOverlapTransition`
+(его `latestRow.status === 'OPEN'`-guard) никогда не тронет уже `RESOLVED` названную пару своим
+`SYSTEM`-атрибутированным авто-resolve — без единого изменения `lib/attendance-reported-projection.ts`
+→ `AuditEvent(CLOCK_SHIFT_FRAGMENT_ADMIN_EDIT)` → COMMIT.
+
+**Общее ядро — сознательно узкий scope.** `applyClockShiftFragmentReasonEdit` в реализации — НЕ
+единая структура, вызываемая обоими путями «как есть»: worker-`PATCH` (`lib/worker-timesheets.ts`)
+остаётся собственной multi-segment delete-all/recreate реализацией (риск полной структурной
+унификации с новым single-fragment admin-путём оценён как непропорционально высокий для этого
+слайса); общими сделаны только две чистые формулы (`computeChangeType`,
+`buildClockShiftAdjustmentData`, экспортированы из `lib/clock-shift-fragment-edit.ts` и
+импортированы в `lib/worker-timesheets.ts`) — устраняет буквальное дублирование этой конкретной
+логики, не более. `applyClockShiftFragmentReasonEdit` как таковая — новый код, используемый только
+admin-путём.
+
+**Проверено** (одноразовый PostgreSQL 16): 72 business-logic + 18 concurrency (реальные
+2+ backend PID, `pg_stat_activity.wait_event_type='Lock'`, сценарии A–E §10) + 8 regression
+(worker `PATCH`, `DISMISS`, `ACKNOWLEDGE_AS_VALID`, `FORCE_CLOSE_OPEN_SHIFT`, smoke для
+`PAIR_ORPHAN_EVENTS`/`CONFIRM_SOURCE_ASSIGNMENT`) + 19 HTTP (CSRF/auth/permission-revocation/
+foreman fail-closed ordering/sanitized response) — 117/117 зелёных. `npm run build` и
+`docker compose -f compose.titanor-time.yaml build app` — чистые в изолированном detached
+worktree/копии, prod/preview не тронуты.
+
+**Не реализовано этим слайсом**: exception-review UI (T7A.8C, отдельный слайс — REASON_EDIT
+остаётся API-only до него, см. `01_SCREEN_MAP.md`).
+
+---
+
+**Оригинальный дизайн (revision 3.2.5, ниже) — сохранён как архитектурная основа**, с учётом
+уточнения выше:
 
 **Проблема, которую это решает**: вызывать `PATCH /api/worker/timesheets/:timesheetId/days/:date` от
 имени `FOREMAN`/`ADMIN` означало бы либо провязывать в этот роут специальную роль-логику (риск

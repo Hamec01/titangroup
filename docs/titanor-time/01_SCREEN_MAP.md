@@ -918,10 +918,14 @@ FOREMAN_APPROVED` только когда все scope версии подтве
   (T7A.8A) — реализован; **`[2026-08-15]`** резолюция — `POST .../resolve` с
   `DISMISS`/`ACKNOWLEDGE_AS_VALID` (T7A.8B.1), `PAIR_ORPHAN_EVENTS` (T7A.8B.2),
   `CONFIRM_SOURCE_ASSIGNMENT` (T7A.8B.3) и `FORCE_CLOSE_OPEN_SHIFT` (T7A.8B.4A) — последние два
-  `ADMIN`/`SUPER_ADMIN`-only, `FOREMAN` не получает ни одно из них — реализованы backend-only.
-  **Экрана для всего этого по-прежнему нет** ни здесь, ни где-либо ещё; из шести resolution-действий
-  §11 остаётся нереализованным только `REASON_EDIT` (T7A.8B.4B). Будущий Exception Review UI
-  (T7A.8B.4B/8C) — отдельный, ещё не спроектированный экран, не расширение этой страницы.
+  `ADMIN`/`SUPER_ADMIN`-only, `FOREMAN` не получает ни одно из них; **`[2026-08-18]`**
+  `REASON_EDIT` (T7A.8B.4B) — отдельный `POST .../exceptions/:exceptionId/edit`,
+  `ADMIN`/`SUPER_ADMIN`-only, `FOREMAN` — безусловный `403`. **Все шесть resolution-действий §11
+  теперь реализованы — backend T7A.8B полностью завершён.** **Экрана для всего этого по-прежнему
+  нет** ни здесь, ни где-либо ещё — REASON_EDIT/остальные пять действий доступны только через API
+  (Postman/аналогичный клиент), не через UI. Будущий Exception Review UI — отдельный слайс
+  **T7A.8C**, ещё не спроектированный (не расширение этой страницы) — единственное, что остаётся
+  из T7A.8 после завершения T7A.8B.
 
 #### `/foreman/review/[timesheetId]` ⚪
 - Роли: `FOREMAN`

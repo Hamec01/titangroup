@@ -1,6 +1,116 @@
 # Titanor Time — Implementation Status
 
-Обновлено: 2026-08-15 Europe/Helsinki (feat: force close open attendance shifts)
+Обновлено: 2026-08-18 Europe/Helsinki (feat: add reason-backed attendance exception edits)
+
+**T7A.8B.4B REASON_EDIT — новый завершённый write-слайс поверх T7A.8B.4A, шестое и последнее
+resolution-действие матрицы §11. С этим слайсом T7A.8B (backend attendance exception resolution)
+объявляется завершённым — но НЕ весь T7A.8** (см. «Остаётся вне этого слайса» ниже: exception-review
+UI — отдельный T7A.8C, ещё не начат). Реализует `docs/titanor-time/T7A_1_ATTENDANCE_CLOCK_DESIGN.md`
+§8.1/§8.5 (resolver-форма с продолжением — единственное действие матрицы, откатывающееся от
+`AttendanceException`(7) назад к `Timesheet`(5)/`TimesheetDraft`(6), а не вперёд к позиции 3/4, как
+остальные пять)/§9.1a/§10.1-§10.3/§11/§12.1-§12.4, с одним обязательным архитектурным уточнением,
+зафиксированным в дизайн-документе (§12.4) до начала реализации: `clockShiftFragmentId` — теперь
+обязательное поле тела запроса, не выводится из `exception.clockShiftFragmentId` (которое
+`OVERLAPPING_SHIFT` никогда не заполняет) — точный алгоритм подтверждения целевого фрагмента
+(`resolveTargetFragmentId`, симметричный для обычных типов и для `OVERLAPPING_SHIFT`) — в §12.4.
+
+**Новый endpoint, не переиспользует ни `/resolve`, ни worker-`PATCH`**: `POST
+/api/admin/attendance/exceptions/:exceptionId/edit`. Требует одновременно все три permission:
+`attendance.exception.read.all`, `attendance.exception.resolve.all`, `timesheet.draft.edit.exception`
+(новая — семя `prisma/migrations/20260818000000_seed_timesheet_draft_edit_exception_permission`,
+чистый DML, без изменений схемы; проверено прямым SQL — ровно 2 строки `RolePermission`, `ADMIN` +
+`SUPER_ADMIN`, `FOREMAN`/`WORKER` отсутствуют структурно). `POST
+/api/foreman/attendance/exceptions/:exceptionId/edit` тоже добавлен, но реализован как
+безусловный fail-closed 403 — permission не выдана `FOREMAN` в v1 (owner-принятая рекомендация
+§12.4), проверка происходит сразу после CSRF/аутентификации, до парсинга тела/валидации
+`exceptionId`/чтения БД.
+
+**Файлы**: три новых — `lib/clock-shift-fragment-edit.ts` (общее транзакционное ядро
+`applyClockShiftFragmentReasonEdit` для single-fragment reported-правки + две чистые формулы,
+`computeChangeType`/`buildClockShiftAdjustmentData`, вынесенные из `lib/worker-timesheets.ts` и
+теперь используемые обоими путями — узкий, сознательно ограниченный shared-scope, НЕ полная
+структурная унификация с multi-segment delete-all/recreate потоком worker `PATCH`, см. ниже),
+`lib/attendance-exception-edit.ts` (резолвер: target-identity, request validation, полная 17-шаговая
+транзакция, построение ответа), `app/api/admin/attendance/exceptions/[exceptionId]/edit/route.ts` +
+`app/api/foreman/.../edit/route.ts`. Изменены: `lib/worker-timesheets.ts` (узкий рефакторинг — две
+строки, `changeType`/`ClockShiftAdjustment.create` теперь зовут общие формулы, вся остальная
+1200-строчная функция `patchWorkerTimesheetDay` не тронута), `lib/attendance-exception-resolution.ts`
+(`parseStrictIsoInstant` стал `export`, переиспользован новым резолвером — без изменений логики).
+
+**Транзакция** (17 шагов, `editAttendanceExceptionReason`): read-only `exceptionId`→`employeeId` →
+`Employee` FOR UPDATE → `AttendanceException` FOR UPDATE → повторная проверка `status`/`type`/target
+identity под локом → `Timesheet`/`TimesheetDraft` FOR UPDATE → повторная проверка DRAFT/RETURNED и
+`reportedProjectionState=SETTLED` → `applyClockShiftFragmentReasonEdit` (создаёт
+`ClockShiftAdjustment`, мутирует живой `TimesheetDraftSegment`, инкрементирует `contentRevision`,
+сохраняет breaks нетронутыми) → для `OVERLAPPING_SHIFT` — явная проверка, что названная пара
+реально перестала пересекаться (иначе весь transaction откатывается, `409 OVERLAP_STILL_PRESENT`) →
+`AttendanceException` → `RESOLVED` с **реальным** `resolvedByUserId` (админ, никогда `SYSTEM`) →
+**только затем** `resolveOverlapsForAffectedShifts` (§9.1a) для остальных потенциально затронутых
+пар — порядок «сначала резолвим названное исключение реальным актором, потом общий overlap-hook»
+критичен: без него общий hook мог бы попытаться авто-разрешить ту же самую названную пару через
+`SYSTEM`-атрибуцию, гоняясь с явным человеческим действием. Достигнуто БЕЗ единого изменения
+`lib/attendance-reported-projection.ts` — существующий `resolveOverlapTransition`'s
+`latestRow.status === 'OPEN'`-guard уже структурно защищает от этой гонки, если резолвер сам
+соблюдает порядок → один `AuditEvent(CLOCK_SHIFT_FRAGMENT_ADMIN_EDIT)` → COMMIT.
+
+**Общее ядро — сознательно узкий scope, не полная унификация.** Риск переписывания
+1200-строчного, тщательно протестированного multi-segment delete-all/recreate потока worker `PATCH`
+в цикл над новым single-fragment ядром оценён как непропорционально высокий для этого слайса.
+Общими сделаны только две чистые, буквально дублировавшиеся формулы; вся остальная логика worker
+`PATCH` (day-type/absence handling, `previousLive`-карта, финальный `resolveOverlapsForAffectedShifts`-
+вызов, `submitWorkerTimesheetCore`) не тронута — подтверждено `git diff` (два однострочных изменения
+в этом файле) и полным regression-прогоном (см. ниже).
+
+**Тесты, реально выполненные на одноразовом PostgreSQL 16** (117/117 PASS): 72 business-logic
+(migration/grants; ADMIN/SUPER_ADMIN success; все пять применимых типов; 9 неприменимых типов через
+полную матрицу §11; terminal exception; точный/непрямой/`clockEventId`-only target-identity; неверный
+employee/timesheet/period фрагмент; `OVERLAPPING_SHIFT` с любой стороны пары; `PENDING`-фрагмент;
+отсутствующий live-сегмент; `FINAL_APPROVED`/`SUBMITTED`/`RETURNED`; частичные правки; строгая
+ISO-8601 валидация; `CHECKOUT_CHRONOLOGY_ANOMALY` требует `endAt`; хронология; site/workArea
+assignment-валидация, включая явный `workAreaId` при смене `siteId`; сохранение breaks; break вне
+новых границ; segment overlap; no-op; `EDITED`/`RESTORED_TO_RECORDED`; реальная атрибуция актора;
+raw `recorded*`-поля побайтово неизменны; `contentRevision` +1 ровно один раз; названное исключение
+резолвится один раз; overlap физически исчезает; `OVERLAP_STILL_PRESENT`-откат; сторонние overlap-пары
+резолвятся общим helper'ом (`SYSTEM`-атрибуция, не именованный админ); полный rollback принудительной
+ошибки; sanitized response) + 18 concurrency (реальные ≥2 backend PID,
+`pg_stat_activity.wait_event_type='Lock'` как доказательство блокировки, `holdLock`-техника с
+раздельными acquired/release-сигналами: A — два одновременных `REASON_EDIT` одного исключения, ровно
+один `200`/один `409 EXCEPTION_ALREADY_RESOLVED`, ровно один `ClockShiftAdjustment`, ровно один admin
+`AuditEvent`; B — `REASON_EDIT` vs worker `PATCH` того же employee/фрагмента, `Employee`-лок
+сериализует, корректная before→after цепочка без потерянной правки; C — `REASON_EDIT` vs ручной
+submit, оба исхода проверены (edit-выиграл/submit-выиграл), никаких частичных данных; D —
+`REASON_EDIT` vs сторонняя, но того же employee, операция materializer/overlap-класса, `Employee`-лок
+сериализует, именованная пара резолвится реальным админом, несвязанная пара — `SYSTEM`, коллизии
+атрибуции нет) + 8 regression (worker `PATCH` clean path создаёт корректно атрибутированный
+`ClockShiftAdjustment` через общие формулы; `DISMISS`/`ACKNOWLEDGE_AS_VALID`; `FORCE_CLOSE_OPEN_SHIFT`
+полный материализаторный путь; smoke-проверка `PAIR_ORPHAN_EVENTS`/`CONFIRM_SOURCE_ASSIGNMENT` —
+ни один из пяти существующих `/resolve`-действий не задет) + 19 HTTP (CSRF; отсутствующая/невалидная
+сессия; `WORKER`/`FOREMAN` → `403` на admin-роуте; foreman-роут `403` безусловно ДО парсинга
+тела/валидации `exceptionId`, включая malformed JSON + fabricated id одновременно; отзыв каждого из
+трёх admin-permission по отдельности → `403`; malformed/несуществующий `exceptionId` → `404`;
+malformed JSON → `400`; полный HTTP success ADMIN + SUPER_ADMIN, точная документированная форма
+ответа, отсутствие GPS/payloadHash/device-полей/cookies в теле; `409 EXCEPTION_ALREADY_RESOLVED` при
+повторе).
+
+Static: `git diff --check`/`prisma validate`/`tsc --noEmit` — зелёные. `npm run build` выполнен в
+полностью изолированной detached-worktree копии (отдельный `node_modules`, скопирован из основного
+worktree; собственный `.next`, не пересекается с работающим preview-сервером на `127.0.0.1:3244`) —
+успешный build, оба новых `.../edit`-роута видны в build-манифесте как dynamic functions;
+production HTTP-тесты выполнены против `npm start` этой же изолированной копии на выделенном порту
+`127.0.0.1:3900`, сервер остановлен и worktree удалена после проверки. `docker compose -f
+compose.titanor-time.yaml build app` — успешный build из основного worktree; production-контейнер
+`titanor-time-app-1` подтверждён не тронутым (тот же `Up 9 days`/`healthy`/`127.0.0.1:3200`,
+`/api/health` — `200` до и после). `prisma migrate deploy` на чистом одноразовом PostgreSQL 16 —
+54/54 миграции (включая новую), повторный запуск — «No pending migrations to apply».
+
+**Остаётся вне этого слайса** (явно, по границам задачи): exception-review UI (T7A.8C — отдельный,
+ещё не начатый слайс; `01_SCREEN_MAP.md`/`02_ROLE_PERMISSION_MATRIX.md` обновлены соответствующей
+пометкой), `attendance.gps.read.raw`, `attendance.conflict.read`, `attendance.policy.*`, admin
+operational overview (T7A.9), scheduler/auto-submit (T7A.10). Preview на `127.0.0.1:3244` и его
+одноразовая БД на `127.0.0.1:55432` не останавливались этим слайсом (production
+`titanor-time-app-1`/`titanor-time-db-1` — только read-only inspect, не тронуты).
+
+---
 
 **T7A.8B.4A FORCE_CLOSE_OPEN_SHIFT — новый завершённый write-слайс поверх T7A.8B.3 (и его
 follow-up fix `6c066c3` "serialize source assignment confirmation").** Реализует

@@ -1103,10 +1103,11 @@ force-closed-форме (`checkOutEventId=NULL`, все три `forceClosed*`-п
 `ClockEvent` не создаётся, инлайн-материализация не запускается (созданная смена остаётся
 `PENDING`, подхватывается обычным catch-up проходом).
 
-Единственное оставшееся resolution-действие (`REASON_EDIT`) не реализовано — `action` со
-значением `REASON_EDIT` (либо любой другой неизвестной строкой) → `400 VALIDATION_ERROR`,
-`fieldErrors.action` перечисляет ровно пять реализованных значений. Нет временной заглушки,
-мутирующей данные для `REASON_EDIT`.
+Шестое resolution-действие, `REASON_EDIT`, **не** добавлено в `action` этого эндпоинта — `action`
+со значением `REASON_EDIT` (либо любой другой неизвестной строкой) по-прежнему → `400
+VALIDATION_ERROR`, `fieldErrors.action` перечисляет ровно пять действий выше. `REASON_EDIT`
+реализован **`[2026-08-18]` T7A.8B.4B** как отдельный endpoint с другой формой тела/ответа/
+target-identity-алгоритмом — `POST .../exceptions/:exceptionId/edit`, см. §9.1d ниже.
 
 #### `POST /api/admin/attendance/exceptions/:exceptionId/resolve`
 #### `POST /api/foreman/attendance/exceptions/:exceptionId/resolve`
@@ -1351,6 +1352,114 @@ force-closed-форме (`checkOutEventId=NULL`, все три `forceClosed*`-п
   сбой (реальный FK-violation при `AuditEvent`) после `INSERT ClockShift`+`DELETE
   EmployeeOpenShift`, но до `COMMIT` → полный откат: `EmployeeOpenShift` на месте, exception
   остаётся `OPEN`, ни `ClockShift`, ни `AuditEvent` не создаются.
+
+### 9.1d Attendance exception `REASON_EDIT` (T7A.8B.4B, `T7A_1_ATTENDANCE_CLOCK_DESIGN.md`
+§8.1/§8.5/§9.1a/§10.1-§10.3/§11/§12.4 — **реализовано**) — `lib/attendance-exception-edit.ts` +
+`lib/clock-shift-fragment-edit.ts`
+
+Отдельный endpoint, не форма `action` на `.../resolve` (§9.1c) и не переиспользование worker
+`PATCH /api/worker/timesheets/:timesheetId/days/:date` — другая форма тела/ответа, другой
+target-identity-алгоритм. **Обязательное архитектурное уточнение**: `clockShiftFragmentId` — поле
+тела запроса, не выводится из `exception.clockShiftFragmentId` (которое `OVERLAPPING_SHIFT`
+никогда не заполняет, у него `clockShiftId`/`relatedClockShiftId` вместо прямой ссылки) — см. точный
+алгоритм подтверждения в `T7A_1_ATTENDANCE_CLOCK_DESIGN.md` §12.4.
+
+#### `POST /api/admin/attendance/exceptions/:exceptionId/edit`
+- Permission: **все три одновременно** — `attendance.exception.read.all`,
+  `attendance.exception.resolve.all`, `timesheet.draft.edit.exception` (отзыв любого из трёх → `403
+  FORBIDDEN`)
+- CSRF: `X-Requested-With: titanor-time` обязателен
+- Request:
+```json
+{ "clockShiftFragmentId": "uuid",
+  "startAt": "2026-08-15T06:00:00.000Z", "endAt": "2026-08-15T14:00:00.000Z",
+  "siteId": "uuid", "workAreaId": "uuid" | null,
+  "reason": "Corrected after attendance review" }
+```
+  `clockShiftFragmentId` обязателен, валидный UUID. `reason` обязателен — `trim()`, пустая после
+  trim строка отклоняется, максимум 2000 символов. Хотя бы одно из `startAt`/`endAt`/`siteId`/
+  `workAreaId` обязательно — запрос без единого редактируемого поля → `400 VALIDATION_ERROR`.
+  `startAt`/`endAt`, если присутствуют — строгий ISO-8601 с обязательным `Z`/numeric UTC offset (тот
+  же парсер, что `FORCE_CLOSE_OPEN_SHIFT`, `parseStrictIsoInstant`, переиспользован как есть).
+  Неизвестные поля тела отклоняются. Отсутствующее поле сохраняет текущее reported-значение;
+  `workAreaId` может быть `null`; если `siteId` меняется, `workAreaId` обязан быть передан явно
+  (включая `null`) — иначе `400 VALIDATION_ERROR`. Финальные `startAt`/`endAt` (после наложения
+  частичной правки на текущие значения) обязаны сохранять `endAt > startAt`. Для
+  `CHECKOUT_CHRONOLOGY_ANOMALY` специально — `endAt` обязателен в каждом запросе.
+- Response `200`:
+```json
+{ "resolutionAction": "REASON_EDIT",
+  "exception": { "id": "uuid", "type": "SITE_MISMATCH_CHECKOUT", "status": "RESOLVED",
+    "resolvedAt": "iso", "resolvedBy": { "id": "uuid", "name": "Admin Name" },
+    "resolutionNote": "string" },
+  "fragment": { "id": "uuid", "clockShiftId": "uuid", "timesheetId": "uuid", "date": "YYYY-MM-DD",
+    "reportedProjectionState": "SETTLED" },
+  "segment": { "id": "uuid", "startAt": "iso", "endAt": "iso", "siteId": "uuid",
+    "workAreaId": "uuid" | null, "sourceAssignmentId": "uuid" },
+  "adjustment": { "id": "uuid", "changeType": "EDITED" | "RESTORED_TO_RECORDED", "reason": "string",
+    "changedByUserId": "uuid", "changedAt": "iso" } }
+```
+  Никогда GPS, сырой `ClockEvent`-payload, `payloadHash`, device-идентификаторы/sequence,
+  произвольный `exception.detail`, cookies/токены.
+- Ошибки: `400 VALIDATION_ERROR` (malformed JSON, форма тела — см. выше), `401
+  NOT_AUTHENTICATED`, `403 CSRF_REJECTED`, `403 FORBIDDEN` (нет одного из трёх permission), `404
+  EXCEPTION_NOT_FOUND` (malformed UUID/несуществующий id — единый код), `409
+  EXCEPTION_ALREADY_RESOLVED` (терминальный статус), `409 ACTION_NOT_APPLICABLE` (тип исключения не
+  из пяти применимых — `SITE_MISMATCH_CHECKOUT`/`EXCESSIVE_CLOCK_SKEW`/
+  `CHECKOUT_CHRONOLOGY_ANOMALY`/`EXCESSIVE_SHIFT_DURATION`/`OVERLAPPING_SHIFT`, `allowedActions` —
+  полная domain-матрица §11 для этого типа; тот же код, БЕЗ `allowedActions`, если тип применим, но
+  запрошенный `clockShiftFragmentId` не проходит target-identity-проверку либо фрагмент ещё
+  `PENDING`), `409 TARGET_NOT_EDITABLE` (нет живого `TimesheetDraftSegment` для фрагмента), `409
+  DRAFT_NOT_EDITABLE` (`Timesheet.status` не `DRAFT`/`RETURNED`), `409 SITE_NOT_ASSIGNED` (нет
+  активного `SiteAssignment` этого работника на финальные site/workArea на дату фрагмента), `409
+  BREAK_OUTSIDE_SEGMENT` (существующий break вышел бы за новые границы сегмента — breaks никогда не
+  редактируются этим действием, только сохраняются как есть), `409 WORK_SEGMENT_OVERLAP` (правка
+  пересеклась бы с другим сегментом того же дня), `409 OVERLAP_STILL_PRESENT` (только
+  `OVERLAPPING_SHIFT` — правка не устранила пересечение именованной пары, вся транзакция
+  откатывается).
+- Транзакция (17 шагов, `editAttendanceExceptionReason`): read-only `exceptionId`→`employeeId` →
+  `Employee FOR UPDATE` → `AttendanceException FOR UPDATE` (canonical order §8.1) → повторная
+  проверка status/type/target identity под локом → `Timesheet`/`TimesheetDraft FOR UPDATE` —
+  **задокументированное «второе» исключение из строгого возрастающего canonical order для
+  resolver-транзакций** (§8.5: единственное действие, откатывающееся от `AttendanceException`(7)
+  назад к позициям 5/6, а не вперёд к позиции 3/4, как остальные пять действий матрицы §11) →
+  повторная проверка DRAFT/RETURNED и `reportedProjectionState=SETTLED` →
+  `applyClockShiftFragmentReasonEdit` (общее ядро — создаёт `ClockShiftAdjustment`, мутирует живой
+  `TimesheetDraftSegment`, инкрементирует `TimesheetDraft.contentRevision`, breaks не трогаются) →
+  для `OVERLAPPING_SHIFT` — явная проверка `overlapExists` на названную пару, иначе откат → один
+  `UPDATE AttendanceException` (→`RESOLVED`, `resolvedByUserId`=**реальный** админ, никогда
+  `SYSTEM`) → **только затем** `resolveOverlapsForAffectedShifts` (§9.1a) для остальных потенциально
+  затронутых пар — порядок критичен: без него общий overlap-hook мог бы попытаться
+  `SYSTEM`-атрибутированно авто-разрешить ту же названную пару, гоняясь с этим явным человеческим
+  действием; защищено существующим `resolveOverlapTransition`'s `latestRow.status === 'OPEN'`-guard
+  БЕЗ единого изменения `lib/attendance-reported-projection.ts` → один `AuditEvent
+  (CLOCK_SHIFT_FRAGMENT_ADMIN_EDIT)` → COMMIT.
+- Audit: `CLOCK_SHIFT_FRAGMENT_ADMIN_EDIT`, `entityType=ATTENDANCE_EXCEPTION`,
+  `entityId=exceptionId`, `beforeValue={status:OPEN,type,fragmentId,clockShiftId}`,
+  `afterValue={status:RESOLVED,resolutionAction:REASON_EDIT,fragmentId,clockShiftId,changeType,
+  segmentId,startAt,endAt,siteId,workAreaId}`, `reason=нормализованная причина` — никогда GPS/raw
+  event payload/`payloadHash`/device-поля/request-тела. Ровно один `AuditEvent` на успешный вызов.
+- DoD: реальная многосессионная конкуренция (≥2 backend PID, `pg_stat_activity.
+  wait_event_type='Lock'`) подтверждена для: двух одновременных `REASON_EDIT` одного исключения
+  (ровно один `200`/один `409 EXCEPTION_ALREADY_RESOLVED`, ровно один `ClockShiftAdjustment`, ровно
+  один `AuditEvent`); `REASON_EDIT` vs worker `PATCH` того же employee/фрагмента (`Employee`-лок
+  сериализует, корректная before→after цепочка `ClockShiftAdjustment`, без потерянной правки);
+  `REASON_EDIT` vs ручной submit (оба порядка исхода проверены, без частичных данных); `REASON_EDIT`
+  vs сторонняя overlap-операция того же employee (именованная пара — реальный админ, несвязанная —
+  `SYSTEM`, коллизии атрибуции нет). Принудительный сбой после `ClockShiftAdjustment`/segment-правки
+  → полный откат (`contentRevision`, сегмент, `ClockShiftAdjustment`, resolution экземпляра — все
+  без изменений).
+
+#### `POST /api/foreman/attendance/exceptions/:exceptionId/edit`
+- **`[2026-08-18]` T7A.8B.4B — реализовано как безусловный fail-closed путь**, не полноценная
+  scope-ветка логики: `timesheet.draft.edit.exception` не выдана `FOREMAN` в v1 (owner-принятая
+  v1-рекомендация §12.4). Проверка CSRF → аутентификация → `hasPermission(...,
+  'timesheet.draft.edit.exception')` → всегда `false` для этой роли в текущей permission-матрице →
+  `403 FORBIDDEN` — до парсинга тела, до валидации `exceptionId` (malformed или well-formed UUID —
+  без разницы), до какого-либо чтения `AttendanceException`/`ClockShiftFragment`. Malformed JSON и
+  fabricated/несуществующий `exceptionId`, поданные одновременно, всё равно дают `403`, не
+  `400`/`404` — permission-гейт структурно недостижим этой ролью, поэтому не имеет смысла давать
+  сигнал о валидности тела/id раньше него.
 
 ## 10. Служебный агрегатор
 

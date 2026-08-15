@@ -154,9 +154,28 @@ FORCE_CLOSE_OPEN_SHIFT`** (`T7A_1_ATTENDANCE_CLOCK_DESIGN.md` §8.5/§9.7/§9.8/
 `resolve.all` (только `ADMIN`/`SUPER_ADMIN`)**, `resolve.assigned` (`FOREMAN`) на оба этих
 действия не распространяется структурно: foreman-роут отклоняет оба `403 FORBIDDEN` на уровне
 кода, на сыром теле запроса, до любой проверки scope/чтения target, независимо от того, держит ли
-вызывающий `resolve.assigned` или нет. Единственное оставшееся resolution-действие
-(`REASON_EDIT`) НЕ засеяно — `action` со значением `REASON_EDIT` → `400 VALIDATION_ERROR`, не
-временная заглушка.
+вызывающий `resolve.assigned` или нет. Шестое resolution-действие (`REASON_EDIT`) на этот
+эндпоинт НЕ добавлено — `action` со значением `REASON_EDIT` → по-прежнему `400
+VALIDATION_ERROR`; реализовано как отдельный endpoint/permission, §2.4d ниже.
+
+### 2.4d Attendance exception `REASON_EDIT` (T7A.8B.4B) — **`[2026-08-18] реализовано`**
+(`T7A_1_ATTENDANCE_CLOCK_DESIGN.md` §8.1/§8.5/§9.1a/§10.1-§10.3/§11/§12.4, `04_ADMIN_FIRST_API_
+CONTRACTS.md` §9.1d)
+
+Засеяна миграцией `20260818000000_seed_timesheet_draft_edit_exception_permission` — чистый DML,
+без изменений схемы (проверено прямым SQL — ровно 2 новых гранта: `ADMIN`+`SUPER_ADMIN`;
+`FOREMAN`/`WORKER` — ни одного; `SYSTEM` структурно не может держать роль). `REASON_EDIT` — шестое
+и последнее действие матрицы §11 — реализовано на отдельном endpoint (`POST .../exceptions/
+:exceptionId/edit`), не форма `action` на `.../resolve` (§2.4c) — требует **все три** permission
+одновременно: `attendance.exception.read.all`, `attendance.exception.resolve.all`,
+`timesheet.draft.edit.exception`. Это же право **не** даёт доступа к `PATCH
+/api/worker/timesheets/*/days/*` ни при каких обстоятельствах — тот маршрут по-прежнему гейтится
+исключительно `timesheet.draft.edit.own` против `employeeId` сессии, без единой строчки
+special-casing.
+
+| Permission | Держатели | Область | Ограничения | Причина | Аудит | Массовое |
+|---|---|---|---|---|---|---|
+| `timesheet.draft.edit.exception` | `ADMIN`, `SUPER_ADMIN` | вся компания, жёстко привязано к целевому origin-фрагменту, подтверждённому `resolveTargetFragmentId` (§12.4) | `POST /api/admin/attendance/exceptions/:exceptionId/edit` — обязателен вместе с `attendance.exception.read.all`+`.resolve.all`, отзыв любого из трёх → `403`; `POST /api/foreman/...` — permission НЕ выдана `FOREMAN` в v1, роут безусловно `403 FORBIDDEN` до парсинга тела/валидации `exceptionId`; никакого доступа к worker `PATCH` | нет | да (`CLOCK_SHIFT_FRAGMENT_ADMIN_EDIT`, без GPS/device-полей/payloadHash) | нет |
 
 | Permission | Держатели | Область | Ограничения | Причина | Аудит | Массовое |
 |---|---|---|---|---|---|---|
@@ -383,6 +402,8 @@ reactivate шаблона — нет утверждённого контракт
 | `/api/foreman/attendance/exceptions/:exceptionId` | GET | `attendance.exception.read.assigned` — **`[2026-08-14] реализовано`** |
 | `/api/admin/attendance/exceptions/:exceptionId/resolve` | POST | `attendance.exception.read.all` + `attendance.exception.resolve.all` — **`[2026-08-15] реализовано (DISMISS/ACKNOWLEDGE_AS_VALID/PAIR_ORPHAN_EVENTS/CONFIRM_SOURCE_ASSIGNMENT/FORCE_CLOSE_OPEN_SHIFT)`** |
 | `/api/foreman/attendance/exceptions/:exceptionId/resolve` | POST | `attendance.exception.read.assigned` + `attendance.exception.resolve.assigned` — **`[2026-08-15] реализовано (DISMISS/ACKNOWLEDGE_AS_VALID/PAIR_ORPHAN_EVENTS только — CONFIRM_SOURCE_ASSIGNMENT и FORCE_CLOSE_OPEN_SHIFT структурно недоступны, оба 403 FORBIDDEN)`** |
+| `/api/admin/attendance/exceptions/:exceptionId/edit` | POST | `attendance.exception.read.all` + `attendance.exception.resolve.all` + `timesheet.draft.edit.exception` — **`[2026-08-18] T7A.8B.4B реализовано (REASON_EDIT)`** |
+| `/api/foreman/attendance/exceptions/:exceptionId/edit` | POST | `timesheet.draft.edit.exception` (не выдана `FOREMAN` в v1) — **`[2026-08-18] реализовано, безусловный 403 до парсинга тела/валидации exceptionId`** |
 
 Эндпоинты домена `absence.*` (§2.3) **не входят в первый вертикальный срез** — permission-контракт
 определён полностью, но route/API contracts для создания/одобрения отсутствий спроектированы позже

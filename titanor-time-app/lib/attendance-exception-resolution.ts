@@ -93,11 +93,12 @@ function allowedActionsFor(type: string): string[] {
 // directly and so silently accepts date-only and timezone-less strings, interpreting the latter as
 // local time). FORCE_CLOSE_OPEN_SHIFT needs the stricter form because `explicitEndAt` is a
 // human-typed administrative timestamp with real payroll consequences — an ambiguous local-time
-// value must be rejected outright, not silently reinterpreted. Not reused/exported elsewhere;
+// value must be rejected outright, not silently reinterpreted. Exported for reuse by
+// lib/attendance-exception-edit.ts (REASON_EDIT's startAt/endAt have the identical requirement) —
 // parseIsoInstant's existing (looser) behavior is left untouched for its existing callers.
 const STRICT_ISO_UTC_OFFSET_PATTERN = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{1,9})?(Z|[+-]\d{2}:\d{2})$/;
 
-function parseStrictIsoInstant(value: unknown): Date | null {
+export function parseStrictIsoInstant(value: unknown): Date | null {
   if (typeof value !== 'string' || !STRICT_ISO_UTC_OFFSET_PATTERN.test(value)) {
     return null;
   }

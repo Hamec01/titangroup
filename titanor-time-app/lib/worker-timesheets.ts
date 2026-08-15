@@ -4,6 +4,7 @@ import { prisma } from '@/lib/prisma';
 import { createAuditEvent } from '@/lib/audit';
 import { helsinkiToday } from '@/lib/workers';
 import { effectiveReportedRangesBatch, resolveOverlapsForAffectedShifts, provenanceValuesEqual, type ProvenanceValues } from '@/lib/attendance-reported-projection';
+import { computeChangeType, buildClockShiftAdjustmentData } from '@/lib/clock-shift-fragment-edit';
 
 // docs/titanor-time/04_ADMIN_FIRST_API_CONTRACTS.md §9 — read-only timesheet/draft/version views
 // (ЭТАП 7 sub-task 3a). §9's ownership rule: "сервер проверяет, что этот Timesheet.employeeId
@@ -662,7 +663,7 @@ export async function patchWorkerTimesheetDay(
         const recorded: ProvenanceValues = { startAt: frag.recordedStartAt, endAt: frag.recordedEndAt, siteId: frag.siteId, workAreaId: frag.workAreaId, sourceAssignmentId: frag.sourceAssignmentId };
         adjustmentDrafts.push({
           clockShiftFragmentId: originId,
-          changeType: provenanceValuesEqual(after, recorded) ? 'RESTORED_TO_RECORDED' : 'EDITED',
+          changeType: computeChangeType(after, recorded),
           before: lastKnown,
           after,
           reason
@@ -694,25 +695,17 @@ export async function patchWorkerTimesheetDay(
       for (const adjustment of adjustmentDrafts) {
         const frag = fragmentsById.get(adjustment.clockShiftFragmentId)!;
         await tx.clockShiftAdjustment.create({
-          data: {
+          data: buildClockShiftAdjustmentData({
             clockShiftFragmentId: adjustment.clockShiftFragmentId,
             clockShiftId: frag.clockShiftId,
             employeeId: frag.employeeId,
             changeType: adjustment.changeType,
-            changedByUserId: actorUserId,
-            beforeStartAt: adjustment.before.startAt,
-            beforeEndAt: adjustment.before.endAt,
-            beforeSiteId: adjustment.before.siteId,
-            beforeWorkAreaId: adjustment.before.workAreaId,
-            beforeSourceAssignmentId: adjustment.before.sourceAssignmentId,
-            afterStartAt: adjustment.after?.startAt ?? null,
-            afterEndAt: adjustment.after?.endAt ?? null,
-            afterSiteId: adjustment.after?.siteId ?? null,
-            afterWorkAreaId: adjustment.after?.workAreaId ?? null,
-            afterSourceAssignmentId: adjustment.after?.sourceAssignmentId ?? null,
+            before: adjustment.before,
+            after: adjustment.after,
             reason: adjustment.reason,
+            changedByUserId: actorUserId,
             requestId
-          }
+          })
         });
       }
 
