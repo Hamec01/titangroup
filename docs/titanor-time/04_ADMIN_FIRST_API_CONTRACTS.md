@@ -1008,6 +1008,15 @@ Check In/Out/Switch Site пишут в outbox и синкаются через `
 
 Только чтение — мутация вынесена в отдельный §9.1c ниже (T7A.8B.1).
 
+**`[2026-08-18]` T7A.8C.1** — оба endpoint'а ниже (list и detail, admin и foreman) теперь имеют
+реального UI-потребителя: `01_SCREEN_MAP.md` `/admin/attendance/exceptions[/:exceptionId]` и
+`/foreman/attendance/exceptions[/:exceptionId]` (`app/{admin,foreman}/attendance/exceptions/`).
+Контракт ниже не менялся ни на йоту — UI-слайс переиспользует `parseExceptionListQuery`/
+`listAttendanceExceptions`/`getAttendanceExceptionDetail` напрямую как Server Components, без
+собственного fetch к этим HTTP-роутам и без второго filter/pagination/scope engine. `siteId`/
+`employeeId`/`payrollPeriodId` остаются полноценно поддержанными query-фильтрами (UI просто не даёт
+им picker — самих значений фильтр не теряет, включая при pagination/повторном submit формы).
+
 #### `GET /api/admin/attendance/exceptions`
 - Permission: `attendance.exception.read.all`
 - Query: `status`(`OPEN`\|`RESOLVED`\|`DISMISSED`, default `OPEN`), `type`(один из 14

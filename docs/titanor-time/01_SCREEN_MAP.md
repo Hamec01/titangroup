@@ -536,6 +536,45 @@ touch target ≥ 48px), `/foreman/*` — desktop-first с поддержкой �
 - API: `GET /api/admin/audit`
 - DoD: фильтрация по датам работает с UTC-хранением, отображение — в `Europe/Helsinki`
 
+#### `/admin/attendance/exceptions` 🟢 **`[2026-08-18] T7A.8C.1 реализовано (list foundation)`**
+- Роли: `ADMIN`, `SUPER_ADMIN` (`attendance.exception.read.all`, permission-check, не role-check)
+- Приоритет: desktop
+- Назначение: очередь `AttendanceException` — отдельная от `/admin/review-scopes` (тот аналог
+  `TimesheetReviewScope`); GPS/geofence/switch-site/overlap и т.п. аномалии самого clock-события
+  (`T7A_1_ATTENDANCE_CLOCK_DESIGN.md` §11)
+- Данные: `ExceptionListItem[]` через уже реализованный `listAttendanceExceptions` —
+  человекочитаемый тип/summary/статус/работник/объект/occurredAt/online-offline/GPS
+  verification (без координат)/payroll period, без scope-ограничения
+- Действия: фильтр `status`(default `OPEN`)/`type`/`from`/`to` (query string, форма сохраняет
+  состояние при submit и pagination); → карточка. `siteId`/`employeeId`/`payrollPeriodId` —
+  поддержанные API-фильтры без picker UI в этом слайсе, работают через прямой URL
+- Состояния: loading (`loading.tsx`); empty; invalid filter (`fieldErrors` inline, не падение);
+  access denied; обычный список; pagination (`totalItems`/`totalPages`)
+- Откуда: `/admin`-навигация (пункт «Attendance exceptions»)
+- Куда: `/admin/attendance/exceptions/[exceptionId]`
+- API: `GET /api/admin/attendance/exceptions` (T7A.8A, без изменений)
+- DoD: 390×844 — без horizontal overflow, строки схлопываются в карточки; keyboard — Tab доходит
+  до строки, виден focus; ноль запрещённых полей (координаты/device/payloadHash) в DOM/ответах
+
+#### `/admin/attendance/exceptions/[exceptionId]` 🟢 **`[2026-08-18] T7A.8C.1 реализовано`**
+- Роли: `ADMIN`, `SUPER_ADMIN`
+- Приоритет: desktop
+- Назначение: карточка исключения — только уже разрешённый `ExceptionDetail` DTO, ничего не
+  дозапрашивает. Read-only заметка «Resolution actions will be available in the next slice» для
+  `OPEN` вместо кнопок действий (T7A.8C.2, ещё не реализован) — ни одной нерабочей кнопки
+- Данные: `ExceptionDetail` — type/status/summary/employee/site/occurredAt/createdAt/payroll
+  period/`timesheet` (со ссылкой на `/admin/timesheets/:id`, если привязан)/clock event
+  metadata/`clockShift`/`relatedClockShift`/fragments/materialization state/allowlisted
+  `detail`/`resolvedAt`/`resolvedBy`/`resolutionNote` для terminal-статуса
+- Действия: только просмотр в этом слайсе
+- Состояния: loading; безопасный «not found» (malformed/missing/out-of-scope id — один и тот же
+  экран, без UUID-oracle)
+- Откуда: `/admin/attendance/exceptions`
+- API: `GET /api/admin/attendance/exceptions/:exceptionId` (T7A.8A, без изменений)
+- DoD: `latitude`/`longitude`/`ClockEventLocation`/`payloadHash`/`requestId`-как-бизнес-
+  данные/`deviceInstallationId`/`deviceSequence`/`sanitizedConflictingPayload`/raw `detail`
+  структурно не могут попасть на экран — их нет в самом типе DTO
+
 #### `/admin/users` 🟢 (частично — см. ⚪ ниже)
 - Роли: `ADMIN`, `SUPER_ADMIN`
 - Приоритет: desktop
@@ -921,11 +960,13 @@ FOREMAN_APPROVED` только когда все scope версии подтве
   `ADMIN`/`SUPER_ADMIN`-only, `FOREMAN` не получает ни одно из них; **`[2026-08-18]`**
   `REASON_EDIT` (T7A.8B.4B) — отдельный `POST .../exceptions/:exceptionId/edit`,
   `ADMIN`/`SUPER_ADMIN`-only, `FOREMAN` — безусловный `403`. **Все шесть resolution-действий §11
-  теперь реализованы — backend T7A.8B полностью завершён.** **Экрана для всего этого по-прежнему
-  нет** ни здесь, ни где-либо ещё — REASON_EDIT/остальные пять действий доступны только через API
-  (Postman/аналогичный клиент), не через UI. Будущий Exception Review UI — отдельный слайс
-  **T7A.8C**, ещё не спроектированный (не расширение этой страницы) — единственное, что остаётся
-  из T7A.8 после завершения T7A.8B.
+  теперь реализованы — backend T7A.8B полностью завершён.** **`[2026-08-18]` T7A.8C.1** — новый
+  read-only Exception Review UI: `/admin/attendance/exceptions[/:exceptionId]` и
+  `/foreman/attendance/exceptions[/:exceptionId]` (см. §2/§4 ниже) — список и карточка
+  `AttendanceException`, **не** расширение этой страницы и **не** та же сущность (см. предупреждение
+  выше — эта страница по-прежнему только про `TimesheetReviewScope.hasException`). Формы всех шести
+  resolution-действий по-прежнему недоступны из UI — только через API (Postman/аналогичный клиент) —
+  это T7A.8C.2, ещё не начат.
 
 #### `/foreman/review/[timesheetId]` ⚪
 - Роли: `FOREMAN`
@@ -1022,6 +1063,36 @@ FOREMAN_APPROVED` только когда все scope версии подтве
 - Данные: `ApprovalAction[]` где `reviewerUserId = текущий`
 - Действия: фильтр по периоду/работнику
 - API: `GET /api/foreman/history`
+
+#### `/foreman/attendance/exceptions` 🟢 **`[2026-08-18] T7A.8C.1 реализовано (list foundation)`**
+- Роли: `FOREMAN` (`attendance.exception.read.assigned`, permission-check, не role-check)
+- Приоритет: desktop
+- Назначение: очередь `AttendanceException` объектов прораба — **не путать** с
+  `/foreman/review/exceptions` (та — `TimesheetReviewScope.hasException`, другая сущность, см.
+  предупреждение там)
+- Данные: тот же `ExceptionListItem[]`, что у admin-версии, но через
+  `attendance.exception.read.assigned` scope (`getForemanSiteIds`, пересчитывается на каждый
+  request); `employeeId`-фильтр недоступен (как и в API)
+- Действия: те же фильтры `status`/`type`/`from`/`to`; → карточка
+- Состояния: те же, что у admin-версии, плюс отдельная empty-фраза, если у прораба сейчас нет ни
+  одного текущего объекта
+- Откуда: `/foreman` (ссылка «Go to attendance exceptions», отдельно от секции review queue)
+- Куда: `/foreman/attendance/exceptions/[exceptionId]`
+- API: `GET /api/foreman/attendance/exceptions` (T7A.8A, без изменений)
+- DoD: чужой объект никогда не появляется в списке; `siteId`-фильтр на чужой объект не расширяет
+  scope (пустой результат, не ошибка); dual-role `FOREMAN`+`WORKER` не видит собственные исключения
+
+#### `/foreman/attendance/exceptions/[exceptionId]` 🟢 **`[2026-08-18] T7A.8C.1 реализовано`**
+- Роли: `FOREMAN`
+- Приоритет: desktop
+- Назначение: карточка исключения — тот же `ExceptionDetail`, что у admin-версии, без ссылки на
+  `timesheet` (только статус текстом, без id) и без кнопок resolution-действий (та же заметка про
+  T7A.8C.2)
+- Данные: см. admin-версию выше
+- Состояния: loading; безопасный «not found» — единый для malformed/missing/out-of-scope id, own↔
+  foreign `OVERLAPPING_SHIFT` — чужая сторона остаётся `null`, экран не пытается её восстановить
+- Откуда: `/foreman/attendance/exceptions`
+- API: `GET /api/foreman/attendance/exceptions/:exceptionId` (T7A.8A, без изменений)
 
 ## 5. Диаграммы потоков
 

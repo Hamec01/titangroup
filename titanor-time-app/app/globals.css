@@ -1013,3 +1013,303 @@ button:disabled {
   gap: 12px;
   margin-top: 4px;
 }
+
+/* docs/titanor-time/01_SCREEN_MAP.md — /admin/attendance/exceptions,
+   /foreman/attendance/exceptions (T7A.8C.1). Additive only — reuses .setup-page/.setup-card/
+   .worker-card/.wk-section-title/.wk-empty/.login-error as the outer shell, same as every other
+   admin/foreman list+detail page. Desktop-first (row-per-exception grid), collapses to a stacked
+   card per row at narrow widths instead of a horizontally-scrolling table. */
+.exc-card {
+  max-width: 1100px;
+}
+
+.exc-filters {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: end;
+  gap: 12px;
+  margin: 4px 0 20px;
+  padding-bottom: 20px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.exc-filter-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 0.85rem;
+}
+
+.exc-filter-field label {
+  color: var(--text-soft);
+}
+
+.exc-filter-field select,
+.exc-filter-field input {
+  height: 38px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 4px;
+  background: rgba(7, 11, 17, 0.88);
+  color: var(--text);
+  padding: 0 10px;
+  min-width: 160px;
+}
+
+.exc-filter-field select:focus-visible,
+.exc-filter-field input:focus-visible {
+  outline: none;
+  border-color: rgba(76, 123, 192, 0.8);
+  box-shadow: 0 0 0 4px rgba(47, 94, 157, 0.18);
+}
+
+.exc-filter-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.exc-apply-button {
+  height: 38px;
+  padding: 0 16px;
+  border: none;
+  border-radius: 4px;
+  background: linear-gradient(135deg, var(--accent) 0%, var(--accent-light) 100%);
+  color: var(--white);
+  font-weight: 600;
+}
+
+.exc-apply-button:focus-visible {
+  outline: 2px solid var(--accent-light);
+  outline-offset: 2px;
+}
+
+.exc-reset-link {
+  font-size: 0.85rem;
+  color: var(--text-soft);
+  text-decoration: underline;
+}
+
+.exc-reset-link:focus-visible {
+  outline: 2px solid var(--accent-light);
+  outline-offset: 2px;
+}
+
+.exc-badge {
+  display: inline-block;
+  flex-shrink: 0;
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--text-soft);
+}
+
+.exc-badge-open {
+  color: #fcd34d;
+  background: rgba(252, 211, 77, 0.14);
+}
+
+.exc-badge-resolved {
+  color: #86efac;
+  background: rgba(134, 239, 172, 0.12);
+}
+
+.exc-badge-dismissed {
+  color: var(--text-soft);
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.exc-row-head {
+  display: grid;
+  grid-template-columns: 1.6fr 0.7fr 1fr 1fr 1fr 1fr 1fr;
+  gap: 12px;
+  padding: 0 14px;
+  margin-bottom: 6px;
+  color: var(--text-soft);
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.exc-list {
+  list-style: none;
+  margin: 0 0 20px;
+  padding: 0;
+  display: grid;
+  gap: 8px;
+}
+
+.exc-row {
+  display: grid;
+  grid-template-columns: 1.6fr 0.7fr 1fr 1fr 1fr 1fr 1fr;
+  gap: 12px;
+  align-items: center;
+  padding: 12px 14px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 6px;
+  background: rgba(7, 11, 17, 0.5);
+  text-decoration: none;
+  color: var(--text);
+}
+
+.exc-row:hover {
+  background: rgba(82, 130, 168, 0.12);
+}
+
+.exc-row:focus-visible {
+  outline: 2px solid var(--accent-light);
+  outline-offset: 2px;
+}
+
+.exc-cell {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.exc-cell-type {
+  display: grid;
+  gap: 2px;
+}
+
+.exc-type-name {
+  font-weight: 600;
+}
+
+.exc-summary {
+  color: var(--text-soft);
+  font-size: 0.82rem;
+}
+
+.exc-muted {
+  color: var(--text-soft);
+  font-size: 0.85rem;
+}
+
+.exc-field-label {
+  display: none;
+}
+
+.exc-pagination {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  font-size: 0.88rem;
+}
+
+.exc-pagination a {
+  color: var(--accent-light);
+}
+
+.exc-pagination a:focus-visible {
+  outline: 2px solid var(--accent-light);
+  outline-offset: 2px;
+}
+
+.exc-pagination-disabled {
+  color: var(--text-soft);
+  opacity: 0.5;
+}
+
+.exc-detail-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.exc-detail-header h1 {
+  margin: 0;
+}
+
+.exc-summary-lead {
+  margin: 4px 0 0;
+  color: var(--text-soft);
+}
+
+.exc-id-line {
+  margin: 0 0 8px;
+  font-family: ui-monospace, monospace;
+  font-size: 0.75rem;
+}
+
+.exc-detail-section {
+  padding-top: 16px;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.exc-detail-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px 24px;
+  margin: 10px 0 0;
+}
+
+.exc-detail-grid dt {
+  margin: 0;
+  color: var(--text-soft);
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.exc-detail-grid dd {
+  margin: 2px 0 0;
+}
+
+.exc-subsection-title {
+  margin: 16px 0 6px;
+  font-size: 0.8rem;
+  color: var(--text-soft);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.exc-fragment-list {
+  margin: 0;
+  padding-left: 18px;
+  font-size: 0.88rem;
+}
+
+/* Narrow screens (390px baseline): rows collapse from a grid into a stacked card, field labels
+   become visible inline, and the head row (which only carries desktop column headers) hides. */
+@media (max-width: 700px) {
+  .exc-row-head {
+    display: none;
+  }
+
+  .exc-row {
+    grid-template-columns: 1fr;
+    gap: 6px;
+  }
+
+  .exc-cell-type {
+    gap: 4px;
+  }
+
+  .exc-field-label {
+    display: block;
+    color: var(--text-soft);
+    font-size: 0.7rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+  }
+
+  .exc-detail-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .exc-filters {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .exc-filter-field select,
+  .exc-filter-field input {
+    min-width: 0;
+    width: 100%;
+  }
+}

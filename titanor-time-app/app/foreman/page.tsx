@@ -43,6 +43,13 @@ export default async function ForemanOverviewPage() {
             </Link>
           </>
         )}
+        <p className="wk-section-title">Clock event exceptions</p>
+        <p className="wk-empty">
+          GPS/geofence/switch-site/overlap anomalies from Check In/Out itself — separate from the timesheet review queue above.
+        </p>
+        <Link href="/foreman/attendance/exceptions" className="wk-action-button">
+          Go to attendance exceptions
+        </Link>
       </div>
     </main>
   );

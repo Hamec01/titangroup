@@ -1,6 +1,152 @@
 # Titanor Time — Implementation Status
 
-Обновлено: 2026-08-18 Europe/Helsinki (feat: add reason-backed attendance exception edits)
+Обновлено: 2026-08-18 Europe/Helsinki (feat: add attendance exception review UI)
+
+**T7A.8C.1 Attendance Exception Review UI — list + detail foundation — первый UI-слайс поверх
+полностью завершённого backend T7A.8A/T7A.8B.** Реализует `docs/titanor-time/01_SCREEN_MAP.md`
+`/admin/attendance/exceptions[/:exceptionId]` и `/foreman/attendance/exceptions[/:exceptionId]` —
+только просмотр очереди и карточки `AttendanceException`. **Формы resolution-действий
+(`DISMISS`/`ACKNOWLEDGE_AS_VALID`/`PAIR_ORPHAN_EVENTS`/`CONFIRM_SOURCE_ASSIGNMENT`/
+`FORCE_CLOSE_OPEN_SHIFT`/`REASON_EDIT`) НЕ реализованы этим слайсом — на detail-карточке
+только read-only заметка «Resolution actions will be available in the next slice», без единой
+рабочей кнопки — это будущий T7A.8C.2.** Backend T7A.8B не тронут вообще — `git status` подтверждает
+ноль изменений в каких-либо `lib/attendance-exception*.ts` или `.../resolve|edit/route.ts` файлах.
+
+**Не путать с уже существующей `/foreman/review/exceptions`** (`TimesheetReviewScope` с
+`hasException=true` — производный флаг табеля) — новая `/foreman/attendance/exceptions` показывает
+непосредственно `AttendanceException`, отдельную сущность; старая страница не изменена и её
+семантика не тронута.
+
+**Файлы**: пять новых — `lib/attendance-exceptions-ui.ts` (чистые presentation-хелперы: человеко-
+читаемые labels для 14 типов/3 статусов/gps-verification/channel/materialization/projection/
+operation-type, `formatDateTime` = тот же `toLocaleString()`-паттерн, что уже используют
+`GeofenceSection`/`ActivationCodeIssuer`, и `buildExceptionsQueryString` — единственная query-string
+логика, не второй filter/pagination engine), `components/attendance-exceptions/ExceptionsListView.tsx`
++ `ExceptionDetailView.tsx` (общие presentation-компоненты, дословно переиспользуемые admin- и
+foreman-страницами — единственное новое соглашение этого слайса: раньше в кодовой базе не было
+общей `components/`-директории вне `app/`, компоненты жили рядом со своей страницей; здесь список и
+карточка почти идентичны у admin/foreman, так что вынесение оправдано и явно решение, а не
+случайность), четыре новых `page.tsx` (+ по одному `loading.tsx` на каждый) под
+`app/admin/attendance/exceptions/` и `app/foreman/attendance/exceptions/`. Изменены: `app/admin/
+layout.tsx` (+1 пункт навигации «Attendance exceptions»), `app/foreman/page.tsx` (+ссылка «Go to
+attendance exceptions», явно подписана отдельно от секции review queue), `app/globals.css` (только
+additive `.exc-*`-классы в конце файла — существующие `.setup-page`/`.setup-card`/`.worker-card`/
+`.wk-*`-классы переиспользованы как есть для внешней рамки страниц, ничего в них не менялось).
+
+**Переиспользовано без изменений** (по требованию задания — «не создавать второй scope/filter/
+pagination engine»): `parseExceptionListQuery`, `listAttendanceExceptions`, `EXCEPTION_TYPE_VALUES`,
+`EXCEPTION_STATUS_VALUES`, `getAttendanceExceptionDetail`, `ForemanScope`, `getForemanSiteIds` — ни
+один экспорт `lib/attendance-exceptions.ts` не менялся.
+
+**Список**: фильтры `status`(default `OPEN`)/`type`/`from`/`to` — обычная GET-форма, хранят
+состояние в query string, submit сбрасывает `page` на 1. `siteId`/`employeeId`/`payrollPeriodId`
+остаются поддержанными API-фильтрами без picker UI в этом слайсе (по заданию) — но, в отличие от
+черновой версии этого слайса, **не игнорируются**, если пришли в URL: подробнее в разделе «Найденный
+и исправленный баг» ниже. Пагинация (`Previous`/`Next`, `page X of Y`) и повторный submit формы
+сохраняют абсолютно все активные фильтры, включая эти три через скрытые `<input type="hidden">`.
+Строка/карточка исключения — единый кликабельный `<a>` (`next/link`), не отдельные ссылки на ячейку —
+один tab-stop на строку, с явным `:focus-visible`-обводом. На ≤700px строка из CSS-grid превращается
+в вертикальный стек карточки с видимыми полевыми labels (`.exc-field-label`), без horizontal
+overflow; таблица-заголовок (`.exc-row-head`) скрыт на этой ширине. Состояния: loading (`loading.tsx`
+Suspense-boundary на каждом из 4 роутов), empty (обычный «нет совпадений» и отдельная фраза для
+foreman без текущих объектов), invalid filter (`parseExceptionListQuery`'s `fieldErrors` — рендерится
+inline, не падение), access denied (permission-check, не role-check — см. ниже), обычный список,
+корректная pagination с `totalItems`/`totalPages`.
+
+**Карточка**: рендерит исключительно уже реализованный `ExceptionDetail` DTO — ничего не
+дозапрашивает и не реконструирует. `latitude`/`longitude`/`ClockEventLocation`/`payloadHash`/
+`requestId`-как-бизнес-данные/`deviceInstallationId`/`deviceSequence`/
+`sanitizedConflictingPayload`/raw `detail` структурно не могут попасть на экран — их нет в самом
+типе `ExceptionDetail`, не только в JSX. `clockShift`/`relatedClockShift` рендерятся единообразно и
+для «ничего не привязано», и для own↔foreign redaction (`null`) — карточка не пытается различить эти
+два случая и не гадает содержимое чужой стороны, показывает одинаковое «Not available» в обоих.
+`timesheet`-ссылка — только для ADMIN (`/admin/timesheets/:id`, реально существующий роут), FOREMAN
+видит только статус текстом, без ссылки и без сырого id. `resolvedAt`/`resolvedBy`/`resolutionNote`
+показаны для terminal-статусов; для `OPEN` вместо них — read-only заметка про будущий слайс, без
+кнопок. Malformed/missing/out-of-scope `exceptionId` — один и тот же безопасный «not found» экран
+(UUID pre-validation перед вызовом `getAttendanceExceptionDetail`, как в существующих `route.ts`).
+
+**Авторизация**: обе admin-страницы и обе foreman-страницы проверяют `hasPermission(roles,
+'attendance.exception.read.{all|assigned}')` — **не** `roles.includes('ADMIN')`/`'FOREMAN')`, в
+отличие от более старых admin/foreman страниц в этой кодовой базе (`/admin/assignments`,
+`/foreman/review` и т.д., которые исторически проверяют только роль). Это осознанное, явно
+запрошенное заданием отличие от устоявшегося в проекте паттерна («не считать наличие роли
+достаточным, если permission отозван») — зафиксировано здесь, чтобы не выглядеть случайным
+расхождением. Foreman-scope (`getForemanSiteIds`+`excludeEmployeeId`) пересчитывается заново на
+каждый request, не кэшируется — тот же паттерн, что read API.
+
+**Найденный и исправленный баг (в собственном коде этого слайса, не в T7A.8B)**: в черновой версии
+обе list-страницы жёстко подставляли `siteId: null, payrollPeriodId: null` (и admin — ещё
+`employeeId: null`) при вызове `parseExceptionListQuery`, вместо чтения их из `searchParams` — то
+есть три документированных как «поддержанные API-фильтры» query-параметра тихо игнорировались любым
+прямым URL. Обнаружено собственным browser-тестом (`?siteId=<чужой>` для foreman вернул полный
+собственный список вместо пустого). Исправлено до коммита: оба `page.tsx` теперь читают все три
+параметра из `searchParams` и передают дальше без изменений; `ExceptionsListView` пробрасывает их
+через скрытые поля формы и в `pageHref` пагинации, чтобы un-UI-фильтр, once в URL, переживал и submit
+формы, и переход между страницами.
+
+**Тесты, реально выполненные на одноразовом PostgreSQL 16 + отдельном dev-сервере (Playwright,
+реальный Chromium)**: 77/77 browser-checks одним прогоном (после итеративной отладки — см. «Проблемы
+инфраструктуры тестирования» ниже) — ADMIN и SUPER_ADMIN видят список/карточку; WORKER получает
+access denied на обеих новых зонах; FOREMAN видит только исключения текущих объектов, чужой сайт не
+протекает в список; FOREMAN без объектов — empty state; FOREMAN с истёкшим-only и с future-only
+`ForemanAssignment` — та же пустая очередь (нет доступа); чужой `siteId` в query не расширяет scope
+(после фикса бага выше — корректно пустой результат); own↔foreign `OVERLAPPING_SHIFT` — своя сторона
+видна, чужая — единообразный «Not available», текст чужого сайта нигде не встречается ни в DOM, ни в
+перехваченных network-ответах; foreman B не может открыть карточку foreman A через чужой прямой URL
+(безопасный «not found», не 403/404-oracle); `OPEN` по умолчанию, переключение
+`OPEN`/`RESOLVED`/`DISMISSED`, `type`-фильтр, `from`/`to`-фильтр (в т.ч. будущая дата → пусто);
+невалидные `status`/`page` → inline field error, не падение; pagination с сохранением фильтров через
+`page=2`; безопасный 404 для malformed/несуществующего id; пустое состояние по комбинации фильтров;
+мобильный вьюпорт 390×844 без горизонтального overflow на списке и карточке, поля-labels видимы;
+десктопный вьюпорт — виден grid-заголовок таблицы; keyboard — Tab доходит до строки, виден focus-
+outline, Enter переходит на карточку; ноль application console errors (dev-only Turbopack HMR
+websocket шум явно отфильтрован и описан отдельно, не замаскирован тихо); DOM и перехваченные
+network-ответы не содержат ни одного из семи запрещённых терминов
+(`latitude`/`longitude`/`payloadHash`/`deviceInstallationId`/`deviceSequence`/
+`sanitizedConflictingPayload`/`ClockEventLocation`) ни в списке, ни в карточке; read-only заметка про
+будущий слайс — только для `OPEN`, без кнопок; для terminal-статуса — реальные `resolvedBy`/note;
+`timesheet`-ссылка есть у ADMIN, когда `timesheet` привязан.
+
+**Regression**: собственный HTTP-smoke (12/12) существующих T7A.8 `GET`/`resolve`/`edit` роутов —
+без единого изменения кода эти endpoints остаются полностью рабочими (list/detail 200, invalid
+`action` → 400 `VALIDATION_ERROR`, реальный `DISMISS` end-to-end, `edit`-роут admin достижим,
+foreman `edit` — безусловный 403, как и было). `scripts/_test-activation.ts` и
+`_test-corrections.ts` — зелёные на отдельной чистой БД без единого изменения.
+
+**Проблемы инфраструктуры тестирования, а не продукта** (задокументировано, чтобы не выглядеть
+скрытым багфиксом): (1) реальный логин-rate-limiter (`lib/rate-limit.ts`, 5 попыток/15 мин на
+identifier, in-memory) сработал в середине итерации теста, когда скрипт логинился заново в каждой из
+~15 секций для одного и того же admin-аккаунта — тест переписан на переиспользование одной сессии на
+персону; (2) `next/link`-переходы и клиентский редирект `/login` после успешного входа — SPA-навигация,
+не полная перезагрузка, поэтому `waitForLoadState('networkidle')` иногда резолвился раньше самого
+перехода — заменено на явный `waitForURL`; (3) Turbopack dev-режима компилирует каждый route на первый
+реальный запрос (до нескольких минут на самый первый заход) — решено прогревом всех четырёх новых
+роутов через `curl` перед запуском Playwright-сьюта.
+
+**Найден отдельный pre-existing баг вне охвата этого слайса, не исправлен**: `app/login/page.tsx`'s
+`<form>` не имеет `method`/`action` — клик по submit до завершения React-гидратации откатывается к
+нативному GET-сабмиту браузера, что кладёт `identifier`+`password` открытым текстом в URL (и, как
+следствие, в access log сервера — воспроизведено и зафиксировано в логе dev-сервера при тестировании
+этого слайса). Не относится к T7A.8C.1 (login page — не часть этого среза), не исправлено, чтобы не
+расширять scope молча — зафиксировано здесь как есть, кандидат на отдельную задачу.
+
+**Проверки**: `git diff --check`/`prisma validate`/`tsc --noEmit`/`npm run build` (все 4 новых
+роута + `loading.tsx`-boundaries видны в build-манифесте) — зелёные; `docker compose build app` —
+успешный build (`docker inspect` до/после подтверждает тот же image ID/`StartedAt`/
+`RestartCount=0`/healthy у `titanor-time-app-1`/`titanor-time-db-1`); `prisma migrate deploy` на
+чистом одноразовом PostgreSQL 16 — 54/54, повторный запуск — «No pending migrations to apply»; ни
+одной schema/permission-миграции этот слайс не добавляет. Preview `127.0.0.1:3244` и его БД не
+останавливались и не использовались для тестов — только собственные одноразовые контейнеры/dev-сервер
+на отдельном порту.
+
+**Остаётся вне этого слайса** (явно, по границам задачи): T7A.8C.2 — формы всех шести
+resolution-действий и реальные POST-вызовы к уже существующим `.../resolve`/`.../edit`; никакого
+нового API/migration/permission не добавлено; `attendance.gps.read.raw`/`attendance.conflict.read`
+не выданы; admin operational overview (T7A.9), scheduler/auto-submit (T7A.10), PWA/service worker —
+не начаты.
+
+---
 
 **T7A.8B.4B REASON_EDIT — новый завершённый write-слайс поверх T7A.8B.4A, шестое и последнее
 resolution-действие матрицы §11. С этим слайсом T7A.8B (backend attendance exception resolution)
