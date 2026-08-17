@@ -3,41 +3,11 @@
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import type { ReturnReasonView } from '@/lib/worker-timesheets';
+import { helsinkiDateAndTimeToUtcIso as helsinkiTimeToIso, utcIsoToHelsinkiTime as isoToHelsinkiTime } from '@/lib/helsinki-datetime';
 import { ReturnReasonsNotice } from '../../ReturnReasonsNotice';
 
 // docs/titanor-time/04_ADMIN_FIRST_API_CONTRACTS.md §0 — required on every mutating request.
 const CSRF_HEADER_VALUE = 'titanor-time';
-
-/** Mirrors lib/periods.ts's server-side helsinkiOffsetMinutesAt — Intl works the same in the browser. */
-function helsinkiOffsetMinutesAt(instant: Date): number {
-  const parts = new Intl.DateTimeFormat('en-US', {
-    timeZone: 'Europe/Helsinki',
-    hourCycle: 'h23',
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-    second: '2-digit'
-  }).formatToParts(instant);
-  const get = (type: string): number => Number(parts.find((p) => p.type === type)!.value);
-  const asIfUtc = Date.UTC(get('year'), get('month') - 1, get('day'), get('hour'), get('minute'), get('second'));
-  return Math.round((asIfUtc - instant.getTime()) / 60000);
-}
-
-/** `date` "YYYY-MM-DD" + `timeStr` "HH:MM" (Helsinki wall-clock) -> the correct UTC ISO instant, DST included. */
-function helsinkiTimeToIso(date: string, timeStr: string): string {
-  const [hh, mm] = timeStr.split(':').map(Number);
-  const naiveGuess = new Date(`${date}T00:00:00.000Z`);
-  naiveGuess.setUTCHours(hh, mm, 0, 0);
-  const offsetMinutes = helsinkiOffsetMinutesAt(naiveGuess);
-  return new Date(naiveGuess.getTime() - offsetMinutes * 60000).toISOString();
-}
-
-/** The reverse: a UTC ISO instant -> its Helsinki wall-clock "HH:MM". */
-function isoToHelsinkiTime(iso: string): string {
-  return new Intl.DateTimeFormat('en-GB', { timeZone: 'Europe/Helsinki', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).format(new Date(iso));
-}
 
 function assignmentKeyOf(siteId: string, workAreaId: string | null): string {
   return `${siteId}::${workAreaId ?? ''}`;

@@ -1091,6 +1091,16 @@ object/array-значения даже под разрешённым ключо�
 `DISMISS`/`ACKNOWLEDGE_AS_VALID`/`PAIR_ORPHAN_EVENTS`/`CONFIRM_SOURCE_ASSIGNMENT`/
 `FORCE_CLOSE_OPEN_SHIFT`**) — `lib/attendance-exception-resolution.ts`
 
+**`[2026-08-18]` T7A.8C.2** — этот endpoint (и §9.1d ниже) теперь имеет реального UI-потребителя:
+`ExceptionActionPanel` (`components/attendance-exceptions/`) на `/admin/attendance/exceptions/
+[exceptionId]` и `/foreman/attendance/exceptions/[exceptionId]`. **Контракт ниже не менялся ни на
+йоту** — каждая форма шлёт ровно тот же `POST`-запрос (тело/CSRF-заголовок/коды ошибок), что и
+любой прямой HTTP-клиент; `allowedActionsFor`/`checkForemanScope` (экспортированы из этого файла,
+логика не менялась) переиспользованы read-only `lib/attendance-exception-resolution-context.ts`
+для UI-превью списка доступных действий — сам `POST` всё так же независимо и полностью
+перепроверяет права/состояние внутри своей транзакции, UI-слой не является вторым authorization
+boundary.
+
 **`[2026-08-15]` T7A.8B.3 — `CONFIRM_SOURCE_ASSIGNMENT` добавлен, только на admin-роуте.**
 `ADMIN`/`SUPER_ADMIN` — единственные держатели (§12.1); `FOREMAN` это действие не получает вовсе —
 foreman-роут распознаёт `action="CONFIRM_SOURCE_ASSIGNMENT"` в теле и отвечает `403 FORBIDDEN` до

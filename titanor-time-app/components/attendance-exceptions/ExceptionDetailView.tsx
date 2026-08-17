@@ -1,3 +1,4 @@
+import type { ReactNode } from 'react';
 import Link from 'next/link';
 import type { ExceptionDetail, ClockShiftDetail } from '@/lib/attendance-exceptions';
 import {
@@ -28,9 +29,13 @@ interface Props {
   detail: ExceptionDetail;
   /** Non-null only for ADMIN when a timesheet is linked — FOREMAN never gets a clickable link. */
   timesheetHref: string | null;
+  /** T7A.8C.2 — the interactive resolution UI (ExceptionActionPanel), rendered only while the
+   * exception is still OPEN. The page always passes one; this component never builds it itself
+   * (it stays a pure display of the already-allowlisted ExceptionDetail DTO, same as T7A.8C.1). */
+  resolutionPanel: ReactNode;
 }
 
-export function ExceptionDetailView({ basePath, detail, timesheetHref }: Props) {
+export function ExceptionDetailView({ basePath, detail, timesheetHref, resolutionPanel }: Props) {
   const isTerminal = detail.status !== 'OPEN';
 
   return (
@@ -162,7 +167,7 @@ export function ExceptionDetailView({ basePath, detail, timesheetHref }: Props) 
             </div>
           </dl>
         ) : (
-          <p className="exc-muted">Resolution actions will be available in the next slice.</p>
+          resolutionPanel
         )}
       </section>
     </div>

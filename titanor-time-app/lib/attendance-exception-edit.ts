@@ -3,7 +3,7 @@ import { prisma } from '@/lib/prisma';
 import { createAuditEvent } from '@/lib/audit';
 import { resolveOverlapsForAffectedShifts, overlapExists } from '@/lib/attendance-reported-projection';
 import { actorDisplayName, UUID_PATTERN } from '@/lib/attendance-exceptions';
-import { parseStrictIsoInstant } from '@/lib/attendance-exception-resolution';
+import { parseStrictIsoInstant, allowedActionsFor } from '@/lib/attendance-exception-resolution';
 import { isSegmentOverlapViolation } from '@/lib/worker-timesheets';
 import { applyClockShiftFragmentReasonEdit, type ClockShiftFragmentEditValues } from '@/lib/clock-shift-fragment-edit';
 
@@ -262,29 +262,6 @@ export type ExceptionEditOutcome =
   | { kind: 'WORK_SEGMENT_OVERLAP' }
   | { kind: 'SITE_NOT_ASSIGNED'; siteId: string }
   | { kind: 'VALIDATION_ERROR'; fieldErrors: Record<string, string[]> };
-
-/** Full §11 domain matrix — used only to answer ACTION_NOT_APPLICABLE's informational
- * `allowedActions` when the exception's TYPE doesn't support REASON_EDIT at all. */
-const DOMAIN_ALLOWED_ACTIONS: Record<string, string[]> = {
-  GPS_NOT_VERIFIED: ['ACKNOWLEDGE_AS_VALID', 'DISMISS'],
-  OUTSIDE_GEOFENCE_CHECKOUT: ['ACKNOWLEDGE_AS_VALID', 'DISMISS'],
-  SITE_MISMATCH_CHECKOUT: ['ACKNOWLEDGE_AS_VALID', 'DISMISS', 'REASON_EDIT'],
-  DOUBLE_CHECK_IN: ['PAIR_ORPHAN_EVENTS', 'DISMISS'],
-  CHECKOUT_WITHOUT_OPEN_SHIFT: ['PAIR_ORPHAN_EVENTS', 'DISMISS'],
-  STALE_ASSIGNMENT: ['CONFIRM_SOURCE_ASSIGNMENT'],
-  GEOFENCE_VERSION_MISMATCH: ['ACKNOWLEDGE_AS_VALID', 'DISMISS'],
-  LATE_SYNC_AFTER_SUBMIT: [],
-  MISSING_CHECKOUT_AT_CUTOFF: ['FORCE_CLOSE_OPEN_SHIFT', 'DISMISS'],
-  EXCESSIVE_CLOCK_SKEW: ['ACKNOWLEDGE_AS_VALID', 'DISMISS', 'REASON_EDIT'],
-  CHECKOUT_CHRONOLOGY_ANOMALY: ['REASON_EDIT', 'DISMISS'],
-  EXCESSIVE_SHIFT_DURATION: ['ACKNOWLEDGE_AS_VALID', 'DISMISS', 'REASON_EDIT'],
-  PERIOD_BOUNDARY_SPAN: ['ACKNOWLEDGE_AS_VALID', 'DISMISS'],
-  OVERLAPPING_SHIFT: ['DISMISS', 'REASON_EDIT']
-};
-
-function allowedActionsFor(type: string): string[] {
-  return DOMAIN_ALLOWED_ACTIONS[type] ?? [];
-}
 
 function formatDate(date: Date): string {
   return date.toISOString().slice(0, 10);

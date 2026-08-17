@@ -1,6 +1,6 @@
 # Titanor Time — Implementation Status
 
-Обновлено: 2026-08-18 Europe/Helsinki (fix: prevent pre-hydration credential leakage)
+Обновлено: 2026-08-18 Europe/Helsinki (feat: add attendance exception resolution UI, T7A.8C.2)
 
 **AUTH SECURITY HOTFIX — утечка credentials через native GET submit до React hydration —
 подтверждена и исправлена.** `app/login/page.tsx`'s `<form>` не имел явных `method`/`action`;
@@ -80,6 +80,111 @@ inspect. Preview `127.0.0.1:3244` не останавливался, не исп
 
 ---
 
+**`[2026-08-18]` T7A.8C.2 Attendance Exception Resolution UI — второй и последний UI-слайс T7A.8C,
+поверх T7A.8C.1 (list/detail) и полностью завершённого backend T7A.8B.** Реализует все шесть
+resolution-действий (`DISMISS`/`ACKNOWLEDGE_AS_VALID`/`PAIR_ORPHAN_EVENTS`/
+`CONFIRM_SOURCE_ASSIGNMENT`/`FORCE_CLOSE_OPEN_SHIFT`/`REASON_EDIT`) на карточке `AttendanceException`
+из T7A.8C.1 — заменяет прежнюю read-only заметку-заглушку. **Публичный API не менялся ни на йоту**:
+каждая форма шлёт `POST` на уже существующие `.../attendance/exceptions/:id/resolve` и `.../edit`
+(T7A.8B), с тем же CSRF-заголовком и телом, что curl/Postman — новых permission/migration/endpoint
+нет.
+
+**Архитектура — read-only context-слой, не дублирующий backend-логику.** Новый
+`lib/attendance-exception-resolution-context.ts` (`getResolutionContext`, Server-only) вычисляет
+role/scope-отфильтрованный DTO: какие действия доступны, кандидаты для `PAIR`/`CONFIRM`,
+целевой `EmployeeOpenShift` для `FORCE_CLOSE`, редактируемые фрагменты для `REASON_EDIT`. Список
+допустимых действий берётся из **реально существующей** доменной матрицы — `allowedActionsFor`
+экспортирован из `lib/attendance-exception-resolution.ts` (была private) и переиспользован здесь
+и в `lib/attendance-exception-edit.ts` (который раньше держал байт-в-байт идентичную приватную
+копию той же матрицы — задублированность устранена попутно). Та же схема для FOREMAN-scope-проверки
+(`checkForemanScope`/`checkForemanScopeForPair`, тоже экспортированы, не продублированы). Контекст
+**никогда не создаёт `AuditEvent`**, ничего не блокирует (`FOR UPDATE`), пересчитывается заново при
+каждом `router.refresh()` — чисто advisory preview для UI, не источник авторизации: каждый `POST`
+самостоятельно и полностью перепроверяет права/состояние внутри своей же транзакции, как и раньше.
+Запрещённые для роли действия (FOREMAN: `CONFIRM_SOURCE_ASSIGNMENT`/`FORCE_CLOSE_OPEN_SHIFT`/
+`REASON_EDIT` — admin-only) **отсутствуют в самом RSC/DOM**, а не просто задизейблены кнопкой —
+подтверждено `grep`-проверкой HTML-ответа во всех 14 типах исключений на FOREMAN-роутах.
+
+**Client-слой** — новый `components/attendance-exceptions/ExceptionActionPanel.tsx`, один переиспо-
+льзуемый `useResolutionMutation`-хук на все шесть форм: синхронный `useRef`-гейт от двойного клика
+(взводится до первого `await`, второй клик до ре-рендера кнопки всё равно гасится), явное
+двухшаговое подтверждение (`ConfirmGate`, отдельный компонент) вместо `window.confirm`, human-
+readable маппинг кодов ошибок, `aria-live`-объявления для screen reader. Реконсиляция: `router.
+refresh()` при `403`/`404`/`409` (мир изменился с момента рендера — истёкшее право/исчезнувшая
+цель/чужая мутация) и при сетевом сбое (без авто-retry — пользователь явно решает, повторять ли),
+но не при `400 VALIDATION_ERROR` (дело в самом запросе, не в состоянии сервера).
+
+**DST-safe datetime для `FORCE_CLOSE_OPEN_SHIFT`/`REASON_EDIT`**: новый чистый (без Prisma/DB)
+`lib/helsinki-datetime.ts` — Europe/Helsinki wall-clock ↔ UTC через `Intl.DateTimeFormat`, ни
+единого `new Date(datetimeLocalValue).toISOString()` (это интерпретировало бы ввод в таймзоне
+браузера, не Хельсинки). Тем же модулем теперь пользуются `app/worker/.../DayEditor.tsx` и
+`app/admin/corrections/.../CorrectionDayEditor.tsx` — раньше каждый держал свою приватную
+byte-identical копию той же DST-логики; извлечение чисто механическое (подтверждено `git diff` —
+только импорт вместо объявления функции, тела не менялись).
+
+**Тесты — 137/137 PASS**, Playwright на одноразовом PostgreSQL 16 + отдельном dev-сервере: матрица
+действий по всем 14 типам исключений × ADMIN/FOREMAN (включая `grep`-подтверждение отсутствия
+admin-only кнопок в DOM); все шесть действий admin — успех, с проверкой `AttendanceException.status`,
+связанных строк (`ClockShift`/`EmployeeOpenShift`/`Timesheet…`) и ровно одного `AuditEvent`
+корректного типа/actor/reason в БД; три доступных FOREMAN-действия — аналогично; пустые
+candidate-состояния (task §4/§13: «пусто — это нормальное объяснённое состояние», не ошибка);
+двойной клик — ровно один `POST`; обрыв сети — без auto-retry, безопасная реконсиляция; две вкладки
+одновременно на одном исключении — ровно один `200`/один `409`, ровно один `AuditEvent`; три
+stale-context сценария (кандидат для `PAIR` перехвачен другим актёром, открытая смена уже закрыта
+реальным Check Out, право на resolve отозвано между рендером и подтверждением — во всех трёх
+исключение не мутировано, показана человеко-понятная ошибка); security/redaction (`sanitizedConflict
+ingPayload`/`ClockEventLocation`/GPS-координаты по-прежнему нигде не в ответе); DST зимой/летом
+(`FORCE_CLOSE_OPEN_SHIFT` в оба сезона даёт корректный UTC-инстант); мобильный вьюпорт 390×844;
+ноль лишних console-ошибок (за вычетом ожидаемых `409`/`403`/`net::ERR_FAILED` от намеренно
+провоцируемых конфликтных сценариев).
+
+**Найденные и исправленные по пути проблемы — все в тестовой инфраструктуре/seed-скрипте, ни одна
+в самом приложении**: (1) `waitForLoadState('networkidle')` ненадёжен сразу после клика,
+запускающего `fetch()`-мутацию — резолвится до реального завершения запроса (задокументированная
+особенность Playwright), из-за чего тестовый скрипт иногда рвал соединение до того, как сервер
+дописал ответ (`ECONNRESET` в логе dev-сервера) — заменено на явный `page.waitForResponse()` перед
+любым действием, читающим результат мутации; аналогично для `router.refresh()`'s собственного
+follow-up RSC-fetch — заменено на поллинг DOM вместо гадания с фиксированной задержкой.
+(2) Одноразовый scratch-seed-скрипт (`_seed-resolution-ui-test.ts`, не часть репозитория) держал
+несколько разных `PAIR_ORPHAN_EVENTS`-фикстур (основную, «пустую», race-сценарий) на одном общем
+employee — сам by-design read-only candidate-запрос (корректно) находил чужие orphan-события того
+же employee как «кандидатов», давая неверный count в тестах; исправлено выдачей каждой такой
+фикстуре отдельного employee — находка не в продукте, а в качестве тестовых данных. (3) Turbopack
+dev-режима иногда не подхватывал глубоко вложенные dynamic API routes сразу после `rsync`-копирования
+файлового дерева непосредственно перед стартом `next dev` — решено `rm -rf .next` + рестарт; чисто
+dev-tooling артефакт этой среды, не баг приложения.
+
+**Regression**: собственная 137-проверочная сьюта уже покрывает все T7A.8 `GET`/`resolve`/`edit`
+роуты сквозным образом; `scripts/_test-activation.ts`/`_test-corrections.ts` — зелёные на отдельной
+чистой БД (потребовалась отдельная БД: seed-скрипт этого слайса создаёт `PayrollPeriod`,
+перекрывающий по датам с тем, что создают эти smoke-тесты, — `ex_payroll_period_date_overlap`
+exclusion constraint).
+
+**Проверки**: `git diff --check`/`prisma validate`/`tsc --noEmit`/`npm run build`/
+`docker compose -f compose.titanor-time.yaml build app` — зелёные; `prisma migrate deploy` на чистом
+одноразовом PostgreSQL 16 — 54/54, повторный запуск — «No pending migrations to apply»; ни одной
+новой schema/permission-миграции этот слайс не добавляет. Production (`titanor-time-app-1`/
+`titanor-time-db-1`) — тот же image/StartedAt/RestartCount=0/healthy до и после, только read-only
+inspect. Preview `127.0.0.1:3244` не останавливался, не использовался для тестов.
+
+**Файлы**: новые — `lib/attendance-exception-resolution-context.ts`, `lib/helsinki-datetime.ts`,
+`components/attendance-exceptions/ExceptionActionPanel.tsx`; изменены — `lib/attendance-exception-
+resolution.ts` (экспорт уже существующих `allowedActionsFor`/`checkForemanScope`/
+`checkForemanScopeForPair`, без изменения их логики), `lib/attendance-exception-edit.ts` (убрана
+задублированная копия матрицы, теперь импортирует), `components/attendance-exceptions/
+ExceptionDetailView.tsx` (заглушка заменена на `resolutionPanel`-проп),
+`app/admin/attendance/exceptions/[exceptionId]/page.tsx` и `app/foreman/attendance/exceptions/
+[exceptionId]/page.tsx` (подключение `getResolutionContext`+`ExceptionActionPanel`),
+`app/worker/periods/[periodId]/hours/[date]/DayEditor.tsx` и `app/admin/corrections/
+[correctionRequestId]/days/[date]/CorrectionDayEditor.tsx` (DST-хелперы вынесены в общий модуль),
+`app/globals.css` (только добавления — новый блок `.exc-action-*`/`.exc-confirm-*`/`.exc-candidate-*`
+в конце файла, ни одно существующее правило не тронуто).
+
+**С этим слайсом T7A.8C объявляется завершённым целиком** (8C.1 — list/detail, 8C.2 — resolution-
+формы/context). **Следующий этап — T7A.9 (admin operational overview)**, ещё не начат.
+
+---
+
 **T7A.8C.1 Attendance Exception Review UI — list + detail foundation — первый UI-слайс поверх
 полностью завершённого backend T7A.8A/T7A.8B.** Реализует `docs/titanor-time/01_SCREEN_MAP.md`
 `/admin/attendance/exceptions[/:exceptionId]` и `/foreman/attendance/exceptions[/:exceptionId]` —
@@ -87,7 +192,8 @@ inspect. Preview `127.0.0.1:3244` не останавливался, не исп
 (`DISMISS`/`ACKNOWLEDGE_AS_VALID`/`PAIR_ORPHAN_EVENTS`/`CONFIRM_SOURCE_ASSIGNMENT`/
 `FORCE_CLOSE_OPEN_SHIFT`/`REASON_EDIT`) НЕ реализованы этим слайсом — на detail-карточке
 только read-only заметка «Resolution actions will be available in the next slice», без единой
-рабочей кнопки — это будущий T7A.8C.2.** Backend T7A.8B не тронут вообще — `git status` подтверждает
+рабочей кнопки — это будущий T7A.8C.2.** **`[2026-08-18]` Реализовано — см. запись T7A.8C.2 выше.**
+Backend T7A.8B не тронут вообще — `git status` подтверждает
 ноль изменений в каких-либо `lib/attendance-exception*.ts` или `.../resolve|edit/route.ts` файлах.
 
 **Не путать с уже существующей `/foreman/review/exceptions`** (`TimesheetReviewScope` с
@@ -220,7 +326,8 @@ access log сервера — воспроизведено и зафиксиро
 на отдельном порту.
 
 **Остаётся вне этого слайса** (явно, по границам задачи): T7A.8C.2 — формы всех шести
-resolution-действий и реальные POST-вызовы к уже существующим `.../resolve`/`.../edit`; никакого
+resolution-действий и реальные POST-вызовы к уже существующим `.../resolve`/`.../edit`
+(**`[2026-08-18]` реализовано — см. запись T7A.8C.2 выше); никакого
 нового API/migration/permission не добавлено; `attendance.gps.read.raw`/`attendance.conflict.read`
 не выданы; admin operational overview (T7A.9), scheduler/auto-submit (T7A.10), PWA/service worker —
 не начаты.

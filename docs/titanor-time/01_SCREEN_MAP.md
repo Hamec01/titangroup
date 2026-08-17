@@ -556,19 +556,26 @@ touch target ≥ 48px), `/foreman/*` — desktop-first с поддержкой �
 - DoD: 390×844 — без horizontal overflow, строки схлопываются в карточки; keyboard — Tab доходит
   до строки, виден focus; ноль запрещённых полей (координаты/device/payloadHash) в DOM/ответах
 
-#### `/admin/attendance/exceptions/[exceptionId]` 🟢 **`[2026-08-18] T7A.8C.1 реализовано`**
+#### `/admin/attendance/exceptions/[exceptionId]` 🟢 **`[2026-08-18] T7A.8C.1+T7A.8C.2 реализовано`**
 - Роли: `ADMIN`, `SUPER_ADMIN`
 - Приоритет: desktop
 - Назначение: карточка исключения — только уже разрешённый `ExceptionDetail` DTO, ничего не
-  дозапрашивает. Read-only заметка «Resolution actions will be available in the next slice» для
-  `OPEN` вместо кнопок действий (T7A.8C.2, ещё не реализован) — ни одной нерабочей кнопки
+  дозапрашивает. **`[2026-08-18]`** Для `OPEN` — read-only заметка-заглушка заменена реальными
+  формами всех шести resolution-действий (`ExceptionActionPanel`, T7A.8C.2), отфильтрованными
+  read-only `lib/attendance-exception-resolution-context.ts` по роли/scope; для terminal-статуса —
+  без изменений (`resolvedBy`/note)
 - Данные: `ExceptionDetail` — type/status/summary/employee/site/occurredAt/createdAt/payroll
   period/`timesheet` (со ссылкой на `/admin/timesheets/:id`, если привязан)/clock event
   metadata/`clockShift`/`relatedClockShift`/fragments/materialization state/allowlisted
-  `detail`/`resolvedAt`/`resolvedBy`/`resolutionNote` для terminal-статуса
-- Действия: только просмотр в этом слайсе
+  `detail`/`resolvedAt`/`resolvedBy`/`resolutionNote` для terminal-статуса; плюс (только `OPEN`)
+  `ResolutionContext` — допустимые действия/кандидаты для `PAIR`/`CONFIRM`/целевой open shift для
+  `FORCE_CLOSE`/редактируемые фрагменты для `REASON_EDIT`
+- Действия: **`[2026-08-18]`** `DISMISS`/`ACKNOWLEDGE_AS_VALID`/`PAIR_ORPHAN_EVENTS`/
+  `CONFIRM_SOURCE_ASSIGNMENT`/`FORCE_CLOSE_OPEN_SHIFT`/`REASON_EDIT` — каждая через `POST` на уже
+  существующие `.../resolve`/`.../edit` (T7A.8B, без изменений контракта), двухшаговое
+  подтверждение вместо `window.confirm`, `router.refresh()`-реконсиляция при устаревшем состоянии
 - Состояния: loading; безопасный «not found» (malformed/missing/out-of-scope id — один и тот же
-  экран, без UUID-oracle)
+  экран, без UUID-oracle); **`[2026-08-18]`** submitting/error/reconciled для каждой формы действия
 - Откуда: `/admin/attendance/exceptions`
 - API: `GET /api/admin/attendance/exceptions/:exceptionId` (T7A.8A, без изменений)
 - DoD: `latitude`/`longitude`/`ClockEventLocation`/`payloadHash`/`requestId`-как-бизнес-
@@ -964,9 +971,10 @@ FOREMAN_APPROVED` только когда все scope версии подтве
   read-only Exception Review UI: `/admin/attendance/exceptions[/:exceptionId]` и
   `/foreman/attendance/exceptions[/:exceptionId]` (см. §2/§4 ниже) — список и карточка
   `AttendanceException`, **не** расширение этой страницы и **не** та же сущность (см. предупреждение
-  выше — эта страница по-прежнему только про `TimesheetReviewScope.hasException`). Формы всех шести
-  resolution-действий по-прежнему недоступны из UI — только через API (Postman/аналогичный клиент) —
-  это T7A.8C.2, ещё не начат.
+  выше — эта страница по-прежнему только про `TimesheetReviewScope.hasException`).
+  **`[2026-08-18]` T7A.8C.2** — формы всех шести resolution-действий реализованы на карточке
+  исключения (см. `/admin/attendance/exceptions/[exceptionId]` и `/foreman/attendance/exceptions/
+  [exceptionId]` выше); **T7A.8C объявляется завершённым целиком**.
 
 #### `/foreman/review/[timesheetId]` ⚪
 - Роли: `FOREMAN`
@@ -1082,13 +1090,16 @@ FOREMAN_APPROVED` только когда все scope версии подтве
 - DoD: чужой объект никогда не появляется в списке; `siteId`-фильтр на чужой объект не расширяет
   scope (пустой результат, не ошибка); dual-role `FOREMAN`+`WORKER` не видит собственные исключения
 
-#### `/foreman/attendance/exceptions/[exceptionId]` 🟢 **`[2026-08-18] T7A.8C.1 реализовано`**
+#### `/foreman/attendance/exceptions/[exceptionId]` 🟢 **`[2026-08-18] T7A.8C.1+T7A.8C.2 реализовано`**
 - Роли: `FOREMAN`
 - Приоритет: desktop
 - Назначение: карточка исключения — тот же `ExceptionDetail`, что у admin-версии, без ссылки на
-  `timesheet` (только статус текстом, без id) и без кнопок resolution-действий (та же заметка про
-  T7A.8C.2)
-- Данные: см. admin-версию выше
+  `timesheet` (только статус текстом, без id). **`[2026-08-18]`** Три доступных прорабу действия —
+  `DISMISS`/`ACKNOWLEDGE_AS_VALID`/`PAIR_ORPHAN_EVENTS` (тот же `ExceptionActionPanel`, что у admin,
+  с `apiBasePath="/api/foreman/..."`); admin-only действия (`CONFIRM_SOURCE_ASSIGNMENT`/
+  `FORCE_CLOSE_OPEN_SHIFT`/`REASON_EDIT`) **отсутствуют в самом DOM/RSC**, не просто задизейблены —
+  подтверждено `grep`-проверкой HTML-ответа
+- Данные: см. admin-версию выше (без `REASON_EDIT`-фрагментов — эта форма прорабу недоступна)
 - Состояния: loading; безопасный «not found» — единый для malformed/missing/out-of-scope id, own↔
   foreign `OVERLAPPING_SHIFT` — чужая сторона остаётся `null`, экран не пытается её восстановить
 - Откуда: `/foreman/attendance/exceptions`

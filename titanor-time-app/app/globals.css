@@ -1313,3 +1313,186 @@ button:disabled {
     width: 100%;
   }
 }
+
+/* T7A.8C.2 — resolution action panel (ExceptionActionPanel). Additive only — reuses
+   .exc-filter-field/.exc-apply-button/.exc-reset-link/.exc-muted/.exc-detail-grid/
+   .exc-subsection-title/.exc-fragment-list from T7A.8C.1 for the plain field/list styling, adds
+   only the action-selector/confirm-step/candidate-picker/warning/error chrome that didn't exist
+   before. */
+.exc-filter-field textarea {
+  min-height: 72px;
+  resize: vertical;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 4px;
+  background: rgba(7, 11, 17, 0.88);
+  color: var(--text);
+  padding: 8px 10px;
+  font: inherit;
+}
+
+.exc-filter-field textarea:focus-visible,
+.exc-candidate-option input:focus-visible {
+  outline: 2px solid var(--accent-light);
+  outline-offset: 2px;
+}
+
+.exc-action-panel {
+  display: grid;
+  gap: 16px;
+}
+
+.exc-action-selector {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.exc-action-tab {
+  padding: 8px 14px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 999px;
+  background: rgba(7, 11, 17, 0.5);
+  color: var(--text);
+  font-size: 0.85rem;
+}
+
+.exc-action-tab:focus-visible {
+  outline: 2px solid var(--accent-light);
+  outline-offset: 2px;
+}
+
+.exc-action-tab-active {
+  background: rgba(82, 130, 168, 0.28);
+  border-color: var(--accent-light);
+  font-weight: 600;
+}
+
+.exc-action-tab-danger {
+  border-color: rgba(253, 164, 175, 0.5);
+  color: var(--error);
+}
+
+.exc-action-form-wrap {
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 6px;
+  padding: 16px;
+  background: rgba(7, 11, 17, 0.35);
+}
+
+.exc-action-form {
+  display: grid;
+  gap: 14px;
+}
+
+.exc-action-danger-button {
+  background: linear-gradient(135deg, #b91c1c 0%, #ef4444 100%);
+}
+
+.exc-confirm-box {
+  border: 1px solid rgba(253, 164, 175, 0.4);
+  border-radius: 6px;
+  padding: 12px 14px;
+  background: rgba(253, 164, 175, 0.08);
+  display: grid;
+  gap: 10px;
+}
+
+.exc-confirm-actions {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+}
+
+.exc-action-error {
+  border: 1px solid rgba(253, 164, 175, 0.4);
+  border-radius: 4px;
+  padding: 10px 12px;
+  background: rgba(253, 164, 175, 0.1);
+  color: var(--error);
+}
+
+.exc-field-error {
+  margin: -6px 0 0;
+  color: var(--error);
+  font-size: 0.85rem;
+}
+
+.exc-warning {
+  border: 1px solid rgba(252, 211, 77, 0.4);
+  border-radius: 4px;
+  padding: 10px 12px;
+  background: rgba(252, 211, 77, 0.1);
+  color: #fcd34d;
+  font-size: 0.9rem;
+}
+
+.exc-candidate-list {
+  border: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 8px;
+}
+
+.exc-candidate-list legend {
+  padding: 0 0 6px;
+  color: var(--text-soft);
+  font-size: 0.8rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.exc-candidate-option {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 4px;
+  background: rgba(7, 11, 17, 0.5);
+  font-size: 0.9rem;
+}
+
+.exc-empty-candidates {
+  color: var(--text-soft);
+  font-style: italic;
+}
+
+.exc-pair-named {
+  padding: 10px 12px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 4px;
+  background: rgba(7, 11, 17, 0.5);
+  display: grid;
+  gap: 2px;
+}
+
+.exc-field-label-inline {
+  color: var(--text-soft);
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.exc-sr-announce {
+  margin: 0;
+  color: var(--text-soft);
+  font-size: 0.82rem;
+  min-height: 1.2em;
+}
+
+@media (max-width: 700px) {
+  .exc-action-selector {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .exc-action-tab {
+    text-align: left;
+  }
+
+  .exc-confirm-actions {
+    flex-direction: column;
+    align-items: stretch;
+  }
+}

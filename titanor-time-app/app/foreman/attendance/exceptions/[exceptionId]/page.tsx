@@ -5,19 +5,25 @@ import { hasPermission } from '@/lib/permissions';
 import { helsinkiToday } from '@/lib/workers';
 import { getForemanSiteIds } from '@/lib/foreman-review';
 import { getAttendanceExceptionDetail, UUID_PATTERN } from '@/lib/attendance-exceptions';
+import { getResolutionContext } from '@/lib/attendance-exception-resolution-context';
 import { ExceptionDetailView } from '@/components/attendance-exceptions/ExceptionDetailView';
+import { ExceptionActionPanel } from '@/components/attendance-exceptions/ExceptionActionPanel';
 
 export const dynamic = 'force-dynamic';
 
 const BASE_PATH = '/foreman/attendance/exceptions';
+const API_BASE_PATH = '/api/foreman/attendance/exceptions';
 
 type RouteParams = { params: Promise<{ exceptionId: string }> };
 
-// docs/titanor-time/01_SCREEN_MAP.md `/foreman/attendance/exceptions/[exceptionId]` (T7A.8C.1).
-// Scope recomputed fresh on every request (never cached) — an expired/added ForemanAssignment
-// between the list and this detail view changes visibility immediately. Malformed id, missing
-// exception, and existing-but-out-of-scope exception all render the identical safe "not found"
-// card — no oracle. FOREMAN never gets a clickable timesheet link (ADMIN-only per the DTO
+// docs/titanor-time/01_SCREEN_MAP.md `/foreman/attendance/exceptions/[exceptionId]` (T7A.8C.1 list/
+// detail foundation, T7A.8C.2 adds the resolution action panel below — DISMISS/ACKNOWLEDGE_AS_VALID/
+// PAIR_ORPHAN_EVENTS only, never CONFIRM_SOURCE_ASSIGNMENT/FORCE_CLOSE_OPEN_SHIFT/REASON_EDIT, which
+// getResolutionContext itself already role-filters out — this page never even asks for those three
+// admin-only contexts). Scope recomputed fresh on every request (never cached) — an expired/added
+// ForemanAssignment between the list and this detail view changes visibility immediately. Malformed
+// id, missing exception, and existing-but-out-of-scope exception all render the identical safe "not
+// found" card — no oracle. FOREMAN never gets a clickable timesheet link (ADMIN-only per the DTO
 // contract) and the own<->foreign OVERLAPPING_SHIFT redaction is whatever
 // getAttendanceExceptionDetail already returned — this page never second-guesses a null.
 export default async function ForemanAttendanceExceptionDetailPage({ params }: RouteParams) {
@@ -38,8 +44,9 @@ export default async function ForemanAttendanceExceptionDetailPage({ params }: R
 
   const { exceptionId } = await params;
   let detail = null;
+  const today = helsinkiToday();
   if (UUID_PATTERN.test(exceptionId)) {
-    const ownSiteIds = await getForemanSiteIds(session.user.id, helsinkiToday());
+    const ownSiteIds = await getForemanSiteIds(session.user.id, today);
     detail = await getAttendanceExceptionDetail(exceptionId, { ownSiteIds, excludeEmployeeId: session.user.employeeId });
   }
 
@@ -56,9 +63,18 @@ export default async function ForemanAttendanceExceptionDetailPage({ params }: R
     );
   }
 
+  let resolutionPanel = null;
+  if (detail.status === 'OPEN') {
+    const canResolve = await hasPermission(session.user.roles, 'attendance.exception.resolve.assigned');
+    const context = canResolve
+      ? await getResolutionContext(exceptionId, { scope: { foremanUserId: session.user.id, today, excludeEmployeeId: session.user.employeeId }, canReasonEdit: false })
+      : null;
+    resolutionPanel = <ExceptionActionPanel apiBasePath={API_BASE_PATH} exceptionId={exceptionId} context={context} />;
+  }
+
   return (
     <main className="setup-page">
-      <ExceptionDetailView basePath={BASE_PATH} detail={detail} timesheetHref={null} />
+      <ExceptionDetailView basePath={BASE_PATH} detail={detail} timesheetHref={null} resolutionPanel={resolutionPanel} />
     </main>
   );
 }

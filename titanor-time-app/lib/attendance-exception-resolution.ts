@@ -75,7 +75,12 @@ function isPairApplicable(type: string): boolean {
   return PAIR_ALLOWED_TYPES.has(type as ExceptionTypeFilter);
 }
 
-function allowedActionsFor(type: string): string[] {
+/** §11's full six-action domain matrix, keyed by exception type — the single source of truth for
+ * "what could ever apply to this type", reused verbatim by lib/attendance-exception-edit.ts (whose
+ * own former private copy was deleted in favor of this export) and by
+ * lib/attendance-exception-resolution-context.ts (T7A.8C.2's read-only UI context layer) rather
+ * than any of them re-declaring the matrix as a second set of string literals. */
+export function allowedActionsFor(type: string): string[] {
   return DOMAIN_ALLOWED_ACTIONS[type as ExceptionTypeFilter] ?? [];
 }
 
@@ -284,7 +289,7 @@ export interface ForemanMutationScope {
   excludeEmployeeId: string | null;
 }
 
-interface ScopeCarrier {
+export interface ScopeCarrier {
   employeeId: string;
   siteId: string | null;
   clockEvent: { siteId: string } | null;
@@ -297,7 +302,7 @@ function collectScopeSiteIds(row: ScopeCarrier): string[] {
   return [row.siteId, row.clockEvent?.siteId, row.clockShift?.siteId, row.clockShiftFragment?.siteId, row.relatedClockShift?.siteId].filter((id): id is string => !!id);
 }
 
-type ScopeCheckOutcome = { kind: 'OK' } | { kind: 'NOT_FOUND' } | { kind: 'FOREMAN_SCOPE_INCOMPLETE' };
+export type ScopeCheckOutcome = { kind: 'OK' } | { kind: 'NOT_FOUND' } | { kind: 'FOREMAN_SCOPE_INCOMPLETE' };
 
 /** Core anyOwn/allOwn decision, factored out so PAIR_ORPHAN_EVENTS can reuse it against a UNION of
  * site ids (named exception's own five relations + both selected ClockEvent sites) instead of
@@ -320,7 +325,12 @@ function checkForemanScopeForSiteIds(scopeSiteIds: string[], employeeId: string,
   return { kind: 'OK' };
 }
 
-function checkForemanScope(row: ScopeCarrier, ownSiteIds: string[], excludeEmployeeId: string | null): ScopeCheckOutcome {
+/** Exported for lib/attendance-exception-resolution-context.ts (T7A.8C.2) — the read-only context
+ * layer re-derives the SAME "is every provable site the caller's own" decision to decide whether to
+ * offer any mutation UI at all, rather than re-implementing the anyOwn/allOwn rule a second time.
+ * The POST endpoints above remain the sole authority: this function's result is advisory for what
+ * the UI shows, never a substitute for the transaction's own re-check. */
+export function checkForemanScope(row: ScopeCarrier, ownSiteIds: string[], excludeEmployeeId: string | null): ScopeCheckOutcome {
   return checkForemanScopeForSiteIds(collectScopeSiteIds(row), row.employeeId, ownSiteIds, excludeEmployeeId);
 }
 
@@ -328,8 +338,9 @@ function checkForemanScope(row: ScopeCarrier, ownSiteIds: string[], excludeEmplo
  * with BOTH selected ClockEvent sites: visibility (anyOwn) is unaffected in a well-formed request
  * (the named exception is already linked to one of the two events, so its own scope already
  * contains at least one of these two site ids), but completeness (allOwn) now additionally
- * requires the OTHER event's site to be the caller's own current site too. */
-function checkForemanScopeForPair(namedRow: ScopeCarrier, checkInSiteId: string, checkOutSiteId: string, ownSiteIds: string[], excludeEmployeeId: string | null): ScopeCheckOutcome {
+ * requires the OTHER event's site to be the caller's own current site too. Exported for the same
+ * T7A.8C.2 context-layer reuse reason as checkForemanScope above. */
+export function checkForemanScopeForPair(namedRow: ScopeCarrier, checkInSiteId: string, checkOutSiteId: string, ownSiteIds: string[], excludeEmployeeId: string | null): ScopeCheckOutcome {
   const scopeSiteIds = [...collectScopeSiteIds(namedRow), checkInSiteId, checkOutSiteId];
   return checkForemanScopeForSiteIds(scopeSiteIds, namedRow.employeeId, ownSiteIds, excludeEmployeeId);
 }

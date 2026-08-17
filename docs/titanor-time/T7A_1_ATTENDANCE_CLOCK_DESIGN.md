@@ -4418,8 +4418,20 @@ Out, worker mobile UI, offline outbox/sync, materializer, scheduler и exception
 (`01_SCREEN_MAP.md`), только просмотр — `lib/attendance-exceptions-ui.ts` +
 `components/attendance-exceptions/` + четыре новых `page.tsx`, ноль изменений в самом backend
 T7A.8B. Проверено на одноразовом PostgreSQL 16 + Playwright: 77/77 browser-checks + 12/12 API
-regression smoke. **`8c.2` остаётся**: формы всех шести resolution-действий поверх уже
-существующих `.../resolve`/`.../edit`. |
+regression smoke. **`8c.2` Exception Resolution UI — `[2026-08-18] реализовано (T7A.8C.2)`**:
+формы всех шести resolution-действий поверх уже существующих `.../resolve`/`.../edit` —
+`lib/attendance-exception-resolution-context.ts` (read-only, role/scope-фильтрованный DTO,
+переиспользует экспортированные `allowedActionsFor`/`checkForemanScope` вместо дублирования
+матрицы §11) + `components/attendance-exceptions/ExceptionActionPanel.tsx` (двухшаговое
+подтверждение, `router.refresh()`-реконсиляция при `403`/`404`/`409`, без auto-retry при сетевом
+сбое) + новый `lib/helsinki-datetime.ts` (DST-safe wall-clock↔UTC для `FORCE_CLOSE_OPEN_SHIFT`/
+`REASON_EDIT`, тем же модулем теперь пользуются и `DayEditor.tsx`/`CorrectionDayEditor.tsx`).
+Контракт `.../resolve`/`.../edit` не менялся ни на йоту, ноль новых permissions/миграций. **С этим
+слайсом T7A.8C (8c.1+8c.2) объявляется завершённым целиком.** Проверено на одноразовом PostgreSQL
+16 + Playwright: 137/137 browser-checks (полная матрица действий по ролям с DOM-проверкой
+отсутствия admin-only кнопок у FOREMAN, все шесть действий admin + три foreman с DB/AuditEvent-
+подтверждением, пустые candidate-состояния, double-submit guard, network-fail reconciliation,
+two-tab race, три stale-context сценария, security/redaction, DST зима/лето, мобильный вьюпорт). |
 | 9 | Операционный обзор (T7A.9, roadmap) | **Владелец, утверждение 2026-08-12**: отдельная сложная страница для conflict/sequence-аномалий в первом пилоте не нужна — вместо неё `ADMIN`/`SUPER_ADMIN` видят **минимальный список/секцию** этих аномалий (`ClockEventIdConflict`, `DeviceEventReceipt(outcome=REJECTED_TERMINAL)`, `FIFO_LEDGER_INCONSISTENT`-класс `AuditEvent`) как часть общего операционного обзора (кто работает сейчас, GPS/sync/missing-checkout exceptions, recorded-vs-reported diff — уже описано в roadmap T7A.9); `FOREMAN` raw conflict payload не получает (`attendance.conflict.read`, §12.1, не выдаётся `FOREMAN`). Это решение закрывает бывший открытый пункт §18.2 — UI **не реализуется этим документом**, только фиксируется его будущий объём. Тест: доступность списка только `ADMIN`/`SUPER_ADMIN`, `403` для `FOREMAN`/`WORKER`, санитизация (никогда координаты/raw payload в списке). |
 | 10 | Auto-submit | Scheduler (§9.6), `CompanyAttendancePolicy` admin endpoints. Тест: идемпотентный повторный тик, debounce после late sync, `SKIPPED_NOT_ACTIONABLE` для human-returned табеля, атомарность attempt+version. |
 | 11 | Full E2E (T7A.10) | Полный чек-лист §17 ниже, iPhone/Safari + Android, restart/backup/restore. |
