@@ -52,8 +52,17 @@ export default function LoginPage() {
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  // AUTH SECURITY HOTFIX — identical `false` on the server render and on the first client render
+  // (before any effect runs), so this can never cause a hydration mismatch. Flips to `true` only
+  // once React has actually mounted and attached handleSubmit — see the submit button below. This
+  // is what closes the pre-hydration window itself, not just a courtesy UX touch.
+  const [hydrated, setHydrated] = useState(false);
 
   const t = LOGIN_STRINGS[locale];
+
+  useEffect(() => {
+    setHydrated(true);
+  }, []);
 
   useEffect(() => {
     setLocale(readStoredLocale());
@@ -155,7 +164,15 @@ export default function LoginPage() {
         ))}
       </div>
 
-      <form className="login-card" onSubmit={handleSubmit} aria-busy={loading}>
+      {/* AUTH SECURITY HOTFIX — method/action are a real, safe native fallback (POST never puts
+          the body in the URL/history, unlike the browser's GET default that applies when these
+          are omitted), for the window before handleSubmit is attached or if JS never loads at
+          all. The hydrated React path below still calls event.preventDefault() first and posts
+          JSON with the required CSRF header via fetch — method/action never fire once that runs.
+          A native fallback submission (no JS) hits this same endpoint without that header and
+          gets a safe 403 CSRF_REJECTED — it was never able to complete a login without JS before
+          this fix either, so nothing that used to work stops working. */}
+      <form className="login-card" method="post" action="/api/auth/login" onSubmit={handleSubmit} aria-busy={loading}>
         {/* eslint-disable-next-line @next/next/no-img-element -- single
             static local asset, not worth next/image's optimization
             pipeline (and its sharp dependency) for one small logo */}
@@ -196,7 +213,15 @@ export default function LoginPage() {
           </p>
         ) : null}
 
-        <button className="login-submit" type="submit" disabled={loading}>
+        {/* AUTH SECURITY HOTFIX — disabled until `hydrated` flips true, i.e. until React has
+            actually attached handleSubmit: with no enabled submit control, neither a click nor
+            Enter-key implicit submission can fire at all during that gap, so the native
+            method/action fallback above never actually gets exercised in the common case (JS
+            present, hydration just hasn't finished yet) — it only remains as the safety net for
+            JS-disabled clients, who could not complete a login natively before this fix either
+            (see the form's own comment). autoComplete/name/password-manager behavior on the
+            inputs themselves is untouched — only the submit control is gated. */}
+        <button className="login-submit" type="submit" disabled={loading || !hydrated}>
           {loading ? t.submitting : t.submit}
         </button>
       </form>

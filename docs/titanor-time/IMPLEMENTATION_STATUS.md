@@ -1,6 +1,84 @@
 # Titanor Time — Implementation Status
 
-Обновлено: 2026-08-18 Europe/Helsinki (feat: add attendance exception review UI)
+Обновлено: 2026-08-18 Europe/Helsinki (fix: prevent pre-hydration credential leakage)
+
+**AUTH SECURITY HOTFIX — утечка credentials через native GET submit до React hydration —
+подтверждена и исправлена.** `app/login/page.tsx`'s `<form>` не имел явных `method`/`action`;
+поля `identifier`/`password` имеют `name`. До завершения React-гидратации (или вовсе без JS)
+браузер мог выполнить обычный native GET submit формы — `/login?identifier=...&password=...` —
+кладя пароль открытым текстом в URL, browser history и access log сервера. Найден и
+воспроизведён (лог утечки сохранён) во время тестирования T7A.8C.1; исправлен отдельным,
+целевым hotfix, без изменения `POST /api/auth/login` контракта.
+
+**Исправление, два независимых слоя защиты**:
+1. **Безопасный native fallback** — `<form method="post" action="/api/auth/login">`. POST
+   никогда не кладёт тело в URL/query string/browser history, независимо от момента submit
+   (до, во время или без гидратации). Гидратированный React-путь по-прежнему делает
+   `event.preventDefault()` первым действием и уходит через `fetch` с JSON-телом и обязательным
+   `X-Requested-With`-заголовком — `method`/`action` формы никогда не срабатывают, пока это
+   работает. Native-фолбэк (без JS) бьёт в тот же `/api/auth/login`, но без CSRF-заголовка —
+   получает безопасный `403 CSRF_REJECTED`; логин без JS не работал и до этого фикса (просто
+   раньше — небезопасно), так что рабочая функциональность не потеряна.
+2. **Defense-in-depth против самого факта submit до гидратации** — новое состояние `hydrated`
+   (`useState(false)`, флип в `true` внутри `useEffect(() => {...}, [])`) гейтит `disabled` кнопки
+   submit: `disabled={loading || !hydrated}`. SSR и первый client-рендер идентичны (`hydrated`
+   всегда `false` до первого эффекта) — hydration mismatch невозможен структурно. Пока кнопка
+   `disabled`, ни click, ни Enter-key implicit submission не могут сработать вообще (браузер не
+   диспатчит submit без доступной non-disabled submit-кнопки) — native GET/POST fallback выше
+   остаётся чистым safety-net, а не тем, что реально срабатывает в обычном сценарии (JS есть,
+   гидратация просто ещё не завершилась). `name`/`autoComplete`/password-manager-атрибуты на
+   самих полях не тронуты — гейтится только submit-кнопка.
+
+**Проверены все формы с password-полями в приложении** (`grep type="password"` по `app/`):
+`app/login/page.tsx` (уязвима, исправлена, см. выше); `app/set-password/page.tsx` и
+`app/set-account-password/page.tsx` — **не уязвимы** и намеренно не тронуты: оба поля пароля в
+обеих формах не имеют атрибута `name` вовсе, поэтому native form submission (GET или иначе) их не
+сериализует — именованного password-поля, которое могло бы попасть в query string, там
+структурно нет. `/reset-password/*` — экранов ещё не существует (⚪ в `01_SCREEN_MAP.md`).
+
+**Тесты, реально выполненные на одноразовом PostgreSQL 16 + отдельном dev-сервере (Playwright,
+реальный Chromium)**: 22/22 PASS (после диагностики нескольких артефактов тестовой инфраструктуры,
+см. ниже) — **JavaScript отключён** (`javaScriptEnabled: false`): submit-кнопка никогда не
+становится кликабельной, URL остаётся ровно `/login` без единого query-параметра, ни один
+navigation-entry не содержит пароль, access log не содержит ни `GET .../login?identifier=`, ни
+сырой пароль. **Искусственно задержанная гидратация** (delay ровно одного JS-чанка страницы
+логина на 3с, `waitUntil:'commit'` + прямой DOM-`click()` в обход собственных wait-эвристик
+Playwright): кнопка подтверждённо `disabled` сразу после commit, прямой click по ней не производит
+навигации, access log чист; после завершения гидратации та же форма нормально логинится. **Обычный
+JavaScript**: ADMIN login кнопкой, WORKER login клавишей Enter, неверный пароль — обычная inline-
+ошибка (форма остаётся на `/login`), rapid double-click отправляет ровно один `POST
+/api/auth/login` (второй клик безопасно проглочен существующим `loading`-гейтом), `autoComplete`/
+`name` на обоих полях не изменились, ноль console/hydration errors. Отдельно проверено:
+`Referer`-заголовок всех последующих запросов после логина — всегда чистый `http://.../login` без
+query string; `AuditEvent`-строки `LOGIN_SUCCEEDED`/`LOGIN_FAILED` — `reason`/`beforeValue`/
+`afterValue` пустые, ни один пароль ни в каком поле (прямой SQL-запрос к одноразовой БД).
+
+**Проблемы тестовой инфраструктуры, обнаруженные и решённые по пути (не имеющие отношения к самому
+фиксу)**: (1) обращение к dev-серверу через `127.0.0.1` (а не `localhost`) триггерит Next.js/
+Turbopack's `allowedDevOrigins`-защиту — HMR WebSocket блокируется, и в этой конкретной связке
+dev-режима это полностью останавливает клиентскую гидратацию (не только live-reload) — переключение
+тестового клиента на `localhost` устранило проблему; это чисто dev-инструментальное поведение
+Next.js, не имеет отношения к продакшену и не является багом приложения. (2) искусственная задержка
+сетевого ответа СРАЗУ всех `_next/static/**/*.js`-чанков (а не одного конкретного) компаундится в
+непредсказуемо долгую суммарную задержку из-за десятков мелких Turbopack-чанков и вдобавок сбивает
+порядок HMR/Fast-Refresh bootstrap, из-за чего последующие `page.fill()`/`page.click()` зависали
+неопределённо — решено точечной задержкой ровно одного named-чанка (`app_login_page_tsx*.js`) и
+прямым `page.evaluate()`-кликом вместо высокоуровневых Playwright-хелперов для pre-hydration
+проверки. (3) реальный login-rate-limiter (`lib/rate-limit.ts`, 5 попыток/15 мин на identifier,
+in-memory) исчерпался у тестового admin-аккаунта во время итеративной отладки delayed-hydration
+сценария — решено переносом всех разведывательных/отладочных запусков на отдельные throwaway-
+аккаунты, оставляя `authfix_admin`/`authfix_worker` нетронутыми для финального прогона.
+
+**Проверки**: `git diff --check`/`prisma validate`/`tsc --noEmit`/`npm run build` (`/login`
+по-прежнему в build-манифесте, статически пререндерится, как и раньше) — зелёные;
+`scripts/_test-activation.ts`/`_test-corrections.ts` — зелёные на отдельной чистой БД без единого
+изменения (auth-смежная регрессия; `POST /api/auth/login` сам контракт не менялся — новых
+`schema`/`migration`/`permission`/API-изменений нет). Production (`titanor-time-app-1`/
+`titanor-time-db-1`) — тот же image/StartedAt/RestartCount=0/healthy до и после, только read-only
+inspect. Preview `127.0.0.1:3244` не останавливался, не использовался для тестов. Изменён ровно
+один файл — `titanor-time-app/app/login/page.tsx`.
+
+---
 
 **T7A.8C.1 Attendance Exception Review UI — list + detail foundation — первый UI-слайс поверх
 полностью завершённого backend T7A.8A/T7A.8B.** Реализует `docs/titanor-time/01_SCREEN_MAP.md`
@@ -124,12 +202,13 @@ identifier, in-memory) сработал в середине итерации т�
 реальный запрос (до нескольких минут на самый первый заход) — решено прогревом всех четырёх новых
 роутов через `curl` перед запуском Playwright-сьюта.
 
-**Найден отдельный pre-existing баг вне охвата этого слайса, не исправлен**: `app/login/page.tsx`'s
-`<form>` не имеет `method`/`action` — клик по submit до завершения React-гидратации откатывается к
-нативному GET-сабмиту браузера, что кладёт `identifier`+`password` открытым текстом в URL (и, как
-следствие, в access log сервера — воспроизведено и зафиксировано в логе dev-сервера при тестировании
-этого слайса). Не относится к T7A.8C.1 (login page — не часть этого среза), не исправлено, чтобы не
-расширять scope молча — зафиксировано здесь как есть, кандидат на отдельную задачу.
+**Найден отдельный pre-existing баг вне охвата этого слайса**: `app/login/page.tsx`'s `<form>` не
+имело `method`/`action` — клик по submit до завершения React-гидратации откатывался к нативному
+GET-сабмиту браузера, что клало `identifier`+`password` открытым текстом в URL (и, как следствие, в
+access log сервера — воспроизведено и зафиксировано в логе dev-сервера при тестировании этого
+слайса). Не относилось к T7A.8C.1 (login page — не часть этого среза), сознательно не исправлено
+здесь, чтобы не расширять scope молча — зафиксировано как кандидат на отдельную задачу.
+**`[2026-08-18]` Исправлено отдельным security hotfix — см. запись ниже.**
 
 **Проверки**: `git diff --check`/`prisma validate`/`tsc --noEmit`/`npm run build` (все 4 новых
 роута + `loading.tsx`-boundaries видны в build-манифесте) — зелёные; `docker compose build app` —
