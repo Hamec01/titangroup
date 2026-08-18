@@ -5248,6 +5248,43 @@ heartbeat-файл, вычисляет возраст `lastTickCompletedAt` от
 скрипт напрямую (`CMD npx tsx scripts/attendance-scheduler-healthcheck.ts`) — не создаёт и не
 открывает никакого сетевого порта/HTTP-сервера.
 
+#### Follow-up: heartbeat completion timestamp + abort-listener leak (2026-08-18)
+
+**Баг 1 — root cause.** `runOneTickSafely` вызывало `writeHeartbeat(startedAt)` — передавало момент
+**начала** тика, не момент его завершения, хотя `HeartbeatContent.lastTickCompletedAt` по контракту
+(и по имени поля) обязано означать именно completion instant. Для тика короче health-stale-window
+разница не была заметна (оба момента попадают в одно и то же "свежее" окно), но для тика ДОЛЬШЕ
+stale-window это давало ложный unhealthy сразу после полностью успешного завершения — healthcheck
+вычислял возраст от неправильной точки отсчёта. **Исправление**: `completedAt = new Date()` берётся
+только ПОСЛЕ реального разрешения `await tick(...)`, именно этот момент передаётся в
+`writeHeartbeat`; `startedAt` остаётся только для поля `startedAt` structured-лога (где оно и должно
+означать начало) и для вычисления `durationMs`. На rejected-пути (top-level ошибка)
+`writeHeartbeat` не вызывается вообще — не изменилось.
+
+**Баг 2 — root cause.** `sleep(ms, signal)` регистрировало `signal.addEventListener('abort', ...,
+{once:true})` на каждый вызов, но снятие слушателя происходило только через сам `{once:true}` —
+то есть только если abort РЕАЛЬНО произошёл. На обычном (не-abort) пути, когда `setTimeout` просто
+истекает сам по себе, слушатель никогда не вызывался и, следовательно, никогда не снимался
+`{once:true}`-механизмом. Поскольку scheduler использует ОДИН долгоживущий `AbortController`
+(`shutdownController`, создан один раз на весь процесс) и вызывает `sleep` заново на каждом
+межтиковом интервале, каждый обычный (не прерванный) цикл оставлял один "мёртвый" слушатель на
+одном и том же signal — за N интервалов накапливалось N слушателей, в конце концов вызывая
+`MaxListenersExceededWarning` у долгоживущего процесса. **Исправление**: `sleep` теперь явно снимает
+свой собственный `abort`-слушатель в ветке нормального `setTimeout`-завершения (до `resolve()`), а
+не полагается только на `{once:true}` — та ветка остаётся как defense-in-depth для abort-случая, но
+не единственный механизм очистки. Оба исхода (normal timeout, abort) теперь оставляют ровно ноль
+слушателей на signal.
+
+**Тестируемость.** `sleep`/`resolveIntervalSecondsOrExit`/собственно один-тик-исполнение вынесены из
+`scripts/attendance-auto-submit-scheduler.ts` в новый `lib/attendance-scheduler-runtime.ts`
+(`runOneTickCore`, dependency-injected: принимает сам tick-callback, heartbeat-writer, logger) —
+позволяет тестировать `sleep`'s listener-lifecycle (25+ циклов) и heartbeat completion-semantics
+(долгий/rejected тик) напрямую, in-process, без реального 30–3600s ожидания и без второго процесса.
+`sleep` сам по себе не содержит production-диапазона — только `resolveIntervalSecondsOrExit`
+по-прежнему жёстко проверяет `[30, 3600]`, это не ослаблено и не обойдено этим рефакторингом; сам
+scheduler-скрипт (`scripts/attendance-auto-submit-scheduler.ts`) стал тонкой связывающей обвязкой
+вокруг этих примитивов, поведение по отношению к production не изменилось.
+
 ### 7. Policy UI retry/idempotency semantics
 
 Клиентская форма (`/admin/attendance/policy`) держит один "attempt"-объект на попытку Save —

@@ -1,6 +1,78 @@
 # Titanor Time — Implementation Status
 
-Обновлено: 2026-08-18 Europe/Helsinki (feat: add attendance scheduler and policy UI)
+Обновлено: 2026-08-18 Europe/Helsinki (fix: correct scheduler heartbeat lifecycle)
+
+**`[2026-08-18]` T7A.10B follow-up — fix(time): correct scheduler heartbeat lifecycle.** Исправляет
+два дефекта в scheduler runtime, найденные ПОСЛЕ T7A.10B (запись ниже), до начала T7A.10C (по-прежнему
+не начат).
+
+**Баг 1 — heartbeat хранил start time, а не completion time.** `runOneTickSafely` вызывало
+`writeHeartbeat(startedAt)` — момент НАЧАЛА тика — хотя `lastTickCompletedAt` по контракту обязано
+быть моментом завершения. Для тика короче health-stale-window разница была незаметна; для тика
+дольше — давало ложный unhealthy сразу после полностью успешного завершения (healthcheck вычислял
+возраст от неправильной точки отсчёта). **Исправление**: `completedAt = new Date()` берётся только
+ПОСЛЕ реального разрешения tick-вызова, именно он передаётся в `writeHeartbeat`; `startedAt`
+остаётся только для поля `startedAt` в structured-логе и для `durationMs`. На rejected-пути
+(top-level ошибка) heartbeat по-прежнему не обновляется вообще.
+
+**Баг 2 — утечка `abort`-слушателя в `sleep()`.** `signal.addEventListener('abort', ...,
+{once:true})` снимался только если abort реально произошёл — на обычном (не-abort) пути, когда
+`setTimeout` истекает сам, слушатель никогда не снимался. Поскольку scheduler использует ОДИН
+долгоживущий `AbortController` на весь процесс и вызывает `sleep` на каждом межтиковом интервале,
+каждый обычный цикл оставлял один "мёртвый" слушатель — за много интервалов накапливалось много
+слушателей, в итоге `MaxListenersExceededWarning`. **Исправление**: `sleep` явно снимает свой
+`abort`-слушатель в ветке нормального `setTimeout`-завершения (не полагается только на
+`{once:true}`, который остался как defense-in-depth для самого abort-случая). Оба исхода (normal
+timeout, abort) теперь оставляют ровно ноль слушателей.
+
+**Рефакторинг для тестируемости**: `sleep`/`resolveIntervalSecondsOrExit`/`runOneTickCore`
+(dependency-injected: принимает tick-callback, heartbeat-writer, logger) вынесены в новый
+`lib/attendance-scheduler-runtime.ts` — позволяет тестировать listener-lifecycle (25+ циклов) и
+heartbeat completion-semantics (долгий/rejected тик) напрямую, in-process, без реального
+30–3600-секундного ожидания. `sleep` сам по себе не содержит production-диапазона; production
+enforcement `[30, 3600]` в `resolveIntervalSecondsOrExit` не ослаблен и не обойдён.
+`scripts/attendance-auto-submit-scheduler.ts` стал тонкой связывающей обвязкой вокруг этих
+примитивов — поведение по отношению к production не изменилось.
+
+**Тесты** (тот же disposable PostgreSQL 16 паттерн, реальные scheduler-процессы, никогда мок):
+
+- **11/11** — 30 последовательных normal sleep-циклов на одном `AbortSignal`: listener count (через
+  `node:events`' `getEventListeners`) возвращается к 0 после каждого цикла, ноль
+  `MaxListenersExceededWarning`; abort во время sleep — promise разрешается ровно один раз, timer не
+  срабатывает повторно, listener снят; уже aborted signal — немедленный resolve, listener не
+  добавляется вовсе.
+- **15/15** — `runOneTickCore` с dependency-injected fakes: долгий (искусственно задержанный) тик —
+  heartbeat-writer вызван ровно один раз, `completedAt` близок к реальному моменту завершения (не к
+  началу), `durationMs` отражает реальную задержку; heartbeat-файл не меняется, пока тик ещё
+  выполняется (прямая проверка через `readHeartbeat()` из середины tick-callback'а); реальный
+  healthcheck-скрипт сразу после завершения — healthy; rejected (top-level ошибка) тик — heartbeat
+  НЕ обновлён, safe log с стабильным `errorCode`, ни фрагмента сырого сообщения ошибки в логе;
+  следующий успешный тик снова обновляет heartbeat.
+- **9/9** — реальный scheduler-процесс: несколько нормальных tick-циклов (immediate + interval),
+  затем `SIGTERM` — процесс завершается `exit(0)`, shutdown прерывает текущий sleep быстро (не
+  дожидается остатка интервала), новых тиков после сигнала нет, `stopped`-лог только после
+  `prisma.$disconnect()` в коде, ноль `MaxListenersExceededWarning` за весь прогон.
+- **24/24** — существующая scheduler-регрессия (immediate tick; no-overlap по реальным
+  `startedAt`/`durationMs`; top-level DB failure → safe log + heartbeat никогда не пишется +
+  healthcheck unhealthy; heartbeat/healthcheck healthy после реального тика; restart не создаёт
+  дубль version/attempt; **две реальные scheduler-реплики** → одна version/один attempt; T7A.10A
+  manual-race фикс остаётся исправленным через реальный scheduler; blanket UUID-scan логов — ноль
+  совпадений) — все по-прежнему зелёные после рефакторинга.
+- **4/4** — Policy UI smoke (ADMIN просмотр+сохранение, DB-подтверждение, ноль console errors) — не
+  задет, ни один файл `app/admin/attendance/policy`/`components/attendance-policy` не менялся.
+
+**Технические проверки**: `git diff --check`, `prisma validate` (схема не менялась), `tsc --noEmit`,
+`npm run build` (изолированная copy), `docker compose -f compose.titanor-time.yaml config --quiet` —
+все чисто. Preview `127.0.0.1:3244` — `200`/`200` до и после, не останавливался. Production
+(`titanor-time-app-1`/`titanor-time-db-1`) — `StartedAt`/`RestartCount=0`/`image` без изменений, не
+пересобирался и не перезапускался; production scheduler не запускался. Изменены только два файла:
+`titanor-time-app/scripts/attendance-auto-submit-scheduler.ts` (переписан как тонкая обвязка) и
+новый `titanor-time-app/lib/attendance-scheduler-runtime.ts`. Schema/migrations/permissions/Compose
+topology/policy API/UI не менялись.
+
+**T7A.10C (полный pilot E2E) по-прежнему не начат этим коммитом.**
+
+---
 
 **`[2026-08-18]` T7A.10B Permanent Attendance Scheduler + Admin Policy UI — новый завершённый слайс
 поверх полностью завершённого T7A.10A (auto-submit backend + policy API + manual-race fix). Добавляет
