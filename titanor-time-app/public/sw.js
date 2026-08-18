@@ -1,15 +1,22 @@
 // docs/titanor-time/T7A_1_ATTENDANCE_CLOCK_DESIGN.md Addendum "T7A.10C.1" §C — hand-rolled service
-// worker, no Workbox/next-pwa. Registered with `scope: '/worker/'` only (app/worker/layout.tsx) —
-// the browser itself structurally prevents this SW from ever intercepting /admin/**, /foreman/**,
-// /login, or any request outside that scope, on top of the allowlist logic below.
+// worker, no Workbox/next-pwa. Registered with `scope: '/worker'` (no trailing slash — a leading
+// trailing-slash typo was found and fixed during T7A.10C.1 testing, see the addendum; a scope of
+// '/worker/' would NOT cover the bare '/worker' page itself, since SW scope matching is a literal
+// string-prefix test) by client code in components/worker-pwa/ServiceWorkerRegistration.tsx — not
+// app/worker/layout.tsx, which only renders that component. The browser itself structurally
+// prevents this SW from ever intercepting /admin/**, /foreman/**, /login, or any request outside
+// that scope, on top of the allowlist logic below.
 //
 // Cache Storage is the ONLY thing this file ever touches. It never reads cookies, never inspects
 // response bodies for content, never sends network requests of its own initiative beyond what the
 // three allowlisted branches below issue. Any request not matched by one of those three branches
-// falls through untouched — no caches.* call happens for it in either direction.
+// falls through untouched — this file makes no `event.respondWith(...)` call for it at all, so the
+// browser performs its own normal network handling; this script itself never calls `fetch()` for
+// those requests.
 
 const CACHE_VERSION = 'v1';
-const CACHE_NAME = `titanor-time-worker-shell-${CACHE_VERSION}`;
+const CACHE_PREFIX = 'titanor-time-worker-shell-';
+const CACHE_NAME = `${CACHE_PREFIX}${CACHE_VERSION}`;
 const OFFLINE_SHELL_PATH = '/worker-offline';
 
 const STATIC_CACHE_PREFIXES = ['/_next/static/', '/icons/'];
@@ -17,6 +24,45 @@ const STATIC_CACHE_EXACT = ['/manifest.webmanifest'];
 
 function isStaticCacheable(pathname) {
   return STATIC_CACHE_EXACT.includes(pathname) || STATIC_CACHE_PREFIXES.some((p) => pathname.startsWith(p));
+}
+
+/**
+ * T7A.10C.1 FOLLOW-UP — fail-closed cacheability predicate. `response.ok` alone (the previous
+ * check) says nothing about redirects, `Cache-Control: private`/`no-store`, a `Set-Cookie` header,
+ * or an opaque/cross-origin response — any of those would make it unsafe to persist this response
+ * under a shared, shell-wide cache key. Same-origin filtering already happens in the `fetch`
+ * listener below (line ~68), so `response.type` here is defense-in-depth, not the only guard.
+ * `Set-Cookie` is a forbidden response-header name per the Fetch spec — browsers strip it from
+ * `Headers` entirely, so `.get('set-cookie')` is normally always null here regardless of what the
+ * server sent. This check is kept anyway (in case that ever changes, and to keep this predicate a
+ * complete, self-documenting statement of intent) — the actual enforcement that `/worker-offline`
+ * never sets one is the route's own response contract (next.config.mjs `headers()`), verified by a
+ * real, non-browser HTTP request in tests, not by this in-SW check.
+ */
+function isSafeToCache(response, { requireHtml = false } = {}) {
+  if (!response || !response.ok) {
+    return false;
+  }
+  if (response.redirected) {
+    return false;
+  }
+  if (response.type !== 'basic') {
+    return false;
+  }
+  const cacheControl = (response.headers.get('cache-control') || '').toLowerCase();
+  if (cacheControl.includes('private') || cacheControl.includes('no-store')) {
+    return false;
+  }
+  if (response.headers.get('set-cookie')) {
+    return false;
+  }
+  if (requireHtml) {
+    const contentType = (response.headers.get('content-type') || '').toLowerCase();
+    if (!contentType.startsWith('text/html')) {
+      return false;
+    }
+  }
+  return true;
 }
 
 self.addEventListener('install', (event) => {
@@ -29,8 +75,14 @@ self.addEventListener('install', (event) => {
 self.addEventListener('activate', (event) => {
   event.waitUntil(
     (async () => {
+      // T7A.10C.1 FOLLOW-UP — namespace isolation. The previous version deleted every cache key on
+      // the origin except the current CACHE_NAME, which would destroy any unrelated same-origin
+      // cache (a future feature's own cache, or one created by different tooling entirely). Now
+      // only THIS shell's own stale versions (same CACHE_PREFIX, different from the current
+      // CACHE_NAME) are ever deleted — a foreign key never starting with CACHE_PREFIX is untouched.
       const keys = await caches.keys();
-      await Promise.all(keys.filter((k) => k !== CACHE_NAME).map((k) => caches.delete(k)));
+      const staleOwnKeys = keys.filter((k) => k.startsWith(CACHE_PREFIX) && k !== CACHE_NAME);
+      await Promise.all(staleOwnKeys.map((k) => caches.delete(k)));
       await self.clients.claim();
     })()
   );
@@ -91,7 +143,7 @@ async function networkFirstWithOfflineShellFallback(request) {
 async function networkFirstUpdatingCache(request, cacheKey) {
   try {
     const response = await fetch(request);
-    if (response && response.ok) {
+    if (isSafeToCache(response, { requireHtml: true })) {
       const cache = await caches.open(CACHE_NAME);
       await cache.put(cacheKey, response.clone());
     }
@@ -116,7 +168,7 @@ async function cacheFirst(request) {
     return cached;
   }
   const response = await fetch(request);
-  if (response && response.ok) {
+  if (isSafeToCache(response)) {
     await cache.put(request, response.clone());
   }
   return response;

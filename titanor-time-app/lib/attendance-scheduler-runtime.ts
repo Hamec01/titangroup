@@ -138,15 +138,24 @@ export interface RetentionStepResult {
  * `lastSuccessAt` starts `null` in the caller (one variable per process, never persisted) — so the
  * very first scheduler loop iteration (the same one that already runs the immediate first
  * auto-submit tick) also attempts retention, satisfying "first pass right after scheduler start"
- * with no separate startup-only code path. A successful pass sets `lastSuccessAt = now`, gating the
- * next attempt to 24h later; a failed pass leaves it unchanged, so the very next loop iteration
- * (not 24h later) retries — never logs the raw Error, only a stable error code.
+ * with no separate startup-only code path. A successful pass gates the next attempt to 24h later; a
+ * failed pass leaves it unchanged, so the very next loop iteration (not 24h later) retries — never
+ * logs the raw Error, only a stable error code.
+ *
+ * T7A.10C.1 FOLLOW-UP — `lastSuccessAt` is now set from a timestamp captured AFTER `runRetention()`
+ * resolves, never the pre-call `now` used for the due-check. The previous version paced the 24h
+ * gate from "when this pass started," so a long-running pass let the next pass start early relative
+ * to actual completion — the exact class of bug `runOneTickCore` above already fixed once for the
+ * heartbeat; this was the one remaining unfixed instance of it. `getNow` defaults to the real clock
+ * (`new Date`) and is only ever overridden by tests — production behavior is unchanged in the common
+ * case where `runRetention()` is fast, and correct instead of merely-usually-correct when it isn't.
  */
 export async function maybeRunRetentionCore(
   lastSuccessAt: Date | null,
   now: Date,
   runRetention: () => Promise<{ deletedCount: number }>,
-  log: (fields: Record<string, unknown>) => void
+  log: (fields: Record<string, unknown>) => void,
+  getNow: () => Date = () => new Date()
 ): Promise<RetentionStepResult> {
   const due = lastSuccessAt === null || now.getTime() - lastSuccessAt.getTime() >= RETENTION_MIN_INTERVAL_MS;
   if (!due) {
@@ -154,8 +163,9 @@ export async function maybeRunRetentionCore(
   }
   try {
     const result = await runRetention();
+    const completedAt = getNow();
     log({ event: 'attendance_location_retention', retentionRan: true, retentionOutcome: 'ok', retentionDeleted: result.deletedCount });
-    return { outcome: { kind: 'ran_ok', deletedCount: result.deletedCount }, lastSuccessAt: now };
+    return { outcome: { kind: 'ran_ok', deletedCount: result.deletedCount }, lastSuccessAt: completedAt };
   } catch {
     // Never logs the raw Error/message/stack — same PII/secret-leak reasoning as runOneTickCore's
     // own top-level-error branch above.

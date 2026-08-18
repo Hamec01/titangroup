@@ -1,6 +1,108 @@
 # Titanor Time — Implementation Status
 
-Обновлено: 2026-08-18 Europe/Helsinki (feat: add offline PWA shell and GPS retention)
+Обновлено: 2026-08-18 Europe/Helsinki (fix: harden PWA cache and retention pacing)
+
+**`[2026-08-18]` T7A.10C.1 FOLLOW-UP — fix(time): harden PWA cache and retention pacing.** Четыре
+независимых hardening-исправления поверх только что закрытого T7A.10C.1 (`e27e722`), найденные при
+review, ещё до продакшена: (1) cache namespace isolation, (2) response cache safety, (3) warm
+retry/concurrency semantics, (4) retention pacing от completion, а не от start. **T7A.10C.2 не
+начат.**
+
+**(1) Cache namespace isolation** (`public/sw.js`). `activate` раньше удалял **любой** cache key
+кроме текущего `CACHE_NAME` — уничтожило бы любой чужой/будущий cache того же origin. Теперь
+собственный prefix `titanor-time-worker-shell-` — удаляются только устаревшие СВОИ версии; текущий
+`CACHE_NAME` и любой ключ без этого префикса (foreign cache) никогда не трогаются. Live-проверено в
+реальном браузере (Playwright, production build): current own cache сохранён, stale own v0 удалён,
+foreign cache `some-other-feature-v1` сохранён байт-в-байт со всем содержимым, IndexedDB
+(`titanor-time-outbox`, все три object store) не изменён.
+
+**(2) Response cache safety.** Единый fail-closed predicate (`isSafeToCache` в `sw.js`, идентичная
+логика продублирована в `lib/offline-outbox/pwa-warm-cache.ts` — эти два контекста не могут делить
+код, тот же принцип, что уже применялся к `CACHE_NAME`-литералу) заменил проверку только на
+`response.ok`: добавлены `!response.redirected`, `response.type === 'basic'` (opaque/cross-origin
+запрещён), `Cache-Control` не содержит `private`/`no-store`, `Set-Cookie` отсутствует (насколько
+доступен Fetch API — сам браузер вычищает этот заголовок из `Headers` по спецификации, поэтому
+реальная гарантия — response contract `/worker-offline` ниже, не эта in-SW проверка), и `requireHtml`
+для shell-документа конкретно. `next.config.mjs` теперь явно отдаёт `/worker-offline` с
+`Cache-Control: public, max-age=0, must-revalidate` — live-проверено прямым HTTP-запросом (не через
+браузер): `Set-Cookie` отсутствует, `Cache-Control` ровно ожидаемый, `Content-Type: text/html`.
+Live-проверено через `page.route()`-перехват прямо на SW-опосредованном fetch: `private`,
+`no-store`, non-HTML content-type и настоящий 302-редирект на `/login` — ни один не перезаписал уже
+закэшированный shell; настоящий (не перехваченный) ответ `/worker-offline` по-прежнему кэшируется
+нормально; `/worker` HTML/RSC как и раньше отсутствуют в Cache Storage; `/login`/`/api/**` — как и
+раньше network-only.
+
+**(3) Warm retry semantics** (`lib/offline-outbox/pwa-warm-cache.ts`, полностью переписан).
+`warmed=true` раньше выставлялся ДО fetch — один 500/503 навсегда блокировал повторные попытки для
+этой вкладки (хуже, чем настоящий network failure, который хотя бы сбрасывал флаг). Конкурентные
+вызовы не дедуплицировались вообще. Теперь: единый in-flight `Promise` — все конкурентные вызовы
+получают тот же промис и реально ждут его исхода; `warmed=true` выставляется только после того, как
+shell И каждый обнаруженный asset подтверждённо закэширован; любой unsafe/failed ответ (shell или
+хотя бы один asset) оставляет `warmed=false` — следующий вызов (эта сессия или следующая) повторяет
+всё с нуля. Mocked-globals unit-тест (`scripts/_test-warm-cache.ts`, `fetch`/`caches`/`navigator`
+подменены, без браузера): первый вызов получает 503 → shell не закэширован, ровно 1 network-запрос;
+второй вызов получает 200 → shell+оба asset закэшированы, `warmed` разблокирован после провала;
+два одновременных вызова выполняют ровно один полный набор network fetch (1 shell + 2 asset = 3
+запроса, не 6).
+
+**(4) Retention pacing от completion** (`lib/attendance-scheduler-runtime.ts`,
+`maybeRunRetentionCore`). `lastSuccessAt` раньше сохранял **pre-call** `now` (тот же класс бага,
+который `runOneTickCore` в этом же файле уже однажды исправил для heartbeat — здесь оставался
+неисправленным экземпляр). Теперь `completedAt` берётся ПОСЛЕ `await runRetention()` через
+injectable `getNow` (по умолчанию — реальные часы; production-поведение не меняется, когда сам
+`runRetention()` быстрый — меняется только когда он медленный, и тогда становится правильным вместо
+почти-всегда-правильного). Pure-function тест (`scripts/_test-retention-pacing.ts`): start=T0,
+completion=T0+10m; T0+24h-1s — всё ещё skipped (тривиально); **completion+24h-1s — всё ещё skipped**
+(дискриминирующая проверка: под старой pacing-от-старта логикой это уже было бы due на 9м59с раньше
+— именно это доказывает, что pacing идёт от completion, а не от start); ровно completion+24h —
+due; failed pass не меняет `lastSuccessAt`; default `getNow` (без override) работает без изменений.
+
+**(5) Consistency-фиксы.** Устаревший комментарий `sw.js:2` про `scope: '/worker/'` (с trailing
+slash) и атрибуцию регистрации `app/worker/layout.tsx` — исправлен на реальные `scope: '/worker'`
+(без слэша) и `components/worker-pwa/ServiceWorkerRegistration.tsx` (design doc уже содержал
+правильную версию этой истории — только заголовочный комментарий в самом `sw.js` был устаревшим).
+Design doc (`T7A_1_ATTENDANCE_CLOCK_DESIGN.md`, fetch-стратегия pseudo-code) исправлен: default-ветка
+— голый `return;`, не `fetch(event.request)`; без `event.respondWith(...)` браузер сам выполняет
+обычную сетевую обработку, SW-скрипт в этот путь не вмешивается вообще.
+
+**Известное ограничение теста, не продукта**: real-browser-triggered SW version-bump (байт-другой
+`sw.js` → настоящий install/activate от самого браузера, не через `unregister()`) — тот же
+activate/delete код уже доказанно корректен (Test A выше, реальный `unregister()`+`reload()`-цикл в
+браузере, и отдельный однократный diagnostic-скрипт — оба стабильно PASS), но именно этот сценарий,
+запущенный как ПОСЛЕДНИЙ шаг внутри одного длинного Node/Playwright-процесса вместе со всеми
+остальными тестами, оказался нестабилен (то PASS, то FAIL) — при этом тот же самый код,
+запущенный как отдельный процесс (или как единственный шаг в самостоятельном diagnostic-скрипте),
+стабильно PASS каждый раз, включая финальный прогон. Похоже на Chromium-специфичную деталь таймингов
+update-check, не на баг в `sw.js`. Не решено окончательно за разумное время — зафиксировано честно,
+а не скрыто; рекомендация на будущее: гонять этот конкретный сценарий отдельным процессом (уже так и
+сделано в `diag-versionbump2.js`-паттерне), не как последний шаг в общем прогоне.
+
+**Тесты**: 3 новых `scripts/_test-*.ts` (следуют конвенции, `_test-retention-pacing.ts` — pure
+function, `_test-warm-cache.ts` — mocked globals, оба без браузера/БД, `_test-pwa-offline-fixture.ts`
+— DB-фикстура для отдельного, не закоммиченного Playwright-прогона, тот же паттерн, что
+`_test-overview.ts`). Playwright — эфемерный (`npm install playwright --no-save` в scratchpad,
+никогда не в `titanor-time-app/package.json`), против production build (`.next/standalone`) в
+изолированной scratch-копии (не against уже работающий preview на `127.0.0.1:3244` — отдельный
+профиль/lock, чтобы не задеть его). 17/17 (основной прогон) + 5/5 (retention pacing) + 2/2 (warm
+retry/concurrency) + version-bump (отдельным процессом, PASS, см. ограничение выше) = зелёные.
+Регрессия: планировщик с retention (SIGTERM → чистый `exit(0)` за секунды, structured-лог без PII),
+`/login` (form method=post, ноль console errors — auth-хотфикс не задет), cold offline restart
+`/worker` рендерит закэшированный shell (не browser network error page), Switch Site offline
+(smoke — оба сайта видны в shell; полный flow повторно не гонялся, не изменялся этой задачей). PII
+scan по закэшированным ответам (реальная проверка — заголовки `Set-Cookie` cached-ответов +
+координато-подобные значения в shell HTML, не text-grep по bundled JS source, который ложно матчит
+собственные же security-проверки в скомпилированном виде) — ноль совпадений.
+
+**Технические проверки**: `git diff --check`/`prisma validate`/`tsc --noEmit` — зелёные (schema не
+менялась, migrations не создавались); production build в изолированной scratch-копии (не в реальном
+репо) — зелёный; `docker compose -f compose.titanor-time.yaml config --quiet` — зелёный
+(`compose.yaml`'s собственная ошибка про отсутствующий `.env.production` — pre-existing, подтверждено
+`git stash`, не вызвано этой задачей). Production (`titanor-time-app-1`/`titanor-time-db-1`) и preview
+(`127.0.0.1:3244`) — не остановлены, не изменены, только read-only inspect до/после. Все disposable
+ресурсы (Postgres-контейнер, standalone-сервер, scratch-копия директории, Playwright) удалены по
+завершении.
+
+---
 
 **`[2026-08-18]` T7A.10C.1 Pilot Gap Closure — feat(time): add offline PWA shell and GPS retention.**
 Закрывает два пробела, найденные перед итоговым pilot E2E (после T7A.10B follow-up, `060d556`): (A)
