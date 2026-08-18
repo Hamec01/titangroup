@@ -4,6 +4,7 @@ import { prisma } from '@/lib/prisma';
 import { createAuditEvent } from '@/lib/audit';
 import { overlapCandidates, overlapExists, resolveOverlapTransition } from '@/lib/attendance-reported-projection';
 import { materializeClockShiftCore } from '@/lib/attendance-materializer';
+import { resolveMissingCheckoutAtCutoffOnLateCheckOut } from '@/lib/attendance-auto-submit';
 
 // docs/titanor-time/T7A_1_ATTENDANCE_CLOCK_DESIGN.md §9.1/§9.2/§9.3/§9.1a — Online clock core
 // (T7A online clock core slice). Route files do HTTP/auth/CSRF/idempotency/validation mapping;
@@ -1035,6 +1036,11 @@ async function checkOutCore(tx: Prisma.TransactionClient, employeeId: string, ac
 
   // (h)
   await tx.employeeOpenShift.delete({ where: { employeeId } });
+
+  // §9.6 "Автоматическое разрешение при позднем реальном Check Out" — resolves every period-scoped
+  // OPEN MISSING_CHECKOUT_AT_CUTOFF tied to this same opening ClockEvent, if any (T7A.10A). Never
+  // reached on a replay (the EXACT_REPLAY branch above already returned).
+  await resolveMissingCheckoutAtCutoffOnLateCheckOut(tx, openShift.openedByClockEventId);
 
   // (i) independent post-close exceptions.
   const { timesheetId, payrollPeriodId } = await resolveTimesheetForInstant(tx, employeeId, effectiveAt);

@@ -200,6 +200,25 @@ Foundation", `04_ADMIN_FIRST_API_CONTRACTS.md` §9.1e). Backend-only — UI (T7A
 |---|---|---|---|---|---|---|
 | `attendance.conflict.read` | `ADMIN`, `SUPER_ADMIN` | вся компания — минимальная секция (не отдельная страница), `ClockEventIdConflict`/`DeviceEventReceipt(REJECTED_TERMINAL)`/`AuditEvent(FIFO_LEDGER_INCONSISTENT)` | `GET /api/admin/overview` — обязателен вместе с `timesheet.read.all`+`attendance.exception.read.all`, отзыв любого из трёх → `403` на следующий запрос (live-проверено); `FOREMAN`/`WORKER` — `403` до какого-либо чтения этих трёх таблиц; `GET /api/foreman/overview` не читает и не выдаёт эту permission ни при каких обстоятельствах | нет | нет (read-only) | — |
 
+### 2.4f Attendance auto-submit backend + company policy API (T7A.10A) — **`[2026-08-18]
+реализовано`** (`T7A_1_ATTENDANCE_CLOCK_DESIGN.md` §9.6 + Addendum "T7A.10A",
+`04_ADMIN_FIRST_API_CONTRACTS.md` §9.1f). Backend-only — scheduler runtime wiring и policy editor UI
+(T7A.10B) не начаты.
+
+Сам тик auto-submit (`npm run attendance:auto-submit` / `runAttendanceAutoSubmitTick`) не проходит
+через permission-систему вообще — CLI-процесс, актёр внутри submit'а — структурно роль-less SYSTEM
+пользователь (`userKind='SYSTEM'`, ноль строк `UserRole`), а не человек с ролью. Обе permission'ы
+ниже относятся только к HTTP-уровню (`GET`/`PATCH /api/admin/attendance/policy`).
+
+Обе permission засеяны одной миграцией `20260818020000_seed_attendance_policy_permissions` — чистый
+DML (проверено прямым SQL — ровно 4 новых гранта: `attendance.policy.read`+`.update` каждой из
+`ADMIN`+`SUPER_ADMIN`; `FOREMAN`/`WORKER` — ни одного; `SYSTEM` структурно не может держать роль).
+
+| Permission | Держатели | Область | Ограничения | Причина | Аудит | Массовое |
+|---|---|---|---|---|---|---|
+| `attendance.policy.read` | `ADMIN`, `SUPER_ADMIN` | единственная строка `CompanyAttendancePolicy` (singleton) | `GET /api/admin/attendance/policy` — strict allowlist ответа; не подразумевает `.update` | нет | нет (read-only) | — |
+| `attendance.policy.update` | `ADMIN`, `SUPER_ADMIN` | единственная строка `CompanyAttendancePolicy` (singleton) | `PATCH /api/admin/attendance/policy` — обязателен вместе с `.read` независимо (оба нужны отдельно, отзыв любого → `403` на следующий запрос); `timezone` никогда не принимается ни при какой permission — заморожена на уровне БД constraint'ом; конкурентный `PATCH` сериализуется через `FOR UPDATE`, lost update невозможен | нет | да (`ATTENDANCE_POLICY_UPDATED`, before/after только по 4 изменяемым полям, без `timezone`) | нет |
+
 ### 2.5 Назначения
 
 | Permission | Держатели | Область | Ограничения | Причина | Аудит | Массовое |

@@ -4878,3 +4878,159 @@ SUM(fragment) WHERE timesheetId=X` без исключений.
 Этот addendum — только запись решения до кода (правило §11 AGENT_RULES.md / §6 ТЗ T7A.9A), не
 отдельное утверждение владельца поверх уже утверждённого 2026-08-12 checkpoint — он детализирует, а
 не меняет объём §16 п.9.
+
+---
+
+## Addendum — T7A.10A Attendance Auto-submit Backend + Company Policy API (2026-08-18)
+
+Написано **до** реализации, по тому же правилу §11 AGENT_RULES.md, что и addendum T7A.9A выше.
+Алгоритм auto-submit сам по себе (candidate scan, canonical locking, ветки (a)–(i), `dueAt`,
+`SKIPPED_*`/`SUBMITTED_*` результаты, `MISSING_CHECKOUT_AT_CUTOFF` создание/разрешение) уже
+дословно зафиксирован в §8/§9.5/§9.6 этого документа — этот addendum ничего там не меняет, только
+добавляет то, чего в документе ещё не было: точный HTTP-контракт `CompanyAttendancePolicy` API,
+точную форму результата одного tick'а и точный CLI-контракт.
+
+### A. `dueAt` — сводная формула (для справки, авторитетный текст — §9.6, шаг 2)
+
+```text
+generation 0 (Timesheet.status = DRAFT):
+  dueAt = (period.endDate + policy.cutoffDaysAfterPeriodEnd дней) @ policy.cutoffTime,
+          интерпретировано как Europe/Helsinki wall-clock, переведено в UTC
+          (helsinkiWallClockToUtc(date, timeOfDay) — lib/periods.ts, тот же хелпер, что уже
+          использует lib/attendance-materializer.ts для periodEndExclusive).
+
+reopened generation N>0 (Timesheet.status = RETURNED, lastReturnedReason = SYSTEM_LATE_SYNC_REOPEN):
+  dueAt = timesheet.systemReopenAt + policy.systemReopenDebounceMinutes минут
+          (обычная арифметика над instant — systemReopenAt уже абсолютный UTC timestamp,
+          никакого повторного перевода часового пояса не требуется).
+```
+
+`policy.timezone` заморожен на `'Europe/Helsinki'` на уровне БД
+(`ck_company_attendance_policy_timezone_frozen`) — вычисление выше жёстко использует Хельсинки, не
+читает `policy.timezone` как переменную (он не может быть ничем другим).
+
+### B. Generation identity — сводка (авторитетный текст — §9.6 `[3.1]`/`[3.2]`)
+
+`AutoSubmissionAttempt.UNIQUE(timesheetId, systemReopenGeneration)` — не `cutoffAt`. Строка
+вставляется **только** в ветках (g)/(h)/(i) — каждая уже под `Timesheet FOR UPDATE` перечитала
+`fresh.systemReopenGeneration === candidateGeneration`, прежде чем писать. Ветки (e) (устаревшая
+генерация) и (f) (актуальная генерация, но ещё не due) заканчиваются `COMMIT` без единой строки —
+никогда не «резервируют» слот наперёд.
+
+### C. Tick result — форма одного вызова `runAttendanceAutoSubmitTick`
+
+```ts
+interface AttendanceAutoSubmitTickResult {
+  scanned: number;               // строк, вернувшихся из candidate-запроса (§9.6, DRAFT ∪ RETURNED+SYSTEM_LATE_SYNC_REOPEN)
+  due: number;                   // из scanned — те, для кого now() >= dueAt на дешёвом (незаблокированном) чтении
+  submittedClean: number;        // AutoSubmissionAttempt.result = SUBMITTED_CLEAN, эта попытка
+  submittedWithExceptions: number; // result = SUBMITTED_WITH_EXCEPTIONS, эта попытка
+  skippedAlreadySubmitted: number; // result = SKIPPED_ALREADY_SUBMITTED, эта попытка (ветка g)
+  skippedNotActionable: number;    // result = SKIPPED_NOT_ACTIONABLE, эта попытка (ветка h)
+  noop: number;                  // due, но branch (e)/(f) — COMMIT без единой строки (стала stale,
+                                  // или ещё не due под локом), И true no-op из шага 5 (existing attempt
+                                  // уже найден дешёвым чтением, транзакция вообще не открывалась)
+  failed: number;                // кандидат, чья транзакция выбросила исключение — ROLLBACK этого
+                                  // кандидата, остальные кандидаты не затронуты (см. §D)
+  failedTimesheetIds: string[];  // только для внутренней диагностики/лога — CLI stdout НЕ печатает
+                                  // этот массив (PII-контракт CLI, §E), только count `failed`
+}
+```
+
+`scanned`/`due`/`noop` считаются на **дешёвом, незаблокированном** чтении (шаги 1–5, §9.6) — не
+рансинхронизированы с тем, что каждая транзакция потом увидит под локом; `submittedClean`/
+`submittedWithExceptions`/`skippedAlreadySubmitted`/`skippedNotActionable` считаются строго по
+`AutoSubmissionAttempt.result`, реально записанному этой попыткой (не по предположению до лока).
+`due` не обязан равняться `submittedClean + submittedWithExceptions + skippedAlreadySubmitted +
+skippedNotActionable + noop-под-локом + failed` построчно один-в-один в каждом отдельном тике —
+конкурентный tick другого воркера тоже мог тронуть тот же кандидат между дешёвым чтением этого тика
+и открытием его собственной транзакции (сам этот тик тогда получит `noop`-эквивалент через branch
+(e)/(f) или (g), не ошибку) — сумма всех восьми счётчиков **тика** остаётся согласованной
+(`scanned = due + not-due-at-cheap-read`, каждый due-кандидат даёт ровно один из
+submitted*/skipped*/noop/failed).
+
+### D. Atomicity/error isolation
+
+Тик — read-only scan (шаги 1–5, без транзакции) + один `BEGIN...COMMIT` **на кандидата** (шаг 6),
+буквально та же архитектура, что `runMaterializerCatchUpPass`
+(`lib/attendance-materializer.ts` — read-only scan + per-candidate transaction, `try/catch` вокруг
+каждого кандидата в цикле, ошибка одного не мешает следующему). Внутри одной транзакции —
+`MISSING_CHECKOUT_AT_CUTOFF` exception (если применимо) + `submitWorkerTimesheetCore`-вызов
+(`TimesheetVersion` + `TimesheetReviewScope` + audit + возможное `LATE_SYNC_AFTER_SUBMIT`
+разрешение) + `AutoSubmissionAttempt` — одним `COMMIT`, либо ни одной строки (`ROLLBACK`) — никогда
+частично.
+
+### E. CLI — контракт stdout/exit code
+
+```text
+npm run attendance:auto-submit
+  -> ровно один вызов runAttendanceAutoSubmitTick({ now: new Date() }) -- реальное системное время,
+     не принимает override ни из argv, ни из env; не принимает actorUserId (SYSTEM резолвится
+     внутри сервиса, §13); не принимает DATABASE_URL как аргумент (только обычный env, как любой
+     другой process.env.DATABASE_URL — Prisma читает его сам).
+  -> stdout: ровно один JSON-объект, поля scanned/due/submittedClean/submittedWithExceptions/
+     skippedAlreadySubmitted/skippedNotActionable/noop/failed (см. §C) — БЕЗ failedTimesheetIds,
+     БЕЗ employeeId/timesheetId/имён работников/UUID любого рода, без GPS/payload/cookies/secrets.
+  -> exit 0, если failed === 0 (тик обработан без внутренних ошибок — SKIPPED_*/noop не ошибки).
+  -> exit 1, если failed > 0 (один или несколько кандидатов упали внутри своей транзакции —
+     retryable следующим тиком, та же candidate query подберёт их снова, поскольку их
+     AutoSubmissionAttempt не был закоммичен).
+  -> без setInterval/while(true) — процесс завершается сразу после одного тика (будущий scheduler
+     wiring, cron/systemd/Compose — T7A.10B, вне этого слайса).
+```
+
+### F. `GET/PATCH /api/admin/attendance/policy` — точный контракт
+
+**Permission**: `attendance.policy.read` (`GET`), `attendance.policy.update` (`PATCH`) — оба только
+`ADMIN`/`SUPER_ADMIN`, новая additive DML-миграция (тот же паттерн, что
+`20260818010000_seed_attendance_conflict_read_permission`).
+
+```text
+GET /api/admin/attendance/policy
+  200: {
+    "cutoffDaysAfterPeriodEnd": 0,
+    "cutoffTime": "23:59:00",        -- строго HH:mm:ss, не ISO-instant (это TIME-колонка, не
+                                          TIMESTAMPTZ — год/месяц/день не существуют для неё)
+    "systemReopenDebounceMinutes": 30,
+    "maxShiftDurationHours": 16,
+    "timezone": "Europe/Helsinki",   -- всегда буквально эта строка (заморожено на уровне БД)
+    "updatedAt": "iso",
+    "updatedByUserId": "uuid" | null
+  }
+  -- strict allowlist -- ни одного internal/security поля (id/singleton — не отдаются).
+```
+
+```text
+PATCH /api/admin/attendance/policy
+  Headers: X-Requested-With: titanor-time (CSRF, как везде), Idempotency-Key: <uuid> (обязателен).
+  Body (partial, минимум одно поле, неизвестные поля -> 400 VALIDATION_ERROR):
+    cutoffDaysAfterPeriodEnd?: integer 0..31
+    cutoffTime?: string, строго /^([01]\d|2[0-3]):[0-5]\d:[0-5]\d$/ (HH:mm:ss)
+    systemReopenDebounceMinutes?: integer 1..1440
+    maxShiftDurationHours?: integer 1..168
+  -- "timezone" в теле в любом виде -> 400 VALIDATION_ERROR (unknown field), никогда не
+     принимается и не меняется -- ck_company_attendance_policy_timezone_frozen гарантирует это и на
+     уровне БД, но валидация уровня API отклоняет попытку раньше, с понятным сообщением, а не
+     полагается только на 500 от constraint-violation.
+  200: то же тело, что GET, после применения.
+  400 VALIDATION_ERROR: fieldErrors -- malformed body, unknown field, out-of-range, неверный формат
+     cutoffTime, пустой body (ни одного разрешённого поля).
+  403 CSRF_REJECTED / FORBIDDEN.
+  409 IDEMPOTENCY_KEY_REUSED / IDEMPOTENCY_KEY_IN_PROGRESS -- стандартный lib/idempotency.ts
+     контракт, тот же, что уже использует POST /api/admin/sites/:siteId/geofence-versions.
+  Транзакция: SELECT CompanyAttendancePolicy FOR UPDATE (единственная строка, singleton) -> apply
+     partial update -> updatedByUserId=actorUserId, updatedAt -> AuditEvent(
+     ATTENDANCE_POLICY_UPDATED, beforeValue/afterValue -- только четыре policy-поля выше, никогда
+     id/singleton/updatedByUserId самого audit-actor'а) -> COMMIT. Конкурентные PATCH сериализуются
+     этим FOR UPDATE -- нет lost update.
+  DELETE -- не существует как route; сама строка защищена
+     trg_company_attendance_policy_no_delete на случай прямого SQL/будущей ошибки.
+  Влияние на уже идущие generations: PATCH не переписывает существующие AutoSubmissionAttempt/
+     TimesheetVersion -- новое значение видно только следующему тику, вычисляющему dueAt заново
+     для ещё не обработанных кандидатов (§B/§9.6 `[3.1]` -- generation identity не завязана на
+     значение политики).
+```
+
+Этот addendum — запись решения до кода, не отдельное утверждение владельца поверх уже
+утверждённого 2026-08-12 checkpoint (§16 п.9/roadmap T7A.7/T7A.10) — он детализирует HTTP/CLI
+контракты вокруг уже полностью специфицированного в §8/§9.5/§9.6 алгоритма.

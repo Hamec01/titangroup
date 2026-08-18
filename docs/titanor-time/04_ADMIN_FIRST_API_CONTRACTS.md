@@ -1588,6 +1588,60 @@ target-identity-алгоритм. **Обязательное архитекту�
 линейно с числом работников/scope — подтверждено `scripts/_test-overview-querycount.ts` на
 disposable БД: n=50 работников → 24 запроса, n=200 работников → 24 запроса (идентично).
 
+### 9.1f Attendance auto-submit backend + company policy API (T7A.10A,
+`T7A_1_ATTENDANCE_CLOCK_DESIGN.md` §9.6 + Addendum "T7A.10A" — **реализовано, только backend**) —
+`lib/attendance-auto-submit.ts`, `lib/attendance-policy.ts`
+
+Точная формула `dueAt`, identity `AutoSubmissionAttempt` и полный алгоритм тика зафиксированы в §9.6
+design doc и addendum `T7A_1_ATTENDANCE_CLOCK_DESIGN.md` ("Addendum — T7A.10A…", 2026-08-18) — этот
+раздел даёт HTTP/CLI-контракт, не переопределяет алгоритм. **Scheduler runtime (cron/systemd/Compose)
+и policy editor UI в этот слайс не входят — см. T7A.10B в `IMPLEMENTATION_STATUS.md`.**
+
+#### `GET /api/admin/attendance/policy`
+- Permission: `attendance.policy.read` (`ADMIN`/`SUPER_ADMIN` only)
+- Response `200` — strict allowlist, `timezone` всегда фиксированная строка (заморожена на уровне БД
+  constraint'ом `ck_company_attendance_policy_timezone_frozen`):
+```json
+{ "timezone": "Europe/Helsinki", "cutoffDaysAfterPeriodEnd": 0, "cutoffTime": "HH:mm:ss",
+  "systemReopenDebounceMinutes": 0, "maxShiftDurationHours": 0, "updatedAt": "iso",
+  "updatedByUserId": "uuid" | null }
+```
+
+#### `PATCH /api/admin/attendance/policy`
+- Permission: `attendance.policy.update` (`ADMIN`/`SUPER_ADMIN` only); CSRF (`X-Requested-With:
+  titanor-time`) обязателен; обязательный UUID-заголовок `Idempotency-Key` (переиспользован
+  существующий `lib/idempotency.ts` — тот же паттерн, что `POST .../geofence-versions`).
+- Request body — частичное обновление, минимум одно поле, неизвестные поля → `400
+  VALIDATION_ERROR`; `timezone` никогда не принимается (даже равный текущему значению):
+```json
+{ "cutoffDaysAfterPeriodEnd": 0..31,
+  "cutoffTime": "HH:mm:ss (строгий формат)",
+  "systemReopenDebounceMinutes": 1..1440,
+  "maxShiftDurationHours": 1..168 }
+```
+- Значение вне границ или неверный формат → `400 VALIDATION_ERROR` + `fieldErrors`. Пустое тело
+  (ни одного из 4 полей) → `400`.
+- Успех `200` — тот же response shape, что `GET`, отражающий уже применённое обновление.
+- Идемпотентность: точный повтор (тот же ключ + то же тело) → тот же `200`-ответ, без повторного
+  `AuditEvent`; тот же ключ с **другим** телом → `409 IDEMPOTENCY_KEY_REUSED`.
+- Транзакция: `CompanyAttendancePolicy ... FOR UPDATE` внутри одной транзакции — конкурентные
+  `PATCH` сериализуются, lost update невозможен (подтверждено реально разными OS-процессами).
+- `AuditEvent(ATTENDANCE_POLICY_UPDATED)` — before/after строго только по применённым из 4 полей
+  (без `timezone`, без прочих служебных колонок).
+- Смена policy никогда не переписывает уже существующие `AutoSubmissionAttempt`/`TimesheetVersion`
+  строки — identity тика keyed по `systemReopenGeneration`, не по значению policy на момент чтения.
+
+#### Auto-submit CLI — `npm run attendance:auto-submit` (`scripts/attendance-auto-submit-tick.ts`)
+- Не HTTP endpoint — one-shot CLI, один тик и выход. `now` всегда реальное системное время;
+  `actorUserId`/`DATABASE_URL`-как-аргумент/произвольный `now` не принимаются ни через argv, ни
+  через env поверх обычного `DATABASE_URL`.
+- stdout — исключительно JSON с 8 полями (`scanned`, `due`, `submittedClean`,
+  `submittedWithExceptions`, `skippedAlreadySubmitted`, `skippedNotActionable`, `noop`, `failed`) —
+  никогда имена/UUID/GPS/payload/cookies/secrets.
+- `exit 0` при `failed === 0`, иначе non-zero; упавшие кандидаты остаются retryable следующим тиком
+  (нет infinite loop, нет retry внутри самого CLI).
+- Точка входа для будущего scheduler'а (T7A.10B) — сам scheduler этим слайсом не подключён.
+
 ## 10. Служебный агрегатор
 
 #### `GET /api/admin/setup-status`

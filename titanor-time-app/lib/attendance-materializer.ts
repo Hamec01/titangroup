@@ -25,8 +25,10 @@ function dayAfter(date: Date): Date {
   return new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate() + 1));
 }
 
-/** §9.4 step 2 — "UTC-момент начала календарного дня, СЛЕДУЮЩЕГО за P.endDate, в Europe/Helsinki". */
-function periodEndExclusive(period: { endDate: Date }): Date {
+/** §9.4 step 2 — "UTC-момент начала календарного дня, СЛЕДУЮЩЕГО за P.endDate, в Europe/Helsinki".
+ * Exported for reuse by lib/attendance-auto-submit.ts (§9.6 "issue 3" open-shift relevance check)
+ * — same exact calculation, not a second copy. */
+export function periodEndExclusive(period: { endDate: Date }): Date {
   const next = dayAfter(period.endDate);
   return helsinkiWallClockToUtc(next, next); // `next`'s own UTC h/m/s are already 0 — serves as its own "00:00" timeOfDay argument.
 }

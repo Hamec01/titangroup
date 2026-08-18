@@ -1,6 +1,131 @@
 # Titanor Time — Implementation Status
 
-Обновлено: 2026-08-18 Europe/Helsinki (feat: add attendance operational overview UI, T7A.9B)
+Обновлено: 2026-08-18 Europe/Helsinki (feat: add attendance auto-submit backend, T7A.10A)
+
+**`[2026-08-18]` T7A.10A Attendance Auto-submit Backend + Company Policy API — новый завершённый
+backend-слайс поверх полностью завершённого T7A.9 (operational overview), T7A.8 (exception review +
+resolution) и T7A.7 (offline sync). Реализует `docs/PROJECT_ROADMAP.md` T7A.10 частично — только
+backend; scheduler runtime wiring и policy UI намеренно не входят в этот слайс, см. T7A.10B ниже.**
+Точная формула `dueAt`, identity `AutoSubmissionAttempt`, форма `AttendanceAutoSubmitTickResult` и
+HTTP-контракт policy API зафиксированы **до** кода в новом addendum `T7A_1_ATTENDANCE_CLOCK_DESIGN.md`
+("Addendum — T7A.10A…", 2026-08-18), детали алгоритма — уже существующий §9.6 design doc, не
+переписан заново.
+
+**Migration** (единственная, чисто additive DML — схема/foundation migration не тронуты):
+`20260818020000_seed_attendance_policy_permissions` добавляет permissions `attendance.policy.read`/
+`attendance.policy.update`, выдаёт обеим только `ADMIN`+`SUPER_ADMIN`. Прямой SQL подтвердил ровно 4
+строки `RolePermission`, `FOREMAN`/`WORKER` — ноль, `SYSTEM` структурно без ролей (нет строк
+`UserRole`).
+
+**Auto-submit core** (`lib/attendance-auto-submit.ts`, новый файл) — `runAttendanceAutoSubmitTick({
+now })`: read-only unlocked scan кандидатов (`Timesheet.status IN (DRAFT, RETURNED+
+lastReturnedReason=SYSTEM_LATE_SYNC_REOPEN)`, `HUMAN_REVIEW_RETURN` исключён на уровне самого
+SQL-запроса) → независимая `BEGIN...COMMIT` транзакция на каждого кандидата (та же архитектура, что
+`lib/attendance-materializer.ts`'s `runMaterializerCatchUpPass` — одна ошибка кандидата не откатывает
+уже закоммиченную работу другого). `dueAt`: для generation 0 —
+`helsinkiWallClockToUtc(periodEndDate + cutoffDaysAfterPeriodEnd дней, cutoffTime)`; для reopened
+generation — `systemReopenAt + systemReopenDebounceMinutes минут` (простая арифметика instant, без
+повторного обращения к Helsinki wall-clock). Identity `AutoSubmissionAttempt` —
+`(timesheetId, systemReopenGeneration)`, **не** `cutoffAt` — иммунитет к изменению policy между
+generations. Вставка исключительно через `INSERT ... ON CONFLICT DO NOTHING RETURNING id` (никогда
+try/catch вокруг обычного INSERT). Реальная отправка — прямой вызов существующего
+`submitWorkerTimesheetCore(..., AUTO)`, без копирования freeze/version/review-scope логики.
+`MISSING_CHECKOUT_AT_CUTOFF` создаётся только если `EmployeeOpenShift.openedAt <
+periodEndExclusive` (переиспользует уже существующую `periodEndExclusive` из
+`lib/attendance-materializer.ts`, теперь экспортированную — не вторая копия формулы); dedup через
+уже существующий partial unique index; смена opened-shift на два периода cutoff — по одному
+exception на период, независимо. SYSTEM-actor резолвится fail-closed (тот же shape-check, что уже
+использует `submitWorkerTimesheetCore`), дополнительно enforced на уровне БД constraint'ом
+`ck_user_system_shape` — «malformed» SYSTEM структурно недостижим через порчу строки, только
+«отсутствует» (DELETE) реально тестируем.
+
+**Late real Check Out резолвит `MISSING_CHECKOUT_AT_CUTOFF` автоматически** — новая экспортируемая
+`resolveMissingCheckoutAtCutoffOnLateCheckOut(tx, openedByClockEventId)` вызывается сразу после `tx
+.employeeOpenShift.delete(...)` в **обоих** реальных Check Out путях (`checkOutCore` в
+`lib/attendance-clock.ts` — online, и `insertAndApplyCheckOut` в `lib/attendance-sync.ts` — offline
+sync), в той же транзакции; резолвит все OPEN exceptions с тем же `clockEventId` разом (одна поздняя
+отметка закрывает exceptions сразу нескольких периодов, если shift пересекал несколько cutoff).
+`resolvedByUserId`=SYSTEM, фиксированный безопасный `resolutionNote`. Replay (тот же
+`clientEventId`) не трогает уже резолвленную строку — идемпотентность существующего replay-механизма
+не менялась.
+
+**Policy API** — `GET`/`PATCH /api/admin/attendance/policy` (`app/api/admin/attendance/policy/
+route.ts`, новый; `lib/attendance-policy.ts`, новый). `GET`: auth + `attendance.policy.read`,
+strict allowlist ответа, `timezone` всегда `"Europe/Helsinki"` (заморожен на уровне БД constraint'ом
+`ck_company_attendance_policy_timezone_frozen`), `cutoffTime` как `HH:mm:ss`. `PATCH`: CSRF +
+`attendance.policy.update` + обязательный UUID `Idempotency-Key` (переиспользован существующий
+`lib/idempotency.ts` — тот же паттерн, что `POST .../geofence-versions`), частичное обновление
+(минимум одно поле), неизвестные поля → `400`, `timezone` никогда не принимается; точные границы:
+`cutoffDaysAfterPeriodEnd` 0..31, `cutoffTime` strict `HH:mm:ss`, `systemReopenDebounceMinutes`
+1..1440, `maxShiftDurationHours` 1..168; одна транзакция с `CompanyAttendancePolicy ... FOR UPDATE`;
+`AuditEvent(ATTENDANCE_POLICY_UPDATED)` с before/after только по четырём policy-полям; детерминированный
+idempotent replay, другое тело под тем же ключом → `409 IDEMPOTENCY_KEY_REUSED`; смена policy никогда
+не переписывает уже существующие строки `AutoSubmissionAttempt`/`TimesheetVersion`.
+
+**CLI** — `npm run attendance:auto-submit` (`scripts/attendance-auto-submit-tick.ts`, новый): один
+тик и выход; `now` всегда реальное системное время, `actorUserId`/`DATABASE_URL`-как-аргумент/
+произвольный `now` не принимаются никак; stdout — исключительно 8 агрегированных счётчиков
+(`scanned/due/submittedClean/submittedWithExceptions/skippedAlreadySubmitted/skippedNotActionable/
+noop/failed`), никаких имён/UUID/GPS/payload/cookies/secrets; `exit 0` при `failed===0`, иначе
+non-zero; упавшие кандидаты остаются retryable следующим тиком. Точка входа для будущего scheduler'а
+(T7A.10B), сам scheduler (cron/systemd/Compose) этим слайсом не подключён.
+
+**Тесты** (disposable PostgreSQL 16, тот же паттерн copy-директории/hardlinked node_modules, что
+T7A.9A/T7A.8, чтобы не задеть lock preview-сервера на `127.0.0.1:3244`):
+
+- `_test-attendance-auto-submit.ts` — **79/79** проверок, дважды подтверждено стабильно на чистой БД:
+  before/exact/after cutoff, Helsinki DST зима/лето (offset ровно на час), `SUBMITTED_CLEAN`/
+  `SUBMITTED_WITH_EXCEPTIONS`, два конкурентных тика через реально разные OS-процессы
+  (`child_process.spawn`, подтверждённые разные PID) → одна `TimesheetVersion`, один
+  `AutoSubmissionAttempt`, auto/manual submit в обоих порядках, повторный тик — истинный no-op,
+  SYSTEM actor отсутствует → полный rollback (ноль attempt/exception строк) и retry после
+  восстановления проходит, атомарный откат при ошибке `submitWorkerTimesheetCore` (испорченный
+  `TimesheetDraft`), одна ошибка кандидата не блокирует соседа в том же тике, `HUMAN_REVIEW_RETURN`
+  исключён из scan на уровне запроса, пять late-sync событий подряд → одна reopen-generation и одна
+  `Vn+1`, смена `systemReopenDebounceMinutes` между generations не ломает identity (keyed по
+  generation, не по debounce-производному времени), stale generation → ноль записей, shift на два
+  периода → два независимых exception-ряда с общим `clockEventId`, shift открыт после конца периода
+  → exception для этого периода не создаётся, поздний реальный online Check Out резолвит exception
+  (включая замену обоих period-scoped exceptions одним check-out), поздний **offline sync** Check Out
+  резолвит тем же путём (`performSync`+`bootstrapDeviceInstallation`), replay не трогает уже
+  резолвленную строку, final approval реально блокируется открытым exception, immutable trigger
+  (переиспользован тот же `fn_clock_event_immutable()`, что у `ClockEvent`) отклоняет `UPDATE`/
+  `DELETE` на `AutoSubmissionAttempt`.
+- `_test-attendance-policy.ts` (HTTP против живого `next dev`) — **57/57** проверок: миграция/гранты,
+  `ADMIN`/`SUPER_ADMIN` success, `FOREMAN`/`WORKER` `403`, CSRF, malformed/unknown-field/bounds/format
+  валидация, idempotent replay + key reuse → `409`, конкурентный `PATCH` через реально разные
+  OS-процессы без lost update, отзыв permission блокирует следующий запрос, `AuditEvent` redaction,
+  `DELETE` отклонён триггером.
+- Query-count проверка (одноразовый скрипт, не deliverable-ассет): policy читается **ровно 1 раз** за
+  тик независимо от N кандидатов (`n=5`→1, `n=50`→1 — не O(N)); per-candidate стоимость SYSTEM-actor
+  lookup и суммарного числа запросов остаётся константной от `n=5` к `n=50` (не N+1).
+- Regression на той же одноразовой БД: `_test-activation.ts`, `_test-corrections.ts`,
+  `_test-overview.ts`, `_test-overview-querycount.ts` (n=50/200 по-прежнему 27 SQL statements,
+  идентично T7A.9A) — все зелёные, не задеты; ручной smoke на существующем `DISMISS` через
+  `/api/admin/attendance/exceptions/:id/resolve` — статус `DISMISSED`, `resolvedByUserId` реального
+  человека (не SYSTEM) — подтверждает, что новая SYSTEM-резолюция не пересекается с ручным resolve-
+  путём ни кодом, ни данными; manual worker submit / online Check In/Out / offline sync Check Out /
+  materializer (`materializeClockShiftCore`, вызывается в той же транзакции, что новая
+  auto-submit-резолюция) — все покрыты внутри самого auto-submit suite (тесты используют реальные
+  `performCheckIn`/`performCheckOut`/`performSync`/`submitWorkerTimesheet`, не моки).
+
+**Технические проверки**: `git diff --check`, `prisma validate` (схема не менялась), `tsc --noEmit`,
+`npm run build` (в изолированной copy-директории — не в живой `.next` preview-сервера), `docker
+compose -f compose.titanor-time.yaml build app` — все чисто/exit 0; `prisma migrate deploy` на чистой
+БД (56 migrations) выполнялся многократно за время задачи, каждый раз "All migrations have been
+successfully applied" без ошибок. Preview `127.0.0.1:3244` — `/api/health`/`/api/ready` оставались
+`200`/`200` до и после сборки, не останавливался. Production (`titanor-time-app-1`/
+`titanor-time-db-1`) не пересобирался и не перезапускался — только read-only `docker inspect`
+(`StartedAt`/`RestartCount`/`image` без изменений) и smoke `200`/`200` до и после.
+
+**Остаётся вне этого слайса, явно не реализовано (T7A.10B)**: permanent cron/systemd/Compose
+scheduler, который реально вызывает `npm run attendance:auto-submit` по расписанию; публичный или
+человеко-аутентифицированный HTTP-endpoint для ручного триггера тика; policy editor UI; production
+deployment этого слайса; reminder-уведомления; PWA/service worker; полный pilot E2E (реальные
+воркеры, реальный cutoff в реальном времени, без disposable БД). Schema/foundation migration
+(`20260812000000_add_attendance_clock_schema_foundation`) не тронута.
+
+---
 
 **`[2026-08-18]` T7A.9A Attendance Operational Overview Read Foundation — новый завершённый
 read-only backend-слайс поверх полностью завершённого T7A.8 (exception review + resolution) и

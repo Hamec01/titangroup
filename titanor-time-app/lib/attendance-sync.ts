@@ -4,6 +4,7 @@ import { prisma } from '@/lib/prisma';
 import { createAuditEvent } from '@/lib/audit';
 import { overlapCandidates, overlapExists, resolveOverlapTransition } from '@/lib/attendance-reported-projection';
 import { materializeClockShiftCore } from '@/lib/attendance-materializer';
+import { resolveMissingCheckoutAtCutoffOnLateCheckOut } from '@/lib/attendance-auto-submit';
 import {
   evaluateGpsReading,
   validateGpsPayload,
@@ -785,6 +786,12 @@ async function insertAndApplyCheckOut(
   });
 
   await tx.employeeOpenShift.delete({ where: { employeeId } });
+
+  // §9.6 "Автоматическое разрешение при позднем реальном Check Out" — resolves every period-scoped
+  // OPEN MISSING_CHECKOUT_AT_CUTOFF tied to this same opening ClockEvent, if any (T7A.10A). Never
+  // reached on a replay/duplicate delivery of the same event (this whole insert path is only
+  // reached after tryInsertClockEvent's own ON CONFLICT DO NOTHING succeeds).
+  await resolveMissingCheckoutAtCutoffOnLateCheckOut(tx, openShift.openedByClockEventId);
 
   const { timesheetId, payrollPeriodId } = await resolveTimesheetForInstant(tx, employeeId, effectiveAt);
   let exceptionType: string | undefined;
