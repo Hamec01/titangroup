@@ -1,6 +1,94 @@
 # Titanor Time — Implementation Status
 
-Обновлено: 2026-08-18 Europe/Helsinki (fix: correct scheduler heartbeat lifecycle)
+Обновлено: 2026-08-18 Europe/Helsinki (feat: add offline PWA shell and GPS retention)
+
+**`[2026-08-18]` T7A.10C.1 Pilot Gap Closure — feat(time): add offline PWA shell and GPS retention.**
+Закрывает два пробела, найденные перед итоговым pilot E2E (после T7A.10B follow-up, `060d556`): (A)
+raw GPS 90-дневный retention реально не запускался (был только защитный DB-trigger); (B) после
+полного закрытия браузера `/worker` нельзя было открыть без сети вообще — не было installable
+offline-shell.
+
+**A. Retention.** Новый `lib/attendance-location-retention.ts`: один `$executeRaw` —
+`DELETE FROM "ClockEventLocation" WHERE "createdAt" < now() - interval '90 days'` — то же выражение,
+что уже использует существующий guard-trigger (`20260812000000_add_attendance_clock_schema_foundation`),
+никакого нового trigger/migration. Возвращает только `{ deletedCount }` — ни одного `clockEventId`/UUID.
+`ClockEvent`/`gpsVerification`/`gpsAccuracyMeters`/`geofenceVersionId` не затрагиваются (FK `onDelete:
+Cascade` — с `ClockEvent` на `ClockEventLocation`, не обратно). Интегрирован в
+`scripts/attendance-auto-submit-scheduler.ts` как отдельный try/catch'нутый шаг той же итерации
+`while(!shuttingDown)`, СРАЗУ после auto-submit тика: первый pass — на первой же итерации
+(`lastSuccessAt` стартует `null`), после успеха — не раньше 24ч, после ошибки — retry на следующем
+цикле (не жду 24ч). Новый переиспользуемый примитив `maybeRunRetentionCore` в
+`lib/attendance-scheduler-runtime.ts` (тот же dependency-injection паттерн, что и `runOneTickCore` из
+T7A.10B follow-up).
+
+**Тесты retention — 31/31** (реальный disposable PostgreSQL 16, дважды подряд с нуля): граница ровно
+89д23ч59м — не удаляется; строго старше 90д — удаляется; `ClockEvent`/GPS-вердикт родителя не
+затронуты; повторный pass → `deletedCount=0`; **два реальных конкурентных** вызова
+(`Promise.all`) — без ошибок/дублей, сумма удалённых равна множеству; провал → retry на следующем
+цикле scheduler'а (не через 24ч); успех → следующий цикл (раньше 24ч) — skip; restart scheduler'а —
+безопасен; `UPDATE`/прямой `DELETE` молодой строки — по-прежнему запрещены существующими триггерами;
+ноль координат/UUID в логах scheduler'а.
+
+**B. Offline PWA shell.** `public/manifest.webmanifest` + сгенерированные (без новой зависимости,
+`node:zlib`) иконки 192/512; ручной `public/sw.js` (без Workbox/next-pwa) — allowlist: кэшируется
+ТОЛЬКО navigation to `/worker` (network-first → cached `/worker-offline` fallback на настоящем network
+failure, никогда не маскирует реальный 401/403) и `/worker-offline` (network-first-updating-cache),
+плюс `/_next/static/**`/`/manifest.webmanifest`/`/icons/**` (cache-first); АБСОЛЮТНО всё остальное
+(`/api/**`, `/login`, `/admin/**`, `/foreman/**`, любой не-GET) — network-only, SW структурно не
+касается Cache Storage для них. `scope: '/worker'` (без trailing slash — `/worker/` технически не
+покрывает саму страницу `/worker`, string-prefix bug, найден и исправлен при тестировании, см. design
+doc addendum §C). Новый data-free `/worker-offline` route (без `dynamic='force-dynamic'`, без
+`cookies()`/`headers()` — статически PII-free по построению), client-компонент читает
+`deviceState`/`localClockState` из уже существующего `lib/offline-outbox/*` (T7A.7B, ноль изменений
+внутренней логики) и рендерит ТОТ ЖЕ `WorkerClockPanel`. `WorkerClockPanel` обобщён: `assignments`
+принимает структурный `ClockPanelAssignment` (оба существующих типа — сервер/IndexedDB — уже
+satisfy его), `periodsHref`/новый `historyHref` — `string | null`.
+
+**Тесты PWA/security — Chromium (production build, не `next dev` — см. testing note в design doc):**
+полный мандаторный 15-шаговый true cold-restart сценарий (`launchPersistentContext`, реальный полный
+close+relaunch процесса, настоящий `context.setOffline(true)`) — **19/19**, дважды подряд стабильно:
+offline Check In → полное закрытие браузера → новый процесс → offline shell грузится из Cache Storage
+→ offline Check Out → второй close/reopen → reconnect → FIFO-sync → ровно один `ClockShift`, два
+`ClockEvent`, два `ACCEPTED` receipt, outbox очищен только после ACK. Switch Site вариант —
+**14/14**: после cold restart обе половины группы (`groupId`) присутствуют или отсутствуют вместе,
+orphan структурно невозможен (`applyGroupResult`, T7A.7B, не менялся). Отдельный PWA/security-скрипт —
+**26/26**: manifest/scope/display/icons; SW install/activate; настоящий version-bump (byte-different
+sw.js) корректно чистит старый+посторонний cache key и НЕ трогает IndexedDB; API always network-only
+(офлайн-`fetch('/api/...')` реально падает, не кэш); Cache Storage полностью PII-free (сканирование
+email/UUID/lat-lon-pair/set-cookie по всем закэшированным телам — ноль совпадений); DOM/console —
+ноль координат; `NOT_AUTHENTICATED`-сессия после reconnect — outbox сохранён (не удалён), только
+`state: PENDING` + `lastErrorCode`; `DEVICE_REVOKED` — то же самое (device pause, не потеря очереди);
+390×844 без horizontal overflow; aria-live/keyboard-focus present; два независимых профиля/устройства
+— раздельные `deviceInstallationId`, ноль cross-contamination. Android-эмуляция (Chromium + Playwright
+`devices['Pixel 5']`) — тот же core-сценарий, **7/7**, дважды подряд. **WebKit/iPhone-эмуляция НЕ
+запускалась** — на этом хосте бинарник WebKit скачан, но недостающие системные `.so`-зависимости
+(`libharfbuzz-icu`, `libepoxy`, `libwayland-*`, и др.) не устанавливались без отдельной авторизации —
+честно зафиксированный gap, не "прошло".
+
+**Регрессия**: scheduler lifecycle с интегрированным retention (heartbeat/tick лог, PII-free, SIGTERM
+→ exit(0) < 5с) — ok; login pre-hydration guard (`d51507b`) — не задет; admin
+(`/admin/corrections`,`/admin/review-scopes`,`/admin/attendance/policy`,`/admin/attendance/exceptions`,
+`/admin/sites`,`/admin/workers`) и foreman (`/foreman/review`,`/foreman/attendance/exceptions`,
+`/foreman/workers`) страницы — 200, ноль console errors. Online `WorkerClockPanel`/offline
+outbox/sync/Switch Site — уже многократно упражнены самими cold-restart/security-скриптами через
+РЕАЛЬНЫЕ Check In/Check Out/Switch Site/Sync действия на том же обобщённом компоненте.
+
+**Технические проверки**: `git diff --check`, `prisma validate` (схема не менялась — retention
+переиспользует существующую таблицу/trigger), `tsc --noEmit`, `npm run build` (изолированная copy),
+`docker compose config --quiet`, `docker compose build app` (образ подтверждённо содержит
+`public/{manifest.webmanifest,sw.js,icons/}`, `lib/attendance-location-retention.ts`,
+`.next/server/app/worker-offline*`), `prisma migrate deploy` дважды на чистой disposable БД (56
+migrations, второй прогон — "No pending migrations") — все чисто. Preview `127.0.0.1:3244` —
+`200`/`200`, HEAD не менялся во время работы. Production (`titanor-time-app-1`/`titanor-time-db-1`) —
+не перезапускался, scheduler-контейнер не запускался (сам сервис production'а не поднят).
+
+**Явно НЕ входит в этот слайс**: T7A.10C.2 (полная E2E-матрица + backup/restore) — не начат; проверка
+на реальных физических телефонах (iPhone/Android) — только эмуляция; legal/privacy approval
+90-дневного raw GPS retention — внешний владельческий gate, не техническая задача; logout/shared-device
+cleanup policy — намеренно не реализована (нет authorization для auto-удаления pending outbox "ради
+приватности" — риск потери несинхронизированных событий); offline shell доступен владельцу уже
+разблокированного профиля браузера без серверного round-trip — задокументировано как честное
+ограничение модели, не дефект.
 
 **`[2026-08-18]` T7A.10B follow-up — fix(time): correct scheduler heartbeat lifecycle.** Исправляет
 два дефекта в scheduler runtime, найденные ПОСЛЕ T7A.10B (запись ниже), до начала T7A.10C (по-прежнему

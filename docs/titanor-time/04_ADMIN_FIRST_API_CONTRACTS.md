@@ -1927,3 +1927,19 @@ Backend-срез (`02_...`, §2.12): создание/пополнение то�
   `INSERT` строки `ForemanAssignment`
 - Не менялись: выбор дат, `isSubstitute`, отсутствие overlap-проверки (несколько
   прорабов/заместителей на объект — легитимно, `03_...`, §4.4)
+
+## 17. T7A.10C.1 — ноль новых HTTP-контрактов (2026-08-18)
+
+Pilot gap closure slice (raw GPS retention + offline PWA shell,
+`T7A_1_ATTENDANCE_CLOCK_DESIGN.md` Addendum "T7A.10C.1") добавляет **ноль** новых API-эндпоинтов и
+не меняет ни один существующий контракт из этого документа. Явно, для traceability:
+
+- Retention (`lib/attendance-location-retention.ts`) — внутренняя scheduler-функция, вызывается
+  только из процесса `scripts/attendance-auto-submit-scheduler.ts`; намеренно нет публичного API и
+  нет admin-кнопки для ручного запуска (§B design doc addendum).
+- PWA-файлы (`public/manifest.webmanifest`, `public/sw.js`, `public/icons/*`) — статические ассеты,
+  не API-роуты; `/worker-offline` — Server Component без данных, не JSON-эндпоинт.
+- `/worker` (§9 выше, `POST /attendance/sync` и остальные роуты) — контракты не менялись; единственное
+  изменение — `WorkerClockPanel` теперь параметризован структурным типом assignment'ов вместо
+  конкретного server-типа (чисто TypeScript-уровневый рефакторинг компонента, не влияет ни на один
+  HTTP-контракт).

@@ -120,3 +120,46 @@ export async function runOneTickCore(
     return { kind: 'top_level_error', durationMs };
   }
 }
+
+// docs/titanor-time/T7A_1_ATTENDANCE_CLOCK_DESIGN.md Addendum "T7A.10C.1" §B — raw GPS retention
+// pacing, run from the SAME scheduler loop as the auto-submit tick, one independent try/catch'd
+// step per iteration, never sharing a transaction or blocking with the tick step.
+
+export const RETENTION_MIN_INTERVAL_MS = 24 * 60 * 60 * 1000;
+
+export type RetentionOutcome = { kind: 'ran_ok'; deletedCount: number } | { kind: 'ran_error' } | { kind: 'skipped' };
+
+export interface RetentionStepResult {
+  outcome: RetentionOutcome;
+  lastSuccessAt: Date | null;
+}
+
+/**
+ * `lastSuccessAt` starts `null` in the caller (one variable per process, never persisted) — so the
+ * very first scheduler loop iteration (the same one that already runs the immediate first
+ * auto-submit tick) also attempts retention, satisfying "first pass right after scheduler start"
+ * with no separate startup-only code path. A successful pass sets `lastSuccessAt = now`, gating the
+ * next attempt to 24h later; a failed pass leaves it unchanged, so the very next loop iteration
+ * (not 24h later) retries — never logs the raw Error, only a stable error code.
+ */
+export async function maybeRunRetentionCore(
+  lastSuccessAt: Date | null,
+  now: Date,
+  runRetention: () => Promise<{ deletedCount: number }>,
+  log: (fields: Record<string, unknown>) => void
+): Promise<RetentionStepResult> {
+  const due = lastSuccessAt === null || now.getTime() - lastSuccessAt.getTime() >= RETENTION_MIN_INTERVAL_MS;
+  if (!due) {
+    return { outcome: { kind: 'skipped' }, lastSuccessAt };
+  }
+  try {
+    const result = await runRetention();
+    log({ event: 'attendance_location_retention', retentionRan: true, retentionOutcome: 'ok', retentionDeleted: result.deletedCount });
+    return { outcome: { kind: 'ran_ok', deletedCount: result.deletedCount }, lastSuccessAt: now };
+  } catch {
+    // Never logs the raw Error/message/stack — same PII/secret-leak reasoning as runOneTickCore's
+    // own top-level-error branch above.
+    log({ event: 'attendance_location_retention', retentionRan: true, retentionOutcome: 'top_level_error', errorCode: 'RETENTION_TOP_LEVEL_ERROR' });
+    return { outcome: { kind: 'ran_error' }, lastSuccessAt };
+  }
+}

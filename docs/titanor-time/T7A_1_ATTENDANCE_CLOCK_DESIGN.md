@@ -5322,3 +5322,191 @@ partial-patch тем же полям с теми же именами и пола
 Этот addendum — запись решения до кода, не отдельное утверждение владельца поверх уже
 утверждённого 2026-08-12 checkpoint. Production deployment этого слайса не входит в scope (STOP-GATE
 задачи); после него остаётся отдельный T7A.10C (полный pilot E2E), ещё не выполненный.
+
+---
+
+## Addendum — T7A.10C.1 Pilot Gap Closure: Secure Offline PWA Shell + GPS Retention (2026-08-18)
+
+Написано **до** реализации. Закрывает два обнаруженных перед pilot E2E пробела: (A) raw GPS
+90-дневный retention — DB-trigger уже существует (`trg_clock_event_location_retention_delete_guard`,
+`20260812000000_add_attendance_clock_schema_foundation`), но ничего его реально не вызывает; (B) нет
+installable offline-shell — `WorkerClockPanel`/`lib/offline-outbox/*` (T7A.7B) уже полностью
+offline-safe в своей БИЗНЕС-логике (bootstrap, enqueue, sync все graceful на сетевой ошибке), но сама
+СТРАНИЦА `/worker` — обычный Next.js Server Component, требующий живого запроса к серверу для самого
+первого HTML — без него после полного закрытия браузера открыть `/worker` без сети невозможно
+вообще, до какого-либо React/IndexedDB кода.
+
+### A. Retention job — контракт
+
+```text
+runAttendanceLocationRetention(): Promise<{ deletedCount: number }>
+  DELETE FROM "ClockEventLocation" WHERE "createdAt" < now() - interval '90 days'
+```
+
+Единственный SQL-запрос, `now()` вычисляется Postgres'ом (не JS Date) — буквально то же выражение,
+что и `fn_clock_event_location_retention_delete_guard` использует для блокировки DELETE младше 90
+дней (`OLD."createdAt" >= now() - interval '90 days'` → RAISE EXCEPTION). Совпадение выражений
+гарантирует отсутствие off-by-one рассинхронизации между job'ом и guard'ом: job удаляет ровно то
+множество строк, которое guard разрешает удалить, ни строкой больше (guard бы просто откатил лишнюю
+попытку как отдельную ошибку — не нужно, если выражения идентичны). `$executeRaw` возвращает
+именно количество затронутых строк — не требует отдельного `SELECT`/`RETURNING` для подсчёта, не
+может вернуть ни одного `clockEventId`. Один `DELETE`-statement — атомарен по семантике Postgres
+сам по себе, без явной обёртки в транзакцию.
+
+`ClockEvent.gpsVerification`/`gpsAccuracyMeters`/`geofenceVersionId` живут на родительской таблице
+`ClockEvent`, не на `ClockEventLocation` — FK `ClockEventLocation.clockEventId → ClockEvent.id` имеет
+`onDelete: Cascade` в направлении "удалили ClockEvent → удаляется его ClockEventLocation", не
+наоборот; удаление `ClockEventLocation` НИКОГДА не касается родительской строки `ClockEvent`.
+
+### B. Scheduler integration — retention pacing
+
+Внутри уже существующего `while (!shuttingDown)`-loop (`scripts/attendance-auto-submit-scheduler.ts`,
+T7A.10B), СРАЗУ после auto-submit тика этой же итерации, отдельный, независимо
+try/catch'нутый шаг:
+
+```text
+maybeRunRetentionCore(lastSuccessAt, now, runRetention, log):
+  due = lastSuccessAt === null || (now - lastSuccessAt) >= 24h
+  if !due: return { skipped }, lastSuccessAt unchanged
+  try:
+    result = await runRetention()
+    log({ event: 'attendance_location_retention', retentionRan: true, retentionOutcome: 'ok', retentionDeleted: result.deletedCount })
+    return { ran_ok }, lastSuccessAt = now
+  catch:
+    log({ event: 'attendance_location_retention', retentionRan: true, retentionOutcome: 'top_level_error', errorCode: 'RETENTION_TOP_LEVEL_ERROR' })
+    return { ran_error }, lastSuccessAt unchanged (retry на СЛЕДУЮЩЕМ цикле, не через 24ч)
+```
+
+`lastSuccessAt` — обычная переменная процесса, начинается `null`, поэтому ПЕРВЫЙ цикл scheduler'а
+(тот же, что уже делает immediate-first auto-submit тик) автоматически пытается retention тоже —
+"первый pass после запуска" без отдельного кода. Retention НИКОГДА не блокирует auto-submit и
+наоборот: оба шага — последовательные, независимо пойманные операции ОДНОЙ итерации loop'а; провал
+retention не откатывает уже успешно завершённый в ЭТОЙ ЖЕ итерации auto-submit тик (они пишут в
+разные таблицы разными запросами, никакой общей транзакции между ними нет и не должно быть). No-overlap
+внутри процесса — структурно то же самое рассуждение, что и для auto-submit (§2/§3 addendum'а
+T7A.10B): один sequential loop, `setInterval` нигде не используется. Несколько scheduler-реплик —
+безопасны без дополнительной координации: `DELETE ... WHERE createdAt < ...` идемпотентен и не имеет
+собственного состояния гонки (в отличие от auto-submit, retention не блокирует конкретные бизнес-строки
+через `FOR UPDATE` — простое multi-row DELETE, конкурентные копии просто делят между собой одно и то же
+множество строк на уровне MVCC, без deadlock). Heartbeat/graceful shutdown — не меняются:
+heartbeat по-прежнему пишется только auto-submit тиком (T7A.10B), retention не имеет собственного
+heartbeat-файла; `shuttingDown`-флаг проверяется между шагами той же итерации, как и раньше.
+
+### C. PWA — architecture decisions
+
+**Manifest/icons.** `public/manifest.webmanifest` (`start_url: /worker`, `scope: /worker`,
+`display: standalone`), два PNG-иконки `public/icons/icon-192.png`/`icon-512.png` (сгенерированы
+программно через `node:zlib`, без новой npm-зависимости — тот же принцип "hand-rolled вместо
+библиотеки", что уже применён для IndexedDB-слоя/SHA-256 в T7A.7B). `app/worker/layout.tsx`
+объявляет `metadata.manifest` — Next.js рендерит `<link rel="manifest">` только для страниц под
+`/worker/**`, не для всего приложения (сам PWA-функционал целенаправленно ограничен worker clock,
+не всем приложением).
+
+**Service worker (`public/sw.js`, ручной, без Workbox/next-pwa)** — регистрируется ТОЛЬКО клиентским
+кодом внутри `app/worker/layout.tsx` (`navigator.serviceWorker.register('/sw.js', { scope:
+'/worker' })` — **без** trailing slash). Scope ограничивает контроль SW строго префиксом
+`/worker*` на уровне самого браузера (defense-in-depth поверх allowlist-логики самого SW —
+`/admin/**`/`/foreman/**`/`/login`/`/api/**` структурно не могут попасть под управление этого SW
+вообще, не только "не должны" по логике). Важный нюанс, найденный при тестировании: Service Worker
+scope — это буквальный string-prefix match, а Next.js рендерит страницу-индекс сегмента `/worker`
+БЕЗ trailing slash; `scope: '/worker/'` (с слэшем) технически НЕ покрывает саму `/worker`
+(`"/worker".startsWith("/worker/")` === false) — при такой опечатке регистрация и активация SW
+проходят успешно, но `navigator.serviceWorker.controller` для страницы `/worker` навсегда остаётся
+`null`, и офлайн-навигация падает с настоящей сетевой ошибкой браузера, а не отдаётся из кэша (легко
+спутать с "SW не работает офлайн" — на самом деле это не касалось SW вообще, чисто scope-matching).
+Строка `/worker` (без слэша) как scope корректно покрывает `/worker`, `/worker/history`,
+`/worker/periods` и `/worker-offline` (все они начинаются с этой строки), но НЕ `/admin`, `/foreman`,
+`/login`, `/api/worker/**` — в дереве маршрутов приложения нет других путей с префиксом `/worker`,
+которые не должны попадать в этот scope.
+
+Fetch-стратегии SW:
+
+```text
+navigation to EXACTLY "/worker" (не "/worker/periods", не "/worker/history", ...):
+  network-first → на успехе (включая настоящий 401/403 — они НЕ маскируются offline shell'ом,
+    просто проксируются как есть) отдать реальный ответ;
+  на настоящем network failure (fetch() бросил/timeout) → caches.match('/worker-offline')
+    (уже прогретый — см. ниже), НИКОГДА не caches.match('/worker') (эта страница никогда не
+    кэшируется вообще).
+
+GET /_next/static/** (иммутабельные, content-hashed чанки), /manifest.webmanifest, /icons/**:
+  cache-first (есть в кэше → отдать немедленно; нет → сеть, затем положить в кэш) — безопасно
+  кэшировать бессрочно (до version bump, см. ниже), это чистые статические байты без данных
+  пользователя.
+
+navigation to "/worker-offline" (прямой визит):
+  network-first → на успехе отдать реальный (тоже статический/PII-free) ответ И обновить кэш;
+  на failure → caches.match('/worker-offline').
+
+ЛЮБОЙ другой запрос (/api/**, /login, /admin/**, /foreman/**, любая другая /worker/* страница,
+POST/PATCH/PUT/DELETE любого метода, что угодно с Set-Cookie в РАНЕЕ увиденном ответе) —
+network-only, SW НИКОГДА не трогает Cache Storage для них ни на чтение, ни на запись. Это не
+"фильтр который может пропустить" — это структура: единственные три ветки выше explicitly
+matching(url), default-ветка — просто `fetch(event.request)` без единого обращения к caches.*.
+```
+
+**Прогрев кэша (warm), не install-time precache хешей.** Next.js хеширует имена чанков на каждой
+сборке — SW как статический файл из `public/` не может заранее знать текущие хеши. Вместо
+build-time манифеста (Workbox-style) — RUNTIME warm со страницы `/worker` (не из самого SW): после
+успешного `ensureDeviceBootstrapped()` → `READY`, клиентский код один раз (per session, флаг в
+памяти модуля) делает `fetch('/worker-offline')`, кладёт ответ в `caches.open(CACHE_NAME)` НАПРЯМУЮ
+(Cache Storage — единое пространство для window/SW контекстов одного origin, класть можно из
+страницы, читать — из SW), затем парсит `<script>`/`<link rel="stylesheet">` URL из полученного HTML
+и явно `fetch()`+`cache.put()` каждый — гарантированно кладёт ИМЕННО те чанки, что нужны
+`/worker-offline` именно ЭТОЙ сборке, без хрупких допущений о том, что Next.js's own prefetch
+случайно закэширует то же самое. `/worker-offline` рендерится Next.js статически (нет
+`dynamic='force-dynamic'`, нет `cookies()`/`headers()`) — сам ответ уже PII-free по построению, не
+только "предполагается таким".
+
+**`/worker-offline` route** — тот же `WorkerClockPanel` (T7A.7B), но с client-derived, не
+server-derived, initial props: читает `deviceState`/`localClockState`/`clockOutbox` из IndexedDB на
+mount (та же самая `lib/offline-outbox/*`, ни одна функция не копируется), строит синтетический
+`ClockStateWire`-эквивалент из `localClockState` (`serverNow` — просто `new Date().toISOString()`
+локального устройства, только для отображения таймера, никогда не источник истины) и передаёт
+`deviceState.contextAssignments` НАПРЯМУЮ как `assignments` prop (не как отдельный fallback для
+имён — как САМ список сайтов для Check In). До завершения этого чтения — ничего не рендерится, кроме
+"Loading…"; если `deviceState` отсутствует/`bootstrapped:false` — "Offline setup is not ready", ноль
+action-кнопок, ноль возможности создать outbox-событие (`atomicEnqueue` и без того уже отказывает с
+`DEVICE_NOT_BOOTSTRAPPED` — второй уровень защиты, не единственный).
+
+**`WorkerClockPanel` generalization** — единственное изменение самого компонента: `assignments` prop
+принимает узкий структурный тип `ClockPanelAssignment` (`id`/`siteId`/`siteName`/`workAreaId`/
+`workAreaName`/`isPrimary`) вместо конкретно `WorkerCurrentAssignment[]` — оба существующих типа
+(`WorkerCurrentAssignment` с сервера, `CachedAssignment` из IndexedDB) уже структурно satisfy его,
+приведения типов не нужны. `periodsHref`/`historyHref` становятся `string | null` (`null` скрывает
+соответствующую nav-ссылку) — offline shell передаёт `null` для обеих: `/worker/periods`/
+`/worker/history` сами требуют сервер-специфичных данных и не входят в offline-scope этого слайса
+(навигация на них при реальном отсутствии сети просто не сработает нормальным образом браузера — SW
+явно не подставляет туда shell, см. fetch-стратегию выше). Никакой другой внутренней логики
+компонента (bootstrap/enqueue/sync/projection/error-handling) НЕ меняется — она уже полностью
+offline-корректна, разрыв был исключительно в "как вообще загрузить страницу без сети", не в
+бизнес-логике самой страницы.
+
+### C.1 Заметки по тестированию true cold-restart (не про продукт, про методику)
+
+Полный сценарий (полное закрытие persistent-профиля браузера, новый процесс, офлайн, навигация на
+`/worker`) тестировался Playwright'ом (`chromium.launchPersistentContext`, реальный
+`context.setOffline(true)`) против **production-сборки** (`next build` + `.next/standalone/server.js`),
+не против `next dev`. Причина: `next dev` инжектит собственный HMR-клиент (WebSocket-переподключение),
+которого в реальной production-сборке физически не существует — при потере соединения этот клиент сам
+инициирует повторную навигацию, которая (в отличие от НАСТОЯЩЕЙ, изначальной SW-перехваченной
+навигации) у Chromium иногда падает в собственный `chrome-error://chromewebdata/` уже ПОСЛЕ того, как
+offline shell успешно отрисовался — ложный, специфичный только для dev-режима сбой, не имеющий
+отношения к реальному pilot-деплою (который всегда `next start`/standalone-сервер в контейнере).
+Отдельно, для самого первого офлайн-навигейта в свежем `launchPersistentContext`-процессе:
+Chromium/CDP не всегда сразу "видит" персистентную SW-регистрацию нового процесса, если не подписаться
+хотя бы на один `context.on('serviceworker', ...)`-listener (это включает CDP `ServiceWorker`-домен) —
+без этого even a genuinely-activated on-disk registration иногда не подхватывается для первой
+навигации. Оба нюанса — особенности автоматизации/тестового инструмента, не продукта; после их учёта
+полный 15-шаговый сценарий (и его Switch Site вариант — оба половины группы синхронизируются
+атомарно, orphan невозможен структурно за счёт существующего `applyGroupResult`, T7A.7B) проходит
+стабильно на нескольких подряд idempotent-прогонах с чистой БД.
+
+### D. Что явно НЕ входит в этот слайс
+
+Реальные физические устройства (iPhone/Android) — только эмуляция (Chromium/WebKit/Android
+device-emulation через Playwright); legal/privacy approval 90-дневного raw GPS retention — внешний
+владельческий gate, не техническая задача; полная E2E-матрица + backup/restore — T7A.10C.2, ещё не
+начат; logout/shared-device cleanup policy — намеренно не реализован (см. §OFFLINE DATA DISCLOSURE
+в самой задаче — удаление pending outbox "ради приватности" запрещено явно, могло бы потерять
+несинхронизированные события).

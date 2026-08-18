@@ -2,7 +2,6 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
-import type { WorkerCurrentAssignment } from '@/lib/worker-context';
 import { captureGpsSnapshot, type GpsSnapshot } from '@/lib/worker-gps';
 import { ensureDeviceBootstrapped, retryBootstrap, type BootstrapOutcome } from '@/lib/offline-outbox/device';
 import { enqueueCheckIn, enqueueCheckOut, enqueueSwitchSite, EnqueueError } from '@/lib/offline-outbox/outbox';
@@ -10,6 +9,7 @@ import { runSyncOnce, tryRefreshClockState, type ClockStateWire, type SyncRunOut
 import { getAllOutboxEvents, type OutboxEventRecord, type CachedAssignment } from '@/lib/offline-outbox/db';
 import { projectClockState } from '@/lib/offline-outbox/projection';
 import { subscribeOutboxChanges } from '@/lib/offline-outbox/broadcast';
+import { warmOfflineShellCache } from '@/lib/offline-outbox/pwa-warm-cache';
 
 // docs/titanor-time/T7A_1_ATTENDANCE_CLOCK_DESIGN.md §6/§7/§9.11 (T7A.7B — offline outbox client).
 // Every Check In/Out/Switch Site action now writes to the IndexedDB outbox FIRST (one atomic
@@ -74,15 +74,34 @@ function formatHelsinkiTime(iso: string): string {
   return helsinkiTimeFormatter.format(new Date(iso));
 }
 
-export interface WorkerClockPanelProps {
-  initialClockState: ClockStateWire;
-  assignments: WorkerCurrentAssignment[];
-  workerName: string | null;
-  todayLabel: string;
-  periodsHref: string;
+// docs/titanor-time/T7A_1_ATTENDANCE_CLOCK_DESIGN.md Addendum "T7A.10C.1" §C — the narrow
+// structural subset this component actually reads off an assignment. Both the server-side
+// `WorkerCurrentAssignment` (lib/worker-context.ts) and the IndexedDB-cached `CachedAssignment`
+// (lib/offline-outbox/db.ts) already satisfy this shape as-is — no adapter/mapping needed for
+// either the online page or the offline shell to pass their own assignment list straight through.
+export interface ClockPanelAssignment {
+  id: string;
+  siteId: string;
+  siteName: string;
+  workAreaId: string | null;
+  workAreaName: string | null;
+  isPrimary: boolean;
 }
 
-export function WorkerClockPanel({ initialClockState, assignments, workerName, todayLabel, periodsHref }: WorkerClockPanelProps) {
+export interface WorkerClockPanelProps {
+  initialClockState: ClockStateWire;
+  assignments: ClockPanelAssignment[];
+  workerName: string | null;
+  todayLabel: string;
+  /** `null` hides the corresponding nav link entirely — the offline shell passes `null` for both,
+   * since /worker/periods and /worker/history need server data this slice does not cache and a
+   * real navigation there while genuinely offline is left to fail the ordinary way, never silently
+   * swapped for this shell (§C "остальные защищённые страницы не подменять worker shell"). */
+  periodsHref: string | null;
+  historyHref: string | null;
+}
+
+export function WorkerClockPanel({ initialClockState, assignments, workerName, todayLabel, periodsHref, historyHref }: WorkerClockPanelProps) {
   const [bootstrap, setBootstrap] = useState<BootstrapOutcome | null>(null);
   const [clockState, setClockState] = useState<ClockStateWire>(initialClockState);
   const [outboxRecords, setOutboxRecords] = useState<OutboxEventRecord[]>([]);
@@ -166,6 +185,12 @@ export function WorkerClockPanel({ initialClockState, assignments, workerName, t
       await refreshOutboxSnapshot();
       if (!cancelled && (outcome.kind === 'READY' || outcome.kind === 'NOT_READY_OFFLINE')) {
         await triggerSync();
+      }
+      if (!cancelled && outcome.kind === 'READY') {
+        // Best-effort, never awaited by anything the user is waiting on — warms the offline
+        // shell's Cache Storage entry so a later genuinely offline cold start has something to
+        // serve (§C of the T7A.10C.1 addendum). No-op if service workers aren't supported.
+        void warmOfflineShellCache();
       }
     })();
     return () => {
@@ -579,14 +604,20 @@ export function WorkerClockPanel({ initialClockState, assignments, workerName, t
         </div>
       )}
 
-      <div className="wk-clock-nav">
-        <Link href={periodsHref} className="wk-back-link">
-          My periods →
-        </Link>
-        <Link href="/worker/history" className="wk-back-link">
-          History →
-        </Link>
-      </div>
+      {(periodsHref || historyHref) && (
+        <div className="wk-clock-nav">
+          {periodsHref && (
+            <Link href={periodsHref} className="wk-back-link">
+              My periods →
+            </Link>
+          )}
+          {historyHref && (
+            <Link href={historyHref} className="wk-back-link">
+              History →
+            </Link>
+          )}
+        </div>
+      )}
     </div>
   );
 }

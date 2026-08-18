@@ -1,20 +1,22 @@
 import { prisma } from '../lib/prisma';
 import { runAttendanceAutoSubmitTick } from '../lib/attendance-auto-submit';
+import { runAttendanceLocationRetention } from '../lib/attendance-location-retention';
 import { writeHeartbeat } from '../lib/attendance-scheduler-heartbeat';
-import { resolveIntervalSecondsOrExit, sleep, logSafe, runOneTickCore } from '../lib/attendance-scheduler-runtime';
+import { resolveIntervalSecondsOrExit, sleep, logSafe, runOneTickCore, maybeRunRetentionCore } from '../lib/attendance-scheduler-runtime';
 
-// docs/titanor-time/T7A_1_ATTENDANCE_CLOCK_DESIGN.md Addendum "T7A.10B" §1-§6 — permanent scheduler
-// process. Not the CLI one-shot `attendance-auto-submit-tick.ts` (T7A.10A, unchanged, still the
-// entry point a future EXTERNAL scheduler could invoke) — this is a long-lived Node process meant
-// to run forever inside its own Compose service (`scheduler`), calling the exact same
-// runAttendanceAutoSubmitTick core on an interval. Never accepts `now`/`actorUserId` overrides from
-// argv or env, at startup or per-tick — production always uses real system time; SYSTEM actor is
-// resolved internally by the core (§13). No HTTP routes/servers of any kind.
+// docs/titanor-time/T7A_1_ATTENDANCE_CLOCK_DESIGN.md Addendum "T7A.10B" §1-§6 + "T7A.10C.1" §B —
+// permanent scheduler process. Not the CLI one-shot `attendance-auto-submit-tick.ts` (T7A.10A,
+// unchanged, still the entry point a future EXTERNAL scheduler could invoke) — this is a
+// long-lived Node process meant to run forever inside its own Compose service (`scheduler`),
+// calling the exact same runAttendanceAutoSubmitTick core on an interval, plus (T7A.10C.1) a
+// once-per-24h raw GPS retention pass in the same loop. Never accepts `now`/`actorUserId`
+// overrides from argv or env, at startup or per-tick — production always uses real system time;
+// SYSTEM actor is resolved internally by the core (§13). No HTTP routes/servers of any kind.
 //
 // This file is now a thin wiring layer — the actual lifecycle primitives (interval parsing,
-// abort-aware sleep, one-tick execution/heartbeat/logging) live in
+// abort-aware sleep, one-tick execution/heartbeat/logging, retention pacing) live in
 // lib/attendance-scheduler-runtime.ts, where they are directly unit-testable without a real
-// database or a real 30s+ wait.
+// database or a real 30s+/24h wait.
 
 let shuttingDown = false;
 const shutdownController = new AbortController();
@@ -36,11 +38,20 @@ async function main(): Promise<void> {
   const intervalMs = intervalSeconds * 1000;
   logSafe({ event: 'attendance_scheduler_started', intervalSeconds });
 
+  let lastRetentionSuccessAt: Date | null = null;
+
   while (!shuttingDown) {
     await runOneTickCore((now) => runAttendanceAutoSubmitTick({ now }), writeHeartbeat, logSafe);
     if (shuttingDown) {
       break;
     }
+
+    const retentionStep = await maybeRunRetentionCore(lastRetentionSuccessAt, new Date(), runAttendanceLocationRetention, logSafe);
+    lastRetentionSuccessAt = retentionStep.lastSuccessAt;
+    if (shuttingDown) {
+      break;
+    }
+
     await sleep(intervalMs, shutdownController.signal);
   }
 

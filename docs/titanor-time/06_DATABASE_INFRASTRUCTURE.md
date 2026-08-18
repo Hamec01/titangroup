@@ -227,6 +227,49 @@ the process exit non-zero immediately, before any database access — Compose's 
 will keep restarting it into the same immediate failure until the env var is corrected, which is the
 intended fail-fast behavior, not a bug to work around.
 
+## 12. Raw GPS retention (`ClockEventLocation`, T7A.10C.1, 2026-08-18)
+
+`docs/titanor-time/T7A_1_ATTENDANCE_CLOCK_DESIGN.md` Addendum "T7A.10C.1" §A/§B is the authoritative
+design text; this section is only the operational summary.
+
+**What exists in the schema (unchanged since `20260812000000_add_attendance_clock_schema_foundation`,
+this slice added no migration).** A guard trigger,
+`fn_clock_event_location_retention_delete_guard`/`trg_...`, has always blocked any `DELETE` of a
+`ClockEventLocation` row younger than 90 days (`OLD."createdAt" >= now() - interval '90 days'` →
+`RAISE EXCEPTION`), and a separate trigger unconditionally blocks all `UPDATE`s on that table. Neither
+changed. What was missing until this slice was anything that actually issued the delete for rows past
+that boundary — the trigger only ever *permitted* it.
+
+**What runs now.** The scheduler process (§11 above — same Compose service, same image, same
+`while(!shuttingDown)` loop) runs one extra step per loop iteration, immediately after the auto-submit
+tick: `runAttendanceLocationRetention()` (`lib/attendance-location-retention.ts`) —
+`DELETE FROM "ClockEventLocation" WHERE "createdAt" < now() - interval '90 days'`, the identical
+boundary expression the guard trigger already enforces, so the job can never attempt to delete a row
+the trigger would reject. First pass runs on scheduler startup; after a successful pass, the next one
+waits at least 24h; after a failure, the very next loop iteration retries (no 24h wait). Result is
+`{ deletedCount }` only — no `clockEventId`/employee/device UUIDs, no coordinates, ever, in the
+scheduler's structured log line (`retentionRan`/`retentionOutcome`/`retentionDeleted` — safe fields
+only; a top-level failure logs a stable `errorCode`, never the raw `Error`).
+
+**No new public API, no manual-run endpoint, no admin button** — by design (this is a maintenance
+job, not a user-facing feature; see design doc addendum §B).
+
+**Multi-replica safety.** The `DELETE ... WHERE createdAt < ...` is a plain set-based statement with
+no row-level lock contention of its own kind (unlike auto-submit's `FOR UPDATE` candidate locking) —
+two scheduler replicas running this concurrently simply partition the same eligible row set at the
+Postgres MVCC level; verified directly with two real concurrent calls against the same disposable
+database (zero errors, summed deleted counts equal the eligible set).
+
+**Diagnostics** — same `docker compose -f compose.titanor-time.yaml logs -f scheduler` as §11; look
+for `"event":"attendance_location_retention"` lines. No separate health signal — retention shares the
+scheduler container's existing heartbeat/health semantics from §11 unchanged.
+
+**Legal/privacy note.** Whether 90 days is the *correct* retention window for raw GPS coordinates
+under applicable privacy law is an external owner/legal decision, not something this slice determines
+or changes — this slice only makes the already-agreed 90-day boundary (encoded in the trigger since
+T7A.1) actually take effect operationally. That approval remains an open external gate, tracked
+outside this document.
+
 **Not yet done (T7A.10C):** this section describes running the scheduler service, not deploying it to
 production — production `titanor-time-app-1`/`titanor-time-db-1` do not currently have a `scheduler`
 sibling. Full pilot E2E (real workers, real cutoff in real time) is a separate, not-yet-started task.

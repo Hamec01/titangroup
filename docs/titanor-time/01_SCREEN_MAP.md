@@ -711,7 +711,9 @@ touch target ≥ 48px), `/foreman/*` — desktop-first с поддержкой �
 между ними явная, но обычный Check In/Out всегда доступен с домашней страницы.
 
 #### `/worker` 🟢 (после ЭТАП 7A — основной экран после логина) — **`[2026-08-15] T7A Worker Online
-Clock UI реализовано; [2026-08-14] T7A.7B добавил offline outbox — экран больше не online-only.`**
+Clock UI реализовано; [2026-08-14] T7A.7B добавил offline outbox; [2026-08-18] T7A.10C.1 добавил
+installable PWA (manifest/service worker/`/worker-offline` fallback) — навигация теперь работает и
+после полного закрытия браузера без сети, см. `/worker-offline` ниже.`**
 - Роли: `WORKER`
 - Приоритет: mobile-first, 390×844 проверено (offline-сценарии тоже, Playwright), touch-target
   ≥48px, основное действие доступно одной рукой; responsive до desktop без горизонтального scroll
@@ -746,8 +748,8 @@ Clock UI реализовано; [2026-08-14] T7A.7B добавил offline outb
   `GPS_NOT_VERIFIED`/`outside geofence` не блокируют локально — тот же контракт, что бэкенд
   (T7A_1_ATTENDANCE_CLOCK_DESIGN.md §5.3), для offline-событий проверяется сервером при синке.
   Reload восстанавливает durable state и через server render, и через IndexedDB outbox (ещё не
-  синкнутые действия переживают reload/remount — не через PWA/offline cache, полноценный service
-  worker по-прежнему не реализован, см. ниже)
+  синкнутые действия переживают reload/remount); с T7A.10C.1 переживает и полное закрытие браузера —
+  cold-restart offline (см. `/worker-offline` ниже)
 - Откуда: логин `WORKER`
 - Куда: `/worker/periods/[periodId]` (или список `/worker/periods`), `/worker/history`
 - API: `GET clock-state`, `GET attendance/context` (device bootstrap), `POST attendance/sync`
@@ -760,10 +762,44 @@ Clock UI реализовано; [2026-08-14] T7A.7B добавил offline outb
   check-out→reconnect→sync даёт ровно одну закрытую смену (подтверждено); координаты не попадают в
   DOM/console/`BroadcastChannel` (подтверждено); network-unknown retry повторяет тот же payload/id
   (подтверждено)
-- **Явно НЕ реализовано**: полноценный service worker/PWA offline-shell (сама навигация `/worker`
-  при полностью недоступной сети не работает — только уже открытая вкладка и её outbox), GPS-
-  accuracy badge, `Today`/`This week` сводка, `Add break`, полное меню, scheduler/auto-submit,
-  exception-review UI, admin attendance overview
+- **Явно НЕ реализовано**: GPS-accuracy badge, `Today`/`This week` сводка, `Add break`, полное меню
+
+#### `/worker-offline` 🟢 (data-free offline shell, `[2026-08-18]` T7A.10C.1)
+- Роли: `WORKER` (но сама страница НЕ проверяет сессию — см. ниже)
+- Приоритет: mobile-first, тот же 390×844
+- Назначение: единственная страница, которую service worker (`public/sw.js`) отдаёт как fallback
+  для навигации на `/worker`, когда сеть реально недоступна (`context.setOffline`/самолётный режим) —
+  это то, что реально грузится при полном закрытии и повторном открытии браузера offline
+- Данные: НЕТ server-side персонализации вообще (не `dynamic='force-dynamic'`, не вызывает
+  `cookies()`/`headers()`/`resolveServerSession()`) — HTML статичен и байт-идентичен для любого
+  посетителя, поэтому безопасен для кэширования service worker'ом без утечки чужих данных через
+  Cache Storage. Вся персонализация — client-side, читается из уже существующего IndexedDB
+  (`deviceState`/`localClockState`/`contextAssignments`, `lib/offline-outbox/*`, T7A.7B, ноль
+  изменений внутренней логики) ПОСЛЕ mount
+- Действия: тот же `WorkerClockPanel`, что и на `/worker` (Check In/Check Out/Switch Site/Sync —
+  один компонент, одни и те же enqueue/sync-функции, не дублируются)
+- Состояния: до завершения чтения IndexedDB — только «Loading…», ноль action-кнопок; если
+  `deviceState` отсутствует или `bootstrapped: false` (ни разу не было успешного online bootstrap) —
+  «Offline setup is not ready», ноль action-кнопок, ноль возможности создать outbox-запись
+- Откуда: только автоматически, через service worker (прямой заход возможен, но не является
+  предполагаемым UX-путём)
+- Куда: `periodsHref`/`historyHref` — `null` (обе nav-ссылки скрыты — `/worker/periods`/
+  `/worker/history` требуют сервер-специфичных данных, вне offline-scope этого слайса)
+- API: НЕТ прямых вызовов — использует тот же `POST /attendance/sync`, что и `/worker`, через тот же
+  outbox
+- DoD (полный 15-шаговый true cold-restart сценарий, Playwright, `launchPersistentContext`,
+  production build): offline Check In → полное закрытие браузера → новый процесс → эта страница
+  грузится из Cache Storage (не браузерная network-error страница) → offline Check Out → второй
+  close/reopen → reconnect → sync — ровно одна закрытая смена, ровно два `ClockEvent`, outbox
+  очищен только после ACK; тот же сценарий для Switch Site — обе половины группы синхронизируются
+  атомарно, orphan невозможен
+- **Известное ограничение (задокументировано, не дефект)**: страница доступна владельцу УЖЕ
+  разблокированного профиля браузера без серверного round-trip (нет проверки сессии на этом уровне —
+  реальная проверка/применение действий всё равно происходит на сервере при sync). Logout/shared-
+  device cleanup policy — намеренно не реализована: auto-удаление pending outbox «ради приватности»
+  запрещено явно (риск потери несинхронизированных событий), финальное решение — за владельцем.
+  Payroll history/admin/exception-данные НЕ кэшируются офлайн ни в каком виде — только site/work-area
+  список назначений и локальная проекция clock-state текущего работника
 
 #### `/worker/periods` ⚪ (список actionable периодов, точка входа при нескольких)
 - Роли: `WORKER`
