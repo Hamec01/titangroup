@@ -4734,3 +4734,147 @@ foreman-scope) приняты как стартовые дефолты и не �
 schema foundation slice (§16 п.1) перед geofence admin/online clock backend/UI; T7A.2 создание
 Prisma-схемы/migration этим документом не начинается и не разрешается автоматически — требует
 отдельной задачи по точному объёму §16 п.1.
+
+---
+
+## Addendum — T7A.9A Attendance Operational Overview Read Foundation (2026-08-18)
+
+Написано **до** реализации, по правилу §11/§6 ТЗ T7A.9A: точная формула diff и точные operational
+states фиксируются здесь прежде, чем пишется код. Реализует объём §16 п.9 (уже утверждённый
+владельцем 2026-08-12) — только read backend (`GET /api/admin/overview`, расширение
+`GET /api/foreman/overview`); UI — отдельный, ещё не начатый T7A.9B.
+
+### A. Operational state — точные определения (используются в `state`-фильтре и в `summary`)
+
+Один работник может нести несколько флагов одновременно; `state`-фильтр отбирает строки по наличию
+флага, не изменяя остальные поля строки.
+
+| State | Точное условие |
+|---|---|
+| `WORKING_NOW` | Существует `EmployeeOpenShift` для этого `employeeId` (PK = `employeeId`, максимум одна строка). |
+| `FINISHED_TODAY` | Существует `ClockShift` этого работника с `recordedEndAt` внутри текущего Helsinki calendar day (`[todayUtcMidnight, todayUtcMidnight+24h)` после конвертации). Наличие новой `EmployeeOpenShift` не убирает этот флаг — оба флага независимы и могут стоять одновременно (закрыл смену и через минуту открыл новую тем же днём). |
+| `MISSING_CHECKOUT` | Существует `AttendanceException{type: MISSING_CHECKOUT_AT_CUTOFF, status: OPEN}` для этого работника. |
+| `GPS_ISSUE` | Существует `AttendanceException{status: OPEN}` этого работника с `type IN (GPS_NOT_VERIFIED, OUTSIDE_GEOFENCE_CHECKOUT, GEOFENCE_VERSION_MISMATCH)`. |
+| `SYNC_ISSUE` | Существует `AttendanceException{status: OPEN}` этого работника с `type IN (DOUBLE_CHECK_IN, CHECKOUT_WITHOUT_OPEN_SHIFT, LATE_SYNC_AFTER_SUBMIT)`. Это ровно набор из ТЗ §4 — `SITE_MISMATCH_CHECKOUT`/`STALE_ASSIGNMENT`/`EXCESSIVE_CLOCK_SKEW`/`CHECKOUT_CHRONOLOGY_ANOMALY`/`EXCESSIVE_SHIFT_DURATION`/`PERIOD_BOUNDARY_SPAN`/`OVERLAPPING_SHIFT` (7 остальных типов enum `AttendanceExceptionType`) не входят ни в `GPS_ISSUE`, ни в `SYNC_ISSUE` — они по-прежнему учтены в общем `summary.openAttendanceExceptions` (count всех `OPEN` этого работника, любого типа) и в admin per-worker "open exception count / safe list of types", просто не поднимают собственный именованный флаг v1. Это сознательное сужение объёма, не пробел — расширять набор именованных флагов вне этого списка не входит в T7A.9A. |
+| `DRAFT` / `RETURNED` | `Timesheet.status` текущего периода работника равен буквально `DRAFT` / `RETURNED`. |
+| `SUBMITTED_MANUAL` | `Timesheet.status = SUBMITTED` И `currentVersion.submissionSource = MANUAL`. |
+| `SUBMITTED_AUTO` | `Timesheet.status = SUBMITTED` И `currentVersion.submissionSource = AUTO`. Нет отдельного `TimesheetStatus`-значения "AUTO_SUBMITTED" — источник живёт только в `TimesheetVersion.submissionSource` (см. `TimesheetStatus` enum, ровно 5 значений: `DRAFT/SUBMITTED/RETURNED/FOREMAN_APPROVED/FINAL_APPROVED`). |
+| `AWAITING_FOREMAN` | `Timesheet.status = SUBMITTED` И существует `TimesheetReviewScope{status: PENDING}` с `timesheetVersionId = currentVersionId`. |
+| `READY_FOR_FINAL_APPROVAL` | `Timesheet.status = FOREMAN_APPROVED`. |
+| `FINAL_APPROVED` | `Timesheet.status = FINAL_APPROVED`. |
+| `CORRECTION_OPEN` | Существует `CorrectionRequest` этого `timesheetId` с `status IN (PENDING, DRAFT_OPEN, SUBMITTED)`. |
+
+Admin-сводка (`summary`) считает conflict/terminal/FIFO-аномалии (§D) **отдельными** счётчиками
+(`conflicts.totalOpenOrRecent` и т.д.), не приплюсовывая их ни к одному из per-worker флагов выше и
+не удваивая `summary.totalWorkers` — секция §D агрегирует по конфликтам/receipt/audit-строкам, не по
+работникам.
+
+### B. Recorded-vs-reported diff — точная формула
+
+Источники:
+- **Recorded** (сырая правда) = `ClockShiftFragment.recordedStartAt`/`recordedEndAt` — immutable,
+  один fragment = одна строка, `timesheetId` — прямое FK-поле на fragment (не через join), поэтому
+  `SUM(fragment) WHERE timesheetId = X` физически не может посчитать один fragment дважды.
+- **Reported** (актуальная проекция):
+  - `Timesheet.status IN (SUBMITTED, FOREMAN_APPROVED, FINAL_APPROVED)` → `WorkSegment WHERE
+    timesheetVersionId = Timesheet.currentVersionId` (+ `siteId`-фильтр для foreman-diff).
+  - `Timesheet.status IN (DRAFT, RETURNED)` → `TimesheetDraftSegment WHERE draftId =
+    Timesheet.draft.id` (+ `siteId`-фильтр).
+  - `reportedMinutes = SUM(segment.endAt - segment.startAt) - SUM(unpaid break minutes для тех же
+    segments)` (`BreakSegment.paid=false` / `TimesheetDraftBreakSegment.paid=false`).
+
+**Late-sync isolation (закрывает открытый в ТЗ §6 пробел, не угадывая).** `ClockShiftFragment.
+timesheetId` — поле уровня `Timesheet`, не уровня `TimesheetVersion`; сам по себе fragment не знает,
+к какой версии он "относится". Наивный `SUM(fragment) WHERE timesheetId=X` включил бы позже
+досинхронизированный fragment и задним числом изменил бы diff уже зафиксированной версии — именно
+то, что ТЗ §6 запрещает. Схема, однако, уже даёт для этого точный, не эвристический сигнал:
+`AttendanceException{type: LATE_SYNC_AFTER_SUBMIT}` создаётся **только** когда fragment
+материализуется для `Timesheet.status IN (SUBMITTED, FINAL_APPROVED)`-периода (т.е. именно тогда,
+когда наивная сумма исказила бы уже зафиксированную версию), и `AttendanceException.
+clockShiftFragmentId` указывает прямо на этот fragment. Поэтому для `reported`-ветки
+"SUBMITTED/FOREMAN_APPROVED/FINAL_APPROVED" формула recordedMinutes —
+
+```
+recordedMinutes = SUM(fragment.recordedEndAt - fragment.recordedStartAt)
+  WHERE fragment.timesheetId = X
+    AND (foreman-diff: fragment.siteId = ownSiteId)
+    AND NOT EXISTS (
+      AttendanceException e
+      WHERE e.clockShiftFragmentId = fragment.id
+        AND e.type = 'LATE_SYNC_AFTER_SUBMIT'
+        AND e.status = 'OPEN'
+    )
+```
+
+т.е. исключается ровно тот fragment, для которого система сама ещё не считает себя "включившей" его
+в зафиксированную версию (exception остаётся `OPEN` до структурного резолва — "once the fragment's
+origin is frozen into a new `WorkSegment` version", §16 п.9 дизайн). Как только появляется новая
+версия и fragment реально попадает в её `WorkSegment`, diff уже читается относительно новой
+`currentVersionId`, и exclusion больше не применяется (сам `WorkSegment`-join уже включает его).
+Для `DRAFT/RETURNED`-ветки exclusion не нужен и не применяется: `LATE_SYNC_AFTER_SUBMIT` в принципе
+не создаётся для `DRAFT`-статуса (draft всегда живой/текущий, у него нет "зафиксированного" среза,
+который могла бы задним числом исказить досинхронизация) — поэтому там `recordedMinutes =
+SUM(fragment) WHERE timesheetId=X` без исключений.
+
+**REMOVED fragment → видимая отрицательная разница**: если fragment был удалён из отчётной проекции
+(`ClockShiftAdjustment{changeType: REMOVED}`), у него нет соответствующей `WorkSegment`/
+`TimesheetDraftSegment`-строки → он не входит в `reportedMinutes`, но входит в `recordedMinutes` (raw
+правда неизменна) → `deltaMinutes` для этого фрагмента отрицателен и виден в общей сумме. Это
+следствие формулы, а не отдельный код-путь.
+
+**Знак и округление**: `deltaMinutes = reportedMinutes - recordedMinutes` (отчитано минус
+зафиксировано; убранный/сокращённый интервал даёт отрицательное число). Округление — **один раз**,
+в конце, на каждую из трёх сумм (`Math.round(totalMs / 60000)`), не на каждый сегмент/фрагмент по
+отдельности; boundary-тест: сумма длительностей `90000ms` (1.5 мин) → `Math.round(1.5) = 2`.
+`adjustmentCount` = `COUNT(ClockShiftAdjustment WHERE clockShiftFragmentId IN (fragments,
+включённые в recordedMinutes этого расчёта))`.
+
+**Если `Timesheet` для employeeId+период ещё не существует** (участник периода без ни одной версии/
+драфта) — diff-DTO целиком `null`, без выдуманных нулей.
+
+### C. finalApprovalBlockedReasons — только из реального состояния, без новых статусов
+
+Строится для employeeId с известным `Timesheet` текущего периода:
+
+- `TIMESHEET_NOT_SUBMITTED` — `status = DRAFT`.
+- `PENDING_SITE_REVIEW` — существует `TimesheetReviewScope{timesheetVersionId: currentVersionId,
+  scopeType: SITE, status: PENDING}`.
+- `PENDING_NON_SITE_REVIEW` — то же самое с `scopeType: NON_SITE`.
+- `RETURNED_SCOPE` — `status = RETURNED` (человеческий возврат) **или** существует
+  `TimesheetReviewScope{timesheetVersionId: currentVersionId, status: RETURNED}` для ещё не
+  пересобранной версии.
+- `OPEN_ATTENDANCE_EXCEPTION` — существует `AttendanceException{status: OPEN}` этого работника,
+  привязанный к текущему периоду (`payrollPeriodId` = выбранный period).
+- `OPEN_CORRECTION` — см. `CORRECTION_OPEN` (§A) для этого `timesheetId`.
+- `AUTO_SUBMITTED_WITH_EXCEPTIONS` — **только** если одновременно верны `currentVersion.
+  submissionSource = AUTO` И `OPEN_ATTENDANCE_EXCEPTION` (см. выше) для того же периода. Код не
+  создаёт и не читает никакой отдельный `TimesheetStatus`-значение с этим именем — это
+  производный код блокировки, не статус (§4 ТЗ).
+
+Причины считаются относительно `currentVersionId`, не исторической версии (§7 ТЗ).
+
+### D. Conflict section (ADMIN/SUPER_ADMIN only) — redaction contract
+
+Три класса строк, каждый — последние N (20) по `createdAt DESC, id DESC`, плюс отдельный
+`total` (стабильная пагинация не требуется — это "минимальная секция", не отдельная страница, §16
+п.9 дизайн-решение владельца):
+
+- `ClockEventIdConflict`: отдаются `id`, `conflictType`, `employee{id,name}`, `createdAt`. **Никогда**
+  `sanitizedConflictingPayload` (уже без GPS, но всё равно raw-подобный jsonb — не для overview),
+  `conflictingPayloadHash`, `requestId`, `deviceInstallationId`.
+- `DeviceEventReceipt{outcome: REJECTED_TERMINAL}`: отдаются `id`, `rejectionCode`,
+  `employee{id,name}`, `createdAt`. **Никогда** `payloadHash`, `deviceSequence`, `clientEventId`,
+  `deviceInstallationId`, `WorkerDeviceInstallation.userAgent`/`platform`.
+- `AuditEvent{eventType: 'FIFO_LEDGER_INCONSISTENT'}` (обычная строка `String`-колонка, не Prisma
+  enum): отдаются `id`, `eventType`, `createdAt`, и `employee`-ссылка **только если её можно
+  подтвердить без raw payload** — `entityType='WORKER_DEVICE_INSTALLATION'` + `entityId` даёт
+  `deviceInstallationId`, из которого читается безопасный `WorkerDeviceInstallation.employeeId` →
+  `Employee{id,name}` join; `beforeValue`/`afterValue` (содержат только числа sequence, не raw
+  payload, но всё равно не входят в разрешённый контракт overview) — не отдаются целиком.
+
+`FOREMAN`/`WORKER` получают `403` на `GET /api/admin/overview` до какого-либо чтения этих трёх
+таблиц (permission-check предшествует любому запросу к ним).
+
+Этот addendum — только запись решения до кода (правило §11 AGENT_RULES.md / §6 ТЗ T7A.9A), не
+отдельное утверждение владельца поверх уже утверждённого 2026-08-12 checkpoint — он детализирует, а
+не меняет объём §16 п.9.

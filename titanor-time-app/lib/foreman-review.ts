@@ -1,7 +1,7 @@
 import { Prisma } from '@prisma/client';
 import { prisma } from '@/lib/prisma';
 import { createAuditEvent } from '@/lib/audit';
-import { computeSiteScopeHasException } from '@/lib/review-scopes';
+import { computeSiteScopeHasException, computeSiteScopeHasExceptionBulk } from '@/lib/review-scopes';
 
 // docs/titanor-time/01_SCREEN_MAP.md §4 (/foreman/*) + PROJECT_ROADMAP.md T7.6-T7.8. No new
 // schema — reuses TimesheetReviewScope (already built for the ADMIN fallback path in
@@ -51,14 +51,22 @@ export interface ForemanOverview {
   exceptionCount: number;
 }
 
-/** DoD (01_SCREEN_MAP.md §4 /foreman): counts must match listForemanReviewScopes's own count at the same moment — same query shape, own scope excluded. */
-export async function getForemanOverview(foremanUserId: string, foremanEmployeeId: string | null, today: Date): Promise<ForemanOverview> {
-  const siteIds = await getForemanSiteIds(foremanUserId, today);
+/** DoD (01_SCREEN_MAP.md §4 /foreman): counts must match listForemanReviewScopes's own count at the
+ * same moment — same query shape, own scope excluded.
+ *
+ * T7A.9A fix: previously a `for` loop awaited computeSiteScopeHasException once per scope
+ * (2×N sequential queries, lib/foreman-review.ts pre-T7A.9A). Now a single bulk call
+ * (computeSiteScopeHasExceptionBulk, lib/review-scopes.ts) does the same comparison in 2 queries
+ * total regardless of scope count. `client` defaults to the global singleton; the
+ * GET /api/foreman/overview route passes its own REPEATABLE READ `tx` so this reads the same
+ * snapshot as the rest of the response (T7A.9A Addendum §10). */
+export async function getForemanOverview(foremanUserId: string, foremanEmployeeId: string | null, today: Date, client: Prisma.TransactionClient | typeof prisma = prisma): Promise<ForemanOverview> {
+  const siteIds = await getForemanSiteIds(foremanUserId, today, client);
   if (siteIds.length === 0) {
     return { pendingCount: 0, exceptionCount: 0 };
   }
 
-  const scopes = await prisma.timesheetReviewScope.findMany({
+  const scopes = await client.timesheetReviewScope.findMany({
     where: {
       scopeType: 'SITE',
       siteId: { in: siteIds },
@@ -68,12 +76,11 @@ export async function getForemanOverview(foremanUserId: string, foremanEmployeeI
     select: { timesheetVersionId: true, siteId: true }
   });
 
-  let exceptionCount = 0;
-  for (const scope of scopes) {
-    if (scope.siteId && (await computeSiteScopeHasException(scope.timesheetVersionId, scope.siteId))) {
-      exceptionCount++;
-    }
-  }
+  const hasExceptionByScope = await computeSiteScopeHasExceptionBulk(
+    scopes.filter((s): s is { timesheetVersionId: string; siteId: string } => !!s.siteId),
+    client
+  );
+  const exceptionCount = scopes.filter((s) => s.siteId && hasExceptionByScope.get(`${s.timesheetVersionId}:${s.siteId}`)).length;
 
   return { pendingCount: scopes.length, exceptionCount };
 }

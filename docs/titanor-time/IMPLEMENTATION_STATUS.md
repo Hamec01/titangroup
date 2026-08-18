@@ -1,6 +1,136 @@
 # Titanor Time — Implementation Status
 
-Обновлено: 2026-08-18 Europe/Helsinki (feat: add attendance exception resolution UI, T7A.8C.2)
+Обновлено: 2026-08-18 Europe/Helsinki (feat: add attendance operational overview APIs, T7A.9A)
+
+**`[2026-08-18]` T7A.9A Attendance Operational Overview Read Foundation — новый завершённый
+read-only backend-слайс поверх полностью завершённого T7A.8 (exception review + resolution) и
+T7A.7 (offline sync/auto-submit).** Реализует объём §16 п.9 design checkpoint (утверждён владельцем
+2026-08-12) и roadmap `PROJECT_ROADMAP.md` T7A.9 — точная формула зафиксирована **до** кода в новом
+addendum `T7A_1_ATTENDANCE_CLOCK_DESIGN.md` ("Addendum — T7A.9A…", 2026-08-18). **UI не реализован
+этим слайсом — это T7A.9B, ещё не начат.**
+
+**API**: новый `GET /api/admin/overview` (требует одновременно `timesheet.read.all` +
+`attendance.exception.read.all` + `attendance.conflict.read`); расширен существующий
+`GET /api/foreman/overview` — **строго additive**: прежние `pendingCount`/`exceptionCount`
+(review-scope "план vs факт"-флаг, `lib/review-scopes.ts`) сохранены с тем же значением, добавлены
+`summary`/`items`/`period`/`page*`. Оба endpoint используют общий read-only слой
+`lib/attendance-overview.ts` (новый файл) — permission-check/query-validation/HTTP-mapping остаются
+в route-файлах, как и в T7A.8A.
+
+**13 operational states** (см. addendum §A точные условия): `WORKING_NOW`, `FINISHED_TODAY`,
+`MISSING_CHECKOUT`, `GPS_ISSUE`, `SYNC_ISSUE`, `DRAFT`, `SUBMITTED_MANUAL`, `SUBMITTED_AUTO`,
+`AWAITING_FOREMAN`, `RETURNED`, `READY_FOR_FINAL_APPROVAL`, `FINAL_APPROVED`, `CORRECTION_OPEN` —
+один работник может нести несколько флагов одновременно; `state`-фильтр сужает `items`, но не
+`summary` (summary — полная разбивка по текущему `siteId`/`employeeId`-скоупу, не дополнительно
+суженная `state`).
+
+**Recorded-vs-reported diff** (addendum §B) — новая для проекта задача: посчитать `deltaMinutes`
+для **текущей** (не исторической) версии/драфта без ретроактивного искажения при позднем offline-
+sync. Найден и использован уже существующий доменный сигнал вместо угадывания:
+`AttendanceException{type: LATE_SYNC_AFTER_SUBMIT, status: OPEN}` создаётся системой ровно в момент,
+когда fragment ещё не включён в зафиксированную версию — `clockShiftFragmentId` этого exception
+исключается из `recordedMinutes` расчёта для `SUBMITTED+`-веток, пока не появится новая версия.
+Live-проверено на disposable БД: fragment на 120 "поздних" минут корректно не вошёл в diff уже
+отправленной версии (`recordedMinutes=240` вместо наивных `360`). `REMOVED`-fragment
+(`ClockShiftAdjustment`) даёт видимую отрицательную разницу без отдельного кода — просто следствие
+формулы (recorded включает его, reported — нет). Round: `Math.round` один раз на итоговую сумму, не
+на каждый сегмент.
+
+**Conflicts section** (ADMIN/SUPER_ADMIN only, addendum §D) — минимальная секция (не отдельная
+страница, per владельческое решение 2026-08-12): последние 20 `ClockEventIdConflict` /
+`DeviceEventReceipt(REJECTED_TERMINAL)` / `AuditEvent(eventType='FIFO_LEDGER_INCONSISTENT')` +
+общий `totalOpenOrRecent`. Явный allowlist полей — `sanitizedConflictingPayload`,
+`conflictingPayloadHash`, `requestId`, `deviceInstallationId`, `deviceSequence`, `clientEventId`,
+`payloadHash`, координаты, `WorkerDeviceInstallation.userAgent`/`platform`, `beforeValue`/
+`afterValue` **никогда** не попадают в ответ (blanket-grep по всему JSON ответа на живом сервере —
+ноль совпадений). `FOREMAN`/`WORKER` получают `403` до какого-либо чтения этих трёх таблиц. Ответ
+`GET /api/foreman/overview` вообще не содержит ключ `conflicts` (не `null` — ключ отсутствует).
+
+**Permission**: новая чистая DML-миграция `20260818010000_seed_attendance_conflict_read_permission`
+(тот же паттерн, что `20260818000000_seed_timesheet_draft_edit_exception_permission`) — сеет
+`attendance.conflict.read`, выдан только `ADMIN`/`SUPER_ADMIN`. Прямым SQL подтверждено: ровно 2
+строки `RolePermission` (`ADMIN`, `SUPER_ADMIN`), `FOREMAN`/`WORKER`/`SYSTEM` — ноль.
+
+**N+1 исправлен**: `getForemanOverview` раньше делал `for`-цикл с `await computeSiteScopeHasException`
+на каждый scope (2×N последовательных запросов). Новая `computeSiteScopeHasExceptionBulk`
+(`lib/review-scopes.ts`) делает тот же расчёт (то же сравнение actual-vs-planned по
+`(timesheetVersionId, siteId, date, sourceAssignmentId)`) за 2 запроса суммарно, независимо от N.
+`getForemanOverview` также принимает опциональный `Prisma.TransactionClient`, чтобы читать тот же
+REPEATABLE READ snapshot, что и остальной ответ.
+
+**Query-count instrumentation** (`scripts/_test-overview-querycount.ts`, новый, следует конвенции
+`_test-*.ts`) — сеет N воркеров (со всеми тремя ветками: open shift / submitted+review-scope / open
+exception) и считает Prisma `query`-события вокруг одного вызова `buildOperationalOverview` внутри
+той же REPEATABLE READ транзакции, что и реальные роуты. Результат на disposable БД: **n=50 → 24
+SQL-запроса, n=200 → 24 SQL-запроса (идентично)** — количество запросов не растёт с N (n=1 даёт
+меньше, 17, поскольку с одним работником срабатывает только одна из трёх fixture-веток и часть bulk-
+запросов схлопывается в `Promise.resolve([])` на пустом id-списке — не показатель роста, а
+показатель полноты сработавших веток). `EXPLAIN ANALYZE` на n=200 fixture:
+`PayrollPeriodParticipant`-выборка по `(periodId, expected)`, `SiteAssignment`-выборка по
+`(siteId, validFrom, validTo)`, `AttendanceException`/`TimesheetReviewScope`-join — все sub-
+millisecond, планировщик обоснованно выбирает Seq Scan на этом объёме (существующие индексы
+`@@index([periodId, expected])`/`@@index([siteId, validFrom, validTo])` уже покрывают паттерн).
+**Не найдено доказанной необходимости в новом индексе** — новые индексы намеренно не добавлены
+(§11 ТЗ: "не добавлять на всякий случай"). Отдельное наблюдение не как блокер: у
+`ClockShiftFragment` нет собственного `@@index` на `timesheetId` (только composite `@@unique`) —
+diff-запрос (`WHERE timesheetId IN (...)`) не был нагружен реальными fragment-строками в
+n=200-прогоне (query-count fixture их не создаёт), поэтому конкретных цифр по этому пути на большом
+объёме нет; если в будущем это станет узким местом — отдельная additive migration, не эта задача.
+
+**Consistency**: оба endpoint оборачивают резолвинг периода + `buildOperationalOverview` в один
+`prisma.$transaction(..., { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead })` —
+`summary`/`items`/`conflicts`/`period` читают один и тот же snapshot; `asOf` фиксируется один раз
+внутри `buildOperationalOverview`. Кэша/stale-агрегатов нет.
+
+**Query contract** (§3 ТЗ): `periodId`/`siteId`/`state`/`page`/`pageSize` — общие; `employeeId` —
+только admin. Явно переданное невалидное значение → `400 VALIDATION_ERROR` + `fieldErrors` (live-
+проверено для каждого параметра). `periodId` не передан → текущий OPEN период по Helsinki calendar
+date, либо `period: null`, если такого нет — **clock-state (`WORKING_NOW`/`FINISHED_TODAY`) всё
+равно считается** (live-проверено: сдвиг дат единственного периода за пределы "сегодня" даёт
+`period: null`, `totalWorkers` падает с 15 до 5 — ровно множество работников с открытой/сегодня-
+закрытой сменой — при нулевых timesheet/review-счётчиках). Явно переданный несуществующий
+`periodId` → `404 PERIOD_NOT_FOUND`. Foreman с чужим `siteId` → пустой `200`, не `403`/`404`
+(live-проверено).
+
+**Foreman scope** (§9 ТЗ): только текущие `ForemanAssignment` (live-проверено: expired/future-
+assignment строки для чужого сайта не расширяют видимость — явный `siteId` чужого объекта даёт
+пустой `200`), dual-role self-exclusion (foreman, слинкованный на `Employee`, не видит собственную
+строку — live-проверено отдельным dual-role fixture), recorded/reported diff только по своему
+`siteId`, никаких conflict/receipt/FIFO данных.
+
+**Тесты** (disposable PostgreSQL 16, HTTP против живого `next dev`, тот же паттерн, что T7A.8A —
+изолированная copy директории с реальным (не symlink — Turbopack его не принимает)
+`node_modules`, чтобы не задеть lock уже работающего preview-сервера на `127.0.0.1:3244`):
+права/миграция (ровно 2 гранта), 401/403/200 по ролям на обоих endpoint, все 400/404-пути,
+все 13 states (включая multi-flag на одном работнике: `SyncIssue` работник несёт одновременно
+`SYNC_ISSUE`+`openAttendanceExceptions` от двух разных exception-типов), Helsinki-полночь
+(`FINISHED_TODAY` по календарному дню), manual/auto, pending/approved/returned review-статусы,
+`finalApprovalBlockedReasons` (все 7 кодов, включая `AUTO_SUBMITTED_WITH_EXCEPTIONS` только при
+реальном совпадении `submissionSource=AUTO`+open exception), correction-статус, diff (breaks
+вычтены, `REMOVED`-fragment даёт отрицательный delta, late-sync исключён из уже отправленной
+версии), redaction (blanket-scan по forbidden-полям), стабильная пагинация (15 работников на 3
+страницы по 5 — ноль дублей/пропусков), REPEATABLE READ (общий snapshot), foreman
+current/expired/future assignment, чужой `siteId`, dual-role self-exclusion, bounded query count
+(n=1/50/200), `EXPLAIN ANALYZE`, ноль `AuditEvent`-строк от `GET` (до/после — 1/1), permission
+revocation вступает в силу на следующий запрос (live DELETE/INSERT в `RolePermission` между двумя
+запросами того же сессионного токена).
+
+**Технические проверки**: `git diff --check`/`prisma validate`/`tsc --noEmit`/`npm run build` —
+зелёные; `prisma migrate deploy` дважды подряд на чистой БД — идемпотентно; T7A.8
+(`GET /api/admin/attendance/exceptions`, `GET /api/foreman/review-scopes`) — smoke 200/200, не
+затронуты; `scripts/_test-activation.ts`/`_test-corrections.ts` — зелёные на отдельной чистой БД.
+`docker compose build app` не запускался отдельно в этом прогоне (не Docker-специфичное изменение,
+только route/lib/migration/scripts) — риск минимален, `npm run build` уже компилирует весь route-
+manifest включая оба новых/изменённых endpoint.
+
+**Остаётся вне этого слайса** (явно, по границам задачи): UI `/admin` и foreman UI (T7A.9B, ещё не
+начат); scheduler/auto-submit (T7A.10); policy editor; raw GPS в overview; отдельная conflict-
+страница; массовое подтверждение; PWA/service worker; redesign; deployment. Production
+(`titanor-time-app-1`/`titanor-time-db-1`) не затронут — только read-only inspect (`docker ps`)
+перед стартом и после завершения. Preview `127.0.0.1:3244` не останавливался (собственный
+disposable dev-сервер/БД/копия директории, полностью изолированные, удалены по завершении).
+
+---
 
 **AUTH SECURITY HOTFIX — утечка credentials через native GET submit до React hydration —
 подтверждена и исправлена.** `app/login/page.tsx`'s `<form>` не имел явных `method`/`action`;

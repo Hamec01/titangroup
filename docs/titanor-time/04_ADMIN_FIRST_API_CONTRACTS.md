@@ -1480,6 +1480,107 @@ target-identity-алгоритм. **Обязательное архитекту�
   `400`/`404` — permission-гейт структурно недостижим этой ролью, поэтому не имеет смысла давать
   сигнал о валидности тела/id раньше него.
 
+### 9.1e Attendance operational overview — read foundation (T7A.9A, `T7A_1_ATTENDANCE_CLOCK_DESIGN.md`
+§16 п.9 + Addendum "T7A.9A Attendance Operational Overview Read Foundation" — **реализовано,
+backend only, UI = T7A.9B, ещё не начат**) — `lib/attendance-overview.ts`
+
+Точная формула operational states и recorded-vs-reported diff зафиксирована в addendum
+`T7A_1_ATTENDANCE_CLOCK_DESIGN.md` (2026-08-18) — этот раздел даёт HTTP-контракт, не переопределяет
+формулу.
+
+**Общие query-параметры обоих endpoint** (все опциональны): `periodId` (UUID), `siteId` (UUID),
+`state` (один из 13 значений ниже), `page` (default 1), `pageSize` (default 20, максимум 100).
+Явно переданное невалидное значение любого параметра → `400 VALIDATION_ERROR` + `fieldErrors`,
+никогда не заменяется дефолтом молча. `periodId` не передан → текущий `OPEN` `PayrollPeriod`,
+покрывающий сегодняшний Helsinki calendar date, либо `period: null`, если такого нет (clock-state
+всё равно считается, timesheet/review-счётчики — нулевые). Явно переданный несуществующий
+`periodId` → `404 PERIOD_NOT_FOUND`.
+
+**13 значений `state`**: `WORKING_NOW`, `FINISHED_TODAY`, `MISSING_CHECKOUT`, `GPS_ISSUE`,
+`SYNC_ISSUE`, `DRAFT`, `SUBMITTED_MANUAL`, `SUBMITTED_AUTO`, `AWAITING_FOREMAN`, `RETURNED`,
+`READY_FOR_FINAL_APPROVAL`, `FINAL_APPROVED`, `CORRECTION_OPEN`. `state`-фильтр сужает `items`, не
+`summary` (`summary` — полная разбивка по текущему `siteId`/`employeeId`-скоупу).
+
+#### `GET /api/admin/overview`
+- Permission: **все три одновременно** — `timesheet.read.all`, `attendance.exception.read.all`,
+  `attendance.conflict.read` (отзыв любого → `403 FORBIDDEN` на следующий запрос)
+- Дополнительный query-параметр: `employeeId` (UUID, admin-only)
+- Response `200`:
+```json
+{ "asOf": "iso", "timezone": "Europe/Helsinki",
+  "period": { "id": "uuid", "startDate": "YYYY-MM-DD", "endDate": "YYYY-MM-DD", "status": "OPEN" } | null,
+  "summary": { "totalWorkers": 0, "workingNow": 0, "finishedToday": 0, "missingCheckout": 0,
+    "gpsIssue": 0, "syncIssue": 0, "draft": 0, "submittedManual": 0, "submittedAuto": 0,
+    "awaitingForeman": 0, "returned": 0, "readyForFinalApproval": 0, "finalApproved": 0,
+    "correctionOpen": 0, "openAttendanceExceptions": 0 },
+  "items": [ { "employee": { "id": "uuid", "name": "string", "employeeNumber": "string" },
+      "states": ["WORKING_NOW", "..."],
+      "openShift": { "site": {"id":"uuid","name":"string"}, "workArea": {"id":"uuid","name":"string"} | null,
+        "openedAt": "iso", "channel": "ONLINE" | "OFFLINE" } | null,
+      "latestFinishedShiftToday": { "id": "uuid", "site": {"id":"uuid","name":"string"},
+        "recordedStartAt": "iso", "recordedEndAt": "iso" } | null,
+      "timesheet": { "id": "uuid", "status": "string" } | null,
+      "currentVersion": { "id": "uuid", "versionNumber": 1, "submissionSource": "MANUAL" | "AUTO",
+        "submittedAt": "iso" } | null,
+      "openExceptionCount": 0, "openExceptionTypes": ["string"],
+      "reviewRoute": { "total": 0, "pending": 0, "approved": 0, "returned": 0,
+        "scopes": [ { "siteName": "string" | null, "status": "PENDING" | "APPROVED" | "RETURNED" } ] } | null,
+      "finalApprovalBlockedReasons": ["string"],
+      "correction": { "status": "PENDING" | "DRAFT_OPEN" | "SUBMITTED" | "APPROVED" | "REJECTED" } | null,
+      "diff": { "recordedMinutes": 0, "reportedMinutes": 0, "deltaMinutes": 0, "adjustmentCount": 0 } | null } ],
+  "conflicts": { "totalOpenOrRecent": 0,
+    "clockEventIdConflicts": [ { "id": "uuid", "conflictType": "string",
+      "employee": {"id":"uuid","name":"string"}, "createdAt": "iso" } ],
+    "rejectedTerminalReceipts": [ { "id": "uuid", "rejectionCode": "string",
+      "employee": {"id":"uuid","name":"string"}, "createdAt": "iso" } ],
+    "fifoLedgerInconsistencies": [ { "id": "uuid", "eventType": "FIFO_LEDGER_INCONSISTENT",
+      "employee": {"id":"uuid","name":"string"} | null, "createdAt": "iso" } ] },
+  "page": 1, "pageSize": 20, "totalItems": 0, "totalPages": 0 }
+```
+  Последние 20 строк на класс в `conflicts` (`createdAt DESC, id DESC`), плюс `totalOpenOrRecent` —
+  сумма полных `COUNT(*)` всех трёх таблиц (append-only, без своего resolved/dismissed-статуса —
+  "recent" не отдельный фильтр, вся секция и есть "последнее"). **Никогда**: raw GPS координаты,
+  `sanitizedConflictingPayload`, `conflictingPayloadHash`, `requestId`, `deviceInstallationId`,
+  `deviceSequence`, `clientEventId`, `payloadHash`, `WorkerDeviceInstallation.userAgent`/`platform`,
+  `beforeValue`/`afterValue` целиком — live blanket-scan подтверждён на реальном ответе, ноль
+  совпадений.
+- `finalApprovalBlockedReasons` — только из реального состояния, без выдуманных статусов:
+  `TIMESHEET_NOT_SUBMITTED`, `PENDING_SITE_REVIEW`, `PENDING_NON_SITE_REVIEW`, `RETURNED_SCOPE`,
+  `OPEN_ATTENDANCE_EXCEPTION`, `OPEN_CORRECTION`, `AUTO_SUBMITTED_WITH_EXCEPTIONS` (последний —
+  только при реальном совпадении `submissionSource=AUTO` И unresolved exception того же периода).
+- Consistency: весь ответ читается внутри одной `REPEATABLE READ` read-only транзакции
+  (`prisma.$transaction(..., { isolationLevel: RepeatableRead })`) — `summary`/`items`/`conflicts`/
+  `period` видят один и тот же snapshot, `asOf` фиксируется один раз. Кэша/stale aggregate table нет.
+- GET не пишет `AuditEvent` (live-проверено — счётчик строк до/после идентичен).
+
+#### `GET /api/foreman/overview`
+- **`[2026-08-18]` T7A.9A — расширено строго additive.** Permission: `timesheet.read.assigned` +
+  `attendance.exception.read.assigned` (оба уже существовали до этой задачи; новых grant для этого
+  endpoint не добавлено). `employeeId`-параметр не поддерживается (400, если передан).
+- Response `200` — прежние поля `pendingCount`/`exceptionCount` (review-scope "план vs факт"-флаг,
+  `lib/review-scopes.ts`, семантика не изменена) сохранены на верхнем уровне, плюс те же
+  `summary`/`items`/`period`/`page`/`pageSize`/`totalItems`/`totalPages`, что у admin-версии выше —
+  **без ключа `conflicts`** (отсутствует в ответе, не `null`):
+```json
+{ "pendingCount": 0, "exceptionCount": 0,
+  "asOf": "iso", "timezone": "Europe/Helsinki", "period": { ... } | null,
+  "summary": { ... }, "items": [ { ... } ],
+  "page": 1, "pageSize": 20, "totalItems": 0, "totalPages": 0 }
+```
+- Scope: каждая строка — только текущий (`validFrom<=today<=validTo|NULL`) `ForemanAssignment`-сайт
+  прораба; dual-role `FOREMAN`+`WORKER` не видит собственную строку (`states`/`summary`/`items` —
+  полностью исключена, не частично замаскирована); чужой `siteId`-фильтр → пустой `200`, не
+  `403`/`404`; `diff`/GPS/sync-флаги считаются только по собственному `siteId`; никаких
+  conflict/receipt/FIFO данных ни при каких обстоятельствах.
+- N+1 fix: `getForemanOverview` (тот же `lib/foreman-review.ts`, что и раньше) теперь использует
+  `computeSiteScopeHasExceptionBulk` (`lib/review-scopes.ts`) — 2 запроса суммарно вместо 2×N
+  последовательных `await` в цикле; принимает опциональный `Prisma.TransactionClient`, чтобы читать
+  тот же `REPEATABLE READ` snapshot, что и остальной ответ.
+
+**Query-count contract** (§11 ТЗ T7A.9A): число SQL-запросов ограничено константой, не растёт
+линейно с числом работников/scope — подтверждено `scripts/_test-overview-querycount.ts` на
+disposable БД: n=50 работников → 24 запроса, n=200 работников → 24 запроса (идентично).
+
 ## 10. Служебный агрегатор
 
 #### `GET /api/admin/setup-status`

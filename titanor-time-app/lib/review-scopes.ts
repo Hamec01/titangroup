@@ -46,6 +46,60 @@ export async function computeSiteScopeHasException(timesheetVersionId: string, s
   return false;
 }
 
+/**
+ * Bulk/set-based equivalent of computeSiteScopeHasException for N scopes at once — T7A.9A fix for
+ * the getForemanOverview N+1 (lib/foreman-review.ts previously awaited computeSiteScopeHasException
+ * once per scope, serially, inside a `for` loop: 2×N queries). Two queries total regardless of N,
+ * scoped by the distinct timesheetVersionIds involved, then grouped in memory exactly like the
+ * per-scope version above — same comparison, same result, bounded query count.
+ */
+export async function computeSiteScopeHasExceptionBulk(
+  scopes: { timesheetVersionId: string; siteId: string }[],
+  client: Prisma.TransactionClient | typeof prisma = prisma
+): Promise<Map<string, boolean>> {
+  const result = new Map<string, boolean>();
+  if (scopes.length === 0) return result;
+
+  const versionIds = [...new Set(scopes.map((s) => s.timesheetVersionId))];
+  const [segments, plannedShifts] = await Promise.all([
+    client.workSegment.findMany({ where: { timesheetVersionId: { in: versionIds } }, select: { timesheetVersionId: true, siteId: true, date: true, sourceAssignmentId: true, startAt: true, endAt: true } }),
+    client.timesheetPlannedShift.findMany({ where: { timesheetVersionId: { in: versionIds } }, select: { timesheetVersionId: true, siteId: true, date: true, sourceAssignmentId: true, plannedStartAt: true, plannedEndAt: true, plannedBreakMinutes: true } })
+  ]);
+
+  const actualMinutesByKey = new Map<string, number>();
+  for (const seg of segments) {
+    const key = `${seg.timesheetVersionId}:${seg.siteId}:${formatDate(seg.date)}:${seg.sourceAssignmentId}`;
+    const minutes = (seg.endAt.getTime() - seg.startAt.getTime()) / 60000;
+    actualMinutesByKey.set(key, (actualMinutesByKey.get(key) ?? 0) + minutes);
+  }
+
+  const plannedByScope = new Map<string, typeof plannedShifts>();
+  for (const ps of plannedShifts) {
+    const scopeKey = `${ps.timesheetVersionId}:${ps.siteId}`;
+    const list = plannedByScope.get(scopeKey) ?? [];
+    list.push(ps);
+    plannedByScope.set(scopeKey, list);
+  }
+
+  for (const scope of scopes) {
+    const scopeKey = `${scope.timesheetVersionId}:${scope.siteId}`;
+    const plans = plannedByScope.get(scopeKey) ?? [];
+    let hasException = false;
+    for (const ps of plans) {
+      const key = `${ps.timesheetVersionId}:${ps.siteId}:${formatDate(ps.date)}:${ps.sourceAssignmentId}`;
+      const actualMinutes = actualMinutesByKey.get(key) ?? 0;
+      const plannedMinutes = ps.plannedStartAt && ps.plannedEndAt ? (ps.plannedEndAt.getTime() - ps.plannedStartAt.getTime()) / 60000 - ps.plannedBreakMinutes : 0;
+      if (Math.round(actualMinutes) !== Math.round(plannedMinutes)) {
+        hasException = true;
+        break;
+      }
+    }
+    result.set(scopeKey, hasException);
+  }
+
+  return result;
+}
+
 export interface ReviewScopeListItem {
   id: string;
   scopeType: string;

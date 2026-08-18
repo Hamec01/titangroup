@@ -7,19 +7,17 @@ import { hasPermission } from '@/lib/permissions';
 import { SESSION_COOKIE_NAME } from '@/lib/session';
 import { prisma } from '@/lib/prisma';
 import { helsinkiToday } from '@/lib/workers';
-import { getForemanOverview, getForemanSiteIds } from '@/lib/foreman-review';
 import { buildOperationalOverview, parseOverviewQuery, resolvePeriodForOverview } from '@/lib/attendance-overview';
 
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
 
-// docs/titanor-time/01_SCREEN_MAP.md §4 `/foreman` — GET /api/foreman/overview.
-// T7A.9A extends this response additively: `pendingCount`/`exceptionCount` (pre-existing,
-// TimesheetReviewScope "plan vs actual" flag — see lib/review-scopes.ts) are unchanged in meaning
-// and kept for backward compatibility; `summary`/`items`/`page*`/`period` are new (Addendum §A/§B/§C).
+// docs/titanor-time/T7A_1_ATTENDANCE_CLOCK_DESIGN.md §16 п.9 + Addendum "T7A.9A" — GET /api/admin/overview.
 function errorBody(body: ApiErrorBody, requestId: string): { error: ApiErrorBody & { requestId: string } } {
   return { error: { ...body, requestId } };
 }
+
+const REQUIRED_PERMISSIONS = ['timesheet.read.all', 'attendance.exception.read.all', 'attendance.conflict.read'];
 
 export async function GET(request: NextRequest): Promise<NextResponse> {
   const requestId = randomUUID();
@@ -29,11 +27,10 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     return jsonError(401, { code: 'NOT_AUTHENTICATED', message: 'No active session.' }, requestId);
   }
 
-  if (!(await hasPermission(authenticated.user.roles, 'timesheet.read.assigned'))) {
-    return jsonError(403, { code: 'FORBIDDEN', message: 'Missing required permission.' }, requestId);
-  }
-  if (!(await hasPermission(authenticated.user.roles, 'attendance.exception.read.assigned'))) {
-    return jsonError(403, { code: 'FORBIDDEN', message: 'Missing required permission.' }, requestId);
+  for (const permissionCode of REQUIRED_PERMISSIONS) {
+    if (!(await hasPermission(authenticated.user.roles, permissionCode))) {
+      return jsonError(403, { code: 'FORBIDDEN', message: 'Missing required permission.' }, requestId);
+    }
   }
 
   const { searchParams } = new URL(request.url);
@@ -42,11 +39,11 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       periodId: searchParams.get('periodId'),
       siteId: searchParams.get('siteId'),
       state: searchParams.get('state'),
-      employeeId: null,
+      employeeId: searchParams.get('employeeId'),
       page: searchParams.get('page'),
       pageSize: searchParams.get('pageSize')
     },
-    { allowEmployeeId: false }
+    { allowEmployeeId: true }
   );
   if (!parsed.ok) {
     return NextResponse.json(errorBody({ code: 'VALIDATION_ERROR', message: 'Invalid query parameters.', fieldErrors: parsed.fieldErrors }, requestId), { status: 400, headers: successHeaders(requestId) });
@@ -54,27 +51,16 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
 
   const today = helsinkiToday();
 
+  // §10 ТЗ T7A.9A — one REPEATABLE READ read-only transaction so summary/items/conflicts (and
+  // period resolution) all read the same DB snapshot; `asOf` is fixed once inside buildOperationalOverview.
   const outcome = await prisma.$transaction(
     async (tx) => {
       const periodResult = await resolvePeriodForOverview(tx, parsed.filters.periodId, today);
       if (!periodResult.ok) {
         return { code: 'PERIOD_NOT_FOUND' as const };
       }
-
-      const [legacy, siteIds] = await Promise.all([
-        getForemanOverview(authenticated.user.id, authenticated.user.employeeId, today, tx),
-        getForemanSiteIds(authenticated.user.id, today, tx)
-      ]);
-
-      const result = await buildOperationalOverview(
-        tx,
-        parsed.filters,
-        { siteIds, excludeEmployeeId: authenticated.user.employeeId, includeConflicts: false },
-        periodResult.period,
-        today
-      );
-
-      return { code: 'OK' as const, legacy, result };
+      const result = await buildOperationalOverview(tx, parsed.filters, { siteIds: null, excludeEmployeeId: null, includeConflicts: true }, periodResult.period, today);
+      return { code: 'OK' as const, result };
     },
     { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead, maxWait: 10_000, timeout: 20_000 }
   );
@@ -83,8 +69,5 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     return jsonError(404, { code: 'PERIOD_NOT_FOUND', message: 'No payroll period with this id.' }, requestId);
   }
 
-  const { conflicts: _conflicts, ...resultWithoutConflicts } = outcome.result;
-  void _conflicts; // always null for foreman (includeConflicts:false) — dropped from the response, not just null
-
-  return NextResponse.json({ pendingCount: outcome.legacy.pendingCount, exceptionCount: outcome.legacy.exceptionCount, ...resultWithoutConflicts }, { status: 200, headers: successHeaders(requestId) });
+  return NextResponse.json(outcome.result, { status: 200, headers: successHeaders(requestId) });
 }

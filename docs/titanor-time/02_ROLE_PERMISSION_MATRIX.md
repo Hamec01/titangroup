@@ -182,6 +182,24 @@ special-casing.
 | `attendance.exception.resolve.assigned` | `FOREMAN` | исключения, чьи ВСЕ доказуемые site-связи — текущие объекты прораба (строже read-scope, где достаточно пересечения); для `PAIR_ORPHAN_EVENTS` — объединение пяти собственных site-связей named exception ∪ `checkInEvent.siteId` ∪ `checkOutEvent.siteId` | `POST /api/foreman/attendance/exceptions/:exceptionId/resolve` — `DISMISS`/`ACKNOWLEDGE_AS_VALID`/`PAIR_ORPHAN_EVENTS` ТОЛЬКО — ни `CONFIRM_SOURCE_ASSIGNMENT`, ни `FORCE_CLOSE_OPEN_SHIFT` этой permission НЕ покрываются (оба структурно `ADMIN`/`SUPER_ADMIN`-only, §12.1); не подразумевает read — оба permission нужны независимо; own↔foreign `OVERLAPPING_SHIFT` видна через `GET`, резолюция → `403 FOREMAN_SCOPE_INCOMPLETE`; для PAIR тот же код, если хотя бы один выбранный event на чужом сайте; scope перепроверяется внутри транзакции по свежим `ForemanAssignment`, не по данным `GET` | нет | да (`ATTENDANCE_EXCEPTION_DISMISSED`/`ATTENDANCE_EXCEPTION_ACKNOWLEDGED_AS_VALID`/`ATTENDANCE_EXCEPTION_PAIRED`, без `detail`/GPS/device-полей) | нет |
 | `attendance.exception.resolve.all` | `ADMIN`, `SUPER_ADMIN` | вся компания | `POST /api/admin/attendance/exceptions/:exceptionId/resolve` — та же матрица §11, без site-ограничения; `CONFIRM_SOURCE_ASSIGNMENT` и `FORCE_CLOSE_OPEN_SHIFT` — только здесь; не подразумевает read | нет | да (то же плюс `CLOCK_SHIFT_ASSIGNMENT_RESOLVED`/`CLOCK_SHIFT_FORCE_CLOSED`, без GPS/device-полей/`chosenAssignmentId`-неймспейса/сырых координат) | нет |
 
+### 2.4e Attendance operational overview — read foundation (T7A.9A) — **`[2026-08-18] реализовано`**
+(`T7A_1_ATTENDANCE_CLOCK_DESIGN.md` §16 п.9 + Addendum "T7A.9A Attendance Operational Overview Read
+Foundation", `04_ADMIN_FIRST_API_CONTRACTS.md` §9.1e). Backend-only — UI (T7A.9B) не начат.
+
+`GET /api/admin/overview` требует **все три** одновременно: `timesheet.read.all` +
+`attendance.exception.read.all` (оба уже засеяны, §2.4b/§2.8) + новый `attendance.conflict.read`
+ниже. `GET /api/foreman/overview` (уже существовавший endpoint, ответ расширен additive) требует
+`timesheet.read.assigned` + `attendance.exception.read.assigned` (оба уже засеяны) — новых grant'ов
+для foreman-эндпоинта эта задача не добавляет.
+
+Новая permission засеяна миграцией `20260818010000_seed_attendance_conflict_read_permission` —
+чистый DML (проверено прямым SQL — ровно 2 новых гранта: `ADMIN`+`SUPER_ADMIN`; `FOREMAN`/`WORKER`
+— ни одного; `SYSTEM` структурно не может держать роль).
+
+| Permission | Держатели | Область | Ограничения | Причина | Аудит | Массовое |
+|---|---|---|---|---|---|---|
+| `attendance.conflict.read` | `ADMIN`, `SUPER_ADMIN` | вся компания — минимальная секция (не отдельная страница), `ClockEventIdConflict`/`DeviceEventReceipt(REJECTED_TERMINAL)`/`AuditEvent(FIFO_LEDGER_INCONSISTENT)` | `GET /api/admin/overview` — обязателен вместе с `timesheet.read.all`+`attendance.exception.read.all`, отзыв любого из трёх → `403` на следующий запрос (live-проверено); `FOREMAN`/`WORKER` — `403` до какого-либо чтения этих трёх таблиц; `GET /api/foreman/overview` не читает и не выдаёт эту permission ни при каких обстоятельствах | нет | нет (read-only) | — |
+
 ### 2.5 Назначения
 
 | Permission | Держатели | Область | Ограничения | Причина | Аудит | Массовое |

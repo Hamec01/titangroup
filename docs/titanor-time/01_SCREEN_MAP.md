@@ -154,8 +154,12 @@ touch target ≥ 48px), `/foreman/*` — desktop-first с поддержкой �
 - Действия: переход к `/admin/timesheets`, `/admin/periods`, `/admin/audit`
 - Состояния: loading; empty (нет открытого периода → баннер); error
 - Откуда: логин `ADMIN`/`SUPER_ADMIN`, nav
-- API: `GET /api/admin/overview`
-- DoD: не показывает цифру, не посчитанную напрямую из БД в момент запроса
+- API: `GET /api/admin/overview` — **`[2026-08-18] T7A.9A backend реализован`**
+  (`04_ADMIN_FIRST_API_CONTRACTS.md` §9.1e, `IMPLEMENTATION_STATUS.md`) — `summary`/`items`/
+  `conflicts`/`period`, 13 operational states, recorded-vs-reported diff, единый REPEATABLE READ
+  snapshot. **Экран `/admin` (⚪) этим слайсом не реализован** — потребление API остаётся T7A.9B.
+- DoD: не показывает цифру, не посчитанную напрямую из БД в момент запроса — уже гарантировано на
+  уровне API (нет кэша/stale aggregate table, `asOf` фиксируется один раз на запрос)
 
 #### `/admin/workers` 🟢
 - Роли: `ADMIN`, `SUPER_ADMIN`
@@ -921,8 +925,13 @@ FOREMAN_APPROVED` только когда все scope версии подтве
 - Состояния: loading; empty (нет ожидающих); error
 - Откуда: логин `FOREMAN`
 - Куда: `/foreman/review`
-- API: `GET /api/foreman/overview`
-- DoD: числа совпадают с реальным списком в `/foreman/review` в момент запроса
+- API: `GET /api/foreman/overview` — **`[2026-08-18] T7A.9A: manual/auto, GPS/sync/missing-checkout
+  exceptions и ожидающие site-scopes реализованы backend'ом** (`04_ADMIN_FIRST_API_CONTRACTS.md`
+  §9.1e) — ответ расширен additive поверх прежних `pendingCount`/`exceptionCount` новыми
+  `summary`/`items`/`period`. **Экран `/foreman` (⚪) этим слайсом не реализован** — потребление
+  API остаётся T7A.9B.
+- DoD: числа совпадают с реальным списком в `/foreman/review` в момент запроса — API-часть уже
+  гарантирована (единый REPEATABLE READ snapshot на весь ответ)
 
 #### `/foreman/review` ⚪
 - Роли: `FOREMAN`
