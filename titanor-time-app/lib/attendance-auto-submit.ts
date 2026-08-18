@@ -5,6 +5,10 @@ import { helsinkiWallClockToUtc } from '@/lib/periods';
 import { periodEndExclusive } from '@/lib/attendance-materializer';
 import { submitWorkerTimesheetCore } from '@/lib/worker-timesheets';
 
+// T7A.10A follow-up (2026-08-18) — fixes a manual-submit race and a SYSTEM-lookup accounting
+// inaccuracy found after the initial T7A.10A slice; see the addendum section of this same name in
+// T7A_1_ATTENDANCE_CLOCK_DESIGN.md for the full root-cause writeup.
+
 // docs/titanor-time/T7A_1_ATTENDANCE_CLOCK_DESIGN.md §8/§9.5/§9.6 + Addendum "T7A.10A" — T7A.10A.
 // Auto-submit service core. Two-phase pattern, same architecture as
 // lib/attendance-materializer.ts's runMaterializerCatchUpPass: a cheap, unlocked read-only scan
@@ -15,10 +19,13 @@ const RESOLVED_LATE_CHECKOUT_NOTE = 'resolved by real check-out arriving late';
 
 // ---------------------------------------------------------------------------------------------
 // SYSTEM actor — same fail-closed shape check as lib/worker-timesheets.ts's own LATE_SYNC_AFTER_
-// SUBMIT resolution (§13). Looked up fresh inside whichever transaction actually needs it — never
-// unconditionally for every candidate (only branch (i)'s real submission, and only when a late
-// real Check Out actually finds an OPEN MISSING_CHECKOUT_AT_CUTOFF to resolve) — this is what keeps
-// the tick's query count from growing with candidates that don't reach either of those.
+// SUBMIT resolution (§13). Two distinct callers of this same fail-closed lookup:
+//   - resolveMissingCheckoutAtCutoffOnLateCheckOut (below) — outside any scheduler tick entirely
+//     (a real Check Out event), always a fresh lookup in its own transaction, never cached.
+//   - runAttendanceAutoSubmitTick's branch (i) — wrapped by a tick-scoped lazy cache (see
+//     getSystemActorId inside runAttendanceAutoSubmitTick) so only the first submitting candidate
+//     of a tick pays this SELECT; later candidates in the same tick reuse the validated id.
+// A tick whose candidates never reach branch (i) never calls this at all.
 // ---------------------------------------------------------------------------------------------
 
 async function resolveSystemActorId(tx: Prisma.TransactionClient): Promise<string> {
@@ -70,13 +77,30 @@ interface PolicySnapshot {
   systemReopenDebounceMinutes: number;
 }
 
-function computeDueAt(status: 'DRAFT' | 'RETURNED', periodEndDate: Date, systemReopenAt: Date | null, policy: PolicySnapshot): Date {
-  if (status === 'DRAFT') {
+// T7A.10A follow-up — dueAt must be derived from systemReopenGeneration, never from the current
+// Timesheet.status. The original version keyed this off status (DRAFT vs RETURNED), re-read fresh
+// under the Timesheet lock — but status is exactly the field a concurrent manual submit changes: if
+// manual submit wins the race, fresh.status becomes SUBMITTED, which is neither DRAFT nor RETURNED,
+// and there is no correct branch for it in a status-keyed formula (a naive `as 'DRAFT'|'RETURNED'`
+// cast used to route it into the RETURNED branch, which then dereferenced a null systemReopenAt on
+// a genuine generation-0 candidate and threw). generation is never touched by a submit of any kind
+// (manual or auto) — only §9.5's reopen step increments it — so it is racer-independent by
+// construction; whether this candidate is due is a question about "how long since generation N
+// started", not "what is the status right now".
+function computeDueAt(systemReopenGeneration: number, periodEndDate: Date, systemReopenAt: Date | null, policy: PolicySnapshot): Date {
+  if (systemReopenGeneration === 0) {
     return helsinkiWallClockToUtc(addDays(periodEndDate, policy.cutoffDaysAfterPeriodEnd), policy.cutoffTime);
   }
-  // RETURNED + SYSTEM_LATE_SYNC_REOPEN — systemReopenAt is always set by the time a Timesheet
-  // reaches this branch (§9.5 step 2 sets it in the same transition that sets lastReturnedReason).
-  return new Date(systemReopenAt!.getTime() + policy.systemReopenDebounceMinutes * 60000);
+  if (systemReopenAt === null) {
+    // Structurally unreachable under the design's own invariant (§9.5 step 2 always sets
+    // systemReopenAt in the same transition that increments systemReopenGeneration) — if it ever
+    // happens, this is an internal bug, not a recoverable state. Throwing here (inside the
+    // candidate's own transaction, or before it opens for the cheap pre-lock call) rolls back any
+    // work already done for this candidate and marks it `failed`, retryable by the next tick —
+    // never silently proceeds with a fabricated dueAt.
+    throw new Error(`AUTO_SUBMIT_GENERATION_WITHOUT_REOPEN_AT:${systemReopenGeneration}`);
+  }
+  return new Date(systemReopenAt.getTime() + policy.systemReopenDebounceMinutes * 60000);
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -159,10 +183,16 @@ type CandidateOutcome =
   | { kind: 'SUBMITTED_CLEAN' } // branch (i)
   | { kind: 'SUBMITTED_WITH_EXCEPTIONS' }; // branch (i)
 
-async function processCandidate(candidate: AutoSubmitCandidate, policy: PolicySnapshot, now: Date, requestId: string): Promise<CandidateOutcome> {
+async function processCandidate(
+  candidate: AutoSubmitCandidate,
+  policy: PolicySnapshot,
+  now: Date,
+  requestId: string,
+  getSystemActorId: (tx: Prisma.TransactionClient) => Promise<string>
+): Promise<CandidateOutcome> {
   const period = await prisma.payrollPeriod.findUniqueOrThrow({ where: { id: candidate.periodId }, select: { endDate: true } });
   const candidateGeneration = candidate.systemReopenGeneration;
-  const cheapDueAt = computeDueAt(candidate.status, period.endDate, candidate.systemReopenAt, policy);
+  const cheapDueAt = computeDueAt(candidateGeneration, period.endDate, candidate.systemReopenAt, policy);
 
   // Step 3 — full no-op, transaction never opens.
   if (now < cheapDueAt) {
@@ -198,15 +228,23 @@ async function processCandidate(candidate: AutoSubmitCandidate, policy: PolicySn
       return { kind: 'STALE_GENERATION' };
     }
 
-    const dueAt = computeDueAt(fresh.status as 'DRAFT' | 'RETURNED', period.endDate, fresh.systemReopenAt, policy);
+    // dueAt is a function of fresh.systemReopenGeneration (confirmed == candidateGeneration by (e)
+    // above), never of fresh.status — status is exactly what a concurrent manual submit changes,
+    // and generation is untouched by any submit. No type assertion on fresh.status here: it is
+    // read as Prisma's real TimesheetStatus union, and step (g) below handles every value that
+    // isn't DRAFT/RETURNED on its own terms instead of assuming the field can only be one of two.
+    const dueAt = computeDueAt(fresh.systemReopenGeneration, period.endDate, fresh.systemReopenAt, policy);
 
     // (f) confirmed-current generation, but its due moment hasn't arrived under the lock.
     if (now < dueAt) {
       return { kind: 'NOT_YET_DUE_UNDER_LOCK' };
     }
 
-    // (g) already submitted — manual submit or another scheduler worker won the race.
-    if (fresh.status !== 'DRAFT' && (fresh.status as string) !== 'RETURNED') {
+    // (g) already submitted — manual submit or another scheduler worker won the race. Covers every
+    // status other than DRAFT/RETURNED (SUBMITTED, FOREMAN_APPROVED, FINAL_APPROVED, ...) — not
+    // just SUBMITTED specifically, since any of them means this candidate is no longer actionable
+    // by auto-submit regardless of which one it landed on.
+    if (fresh.status !== 'DRAFT' && fresh.status !== 'RETURNED') {
       await insertAutoSubmissionAttempt(tx, candidate.id, candidateGeneration, dueAt, 'SKIPPED_ALREADY_SUBMITTED', null);
       return { kind: 'SKIPPED_ALREADY_SUBMITTED' };
     }
@@ -219,8 +257,11 @@ async function processCandidate(candidate: AutoSubmitCandidate, policy: PolicySn
       return { kind: 'SKIPPED_NOT_ACTIONABLE' };
     }
 
-    // (i) real submission — confirmed due, confirmed DRAFT/RETURNED+SYSTEM_LATE_SYNC_REOPEN under lock.
-    const systemActorId = await resolveSystemActorId(tx);
+    // (i) real submission — confirmed due, confirmed DRAFT/RETURNED+SYSTEM_LATE_SYNC_REOPEN under
+    // lock. getSystemActorId is the tick-scoped lazy cache (see runAttendanceAutoSubmitTick below)
+    // — only the first submitting candidate of this tick actually pays the SELECT; every later one
+    // reuses the validated id with zero extra queries.
+    const systemActorId = await getSystemActorId(tx);
 
     if (openShift && openShift.openedAt < periodEndExclusive(period)) {
       await insertMissingCheckoutException(tx, {
@@ -234,7 +275,12 @@ async function processCandidate(candidate: AutoSubmitCandidate, policy: PolicySn
     }
 
     await tx.$queryRaw`SELECT id FROM "TimesheetDraft" WHERE "timesheetId" = ${candidate.id}::uuid FOR UPDATE`;
-    const version = await submitWorkerTimesheetCore(tx, fresh.employeeId, candidate.id, systemActorId, requestId, SubmissionSource.AUTO);
+    // validatedSystemActorId reuses the id just resolved above for submitWorkerTimesheetCore's own
+    // internal LATE_SYNC_AFTER_SUBMIT resolution step (§9.5) instead of a second, redundant lookup
+    // of the same row inside the same transaction.
+    const version = await submitWorkerTimesheetCore(tx, fresh.employeeId, candidate.id, systemActorId, requestId, SubmissionSource.AUTO, {
+      validatedSystemActorId: systemActorId
+    });
 
     const hasBlocking = await tx.attendanceException.findFirst({
       where: { employeeId: fresh.employeeId, payrollPeriodId: fresh.periodId, status: 'OPEN' },
@@ -295,6 +341,26 @@ export async function runAttendanceAutoSubmitTick(input: AttendanceAutoSubmitTic
 
   const candidates = await scanAutoSubmitCandidates();
 
+  // Tick-scoped lazy SYSTEM actor cache — T7A.10A follow-up. Plain closure variable, never a
+  // module-global and never carried between ticks (a fresh runAttendanceAutoSubmitTick call always
+  // starts with an empty cache, scoped only to this function invocation). The first candidate that
+  // actually reaches branch (i) validates the SYSTEM actor's shape once and caches the id; every
+  // later submitting candidate in this same tick reuses it with zero additional SELECTs. A tick
+  // whose candidates never reach branch (i) — e.g. a replay tick where every candidate already has
+  // an AutoSubmissionAttempt and short-circuits at NOOP_EXISTING before any transaction opens —
+  // never resolves the SYSTEM actor at all. Only successful resolutions are cached: if the lookup
+  // throws (actor missing/malformed), the cache stays empty and the next candidate that needs it
+  // retries fresh, so a transient/mid-tick fix is still picked up within the same tick.
+  let cachedSystemActorId: string | null = null;
+  async function getSystemActorId(tx: Prisma.TransactionClient): Promise<string> {
+    if (cachedSystemActorId !== null) {
+      return cachedSystemActorId;
+    }
+    const resolved = await resolveSystemActorId(tx);
+    cachedSystemActorId = resolved;
+    return resolved;
+  }
+
   const result: AttendanceAutoSubmitTickResult = {
     scanned: candidates.length,
     due: 0,
@@ -310,7 +376,7 @@ export async function runAttendanceAutoSubmitTick(input: AttendanceAutoSubmitTic
   for (const candidate of candidates) {
     let outcome: CandidateOutcome;
     try {
-      outcome = await processCandidate(candidate, policy, now, requestId);
+      outcome = await processCandidate(candidate, policy, now, requestId, getSystemActorId);
     } catch {
       // Retryable — no AutoSubmissionAttempt row was written for this (timesheetId, generation),
       // so the next tick's candidate scan/existing-attempt check will pick this timesheet up again

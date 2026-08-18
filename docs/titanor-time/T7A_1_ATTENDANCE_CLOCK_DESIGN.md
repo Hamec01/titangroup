@@ -4892,22 +4892,70 @@ SUM(fragment) WHERE timesheetId=X` без исключений.
 
 ### A. `dueAt` — сводная формула (для справки, авторитетный текст — §9.6, шаг 2)
 
+**`[2026-08-18] follow-up исправление — см. "Follow-up: manual-submit race" ниже.** `dueAt` —
+функция **исключительно** от `systemReopenGeneration`, никогда от `Timesheet.status`. Формулировка
+ниже намеренно НЕ привязывает вычисление к статусу (первая версия этого addendum ошибочно писала
+«generation 0 (Timesheet.status = DRAFT)» / «reopened generation N>0 (Timesheet.status =
+RETURNED...)», как будто generation и status — взаимозаменяемые ярлыки одного и того же понятия;
+это разночтение и стало прямой причиной бага, см. follow-up ниже):
+
 ```text
-generation 0 (Timesheet.status = DRAFT):
+systemReopenGeneration === 0:
   dueAt = (period.endDate + policy.cutoffDaysAfterPeriodEnd дней) @ policy.cutoffTime,
           интерпретировано как Europe/Helsinki wall-clock, переведено в UTC
           (helsinkiWallClockToUtc(date, timeOfDay) — lib/periods.ts, тот же хелпер, что уже
           использует lib/attendance-materializer.ts для periodEndExclusive).
 
-reopened generation N>0 (Timesheet.status = RETURNED, lastReturnedReason = SYSTEM_LATE_SYNC_REOPEN):
+systemReopenGeneration > 0:
   dueAt = timesheet.systemReopenAt + policy.systemReopenDebounceMinutes минут
           (обычная арифметика над instant — systemReopenAt уже абсолютный UTC timestamp,
-          никакого повторного перевода часового пояса не требуется).
+          никакого повторного перевода часового пояса не требуется). systemReopenAt=null при
+          generation>0 структурно недостижимо (§9.5 шаг 2 всегда ставит оба поля в одном
+          переходе) — если всё же произойдёт, вычисление явно бросает исключение (fail-closed,
+          откат кандидата), а не молча выбирает произвольную ветку.
 ```
 
 `policy.timezone` заморожен на `'Europe/Helsinki'` на уровне БД
 (`ck_company_attendance_policy_timezone_frozen`) — вычисление выше жёстко использует Хельсинки, не
 читает `policy.timezone` как переменную (он не может быть ничем другим).
+
+#### Follow-up: manual-submit race (`fix(time): handle auto-submit manual race`, 2026-08-18)
+
+**Root cause.** Реализация после `Timesheet FOR UPDATE` пересчитывала `dueAt` по
+`fresh.status as 'DRAFT' | 'RETURNED'` — приведение типа, которое **лжёт**, когда ручной submit
+выиграл гонку между дешёвым (незаблокированным) чтением кандидата и локом: `fresh.status` в этот
+момент реально равен `SUBMITTED`, но приведение типа заставляло TypeScript считать его одним из
+двух перечисленных значений. Код направлял такой кандидат в RETURNED-ветку формулы (поскольку
+`status !== 'DRAFT'`), которая разыменовывала `systemReopenAt!.getTime()` — а у только что
+проигравшего гонку generation-0 кандидата `systemReopenAt` **всегда** `null` (он ещё ни разу не
+переоткрывался). Результат — необработанный `TypeError`, весь per-candidate transaction откатывался,
+и tick засчитывал этого кандидата в `failed` вместо корректного `SKIPPED_ALREADY_SUBMITTED` —
+несмотря на то, что ветка (g) (`fresh.status !== 'DRAFT' && fresh.status !== 'RETURNED'` →
+`SKIPPED_ALREADY_SUBMITTED`) уже стояла в коде СРАЗУ ПОСЛЕ вычисления `dueAt` и корректно обработала
+бы этот случай — вычисление `dueAt` просто никогда до неё не доходило живым.
+
+**Почему generation, а не status.** `systemReopenGeneration` не трогается НИ ручным, НИ авто submit
+— инкрементируется исключительно §9.5-шагом reopen. `Timesheet.status`, наоборот, это ровно то
+поле, которое меняет конкурирующий писатель. Формула «сколько прошло с начала generation N» не
+должна зависеть от «что сейчас в статусе» — это два независимых измерения одного и того же
+кандидата, и смешивание их в одну функцию было структурной ошибкой дизайна этого addendum, не
+только имплементации.
+
+**Исправление.** `computeDueAt` теперь принимает `systemReopenGeneration: number` напрямую (не
+`status`), без единого приведения типа над `fresh.status` где-либо в `processCandidate`. Порядок
+проверок после `Timesheet FOR UPDATE` (branch e→dueAt→f→g→h→i) не изменился — сам этот порядок был
+верным с самого начала; ошибка была изолирована к тому, ЧТО передавалось в `computeDueAt`, не к
+порядку веток.
+
+**Доказательство fix'а — детерминированный тест реальной гонки** (не unit-мок): отдельный процесс
+удерживает `Employee FOR UPDATE`; реальный `submitWorkerTimesheet` и реальный
+`runAttendanceAutoSubmitTick`, каждый в своём собственном OS-процессе/DB backend, оба ставятся в
+очередь на тот же лок в контролируемом порядке, подтверждённом через `pg_stat_activity
+.wait_event_type = 'Lock'` с реально разными PID — не `Promise.all` на одном соединении. Оба порядка
+(manual первым, scheduler первым) проверены: проигравшая сторона получает ожидаемый чистый исход
+(`SKIPPED_ALREADY_SUBMITTED`/`resultingVersionId=null` для scheduler; `INVALID_STATE_TRANSITION` для
+manual), ровно одна `TimesheetVersion` с корректным `submissionSource`, ровно один durable
+`AutoSubmissionAttempt`. См. `IMPLEMENTATION_STATUS.md` за точные счётчики прогона.
 
 ### B. Generation identity — сводка (авторитетный текст — §9.6 `[3.1]`/`[3.2]`)
 
@@ -4959,6 +5007,42 @@ submitted*/skipped*/noop/failed).
 (`TimesheetVersion` + `TimesheetReviewScope` + audit + возможное `LATE_SYNC_AFTER_SUBMIT`
 разрешение) + `AutoSubmissionAttempt` — одним `COMMIT`, либо ни одной строки (`ROLLBACK`) — никогда
 частично.
+
+#### Follow-up: SYSTEM singleton lookup accounting (2026-08-18)
+
+**Root cause.** Первая версия `processCandidate` (branch (i)) вызывала `resolveSystemActorId(tx)`
+безусловно для КАЖДОГО реально отправляемого кандидата — O(N) `User`-SELECT на N реальных
+отправок за один тик, хотя формулировка §D/этого addendum уже описывала намерение «не растить
+query count с числом кандидатов». Отдельно, `submitWorkerTimesheetCore`'s собственный шаг
+разрешения `LATE_SYNC_AFTER_SUBMIT` (§9.5) для reopened-generation кандидатов с уже примороженными
+origin-фрагментами делал СВОЙ независимый SELECT той же самой строки `User` внутри той же самой
+транзакции, где `processCandidate` уже секундой раньше прочитал и провалидировал её.
+
+**Исправление.** `runAttendanceAutoSubmitTick` держит tick-scoped lazy cache (обычная closure-
+переменная, не module-global, никогда не переживает вызов функции) — первый кандидат тика, который
+реально доходит до branch (i), делает один `User`-SELECT и валидирует его форму (тот же fail-closed
+shape-check, что и раньше); каждый следующий отправляемый кандидат ЭТОГО ЖЕ тика переиспользует уже
+провалидированный id без единого дополнительного запроса. Кэшируются только УСПЕШНЫЕ резолюции —
+если SYSTEM отсутствует/malformed, кэш остаётся пустым и следующий кандидат пробует заново (тик,
+где SYSTEM восстановили посередине, всё ещё подхватывает исправление для оставшихся кандидатов).
+Тот же validated id передаётся в `submitWorkerTimesheetCore` через новый optional-параметр
+`internalContext: { validatedSystemActorId }` — устраняя второй, ранее избыточный `User`-SELECT
+внутри `LATE_SYNC_AFTER_SUBMIT`-резолюции той же транзакции. Fail-closed поведение не ослаблено:
+`AttendanceException.resolvedByUserId` — реальный FK на `User.id` (`onDelete: Restrict`), так что
+запись с несуществующим id всё равно упадёт на уровне БД, даже без повторной проверки формы.
+Ручной submit (`submitWorkerTimesheet`) никогда не передаёт `internalContext` — сохраняет прежнее
+поведение (собственный полный fail-closed lookup) без изменений. `resolveMissingCheckoutAtCutoff
+OnLateCheckOut` (реальный Check Out вне какого-либо тика) тоже не кэширует — каждый вызов делает
+свежую проверку в своей собственной транзакции, как и раньше.
+
+**Уточнение формулировки query-count.** Утверждение «query count тика ограничен константой» из
+предыдущей версии этого addendum было неточным — общее число SQL statements за тик растёт линейно
+с числом реально обрабатываемых кандидатов (каждая отправка — своя многошаговая транзакция), это
+ожидаемо и корректно, НЕ баг. Константой (O(1) на тик, не O(N)) ограничены только **singleton**-
+чтения: `CompanyAttendancePolicy` (1 раз за тик, как и было верно с самого начала) и теперь также
+SYSTEM-actor-валидация (1 раз за тик при наличии хотя бы одного реального submit, 0 раз на тике,
+где ни один кандидат не доходит до branch (i) — например чистый replay-тик). См. исправленную
+формулировку в `IMPLEMENTATION_STATUS.md`.
 
 ### E. CLI — контракт stdout/exit code
 

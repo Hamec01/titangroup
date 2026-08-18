@@ -948,6 +948,21 @@ export interface SubmitResult {
 export type SubmitError = TimesheetAccessError | { code: 'INVALID_STATE_TRANSITION' };
 
 /**
+ * T7A.10A follow-up — for a caller (auto-submit) that already resolved and shape-validated the
+ * SYSTEM actor earlier in the SAME transaction (e.g. as this call's own `actorUserId` for an AUTO
+ * submission), `validatedSystemActorId` lets the LATE_SYNC_AFTER_SUBMIT resolution step below reuse
+ * that id instead of paying a second `User` SELECT for the same row inside the same transaction.
+ * The fail-closed shape check is NOT re-run in that case — it was already run moments earlier in
+ * this same transaction, and the `AttendanceException.resolvedByUserId` foreign key still fails
+ * closed if the row were somehow deleted in between (structurally unreachable in practice, same as
+ * the rest of §13's fail-closed reasoning). Manual submit (`submitWorkerTimesheet` below) never
+ * passes this — it keeps paying its own fresh, fully-validated lookup exactly as before.
+ */
+export interface SubmitWorkerTimesheetCoreContext {
+  validatedSystemActorId?: string;
+}
+
+/**
  * docs/titanor-time/T7A_1_ATTENDANCE_CLOCK_DESIGN.md §9.5/§9.6/§15 п.1 — the single point that
  * ever freezes a TimesheetVersion (manual submit today; auto-submit, §9.6, is a future slice that
  * will call this same function). Takes `tx` from the caller and never opens its own transaction —
@@ -965,7 +980,8 @@ export async function submitWorkerTimesheetCore(
   timesheetId: string,
   actorUserId: string,
   requestId: string,
-  submissionSource: SubmissionSource
+  submissionSource: SubmissionSource,
+  internalContext?: SubmitWorkerTimesheetCoreContext
 ): Promise<SubmitResult> {
   const previousTimesheet = await tx.timesheet.findUniqueOrThrow({ where: { id: timesheetId }, select: { status: true } });
   const previousStatus = previousTimesheet.status;
@@ -1162,21 +1178,31 @@ export async function submitWorkerTimesheetCore(
       .map((e) => e.id);
 
     if (resolvableIds.length > 0) {
-      // §13 — the reserved SYSTEM actor; ck_user_system_shape (CK-34) already guarantees this
-      // shape at the DB level when the row exists at all, but a submit that would otherwise
-      // silently resolve exceptions under a non-existent/malformed actor must never proceed —
-      // the whole submit transaction rolls back instead (stable identifier, matches the
-      // SYSTEM_SCHEDULER_USERNAME_OCCUPIED/SYSTEM_USER_NOT_ELIGIBLE convention elsewhere).
-      const systemActor = await tx.user.findFirst({
-        where: { userKind: 'SYSTEM', username: 'system.scheduler' },
-        select: { id: true, status: true, passwordHash: true, employeeId: true }
-      });
-      if (!systemActor || systemActor.status !== 'DEACTIVATED' || systemActor.passwordHash !== null || systemActor.employeeId !== null) {
-        throw new Error('SYSTEM_SCHEDULER_ACTOR_MISSING_OR_INVALID');
+      // §13 — the reserved SYSTEM actor. If the caller already validated it earlier in this same
+      // transaction (auto-submit — see SubmitWorkerTimesheetCoreContext above), reuse that id
+      // rather than paying a second `User` SELECT for the identical row. Otherwise (manual submit,
+      // or any other caller that didn't pass a context) run the full fail-closed lookup exactly as
+      // before: ck_user_system_shape (CK-34) already guarantees this shape at the DB level when the
+      // row exists at all, but a submit that would otherwise silently resolve exceptions under a
+      // non-existent/malformed actor must never proceed — the whole submit transaction rolls back
+      // instead (stable identifier, matches the SYSTEM_SCHEDULER_USERNAME_OCCUPIED/
+      // SYSTEM_USER_NOT_ELIGIBLE convention elsewhere).
+      let systemActorId: string;
+      if (internalContext?.validatedSystemActorId) {
+        systemActorId = internalContext.validatedSystemActorId;
+      } else {
+        const systemActor = await tx.user.findFirst({
+          where: { userKind: 'SYSTEM', username: 'system.scheduler' },
+          select: { id: true, status: true, passwordHash: true, employeeId: true }
+        });
+        if (!systemActor || systemActor.status !== 'DEACTIVATED' || systemActor.passwordHash !== null || systemActor.employeeId !== null) {
+          throw new Error('SYSTEM_SCHEDULER_ACTOR_MISSING_OR_INVALID');
+        }
+        systemActorId = systemActor.id;
       }
       await tx.attendanceException.updateMany({
         where: { id: { in: resolvableIds } },
-        data: { status: 'RESOLVED', resolvedByUserId: systemActor.id, resolvedAt: new Date(), resolutionNote: 'resolved by resubmission (Vn+1)' }
+        data: { status: 'RESOLVED', resolvedByUserId: systemActorId, resolvedAt: new Date(), resolutionNote: 'resolved by resubmission (Vn+1)' }
       });
     }
   }

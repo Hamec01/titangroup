@@ -1,6 +1,81 @@
 # Titanor Time — Implementation Status
 
-Обновлено: 2026-08-18 Europe/Helsinki (feat: add attendance auto-submit backend, T7A.10A)
+Обновлено: 2026-08-18 Europe/Helsinki (fix: handle auto-submit manual race)
+
+**`[2026-08-18]` T7A.10A follow-up — fix(time): handle auto-submit manual race.** Исправляет два
+дефекта, найденные ПОСЛЕ первоначального T7A.10A слайса (запись ниже), до начала T7A.10B (который
+по-прежнему НЕ начат этим коммитом).
+
+**Баг 1 — manual-submit race.** `lib/attendance-auto-submit.ts`'s `computeDueAt` пересчитывался под
+`Timesheet FOR UPDATE` по `fresh.status as 'DRAFT' | 'RETURNED'` — приведение типа, которое лжёт,
+когда ручной submit выигрывает гонку между дешёвым чтением кандидата и локом (`fresh.status`
+реально становится `SUBMITTED`). Формула уходила в RETURNED-ветку и разыменовывала
+`systemReopenAt!.getTime()` на generation-0 кандидате, у которого это поле всегда `null` —
+необработанный `TypeError`, транзакция кандидата откатывалась целиком, tick засчитывал его в
+`failed` вместо корректного `SKIPPED_ALREADY_SUBMITTED`. **Исправление**: `computeDueAt` теперь
+принимает `systemReopenGeneration: number` напрямую — generation, в отличие от status, не трогается
+никаким submit'ом (ни ручным, ни авто), только §9.5-шагом reopen, и потому racer-independent по
+конструкции. Ни одного приведения типа над `fresh.status` в `processCandidate` больше нет; порядок
+проверок после лока (stale-generation → dueAt → not-yet-due → already-submitted →
+HUMAN_REVIEW_RETURN → real submit) не изменился — он был верным с самого начала, ошибка была
+изолирована к тому, что передавалось в саму формулу. Полный root-cause разбор — новая секция
+"Follow-up: manual-submit race" в addendum `T7A_1_ATTENDANCE_CLOCK_DESIGN.md` (§A).
+
+**Баг 2 — SYSTEM singleton lookup O(N) вместо O(1).** SYSTEM-actor резолвился заново для каждого
+реально отправляемого кандидата тика (branch (i)) — O(N) `User`-SELECT на N отправок, — плюс
+`submitWorkerTimesheetCore`'s собственная `LATE_SYNC_AFTER_SUBMIT`-резолюция (§9.5) для reopened-
+generation кандидатов с примороженными origin-фрагментами делала СВОЙ второй, избыточный SELECT той
+же строки внутри той же транзакции. **Исправление**: tick-scoped lazy cache (обычная closure-
+переменная в `runAttendanceAutoSubmitTick`, никогда не module-global, никогда не переживает вызов
+функции) — первый реально отправляемый кандидат тика валидирует SYSTEM-actor один раз, остальные
+переиспользуют id без дополнительных запросов; кэшируются только успешные резолюции. Тот же
+validated id передаётся в `submitWorkerTimesheetCore` через новый optional-параметр
+`SubmitWorkerTimesheetCoreContext.validatedSystemActorId`, устраняя второй lookup внутри той же
+транзакции. Fail-closed поведение не ослаблено — `AttendanceException.resolvedByUserId` остаётся
+реальным FK на `User.id` (`onDelete: Restrict`), так что запись с несуществующим id всё равно упадёт
+на уровне БД. Ручной submit (`submitWorkerTimesheet`) никогда не передаёт этот context — сохраняет
+прежний, независимо валидирующий путь без изменений; `resolveMissingCheckoutAtCutoffOnLateCheckOut`
+(реальный Check Out вне тика) тоже не кэширует. Полный root-cause разбор — новая секция "Follow-up:
+SYSTEM singleton lookup accounting" в том же addendum, сразу после §D.
+
+**Тесты — детерминированная гонка, реальные backend PID.** Новый scratch-скрипт проверяет ОБА
+порядка через реально отдельные OS-процессы: один держит `Employee FOR UPDATE`, реальный
+`submitWorkerTimesheet` и реальный `runAttendanceAutoSubmitTick` (каждый в своём процессе/DB
+backend) ставятся в очередь на тот же лок в контролируемом порядке — очередь и разные PID
+подтверждены через `pg_stat_activity.wait_event_type = 'Lock'`, не `Promise.all` на одном
+соединении. **Manual-первым**: после освобождения лока manual submit коммитится первым
+(`submissionSource=MANUAL`, ровно одна `TimesheetVersion`), scheduler tick затем видит `SUBMITTED`
+под своим локом → `failed=0`, `skippedAlreadySubmitted=1`, ровно один
+`AutoSubmissionAttempt(SKIPPED_ALREADY_SUBMITTED, resultingVersionId=null)`, вторая версия не
+создаётся. **Scheduler-первым** (обратный порядок): scheduler коммитится первым
+(`submissionSource=AUTO`, ровно один durable attempt `SUBMITTED_CLEAN`/`_WITH_EXCEPTIONS`), manual
+submit получает `INVALID_STATE_TRANSITION`. Оба сценария — **23/23** проверок, дважды подтверждено
+стабильно на чистой БД. Query-count скрипт переписан: `n=5`→policy=1/SYSTEM=1, `n=50`→policy=1/
+SYSTEM=1 (было бы `n`, а не `1`, до фикса), replay-тик (все кандидаты уже `SUBMITTED`, вне scan)
+→ SYSTEM=0/policy=1 — не заявляет константность ВСЕГО тика, только singleton-чтений.
+
+**Regression** (та же одноразовая disposable PostgreSQL 16, свежая): generation 0 clean auto-submit;
+generation >0 late-reopen auto-submit (с проверкой debounce-границы); stale generation (кандидат не
+падает, ноль записей); not-due under lock; HUMAN_REVIEW_RETURN race (исключён из scan на уровне
+запроса); два конкурентных scheduler-тика через реально разные PID (одна версия, один durable
+attempt); missing-checkout создание; поздний реальный online И offline Check Out резолвит
+exception; обычный ручной submit (изолированно) — **33/33** проверки, дважды подтверждено стабильно.
+Policy API smoke (GET→PATCH→GET round trip, `ADMIN`) — **5/5**; overview smoke
+(`_test-overview.ts`, неизменённый) — зелёный, не задет.
+
+**Технические проверки**: `git diff --check`, `prisma validate` (схема не менялась), `tsc --noEmit`
+— чисто; `npm run build` в изолированной copy-директории (не в живой `.next` preview) — чисто;
+`docker compose -f compose.titanor-time.yaml build app` — успешно; `prisma migrate deploy` дважды
+подряд на чистой БД — 56 migrations (без изменений от исходного T7A.10A), второй прогон "No pending
+migrations to apply". Preview `127.0.0.1:3244` — `/api/health`/`/api/ready` `200`/`200` до и после,
+не останавливался. Production (`titanor-time-app-1`/`titanor-time-db-1`) — `StartedAt`/
+`RestartCount=0`/`image` без изменений, не пересобирался и не перезапускался. Изменены только два
+файла: `lib/attendance-auto-submit.ts`, `lib/worker-timesheets.ts` — ни schema, ни migrations, ни
+permissions не тронуты.
+
+**T7A.10B (permanent scheduler wiring, policy editor UI) по-прежнему НЕ начат этим коммитом.**
+
+---
 
 **`[2026-08-18]` T7A.10A Attendance Auto-submit Backend + Company Policy API — новый завершённый
 backend-слайс поверх полностью завершённого T7A.9 (operational overview), T7A.8 (exception review +
@@ -97,8 +172,14 @@ T7A.9A/T7A.8, чтобы не задеть lock preview-сервера на `127
   OS-процессы без lost update, отзыв permission блокирует следующий запрос, `AuditEvent` redaction,
   `DELETE` отклонён триггером.
 - Query-count проверка (одноразовый скрипт, не deliverable-ассет): policy читается **ровно 1 раз** за
-  тик независимо от N кандидатов (`n=5`→1, `n=50`→1 — не O(N)); per-candidate стоимость SYSTEM-actor
-  lookup и суммарного числа запросов остаётся константной от `n=5` к `n=50` (не N+1).
+  тик независимо от N кандидатов (`n=5`→1, `n=50`→1 — не O(N)). **`[2026-08-18] исправлено follow-
+  up'ом ниже** — формулировка «per-candidate стоимость SYSTEM-actor lookup остаётся константной»
+  здесь была неточной: на момент этой записи SYSTEM-actor резолвился заново для КАЖДОГО реально
+  отправляемого кандидата (O(N) `User`-SELECT на N отправок за тик), не O(1). Суммарное число SQL
+  statements за тик само по себе растёт линейно с числом кандидатов (каждая отправка — своя
+  многошаговая транзакция) — это ожидаемо и не являлось претензией; неточной была именно фраза про
+  SYSTEM-actor lookup. См. follow-up запись ниже за фактические исправленные числа (`n=5`→1
+  SYSTEM-SELECT, `n=50`→1, replay-тик→0).
 - Regression на той же одноразовой БД: `_test-activation.ts`, `_test-corrections.ts`,
   `_test-overview.ts`, `_test-overview-querycount.ts` (n=50/200 по-прежнему 27 SQL statements,
   идентично T7A.9A) — все зелёные, не задеты; ручной smoke на существующем `DISMISS` через
