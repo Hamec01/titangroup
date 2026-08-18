@@ -1496,3 +1496,351 @@ button:disabled {
     align-items: stretch;
   }
 }
+
+/* docs/titanor-time/01_SCREEN_MAP.md — /admin, /foreman (T7A.9B, PROJECT_ROADMAP.md T7A.9).
+   Additive only, own prefix — reuses .setup-page/.setup-card/.worker-card/.wk-page/.wk-section-
+   title/.wk-empty/.login-error/.exc-apply-button/.exc-reset-link/.exc-pagination* as shared atoms,
+   same as every other admin/foreman page. Desktop-first; worker rows are cards (too many fields per
+   worker for a single-line table row to stay readable, even on desktop), not a horizontally-
+   scrolling table. */
+.ov-card {
+  max-width: 1200px;
+}
+
+.ov-muted {
+  color: var(--text-soft);
+  font-size: 0.85rem;
+}
+
+.ov-legacy {
+  padding-bottom: 20px;
+  margin-bottom: 20px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  display: grid;
+  gap: 10px;
+  align-items: start;
+}
+
+.ov-legacy-note {
+  margin: 4px 0 0;
+  color: var(--text-soft);
+  font-size: 0.85rem;
+}
+
+.ov-period-banner {
+  margin: 0 0 20px;
+  display: grid;
+  gap: 6px;
+}
+
+.ov-period-line {
+  margin: 0;
+}
+
+.ov-period-links {
+  margin: 6px 0 0;
+}
+
+.ov-asof {
+  margin: 0;
+  color: var(--text-soft);
+  font-size: 0.82rem;
+}
+
+.ov-warning {
+  border: 1px solid rgba(252, 211, 77, 0.4);
+  border-radius: 4px;
+  padding: 10px 12px;
+  background: rgba(252, 211, 77, 0.1);
+  color: #fcd34d;
+  font-size: 0.9rem;
+  margin: 0;
+}
+
+.ov-warning p {
+  margin: 0;
+}
+
+.ov-warning p + p {
+  margin-top: 8px;
+}
+
+.ov-filters {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: end;
+  gap: 12px;
+  margin: 0 0 20px;
+  padding-bottom: 20px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.ov-filter-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 0.85rem;
+}
+
+.ov-filter-field label {
+  color: var(--text-soft);
+}
+
+.ov-filter-field select {
+  height: 38px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 4px;
+  background: rgba(7, 11, 17, 0.88);
+  color: var(--text);
+  padding: 0 10px;
+  min-width: 160px;
+}
+
+.ov-filter-field select:focus-visible {
+  outline: none;
+  border-color: rgba(76, 123, 192, 0.8);
+  box-shadow: 0 0 0 4px rgba(47, 94, 157, 0.18);
+}
+
+.ov-filter-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.ov-summary-grid {
+  list-style: none;
+  margin: 0 0 24px;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  gap: 10px;
+}
+
+.ov-summary-card {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 12px 14px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 6px;
+  background: rgba(7, 11, 17, 0.5);
+  text-decoration: none;
+  color: var(--text);
+}
+
+a.ov-summary-card:hover {
+  background: rgba(82, 130, 168, 0.12);
+}
+
+a.ov-summary-card:focus-visible {
+  outline: 2px solid var(--accent-light);
+  outline-offset: 2px;
+}
+
+.ov-summary-card-active {
+  border-color: var(--accent-light);
+  background: rgba(82, 130, 168, 0.22);
+}
+
+.ov-summary-card-static {
+  opacity: 0.85;
+}
+
+.ov-summary-value {
+  font-size: 1.4rem;
+  font-weight: 700;
+}
+
+.ov-summary-label {
+  color: var(--text-soft);
+  font-size: 0.76rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.ov-summary-card-active .ov-summary-label {
+  color: var(--text);
+}
+
+.ov-conflicts {
+  margin: 0 0 24px;
+  padding: 16px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 6px;
+  background: rgba(7, 11, 17, 0.35);
+}
+
+.ov-conflict-group {
+  margin-top: 12px;
+}
+
+.ov-subsection-title {
+  margin: 0 0 6px;
+  font-size: 0.8rem;
+  color: var(--text-soft);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.ov-conflict-list {
+  margin: 0;
+  padding-left: 18px;
+  font-size: 0.86rem;
+  display: grid;
+  gap: 4px;
+}
+
+.ov-badge {
+  display: inline-block;
+  flex-shrink: 0;
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--text-soft);
+}
+
+.ov-badge-neutral {
+  color: var(--text-soft);
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.ov-badge-positive {
+  color: #86efac;
+  background: rgba(134, 239, 172, 0.12);
+}
+
+.ov-badge-issue {
+  color: #fcd34d;
+  background: rgba(252, 211, 77, 0.14);
+}
+
+.ov-worker-list {
+  list-style: none;
+  margin: 0 0 20px;
+  padding: 0;
+  display: grid;
+  gap: 12px;
+}
+
+.ov-worker-card {
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 6px;
+  padding: 16px;
+  background: rgba(7, 11, 17, 0.5);
+}
+
+.ov-worker-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: start;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding-bottom: 12px;
+  margin-bottom: 12px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.ov-worker-name {
+  margin: 0;
+  font-size: 1.05rem;
+}
+
+.ov-state-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.ov-worker-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px 24px;
+  margin: 0;
+}
+
+.ov-worker-grid dt {
+  margin: 0;
+  color: var(--text-soft);
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.ov-worker-grid dd {
+  margin: 2px 0 0;
+  font-size: 0.9rem;
+  overflow-wrap: anywhere;
+}
+
+.ov-blocker-list {
+  margin: 0;
+  padding-left: 16px;
+}
+
+.ov-delta {
+  font-weight: 600;
+}
+
+.ov-delta-positive {
+  color: #86efac;
+}
+
+.ov-delta-negative {
+  color: var(--error);
+}
+
+.ov-delta-zero {
+  color: var(--text-soft);
+}
+
+.ov-skeleton-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  gap: 10px;
+  margin-top: 20px;
+}
+
+.ov-skeleton-card {
+  height: 62px;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.06);
+  animation: ov-skeleton-pulse 1.4s ease-in-out infinite;
+}
+
+@keyframes ov-skeleton-pulse {
+  0%,
+  100% {
+    opacity: 0.6;
+  }
+  50% {
+    opacity: 0.3;
+  }
+}
+
+@media (max-width: 700px) {
+  .ov-summary-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .ov-worker-grid {
+    grid-template-columns: 1fr;
+    gap: 8px;
+  }
+
+  .ov-worker-head {
+    flex-direction: column;
+  }
+
+  .ov-filters {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .ov-filter-field select {
+    width: 100%;
+  }
+}

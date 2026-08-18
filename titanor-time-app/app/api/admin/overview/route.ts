@@ -1,13 +1,11 @@
 import { randomUUID } from 'node:crypto';
-import { Prisma } from '@prisma/client';
 import { NextRequest, NextResponse } from 'next/server';
 import { jsonError, successHeaders, type ApiErrorBody } from '@/lib/api-error';
 import { resolveAuthenticatedSession } from '@/lib/auth';
 import { hasPermission } from '@/lib/permissions';
 import { SESSION_COOKIE_NAME } from '@/lib/session';
-import { prisma } from '@/lib/prisma';
 import { helsinkiToday } from '@/lib/workers';
-import { buildOperationalOverview, parseOverviewQuery, resolvePeriodForOverview } from '@/lib/attendance-overview';
+import { getAdminOperationalOverview, parseOverviewQuery } from '@/lib/attendance-overview';
 
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
@@ -52,18 +50,10 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   const today = helsinkiToday();
 
   // §10 ТЗ T7A.9A — one REPEATABLE READ read-only transaction so summary/items/conflicts (and
-  // period resolution) all read the same DB snapshot; `asOf` is fixed once inside buildOperationalOverview.
-  const outcome = await prisma.$transaction(
-    async (tx) => {
-      const periodResult = await resolvePeriodForOverview(tx, parsed.filters.periodId, today);
-      if (!periodResult.ok) {
-        return { code: 'PERIOD_NOT_FOUND' as const };
-      }
-      const result = await buildOperationalOverview(tx, parsed.filters, { siteIds: null, excludeEmployeeId: null, includeConflicts: true }, periodResult.period, today);
-      return { code: 'OK' as const, result };
-    },
-    { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead, maxWait: 10_000, timeout: 20_000 }
-  );
+  // period resolution) all read the same DB snapshot; `asOf` is fixed once inside
+  // buildOperationalOverview. Same wrapper the /admin Server Component calls directly (T7A.9B) —
+  // no HTTP self-fetch, no second transaction-wrapping copy.
+  const outcome = await getAdminOperationalOverview(parsed.filters, today);
 
   if (outcome.code === 'PERIOD_NOT_FOUND') {
     return jsonError(404, { code: 'PERIOD_NOT_FOUND', message: 'No payroll period with this id.' }, requestId);

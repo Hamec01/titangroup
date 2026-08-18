@@ -1481,12 +1481,19 @@ target-identity-алгоритм. **Обязательное архитекту�
   сигнал о валидности тела/id раньше него.
 
 ### 9.1e Attendance operational overview — read foundation (T7A.9A, `T7A_1_ATTENDANCE_CLOCK_DESIGN.md`
-§16 п.9 + Addendum "T7A.9A Attendance Operational Overview Read Foundation" — **реализовано,
-backend only, UI = T7A.9B, ещё не начат**) — `lib/attendance-overview.ts`
+§16 п.9 + Addendum "T7A.9A Attendance Operational Overview Read Foundation" — **реализовано**) —
+`lib/attendance-overview.ts`
 
 Точная формула operational states и recorded-vs-reported diff зафиксирована в addendum
 `T7A_1_ATTENDANCE_CLOCK_DESIGN.md` (2026-08-18) — этот раздел даёт HTTP-контракт, не переопределяет
 формулу.
+
+**`[2026-08-18]` T7A.9B** — оба endpoint'а ниже теперь имеют реального UI-потребителя:
+`01_SCREEN_MAP.md` `/admin` и `/foreman` (`app/admin/page.tsx`/`app/foreman/page.tsx`). Контракт
+ниже не менялся ни на йоту — обе страницы вызывают `getAdminOperationalOverview`/
+`getForemanOperationalOverview` (те же новые wrapper'ы в `lib/attendance-overview.ts`, которые
+теперь используют и сами route-файлы) напрямую как Server Components, без HTTP-запроса к
+собственному API и без второй копии транзакционного контракта.
 
 **Общие query-параметры обоих endpoint** (все опциональны): `periodId` (UUID), `siteId` (UUID),
 `state` (один из 13 значений ниже), `page` (default 1), `pageSize` (default 20, максимум 100).

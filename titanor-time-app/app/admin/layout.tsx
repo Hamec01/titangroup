@@ -4,6 +4,7 @@ import { redirect } from 'next/navigation';
 import { resolveServerSession } from '@/lib/server-session';
 
 const ADMIN_NAVIGATION = [
+  { href: '/admin', label: 'Overview' },
   { href: '/admin/setup', label: 'Setup' },
   { href: '/admin/workers', label: 'Workers' },
   { href: '/admin/users', label: 'Users' },

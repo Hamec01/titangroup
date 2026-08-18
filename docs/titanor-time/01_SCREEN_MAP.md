@@ -145,21 +145,33 @@ touch target ≥ 48px), `/foreman/*` — desktop-first с поддержкой �
 - API: `GET /api/admin/setup-status`
 - DoD: точно отражает БД, не кэширует «выполнено» после деактивации сущности
 
-#### `/admin` (обзор) ⚪
-- Роли: `ADMIN`, `SUPER_ADMIN`
+#### `/admin` (operational overview) 🟢 **`[2026-08-18] T7A.9B реализовано`**
+- Роли: `ADMIN`, `SUPER_ADMIN` (`timesheet.read.all`+`attendance.exception.read.all`+
+  `attendance.conflict.read` одновременно, permission-check не role-check)
 - Приоритет: desktop
-- Назначение: сводка после setup — открытый период, число ожидающих подтверждения табелей,
-  последние audit-события; реальные данные, без заглушечной статистики
-- Данные: агрегаты по `PayrollPeriod`, `Timesheet.status`, последние `AuditEvent`
-- Действия: переход к `/admin/timesheets`, `/admin/periods`, `/admin/audit`
-- Состояния: loading; empty (нет открытого периода → баннер); error
-- Откуда: логин `ADMIN`/`SUPER_ADMIN`, nav
-- API: `GET /api/admin/overview` — **`[2026-08-18] T7A.9A backend реализован`**
-  (`04_ADMIN_FIRST_API_CONTRACTS.md` §9.1e, `IMPLEMENTATION_STATUS.md`) — `summary`/`items`/
-  `conflicts`/`period`, 13 operational states, recorded-vs-reported diff, единый REPEATABLE READ
-  snapshot. **Экран `/admin` (⚪) этим слайсом не реализован** — потребление API остаётся T7A.9B.
-- DoD: не показывает цифру, не посчитанную напрямую из БД в момент запроса — уже гарантировано на
-  уровне API (нет кэша/stale aggregate table, `asOf` фиксируется один раз на запрос)
+- Назначение: полный операционный обзор — больше не безусловный `redirect('/admin/setup')`. Кто
+  работает сейчас/закончил/missing checkout/GPS/sync issue, что draft/отправлено вручную-
+  автоматически/ждёт прораба/возвращено/готово к final approval/в correction, плюс recorded-vs-
+  reported diff и компактная conflicts-секция (ADMIN-only)
+- Данные: `OverviewResult` целиком — `summary`(15 карточек)/`items`(worker rows)/`conflicts`/
+  `period`/`asOf`, без клиентского пересчёта — все числа уже посчитаны backend
+- Действия: 13 operational-state summary-карточек — каждая ссылка/кнопка фильтра (`state` в URL,
+  `aria-current` на активной), фильтры period/site/state/pageSize (URL query string), явный
+  Refresh, ссылки на `/admin/workers/:id`/`/admin/timesheets/:id`/`/admin/periods/:id`/
+  `/admin/attendance/exceptions?status=OPEN&employeeId=`/`/admin/corrections`
+- Состояния: loading (`app/admin/loading.tsx`, skeleton той же формы); normal; no active period
+  (честный баннер, clock-state всё равно показан); no workers; фильтр вернул ноль строк (отдельная
+  формулировка); invalid filters (inline banner, не 500); period not found; access denied; error
+  (`app/admin/error.tsx`, без stack trace); pagination
+- Откуда: логин `ADMIN`/`SUPER_ADMIN`, nav (`Overview`, первый пункт)
+- Куда: `/admin/workers/:id`, `/admin/timesheets/:id`, `/admin/periods/:id`,
+  `/admin/attendance/exceptions`, `/admin/corrections`, `/admin/periods`, `/admin/setup`
+- API: не самостоятельный fetch — Server Component напрямую вызывает `getAdminOperationalOverview`
+  (`lib/attendance-overview.ts`), тот же server-only wrapper, что и `GET /api/admin/overview`
+  (`04_ADMIN_FIRST_API_CONTRACTS.md` §9.1e) — контракт API не менялся
+- DoD: не показывает цифру, не посчитанную напрямую из БД в момент запроса (уже гарантировано на
+  уровне backend); ноль запрещённых полей (GPS/payload/hash/device/requestId) в DOM; bounded query
+  count не изменился (n=50/200 → 24 запроса, как в T7A.9A)
 
 #### `/admin/workers` 🟢
 - Роли: `ADMIN`, `SUPER_ADMIN`
@@ -915,23 +927,28 @@ FOREMAN_APPROVED` только когда все scope версии подтве
 проверяемый отдельно администратором). Собственные scope прораба (дуал-роль) исключены из его же
 очереди.
 
-#### `/foreman` ⚪
-- Роли: `FOREMAN`
+#### `/foreman` 🟢 **`[2026-08-18] T7A.9B реализовано`**
+- Роли: `FOREMAN` (`timesheet.read.assigned`+`attendance.exception.read.assigned`, permission-check)
 - Приоритет: desktop + планшет
-- Назначение: обзор — сколько табелей ожидает проверки на его объектах, реальные числа
-- Данные: агрегат `Timesheet.status` по назначенным объектам; после ЭТАП 7A отдельно manual/auto,
-  GPS/sync/missing-checkout exceptions и ожидающие site-scopes
-- Действия: → очередь проверки
-- Состояния: loading; empty (нет ожидающих); error
+- Назначение: scoped operational overview — прежний pendingCount/exceptionCount-блок сохранён
+  (ссылки на review queue и attendance exceptions queue), дополнен тем же worker-list/summary/
+  фильтрами, что у `/admin`, но только на текущих объектах прораба и без conflicts-секции
+- Данные: `OverviewResult`, отфильтрованный по текущим `ForemanAssignment`-сайтам, dual-role
+  self-exclusion; manual/auto, GPS/sync/missing-checkout exceptions, ожидающие site-scopes,
+  recorded-vs-reported diff — только по своим сайтам
+- Действия: → очередь проверки (`/foreman/review`); те же 13 state-фильтры/period/site/pageSize,
+  что у admin; ссылки внутри worker-rows ведут только на уже существующие scoped-роуты
+  (`/foreman/review/:timesheetId`, `/foreman/attendance/exceptions`) — никаких `/admin` URL
+- Состояния: те же, что у `/admin` (loading/normal/no-period/no-workers/empty-filter/invalid/
+  not-found/access-denied/error/pagination); чужой `siteId` → пустой список, не `403`/`404`
 - Откуда: логин `FOREMAN`
-- Куда: `/foreman/review`
-- API: `GET /api/foreman/overview` — **`[2026-08-18] T7A.9A: manual/auto, GPS/sync/missing-checkout
-  exceptions и ожидающие site-scopes реализованы backend'ом** (`04_ADMIN_FIRST_API_CONTRACTS.md`
-  §9.1e) — ответ расширен additive поверх прежних `pendingCount`/`exceptionCount` новыми
-  `summary`/`items`/`period`. **Экран `/foreman` (⚪) этим слайсом не реализован** — потребление
-  API остаётся T7A.9B.
-- DoD: числа совпадают с реальным списком в `/foreman/review` в момент запроса — API-часть уже
-  гарантирована (единый REPEATABLE READ snapshot на весь ответ)
+- Куда: `/foreman/review`, `/foreman/review/:timesheetId`, `/foreman/attendance/exceptions`
+- API: не самостоятельный fetch — Server Component напрямую вызывает
+  `getForemanOperationalOverview` (`lib/attendance-overview.ts`), тот же server-only wrapper, что и
+  `GET /api/foreman/overview` (`04_ADMIN_FIRST_API_CONTRACTS.md` §9.1e) — контракт не менялся
+- DoD: числа совпадают с реальным списком в `/foreman/review` в момент запроса (гарантировано на
+  уровне backend, единый REPEATABLE READ snapshot); ноль `/admin`-ссылок, ноль conflicts-данных в
+  DOM/RSC/network для этой роли (live-подтверждено grep'ом)
 
 #### `/foreman/review` ⚪
 - Роли: `FOREMAN`

@@ -1,13 +1,14 @@
 # Titanor Time — Implementation Status
 
-Обновлено: 2026-08-18 Europe/Helsinki (feat: add attendance operational overview APIs, T7A.9A)
+Обновлено: 2026-08-18 Europe/Helsinki (feat: add attendance operational overview UI, T7A.9B)
 
 **`[2026-08-18]` T7A.9A Attendance Operational Overview Read Foundation — новый завершённый
 read-only backend-слайс поверх полностью завершённого T7A.8 (exception review + resolution) и
 T7A.7 (offline sync/auto-submit).** Реализует объём §16 п.9 design checkpoint (утверждён владельцем
 2026-08-12) и roadmap `PROJECT_ROADMAP.md` T7A.9 — точная формула зафиксирована **до** кода в новом
 addendum `T7A_1_ATTENDANCE_CLOCK_DESIGN.md` ("Addendum — T7A.9A…", 2026-08-18). **UI не реализован
-этим слайсом — это T7A.9B, ещё не начат.**
+этим слайсом — это T7A.9B.** **`[2026-08-18]` T7A.9B реализован — см. запись ниже; с ним T7A.9
+объявляется полностью завершённым.**
 
 **API**: новый `GET /api/admin/overview` (требует одновременно `timesheet.read.all` +
 `attendance.exception.read.all` + `attendance.conflict.read`); расширен существующий
@@ -123,12 +124,167 @@ revocation вступает в силу на следующий запрос (li
 только route/lib/migration/scripts) — риск минимален, `npm run build` уже компилирует весь route-
 manifest включая оба новых/изменённых endpoint.
 
-**Остаётся вне этого слайса** (явно, по границам задачи): UI `/admin` и foreman UI (T7A.9B, ещё не
-начат); scheduler/auto-submit (T7A.10); policy editor; raw GPS в overview; отдельная conflict-
-страница; массовое подтверждение; PWA/service worker; redesign; deployment. Production
-(`titanor-time-app-1`/`titanor-time-db-1`) не затронут — только read-only inspect (`docker ps`)
-перед стартом и после завершения. Preview `127.0.0.1:3244` не останавливался (собственный
-disposable dev-сервер/БД/копия директории, полностью изолированные, удалены по завершении).
+**Остаётся вне этого слайса** (явно, по границам задачи): UI `/admin` и foreman UI
+(**`[2026-08-18]` T7A.9B — см. запись ниже**); scheduler/auto-submit (T7A.10); policy editor;
+raw GPS в overview; отдельная conflict-страница; массовое подтверждение; PWA/service worker;
+redesign; deployment. Production (`titanor-time-app-1`/`titanor-time-db-1`) не затронут — только
+read-only inspect (`docker ps`) перед стартом и после завершения. Preview `127.0.0.1:3244` не
+останавливался (собственный disposable dev-сервер/БД/копия директории, полностью изолированные,
+удалены по завершении).
+
+---
+
+**`[2026-08-18]` T7A.9B Attendance Operational Overview UI — второй и последний слайс T7A.9, поверх
+полностью завершённого read-only backend T7A.9A.** Реализует `docs/PROJECT_ROADMAP.md` T7A.9 целиком
+и `01_SCREEN_MAP.md` `/admin` (обзор) и `/foreman` — заменяет прежний безусловный `redirect
+('/admin/setup')` на `/admin` реальным operational overview, дополняет `/foreman`'s прежнюю
+pendingCount-заглушку. **Публичный API контракт T7A.9A не менялся ни на йоту** — оба
+`GET /api/{admin,foreman}/overview` (query/response shape/permissions/redaction) идентичны; новых
+permission/migration нет.
+
+**Архитектура — общий server-only wrapper, не HTTP self-fetch.** `lib/attendance-overview.ts`
+дополнен `getAdminOperationalOverview`/`getForemanOperationalOverview` — каждый инкапсулирует уже
+существующий `prisma.$transaction(..., RepeatableRead)` + `resolvePeriodForOverview` +
+`buildOperationalOverview` (+ для foreman — `getForemanOverview`/`getForemanSiteIds` из
+`lib/foreman-review.ts` в той же транзакции). И `GET /api/{admin,foreman}/overview`, и
+`app/admin/page.tsx`/`app/foreman/page.tsx` вызывают ровно один и тот же wrapper — ни один компонент
+не делает HTTP-запрос к собственному API, транзакционный контракт не продублирован. Подтверждено
+`scripts/_test-overview-querycount.ts` на чистой БД: bounded query count **не изменился** —
+n=50→24, n=200→24 SQL-запросов, идентично зафиксированному в T7A.9A.
+
+**Permissions — через `hasPermission`, не `roles.includes`.** `/admin` требует одновременно
+`timesheet.read.all`+`attendance.exception.read.all`+`attendance.conflict.read` (как и API); при
+отзыве любого — понятный access-denied текст, `getAdminOperationalOverview` не вызывается вовсе,
+никакие данные не попадают в RSC/DOM (live-проверено). `/foreman` требует `timesheet.read.assigned`+
+`attendance.exception.read.assigned`. `WORKER` не получает ни ту, ни другую страницу. Dual-role
+`FOREMAN`+`WORKER` не видит собственную строку (уже гарантировано `excludeEmployeeId` в T7A.9A,
+live-подтверждено и на UI-уровне).
+
+**Admin summary** — 15 карточек (13 operational states + Total workers + Open attendance
+exceptions, последняя — не кликабельна, это агрегат, а не per-item state). Каждая state-карточка —
+`<Link>`, меняющая `state` в URL, с `aria-current="true"` на активном фильтре. Ноль подменяется
+выдуманным значением — цифры идут напрямую из уже посчитанного backend `summary`.
+
+**Period state** — период/даты/status/`asOf` (новый `formatHelsinkiDateTime` в
+`lib/helsinki-datetime.ts`, явный `timeZone: 'Europe/Helsinki'`, не зависит от locale/TZ сервера) +
+ручной `Refresh` (обычная ссылка на тот же URL — `force-dynamic` гарантирует свежий рендер, без
+клиентского JS). `period: null` — честный баннер «No open payroll period covers today» со ссылками
+на `/admin/periods`/`/admin/setup` (для foreman — тот же баннер без admin-only ссылок); clock-state
+данные (`WORKING_NOW`/`FINISHED_TODAY`) по-прежнему отображаются, как и гарантирует backend.
+
+**Фильтры** — period/site/state/pageSize в URL query string, человекочитаемые period/site options
+через новый небольшой `lib/attendance-overview-lookups.ts` (`listPeriodOptions`/
+`listSiteOptionsForAdmin`/`listSiteOptionsForForeman` — bounded query count, foreman видит только
+свои текущие сайты через тот же `getForemanSiteIds`, что и сам overview-scope, так что dropdown
+никогда не предлагает сайт, который сам запрос потом молча проигнорирует). `employeeId` для admin —
+только скрытое поле формы (никогда не текстовый ввод UUID), сохраняется пагинацией. При смене
+period/site/state — `page` сбрасывается на 1, остальные фильтры сохраняются (live-проверено).
+Malformed query → inline invalid-filter banner, не 500. Valid-but-missing `periodId` → понятный
+not-found banner, не Prisma-ошибка.
+
+**Worker rows** — карточка на воркера (не одна строка таблицы — слишком много полей): имя (`Link` на
+`/admin/workers/:id` для admin)/employee number/state badges/working-now (site/work
+area/openedAt/online-offline)/latest finished shift/timesheet status
+(`Link` на `/admin/timesheets/:id` для admin, на `/foreman/review/:id` для foreman)/version+MANUAL-
+AUTO+submittedAt/open exceptions (`Link` на `/admin/attendance/exceptions?status=OPEN&employeeId=`
+для admin, на `/foreman/attendance/exceptions` для foreman)/review route
+counts+scopes/finalApprovalBlockedReasons/correction status (`Link` на `/admin/corrections` — общий
+список, не `/admin/corrections/:id`, т.к. `OverviewWorkerItem.correction` намеренно не содержит
+`correctionRequestId` в контракте T7A.9A, значит ссылка на конкретную запись была бы придуманной)/
+recorded-vs-reported diff. Ни один UUID не используется как основной видимый label.
+`finalApprovalBlockedReasons` — все 7 известных кодов получили человекочитаемый label; неизвестный
+будущий код не скрывается — безопасный fallback (title-case из самого кода), не молчаливое
+исчезновение.
+
+**Recorded vs reported** — `diff: null` → «Not available» текстом, никогда `0`; знак delta
+визуально и текстово различим (`+`/`-`/без знака, отдельный CSS-класс на каждый случай); минуты —
+часы+минуты со знаком (`formatSignedMinutes`/`formatMinutes` в новом
+`lib/attendance-overview-ui.ts`), интервалы на клиенте не пересчитываются — только форматирование
+уже посчитанных backend чисел.
+
+**Conflicts — ADMIN only, компактная секция на `/admin`, не отдельная страница.** Только поля
+готового DTO (type/rejectionCode/eventType, employee name, createdAt) — то же allowlist, что уже
+проверен blanket-grep'ом в T7A.9A на самом API-ответе; на UI-уровне повторно подтверждено
+blanket-grep по всему HTML (`payloadHash`/`conflictingPayloadHash`/`requestId`/
+`deviceInstallationId`/`deviceSequence`/`clientEventId`/`sanitizedConflictingPayload`/
+`beforeValue`/`afterValue`/координаты — ноль совпадений). У `FOREMAN` секция **отсутствует
+полностью** в самом HTML (не disabled/placeholder) — live-подтверждено grep'ом на реальном ответе,
+как и полное отсутствие `href="/admin...` ссылок.
+
+**Foreman overview** — сохранены прежние `pendingCount`/`exceptionCount` + ссылки на review queue и
+attendance exceptions queue (та же формулировка про `TimesheetReviewScope.hasException` vs
+`AttendanceException`, сделана компактнее). Дополнено scoped summary/worker-rows/фильтрами/
+пагинацией — тот же `OverviewView`-компонент, что у admin, с `role="foreman"` (различаются только
+scope/ссылки/отсутствие conflicts). Легаси-секция независима от новых overview-фильтров — невалидный
+`state`/`siteId` не ломает её (`getForemanOverview` вызывается отдельно в этом случае).
+
+**UI states**: loading (`app/admin/loading.tsx`/`app/foreman/loading.tsx` — skeleton той же формы,
+что финальный контент, без layout collapse), normal, no active period, no workers (`summary.
+totalWorkers === 0`, отдельная формулировка от «фильтр вернул ноль строк» —
+`totalWorkers > 0` но `items.length === 0`), invalid filters, period not found, access denied,
+unexpected error (`app/admin/error.tsx`/`app/foreman/error.tsx` — никогда не рендерит `error.
+message`/stack trace, только Next'овский безопасный `digest`), pagination, refresh — все
+реализованы и проверены.
+
+**Тесты — 139/139 PASS**, Playwright на одноразовом PostgreSQL 16 + отдельном dev-сервере (сессии
+через прямую установку cookie `tt_session` из `UserSession.tokenHash`-фикстур
+`scripts/_test-overview.ts`, без похода через login — обходит login-rate-limiter полностью): summary
+совпадает с прямым API-запросом; все 13 state-фильтров через клик по карточке +
+`aria-current`-проверка; period/site-фильтрация; pagination с сохранением `siteId`/`pageSize`;
+working/finished/manual/auto/issues rows; все известные `finalApprovalBlockedReasons` (включая
+`RETURNED_SCOPE`/`PENDING_NON_SITE_REVIEW`, добавленные отдельным доп.-фикстурным скриптом сверх
+`_test-overview.ts`'s набора; NON_SITE review scope корректно рендерится как «Non-site: PENDING», а
+не с придуманным именем сайта); correction status+ссылка; diff positive/negative/zero/`null`;
+conflicts (все три категории) + redaction; no-period (сдвиг дат периода за пределы «сегодня», не
+`status`, — `LOCKED`/`EXPORTED` требуют доп. metadata-полей по `ck_payroll_period_status_metadata_
+shape`, не подходят для этого теста); missing period (`404`-класс, inline банер, не 500); invalid
+filter; permission revocation (вступает в силу на следующий запрос, ноль реальных данных — не
+эвристика по заголовку страницы, который может легитимно на миг совпасть с loading-skeleton'ом при
+стриминге, см. ниже); foreman: только текущие свои сайты, чужой `siteId` → пустой список, expired/
+future `ForemanAssignment` не расширяет scope, dual-role self-exclusion, conflicts-секция
+отсутствует полностью, ни одной `/admin`-ссылки; security: `WORKER` denied на обеих страницах, ноль
+запрещённых полей в HTML, ни один worker name не является сырым UUID, `GET`-рендер создаёт **ноль**
+новых `AuditEvent` (до/после — идентичный `COUNT(*)`); UX: desktop/tablet/390×844 без horizontal
+overflow, keyboard focus достигает summary-карточки, ноль лишних console-ошибок на всей сессии;
+regression smoke на `/admin/setup`/`/admin/timesheets`/`/admin/periods`/`/admin/corrections`/
+`/admin/workers`/`/admin/attendance/exceptions`/`/foreman/review`/`/foreman/attendance/exceptions`/
+`/login`.
+
+**Найденная и исправленная по пути тестовая (не продуктовая) ловушка**: React SSR расщепляет два
+соседних JSX text-expression'а (например `Delta {formatSignedMinutes(...)}`) на отдельные узлы в
+сыром HTML-источнике (с `<!-- -->`-маркером между ними в реальном DOM) — невидимо для пользователя,
+но ломает наивную проверку тест-скрипта через `page.content()`. Исправлено переходом на
+`page.textContent()` для этих конкретных проверок (то, что реально видит пользователь). Отдельно:
+`loading.tsx`'s статический skeleton (с тем же заголовком «Operational overview», без единой
+реальной цифры) на мгновение легитимно присутствует в потоковом первичном HTML-ответе даже для
+access-denied веток (весь async Server Component, включая обе ветки, находится под одной Suspense-
+границей) — не утечка данных; исправленная проверка ищет конкретные data-маркеры
+(`ov-summary-value`/`ov-worker-card`/имя фикстуры), а не заголовок.
+
+**Regression**: `_test-overview.ts`/`_test-overview-querycount.ts` (query count не изменился, см.
+выше) — зелёные на чистой БД; `_test-activation.ts`/`_test-corrections.ts` — зелёные на чистой БД.
+
+**Проверки**: `git diff --check`/`prisma validate`/`tsc --noEmit`/`npm run build` (`/admin`/`/foreman`
+в build-манифесте как `ƒ`-роуты, не статический redirect) — зелёные;
+`docker compose -f compose.titanor-time.yaml build app` — успешный build; `prisma migrate deploy` на
+чистом одноразовом PostgreSQL 16 — 55/55, повторный запуск — «No pending migrations to apply»; ни
+одной новой schema/permission-миграции этот слайс не добавляет. Production (`titanor-time-app-1`/
+`titanor-time-db-1`) — тот же image/StartedAt/RestartCount=0/healthy до и после, только read-only
+inspect. Preview `127.0.0.1:3244` не останавливался, не использовался для тестов.
+
+**Файлы**: новые — `lib/attendance-overview-lookups.ts`, `lib/attendance-overview-ui.ts`,
+`components/overview/OverviewView.tsx`, `app/admin/loading.tsx`, `app/admin/error.tsx`,
+`app/foreman/loading.tsx`, `app/foreman/error.tsx`; изменены — `lib/attendance-overview.ts` (два
+новых wrapper'а, существующая логика не тронута), `lib/helsinki-datetime.ts` (новый
+`formatHelsinkiDateTime`), `app/api/admin/overview/route.ts`/`app/api/foreman/overview/route.ts`
+(используют wrapper вместо собственной транзакции), `app/admin/page.tsx` (полная замена redirect на
+overview), `app/foreman/page.tsx` (замена pendingCount-заглушки на overview + сохранённая legacy-
+секция), `app/admin/layout.tsx` (добавлен nav-пункт «Overview» → `/admin`, `/admin/setup` остался
+отдельным пунктом), `app/globals.css` (только добавления — новый блок `.ov-*` в конце файла).
+
+**С этим слайсом T7A.9 (operational overview) объявляется завершённым целиком** (9A — read-only
+backend, 9B — UI). Backend-контракт T7A.9A не изменён ни на йоту. **Следующий этап — T7A.10
+(scheduler/auto-submit и pilot readiness)**, ещё не начат.
 
 ---
 

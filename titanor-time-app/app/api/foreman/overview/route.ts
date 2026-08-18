@@ -1,14 +1,11 @@
 import { randomUUID } from 'node:crypto';
-import { Prisma } from '@prisma/client';
 import { NextRequest, NextResponse } from 'next/server';
 import { jsonError, successHeaders, type ApiErrorBody } from '@/lib/api-error';
 import { resolveAuthenticatedSession } from '@/lib/auth';
 import { hasPermission } from '@/lib/permissions';
 import { SESSION_COOKIE_NAME } from '@/lib/session';
-import { prisma } from '@/lib/prisma';
 import { helsinkiToday } from '@/lib/workers';
-import { getForemanOverview, getForemanSiteIds } from '@/lib/foreman-review';
-import { buildOperationalOverview, parseOverviewQuery, resolvePeriodForOverview } from '@/lib/attendance-overview';
+import { getForemanOperationalOverview, parseOverviewQuery } from '@/lib/attendance-overview';
 
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
@@ -54,30 +51,9 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
 
   const today = helsinkiToday();
 
-  const outcome = await prisma.$transaction(
-    async (tx) => {
-      const periodResult = await resolvePeriodForOverview(tx, parsed.filters.periodId, today);
-      if (!periodResult.ok) {
-        return { code: 'PERIOD_NOT_FOUND' as const };
-      }
-
-      const [legacy, siteIds] = await Promise.all([
-        getForemanOverview(authenticated.user.id, authenticated.user.employeeId, today, tx),
-        getForemanSiteIds(authenticated.user.id, today, tx)
-      ]);
-
-      const result = await buildOperationalOverview(
-        tx,
-        parsed.filters,
-        { siteIds, excludeEmployeeId: authenticated.user.employeeId, includeConflicts: false },
-        periodResult.period,
-        today
-      );
-
-      return { code: 'OK' as const, legacy, result };
-    },
-    { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead, maxWait: 10_000, timeout: 20_000 }
-  );
+  // Same wrapper the /foreman Server Component calls directly (T7A.9B) — no HTTP self-fetch, no
+  // second transaction-wrapping copy.
+  const outcome = await getForemanOperationalOverview(authenticated.user.id, authenticated.user.employeeId, parsed.filters, today);
 
   if (outcome.code === 'PERIOD_NOT_FOUND') {
     return jsonError(404, { code: 'PERIOD_NOT_FOUND', message: 'No payroll period with this id.' }, requestId);

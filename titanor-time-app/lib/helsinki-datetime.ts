@@ -77,3 +77,19 @@ export function utcIsoToHelsinkiDateTimeLocal(iso: string): string {
 export function utcIsoToHelsinkiDate(iso: string): string {
   return new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Helsinki' }).format(new Date(iso));
 }
+
+/** Human-readable Europe/Helsinki date+time (e.g. "18 Aug 2026, 18:44") — explicit `timeZone`, not
+ * server-locale-dependent like the `toLocaleString()` convention used elsewhere for non-TZ-critical
+ * display. Used by T7A.9B's `asOf` (task requires it "отформатированный в Europe/Helsinki"
+ * specifically, not "whatever the server happens to run as"). */
+export function formatHelsinkiDateTime(iso: string): string {
+  return new Intl.DateTimeFormat('en-GB', {
+    timeZone: 'Europe/Helsinki',
+    day: 'numeric',
+    month: 'short',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+    hourCycle: 'h23'
+  }).format(new Date(iso));
+}

@@ -1,5 +1,7 @@
 import { Prisma } from '@prisma/client';
+import { prisma } from '@/lib/prisma';
 import { UUID_PATTERN } from '@/lib/attendance-exceptions';
+import { getForemanOverview, getForemanSiteIds, type ForemanOverview } from '@/lib/foreman-review';
 
 // docs/titanor-time/T7A_1_ATTENDANCE_CLOCK_DESIGN.md §16 п.9 + Addendum "T7A.9A Attendance
 // Operational Overview Read Foundation" (2026-08-18) — exact operational-state definitions and the
@@ -738,4 +740,44 @@ async function buildConflicts(tx: Prisma.TransactionClient): Promise<OverviewCon
       };
     })
   };
+}
+
+// ---------------------------------------------------------------------------------------------
+// T7A.9B — server-only wrappers around the transaction contract above. GET /api/{admin,foreman}/
+// overview and the /admin, /foreman Server Components both call these instead of each re-opening
+// their own prisma.$transaction(...) — one place owns "resolve period, then buildOperationalOverview
+// (plus, for foreman, the legacy pendingCount/exceptionCount and site scope), all inside one
+// REPEATABLE READ transaction". Neither caller does an HTTP self-fetch to its own API route.
+// ---------------------------------------------------------------------------------------------
+
+const OVERVIEW_TX_OPTIONS = { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead, maxWait: 10_000, timeout: 20_000 } as const;
+
+export type AdminOverviewOutcome = { code: 'PERIOD_NOT_FOUND' } | { code: 'OK'; result: OverviewResult };
+
+export async function getAdminOperationalOverview(filters: OverviewFilters, today: Date): Promise<AdminOverviewOutcome> {
+  return prisma.$transaction(async (tx) => {
+    const periodResult = await resolvePeriodForOverview(tx, filters.periodId, today);
+    if (!periodResult.ok) {
+      return { code: 'PERIOD_NOT_FOUND' as const };
+    }
+    const result = await buildOperationalOverview(tx, filters, { siteIds: null, excludeEmployeeId: null, includeConflicts: true }, periodResult.period, today);
+    return { code: 'OK' as const, result };
+  }, OVERVIEW_TX_OPTIONS);
+}
+
+export type ForemanOverviewOutcome = { code: 'PERIOD_NOT_FOUND' } | { code: 'OK'; legacy: ForemanOverview; result: OverviewResult };
+
+export async function getForemanOperationalOverview(foremanUserId: string, foremanEmployeeId: string | null, filters: OverviewFilters, today: Date): Promise<ForemanOverviewOutcome> {
+  return prisma.$transaction(async (tx) => {
+    const periodResult = await resolvePeriodForOverview(tx, filters.periodId, today);
+    if (!periodResult.ok) {
+      return { code: 'PERIOD_NOT_FOUND' as const };
+    }
+
+    const [legacy, siteIds] = await Promise.all([getForemanOverview(foremanUserId, foremanEmployeeId, today, tx), getForemanSiteIds(foremanUserId, today, tx)]);
+
+    const result = await buildOperationalOverview(tx, filters, { siteIds, excludeEmployeeId: foremanEmployeeId, includeConflicts: false }, periodResult.period, today);
+
+    return { code: 'OK' as const, legacy, result };
+  }, OVERVIEW_TX_OPTIONS);
 }

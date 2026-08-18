@@ -1,56 +1,87 @@
 import { redirect } from 'next/navigation';
-import Link from 'next/link';
 import { resolveServerSession } from '@/lib/server-session';
-import { getForemanOverview } from '@/lib/foreman-review';
+import { hasPermission } from '@/lib/permissions';
 import { helsinkiToday } from '@/lib/workers';
+import { getForemanOverview } from '@/lib/foreman-review';
+import { getForemanOperationalOverview, parseOverviewQuery } from '@/lib/attendance-overview';
+import { listPeriodOptions, listSiteOptionsForForeman } from '@/lib/attendance-overview-lookups';
+import { OverviewView, type OverviewOutcome } from '@/components/overview/OverviewView';
 
 export const dynamic = 'force-dynamic';
 
-// docs/titanor-time/01_SCREEN_MAP.md §4 `/foreman` — overview, closes the 404 gap /login has
-// redirected FOREMAN into since the very start of the project (same situation /worker was in
-// before ЭТАП 7's UI slice, and /admin/setup before that).
-export default async function ForemanOverviewPage() {
+const BASE_PATH = '/foreman';
+const REQUIRED_PERMISSIONS = ['timesheet.read.assigned', 'attendance.exception.read.assigned'];
+
+type RouteParams = { searchParams: Promise<Record<string, string | string[] | undefined>> };
+
+function one(v: string | string[] | undefined): string | null {
+  if (v === undefined) {
+    return null;
+  }
+  return Array.isArray(v) ? (v[0] ?? null) : v;
+}
+
+// docs/titanor-time/01_SCREEN_MAP.md `/foreman` (T7A.9B) — scoped operational overview, replacing
+// the pendingCount-only landing page. Preserves its pre-existing review-queue/exceptions shortcut
+// (ForemanLegacySection in OverviewView). Reuses getForemanOperationalOverview (lib/attendance-
+// overview.ts) — the exact same server-only wrapper GET /api/foreman/overview calls.
+export default async function ForemanOverviewPage({ searchParams }: RouteParams) {
   const session = await resolveServerSession();
   if (!session) {
     redirect('/login');
   }
 
-  if (!session.user.roles.includes('FOREMAN')) {
-    return (
-      <main className="setup-page">
-        <p className="login-error" role="alert">
-          Access denied — this page requires the FOREMAN role.
-        </p>
-      </main>
-    );
+  // Permission-checked, not role-checked (task §3) — WORKER (no matter its roles array) and a
+  // dual-role FOREMAN+WORKER whose FOREMAN permissions were revoked must not see this page, and the
+  // overview service is never called in that case.
+  for (const permissionCode of REQUIRED_PERMISSIONS) {
+    if (!(await hasPermission(session.user.roles, permissionCode))) {
+      return (
+        <main className="setup-page">
+          <p className="login-error" role="alert">
+            Access denied — this page requires the {permissionCode} permission.
+          </p>
+        </main>
+      );
+    }
   }
 
-  const overview = await getForemanOverview(session.user.id, session.user.employeeId, helsinkiToday());
+  const sp = await searchParams;
+  const rawQuery = {
+    periodId: one(sp.periodId),
+    siteId: one(sp.siteId),
+    state: one(sp.state),
+    employeeId: null, // not a supported filter on this endpoint
+    page: one(sp.page),
+    pageSize: one(sp.pageSize)
+  };
+  const parsed = parseOverviewQuery(rawQuery, { allowEmployeeId: false });
+
+  let outcome: OverviewOutcome;
+  let legacy: { pendingCount: number; exceptionCount: number };
+  const today = helsinkiToday();
+
+  if (!parsed.ok) {
+    outcome = { kind: 'invalid', fieldErrors: parsed.fieldErrors };
+    // The pre-existing review-queue shortcut (task §11) is independent of the new overview filters
+    // (period/site/state/page/pageSize) — an invalid overview filter must not also break it.
+    legacy = await getForemanOverview(session.user.id, session.user.employeeId, today);
+  } else {
+    const result = await getForemanOperationalOverview(session.user.id, session.user.employeeId, parsed.filters, today);
+    if (result.code === 'PERIOD_NOT_FOUND') {
+      outcome = { kind: 'period-not-found' };
+      legacy = await getForemanOverview(session.user.id, session.user.employeeId, today);
+    } else {
+      legacy = { pendingCount: result.legacy.pendingCount, exceptionCount: result.legacy.exceptionCount };
+      outcome = { kind: 'ok', result: result.result };
+    }
+  }
+
+  const [periodOptions, siteOptions] = await Promise.all([listPeriodOptions(), listSiteOptionsForForeman(session.user.id, today)]);
 
   return (
     <main className="wk-page">
-      <div className="wk-card">
-        <h1>Review queue</h1>
-        {overview.pendingCount === 0 ? (
-          <p className="wk-empty">Nothing waiting for review on your sites.</p>
-        ) : (
-          <>
-            <p className="setup-subtitle">
-              {overview.pendingCount} pending{overview.exceptionCount > 0 ? `, ${overview.exceptionCount} with an exception` : ''}
-            </p>
-            <Link href="/foreman/review" className="wk-action-button">
-              Go to review queue
-            </Link>
-          </>
-        )}
-        <p className="wk-section-title">Clock event exceptions</p>
-        <p className="wk-empty">
-          GPS/geofence/switch-site/overlap anomalies from Check In/Out itself — separate from the timesheet review queue above.
-        </p>
-        <Link href="/foreman/attendance/exceptions" className="wk-action-button">
-          Go to attendance exceptions
-        </Link>
-      </div>
+      <OverviewView role="foreman" basePath={BASE_PATH} rawQuery={rawQuery} outcome={outcome} periodOptions={periodOptions} siteOptions={siteOptions} legacy={legacy} />
     </main>
   );
 }
