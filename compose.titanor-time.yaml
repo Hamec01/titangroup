@@ -29,6 +29,7 @@ services:
     build:
       context: .
       dockerfile: titanor-time-app/Dockerfile
+    image: titanor-time-app:latest
     restart: unless-stopped
     init: true
 
@@ -63,6 +64,43 @@ services:
       timeout: 3s
       retries: 5
       start_period: 20s
+
+  # T7A.10B — permanent attendance auto-submit scheduler. Deliberately has NO `build:` of its own —
+  # `image: titanor-time-app:latest` reuses the exact image `app` builds (same code, same generated
+  # Prisma Client, same node_modules), just run with a different command. `docker compose build app`
+  # (or `up --build app`) is what actually produces this image; `scheduler` only ever consumes it.
+  # Runs `attendance:auto-submit:scheduler` (docs/titanor-time/T7A_1_ATTENDANCE_CLOCK_DESIGN.md
+  # Addendum "T7A.10B") instead of the default `node server.js`/Next.js server — this service never
+  # listens on any port and is not reachable from `lan` or the host; it only needs to reach `db`.
+  # A second replica of this service is safe (§3/§4 of the addendum) — the existing T7A.10A
+  # DB-level locking/idempotency is the source of truth, not anything scheduler-side.
+  scheduler:
+    image: titanor-time-app:latest
+    command: ["npx", "tsx", "scripts/attendance-auto-submit-scheduler.ts"]
+    restart: unless-stopped
+    init: true
+
+    depends_on:
+      db:
+        condition: service_healthy
+
+    env_file:
+      - path: .env.titanor-time
+        required: false
+
+    environment:
+      NODE_ENV: production
+      NEXT_TELEMETRY_DISABLED: "1"
+
+    networks:
+      - internal
+
+    healthcheck:
+      test: ["CMD", "npx", "tsx", "scripts/attendance-scheduler-healthcheck.ts"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
 
   db:
     image: postgres:16

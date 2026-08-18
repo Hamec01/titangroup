@@ -8,7 +8,8 @@
     "start": "next start",
     "bootstrap:super-admin": "tsx scripts/bootstrap-super-admin.ts",
     "reset-password": "tsx scripts/reset-password.ts",
-    "attendance:auto-submit": "tsx scripts/attendance-auto-submit-tick.ts"
+    "attendance:auto-submit": "tsx scripts/attendance-auto-submit-tick.ts",
+    "attendance:auto-submit:scheduler": "tsx scripts/attendance-auto-submit-scheduler.ts"
   },
   "dependencies": {
     "@prisma/client": "6.19.0",

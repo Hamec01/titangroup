@@ -598,6 +598,32 @@ touch target ≥ 48px), `/foreman/*` — desktop-first с поддержкой �
   данные/`deviceInstallationId`/`deviceSequence`/`sanitizedConflictingPayload`/raw `detail`
   структурно не могут попасть на экран — их нет в самом типе DTO
 
+#### `/admin/attendance/policy` 🟢 **`[2026-08-18] T7A.10B реализовано`**
+- Роли: `ADMIN`, `SUPER_ADMIN` (`attendance.policy.read` для просмотра, `attendance.policy.update`
+  для редактирования — независимые permission-checks, не role-check; viewer с одним только read
+  видит те же данные в read-only режиме, без формы)
+- Приоритет: desktop, но без horizontal overflow на 390×844
+- Назначение: единственная страница редактирования `CompanyAttendancePolicy` — Server Component
+  читает `lib/attendance-policy.ts` напрямую (без HTTP self-fetch), клиентская форма сохраняет
+  через уже существующий `PATCH /api/admin/attendance/policy` (T7A.10A, контракт не менялся)
+- Данные: `cutoffDaysAfterPeriodEnd`, `cutoffTime` (с секундами), `systemReopenDebounceMinutes`,
+  `maxShiftDurationHours` — редактируемые; `timezone` (всегда `Europe/Helsinki`, read-only текст,
+  без input/select), `updatedAt` (Helsinki time) — только просмотр; `updatedByUserId` из ответа API
+  никогда не рендерится в DOM
+- Действия: partial PATCH — минимум одно реально изменённое поле; один "attempt" (UUID
+  Idempotency-Key + замороженный payload) на клик Save — сетевой сбой сохраняет тот же attempt для
+  Retry (byte-identical повтор), любой определённый ответ сервера (успех/validation/permission/
+  idempotency-конфликт) завершает attempt, следующее изменение поля создаёт новый key
+- Состояния: loading (`loading.tsx`); access denied (нет `attendance.policy.read`); normal
+  (read-only, если нет `.update`); saving; saved; validation error (fieldErrors у каждого поля);
+  network result unknown + Retry; permission revoked (403 на Save) — понятная ошибка
+- Откуда: `/admin`-навигация (пункт «Attendance policy»)
+- Куда: —
+- API: `GET/PATCH /api/admin/attendance/policy` (T7A.10A, без изменений контракта)
+- DoD: keyboard — Tab доходит до каждого поля и до Save, виден focus; `noValidate` на форме — нативная
+  валидация не блокирует показ серверных fieldErrors; aria-live region без повторного спама; ноль
+  UUID-строк в видимом тексте страницы; ноль console/hydration errors
+
 #### `/admin/users` 🟢 (частично — см. ⚪ ниже)
 - Роли: `ADMIN`, `SUPER_ADMIN`
 - Приоритет: desktop

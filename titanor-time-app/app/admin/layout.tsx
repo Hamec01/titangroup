@@ -15,7 +15,8 @@ const ADMIN_NAVIGATION = [
   { href: '/admin/timesheets', label: 'Timesheets' },
   { href: '/admin/review-scopes', label: 'Review' },
   { href: '/admin/corrections', label: 'Corrections' },
-  { href: '/admin/attendance/exceptions', label: 'Attendance exceptions' }
+  { href: '/admin/attendance/exceptions', label: 'Attendance exceptions' },
+  { href: '/admin/attendance/policy', label: 'Attendance policy' }
 ] as const;
 
 export default async function AdminLayout({ children }: Readonly<{ children: ReactNode }>) {

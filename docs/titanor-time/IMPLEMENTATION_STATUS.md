@@ -1,6 +1,139 @@
 # Titanor Time — Implementation Status
 
-Обновлено: 2026-08-18 Europe/Helsinki (fix: handle auto-submit manual race)
+Обновлено: 2026-08-18 Europe/Helsinki (feat: add attendance scheduler and policy UI)
+
+**`[2026-08-18]` T7A.10B Permanent Attendance Scheduler + Admin Policy UI — новый завершённый слайс
+поверх полностью завершённого T7A.10A (auto-submit backend + policy API + manual-race fix). Добавляет
+постоянный scheduler-процесс и Compose-сервис, и admin UI для уже существующего policy API. Production
+НЕ развёрнут этим слайсом. После него остаётся T7A.10C (полный pilot E2E).**
+
+Design addendum "T7A.10B" в `T7A_1_ATTENDANCE_CLOCK_DESIGN.md` (2026-08-18, написан до кода) —
+runtime lifecycle, interval semantics, no-overlap, multi-replica, graceful shutdown/recovery, safe
+logging/health, policy UI retry/idempotency semantics — все зафиксированы там до реализации.
+
+**Scheduler runner** (`lib/attendance-scheduler-heartbeat.ts`,
+`scripts/attendance-auto-submit-scheduler.ts`, `scripts/attendance-scheduler-healthcheck.ts`, npm
+script `attendance:auto-submit:scheduler`) — отдельная точка входа от одноразового CLI T7A.10A
+(`attendance-auto-submit-tick.ts`, не изменён). Немедленный первый tick при старте, затем повтор с
+`ATTENDANCE_SCHEDULER_INTERVAL_SECONDS` (не задан → default 60; задан → целое в `[30, 3600]`, иначе
+`process.exit(1)` до первого обращения к БД). Простой последовательный `while`-loop с `await` — не
+`setInterval` — структурно исключает наложение двух тиков одного процесса; следующий `setTimeout`
+планируется только после полного разрешения предыдущего `runAttendanceAutoSubmitTick`. Между
+процессами (вторая реплика) no-overlap **не** гарантируется на уровне scheduler'а — источник истины
+остаётся уже существующий T7A.10A DB-level locking/idempotency (`Timesheet FOR UPDATE`,
+`UNIQUE(timesheetId, systemReopenGeneration)`, `ON CONFLICT DO NOTHING`), явно проверено с реально
+двумя scheduler-процессами (см. тесты ниже). `SIGTERM`/`SIGINT` — идемпотентный обработчик,
+`AbortController` немедленно прерывает межтиковый sleep, текущий тик естественно завершается (не
+прерывается насильно кодом — `SIGKILL` до его завершения просто откатывает НЕЗАВЕРШЁННУЮ
+per-candidate транзакцию, уже закоммиченные кандидаты остаются закоммиченными), `prisma.$disconnect()`
+→ `process.exit(0)`. Top-level ошибка тика (БД недоступна и т.п.) не убивает loop — безопасный лог,
+retry на следующем интервале; конфигурационная ошибка (invalid interval) — `process.exit` не равный
+нулю. Никаких `now`/`actorUserId` override ни из argv, ни из env — ни при старте, ни на любом тике.
+Никаких HTTP routes.
+
+**Safe logging/health** — одна JSON-строка на тик в stdout (`event`, `startedAt`, `durationMs`,
+`runnerOutcome`, восемь агрегированных counters того же формата, что CLI T7A.10A); top-level failure
+→ `runnerOutcome: "top_level_error"`, единый стабильный `errorCode: "SCHEDULER_TICK_TOP_LEVEL_ERROR"`
+— сырой `Error`/message/stack никогда не логируется, `failedTimesheetIds` никогда не логируется
+(только count `failed`). Heartbeat — отдельный PII-свободный JSON-файл на диске
+(`{lastTickCompletedAt}`, default `/tmp/attendance-scheduler-heartbeat.json`), обновляется только
+после реально РАЗРЕШИВШЕГОСЯ вызова `runAttendanceAutoSubmitTick` (per-candidate `failed` внутри
+результата — не top-level failure — heartbeat всё равно обновляется, это ожидаемая деградация, не
+зависший loop). Healthcheck (`attendance-scheduler-healthcheck.ts`, без HTTP/портов) —
+`exit(0)` если возраст heartbeat ≤ `max(intervalSeconds×3, 120)` секунд, иначе `exit(1)`.
+
+**Compose** — новый сервис `scheduler` в `compose.titanor-time.yaml`: `image: titanor-time-app:latest`
+без собственного `build:` (буквально тот же image/Prisma Client, что `app` — `docker compose build
+app` производит его, `scheduler` только использует), `command` переопределён на
+`attendance:auto-submit:scheduler`, `restart: unless-stopped`, `init: true`,
+`depends_on: db: service_healthy`, тот же `env_file: .env.titanor-time`, `NODE_ENV=production`,
+**только** сеть `internal` (без `lan`, без единого published port — `docker compose config`
+подтверждает `ports: null`), собственный file-based `healthcheck`. `docker compose config` валиден.
+Реальный `.env.titanor-time` не менялся — только добавлена
+`ATTENDANCE_SCHEDULER_INTERVAL_SECONDS=60` в `.env.titanor-time.example`. Этот сервис НЕ запускался в
+существующем production Compose project этой задачей.
+
+**Admin Policy UI** — `/admin/attendance/policy` (`app/admin/attendance/policy/{page,loading}.tsx`,
+`components/attendance-policy/PolicyForm.tsx`), пункт nav «Attendance policy». Server Component читает
+`getCompanyAttendancePolicy()` напрямую (без HTTP self-fetch), доступ через `hasPermission` (не
+`roles.includes`) — `attendance.policy.read` для просмотра, `.update` для формы независимо (viewer
+с одним read получает read-only карточку). Показывает `timezone` (read-only текст, никакого
+input/select), 4 редактируемых поля (`cutoffTime` — `<input type="time" step="1">`, с секундами),
+`updatedAt` в Helsinki time, предупреждение что auto-submit — не approval, и что изменение policy не
+переписывает существующие версии/attempts. Форма: partial PATCH через уже существующий API (T7A.10A,
+контракт не менялся); один "attempt"-объект (UUID Idempotency-Key + замороженный payload) на клик
+Save; сетевой сбой → "result unknown" + Retry с тем же key/payload (fields disabled до разрешения);
+любой определённый server-ответ завершает attempt (новое изменение поля → новый key на следующий
+Save); синхронный `pendingRef`-guard против double-submit; `noValidate` на форме — нативная
+валидация не блокирует показ серверных fieldErrors; `aria-live` announcements; `updatedByUserId`
+никогда не рендерится в DOM. CSS — только additive, `.policy-*` namespace в `globals.css`.
+
+**Тесты** (disposable PostgreSQL 16 + отдельный throwaway Compose project `titanor-time-t7a10b-test`,
+никогда production Compose project):
+
+- Scheduler runtime (`_test-scheduler.ts`, реальные `scripts/attendance-auto-submit-scheduler.ts`
+  процессы, никогда мок) — **44/44**: немедленный первый tick; повтор после интервала; no-overlap
+  (проверено по реальным `startedAt`/`durationMs` — ни одна пара тиков не пересекается); invalid
+  interval (`15`/`99999`/`not-a-number`/`30.5`) → non-zero exit, ноль DB writes, ни одного тика;
+  `SIGTERM` → graceful `exit(0)`, shutdown залогирован, новых тиков после сигнала нет; `stopped`
+  лог только после `prisma.$disconnect()`; top-level DB failure (заведомо нерабочий `DATABASE_URL`)
+  → безопасный лог, процесс жив, heartbeat никогда не пишется, healthcheck сообщает unhealthy;
+  heartbeat обновляется и healthcheck healthy после реального завершённого тика; restart (два
+  последовательных реальных процесса) не создаёт дубль version/attempt; **две реально параллельные
+  scheduler-реплики** (разные PID) на одном due-кандидате → ровно одна version/один attempt, ноль
+  failed; policy change, применённая МЕЖДУ двумя реальными тиками одного живого процесса, подхватывается
+  следующим тиком без рестарта; T7A.10A manual-submit-race фикс остаётся исправленным при прогоне
+  через реальный scheduler; безопасные логи проверены blanket UUID-regex сканом (покрывает и
+  `failedTimesheetIds`) — ноль совпадений, ноль `DATABASE_URL`/cookie-паттернов.
+- Compose (`docker compose config` + реальный disposable Compose run, отдельный project name,
+  временный host-port override только для миграций/сидинга — никогда в реальном
+  `compose.titanor-time.yaml`) — **8/8**: `config --quiet` валиден; `scheduler` без единого
+  published port; только сеть `internal`; `restart`/`init`/`depends_on` корректны; `app` и
+  `scheduler` — буквально один и тот же `image:`; реальный containerized `scheduler` действительно
+  выполняет due auto-submit (seed → wait → `SUBMITTED`, 1 version/1 attempt); restart containerized
+  scheduler не создаёт дубль; `db` остановлен → `top_level_error` в логах, контейнер жив → `db`
+  запущен снова → scheduler реально восстанавливается и обрабатывает свежего due-кандидата.
+- Policy UI (`_test-policy-ui.js`, headless Chromium/Playwright, реальный `next dev` против
+  disposable БД) — **34/34**, дважды подтверждено стабильно на чистой БД: `ADMIN`/`SUPER_ADMIN`
+  просмотр+сохранение; `WORKER`/`FOREMAN` — access denied, без Save-кнопки; все четыре fieldErrors
+  в одном 400-ответе; `timezone` read-only (нет input/select); успешный Save +
+  authoritative re-read (DB-значение совпадает с UI); двойной клик по Save → ровно один PATCH;
+  сетевой сбой (route-интерсепция) → "result unknown", retry шлёт **тот же** Idempotency-Key и
+  byte-identical payload; синтетический 409 `IDEMPOTENCY_KEY_REUSED` корректно отображается, поля
+  разблокируются для новой попытки; отзыв `attendance.policy.update` посередине сессии → следующий
+  Save показывает ошибку permission; keyboard Tab-навигация с видимым focus; 390×844 и 1440×900 без
+  horizontal overflow; ноль console/page errors; ноль UUID-строк и слова `updatedByUserId` в видимом
+  тексте страницы, URL без query string.
+- Regression на той же/свежей одноразовой БД: `npm run attendance:auto-submit` (CLI one-shot,
+  не задет); `_test-activation.ts`/`_test-corrections.ts`/`_test-overview.ts`/
+  `_test-overview-querycount.ts` (n=50/200 всё ещё 27 SQL statements) — все зелёные; online Check
+  In/Out, offline sync Check In/Out, exception `DISMISS`-resolve, policy `GET`/`PATCH` smoke —
+  отдельный прогон, **10/10**, ничего из T7A.10B не задело эти пути (ни один файл из
+  `attendance-clock.ts`/`attendance-sync.ts`/`attendance-exceptions*.ts`/`attendance-overview.ts` не
+  менялся).
+
+**Технические проверки**: `git diff --check`, `docker compose -f compose.titanor-time.yaml config
+--quiet`, `prisma validate` (схема не менялась), `tsc --noEmit`, `npm run build` (изолированная
+copy-директория, не живая `.next` preview) — все чисто; `docker compose build app` — успешно, тот же
+`titanor-time-app:latest`; scheduler-команда реально запущена из построенного image напрямую
+(`docker run ... titanor-time-app:latest npx tsx scripts/attendance-auto-submit-scheduler.ts`) —
+стартовала, залогировала `attendance_scheduler_started` и корректный top-level-error лог против
+заведомо недоступной БД, контейнер остался жив (удалён после проверки); `prisma migrate deploy` на
+чистой БД (56 migrations, без изменений от T7A.10A) — дважды, второй прогон "No pending migrations".
+Preview `127.0.0.1:3244` — `200`/`200` до и после, не останавливался. Production
+(`titanor-time-app-1`/`titanor-time-db-1`) — `StartedAt`/`RestartCount=0`/`image` без изменений, не
+пересобирался и не перезапускался; `scheduler`-сервис НЕ запускался в реальном production Compose
+project.
+
+**Документация обновлена**: `IMPLEMENTATION_STATUS.md` (эта запись), `T7A_1_ATTENDANCE_CLOCK_DESIGN.md`
+(addendum "T7A.10B"), `04_ADMIN_FIRST_API_CONTRACTS.md` (§9.1f — UI-потребитель, контракт не менялся),
+`01_SCREEN_MAP.md` (`/admin/attendance/policy`), `06_DATABASE_INFRASTRUCTURE.md` (§11 — scheduler
+start/stop/diagnostics), `.env.titanor-time.example` (`ATTENDANCE_SCHEDULER_INTERVAL_SECONDS=60`,
+реальный `.env.titanor-time` не менялся). Schema/migrations/permissions не менялись этим слайсом.
+
+**T7A.10C (полный pilot E2E) по-прежнему не выполнен этим коммитом.**
+
+---
 
 **`[2026-08-18]` T7A.10A follow-up — fix(time): handle auto-submit manual race.** Исправляет два
 дефекта, найденные ПОСЛЕ первоначального T7A.10A слайса (запись ниже), до начала T7A.10B (который

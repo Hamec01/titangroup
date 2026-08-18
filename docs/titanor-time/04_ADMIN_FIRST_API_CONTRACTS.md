@@ -1589,13 +1589,24 @@ target-identity-алгоритм. **Обязательное архитекту�
 disposable БД: n=50 работников → 24 запроса, n=200 работников → 24 запроса (идентично).
 
 ### 9.1f Attendance auto-submit backend + company policy API (T7A.10A,
-`T7A_1_ATTENDANCE_CLOCK_DESIGN.md` §9.6 + Addendum "T7A.10A" — **реализовано, только backend**) —
-`lib/attendance-auto-submit.ts`, `lib/attendance-policy.ts`
+`T7A_1_ATTENDANCE_CLOCK_DESIGN.md` §9.6 + Addendum "T7A.10A" — **backend реализован**;
+**`[2026-08-18] T7A.10B`** добавляет постоянный scheduler runtime и admin policy UI, контракт ниже
+не менялся ни на йоту) — `lib/attendance-auto-submit.ts`, `lib/attendance-policy.ts`
 
 Точная формула `dueAt`, identity `AutoSubmissionAttempt` и полный алгоритм тика зафиксированы в §9.6
 design doc и addendum `T7A_1_ATTENDANCE_CLOCK_DESIGN.md` ("Addendum — T7A.10A…", 2026-08-18) — этот
-раздел даёт HTTP/CLI-контракт, не переопределяет алгоритм. **Scheduler runtime (cron/systemd/Compose)
-и policy editor UI в этот слайс не входят — см. T7A.10B в `IMPLEMENTATION_STATUS.md`.**
+раздел даёт HTTP/CLI-контракт, не переопределяет алгоритм.
+
+**`[2026-08-18] T7A.10B`** — `GET`/`PATCH` ниже теперь имеют реального UI-потребителя:
+`01_SCREEN_MAP.md` `/admin/attendance/policy` (`app/admin/attendance/policy/page.tsx` +
+`components/attendance-policy/PolicyForm.tsx`). Контракт не менялся — страница вызывает
+`getCompanyAttendancePolicy()` (тот же `lib/attendance-policy.ts`) напрямую как Server Component для
+чтения (без HTTP self-fetch), и тот же `PATCH` ниже для сохранения. Также добавлен постоянный
+scheduler-процесс (`scripts/attendance-auto-submit-scheduler.ts`, Compose-сервис `scheduler`),
+реально вызывающий `runAttendanceAutoSubmitTick` по расписанию — не HTTP endpoint, не меняет этот
+контракт, детали в addendum "T7A.10B" (`T7A_1_ATTENDANCE_CLOCK_DESIGN.md`) и
+`06_DATABASE_INFRASTRUCTURE.md`. Production deployment не входит в T7A.10B; после него остаётся
+T7A.10C (полный pilot E2E).
 
 #### `GET /api/admin/attendance/policy`
 - Permission: `attendance.policy.read` (`ADMIN`/`SUPER_ADMIN` only)

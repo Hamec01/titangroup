@@ -1844,3 +1844,133 @@ a.ov-summary-card:focus-visible {
     width: 100%;
   }
 }
+
+/* docs/titanor-time/01_SCREEN_MAP.md /admin/attendance/policy (T7A.10B). Additive only, own
+   .policy-* prefix — reuses .setup-page/.setup-card/.login-submit as-is, adds nothing to their
+   rules. */
+
+.policy-card {
+  max-width: 640px;
+}
+
+.policy-notice {
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 6px;
+  padding: 10px 14px;
+  margin: 12px 0;
+  background: rgba(7, 11, 17, 0.5);
+  color: var(--text-soft);
+  font-size: 0.88rem;
+}
+
+.policy-notice-warning {
+  border-color: rgba(252, 211, 77, 0.4);
+  background: rgba(252, 211, 77, 0.1);
+  color: #fcd34d;
+}
+
+.policy-readonly-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  margin: 16px 0;
+  padding-bottom: 16px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.policy-readonly-grid dt {
+  color: var(--text-soft);
+  font-size: 0.78rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  margin: 0 0 4px;
+}
+
+.policy-readonly-grid dd {
+  margin: 0;
+  font-size: 0.95rem;
+}
+
+.policy-readonly-note {
+  color: var(--text-soft);
+  font-size: 0.9rem;
+}
+
+.policy-form-wrap form {
+  display: grid;
+  gap: 16px;
+}
+
+.policy-field {
+  display: grid;
+  gap: 6px;
+}
+
+.policy-field label {
+  color: var(--accent-light);
+  font-size: 0.85rem;
+  letter-spacing: 0.04em;
+}
+
+.policy-field input {
+  height: 44px;
+  width: 100%;
+  max-width: 260px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 4px;
+  background: rgba(7, 11, 17, 0.88);
+  color: var(--text);
+  padding: 0 12px;
+}
+
+.policy-field input:focus-visible {
+  outline: none;
+  border-color: rgba(76, 123, 192, 0.8);
+  box-shadow: 0 0 0 4px rgba(47, 94, 157, 0.18);
+}
+
+.policy-field input:disabled {
+  opacity: 0.6;
+}
+
+.policy-field-error {
+  margin: 0;
+  color: var(--error);
+  font-size: 0.85rem;
+}
+
+.policy-error-banner {
+  border: 1px solid rgba(253, 164, 175, 0.4);
+  border-radius: 4px;
+  padding: 10px 12px;
+  background: rgba(253, 164, 175, 0.1);
+  color: var(--error);
+  margin: 0;
+}
+
+.policy-network-unknown {
+  border: 1px solid rgba(252, 211, 77, 0.4);
+  border-radius: 6px;
+  padding: 12px 14px;
+  background: rgba(252, 211, 77, 0.1);
+  color: #fcd34d;
+  display: grid;
+  gap: 10px;
+}
+
+.policy-sr-announce {
+  margin: 0;
+  color: var(--text-soft);
+  font-size: 0.82rem;
+  min-height: 1.2em;
+}
+
+@media (max-width: 480px) {
+  .policy-readonly-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .policy-field input {
+    max-width: 100%;
+  }
+}

@@ -5118,3 +5118,170 @@ PATCH /api/admin/attendance/policy
 Этот addendum — запись решения до кода, не отдельное утверждение владельца поверх уже
 утверждённого 2026-08-12 checkpoint (§16 п.9/roadmap T7A.7/T7A.10) — он детализирует HTTP/CLI
 контракты вокруг уже полностью специфицированного в §8/§9.5/§9.6 алгоритма.
+
+---
+
+## Addendum — T7A.10B Permanent Attendance Scheduler + Admin Policy UI (2026-08-18)
+
+Написано **до** реализации, по тому же правилу §11 AGENT_RULES.md, что и addendum'ы T7A.9A/T7A.10A
+выше. Сам алгоритм тика (candidate scan, locking, `dueAt`, `SKIPPED_*`/`SUBMITTED_*`) уже дословно
+зафиксирован в §8/§9.5/§9.6 и не меняется этим addendum'ом — T7A.10B добавляет только: (1)
+постоянный процесс, который реально вызывает уже существующий `runAttendanceAutoSubmitTick` по
+расписанию, и (2) admin UI поверх уже существующего `CompanyAttendancePolicy` API (T7A.10A). Ни
+production deployment, ни полный pilot E2E (T7A.10C) в этот слайс не входят.
+
+### 1. Runtime scheduler lifecycle
+
+Новый постоянный процесс `scripts/attendance-auto-submit-scheduler.ts` — не CLI-однократный
+`attendance-auto-submit-tick.ts` (T7A.10A, остаётся неизменным, отдельная точка входа для будущего
+внешнего scheduler'а/ручного прогона), а долгоживущий loop внутри одного Node-процесса:
+
+```text
+1. Разобрать ATTENDANCE_SCHEDULER_INTERVAL_SECONDS (см. §2) — при ошибке exit(1) ДО первого
+   обращения к БД (config validation не может частично выполниться и потом упасть на середине).
+2. Установить обработчики SIGTERM/SIGINT (см. §5) — до первого тика, чтобы сигнал, пришедший даже
+   во время самого первого тика, был перехвачен.
+3. Немедленный первый тик — runAttendanceAutoSubmitTick({ now: new Date() }), тот же вызов, что уже
+   использует CLI T7A.10A, никаких новых параметров now/actorUserId не существует и не может быть
+   передано снаружи (ни через argv, ни через env) ни для этого, ни для любого последующего тика.
+4. Цикл: пока не запрошено graceful shutdown — sleep(intervalMs) → тик → sleep(intervalMs) → тик →
+   ... (см. §2 про non-overlap).
+5. При graceful shutdown — см. §5.
+```
+
+### 2. Interval semantics
+
+`ATTENDANCE_SCHEDULER_INTERVAL_SECONDS`: не задан → default `60`; задан → должен быть целым числом
+в диапазоне `[30, 3600]`, иначе fail-fast (`process.exit(1)`, безопасное сообщение в stderr, ни
+одного обращения к БД к этому моменту ещё не было). Интервал — это пауза **между завершением
+одного тика и стартом следующего**, не период `setInterval`: следующий `setTimeout` планируется
+только после того, как `await runAttendanceAutoSubmitTick(...)` для предыдущего тика уже
+разрешился (успешно или с пойманной ошибкой, см. §D существующего addendum'а T7A.10A про
+atomicity/error isolation одного тика). Простой последовательный `while`-loop с `await` внутри —
+структурно исключает наложение двух тиков в одном процессе; `setInterval` нигде не используется
+именно по этой причине (он бы мог запустить новый tick до завершения предыдущего, если сам тик
+однажды займёт больше времени, чем интервал).
+
+### 3. No-overlap guarantee
+
+Внутри одного процесса — структурная (см. §2: один `while`-loop, не `setInterval`). Между
+процессами (вторая реплика, см. §4) — **не** гарантируется на уровне scheduler'а вообще, и не
+должна: источник истины — уже существующие БД-механизмы T7A.10A (`Timesheet FOR UPDATE` под
+canonical lock order, `AutoSubmissionAttempt` `UNIQUE(timesheetId, systemReopenGeneration)`,
+`ON CONFLICT DO NOTHING RETURNING`). Два тика из двух разных процессов, ударившие по одному и тому
+же кандидату почти одновременно — тот же самый сценарий, что уже детерминированно проверен в
+T7A.10A (`_test-attendance-auto-submit.ts` тесты #6/#16: одна `TimesheetVersion`, один durable
+`AutoSubmissionAttempt`, второй тик получает чистый `SKIPPED_ALREADY_SUBMITTED`/`STALE_GENERATION`
+через lock, не `failed`). Scheduler-уровень не добавляет никакого distributed lock/leader election
+— это было бы лишней сложностью поверх уже достаточного DB-уровня согласованности.
+
+### 4. Multi-replica behavior
+
+Явно разрешено и не требует специальной координации (§3). `docker compose ... up --scale
+scheduler=2` (или любой другой способ поднять вторую реплику того же сервиса) безопасен — каждая
+реплика независимо выполняет собственный immediate-first-tick + interval-loop; корректность
+кросс-реплик обеспечивает БД, не scheduler-код. Реплики не обмениваются состоянием, не знают друг о
+друге, каждая пишет свой собственный heartbeat-файл в собственной файловой системе контейнера (§6)
+— Compose healthcheck на каждый контейнер применяется независимо.
+
+### 5. Graceful shutdown / recovery
+
+`SIGTERM`/`SIGINT` (Compose посылает `SIGTERM` при `stop`/`down`/пересборке, `init: true` уже в
+`compose.titanor-time.yaml` для `app` — обеспечивает корректный PID 1 signal forwarding, `scheduler`
+получает тот же `init: true`):
+
+```text
+1. Обработчик идемпотентен (второй сигнал во время уже начатого shutdown — no-op, не двойной lifecycle-лог).
+2. Флаг shutdownRequested = true; AbortController.abort() — если процесс сейчас в межтиковом sleep,
+   это немедленно прерывает ожидание (не тратит остаток интервала впустую).
+3. Если тик сейчас реально выполняется — НЕ прерывается насильно из кода; loop просто не планирует
+   следующий тик после его завершения. Если оркестратор (Docker/Compose) не дождался и прислал
+   SIGKILL до естественного завершения тика — Postgres откатывает текущую НЕЗАВЕРШЁННУЮ per-candidate
+   транзакцию сам (стандартное поведение при обрыве соединения), другие уже закоммиченные кандидаты
+   этого тика остаются закоммиченными (та же atomicity-модель, что §D T7A.10A) — recovery не требует
+   специального кода здесь, только уже существующей per-candidate транзакционной границы.
+4. После естественного завершения (или немедленно, если тика не было) — prisma.$disconnect(),
+   финальный safe log, process.exit(0).
+```
+
+Восстановление после падения процесса (OOM, `docker kill`, хостовый reboot) не требует какого-либо
+specific recovery-шага при следующем старте — `runAttendanceAutoSubmitTick`'s собственная cheap
+existing-attempt проверка (T7A.10A, до открытия транзакции) уже делает "продолжить с того места, где
+остановились" тривиальным: недообработанные due-кандидаты просто снова попадут в scan следующего
+тика, уже обработанные — no-op'нутся на cheap-check. `restart: unless-stopped` в Compose
+перезапускает контейнер автоматически.
+
+### 6. Safe logging / health contract
+
+**Лог** — одна структурированная JSON-строка в stdout на тик:
+
+```json
+{ "event": "attendance_auto_submit_tick", "startedAt": "iso", "durationMs": 0,
+  "runnerOutcome": "ok",
+  "scanned": 0, "due": 0, "submittedClean": 0, "submittedWithExceptions": 0,
+  "skippedAlreadySubmitted": 0, "skippedNotActionable": 0, "noop": 0, "failed": 0 }
+```
+
+При top-level ошибке (полный `runAttendanceAutoSubmitTick`-вызов бросил исключение — недоступна БД,
+и т.п.) — `runnerOutcome: "top_level_error"`, `errorCode: "SCHEDULER_TICK_TOP_LEVEL_ERROR"` (единый
+стабильный код для любой такой ошибки — сырой `Error`/`.message`/stack никогда не логируется, он
+может содержать фрагмент connection string/SQL с данными). Восемь агрегированных счётчиков — те же
+самые безопасные числа, что уже проверены на PII-контракт CLI-версии T7A.10A;
+`failedTimesheetIds` (массив UUID) из результата тика — **никогда** не логируется, только сам
+count `failed`. Никаких имён/UUID сотрудников или табелей, GPS, payload, `DATABASE_URL`,
+cookies/токенов ни в одном логе scheduler'а.
+
+**Heartbeat** — отдельный от логов, PII-свободный JSON-файл на диске контейнера (`{
+"lastTickCompletedAt": "iso" }`, путь по умолчанию `/tmp/attendance-scheduler-heartbeat.json`,
+переопределяемо только для тестовой изоляции через `ATTENDANCE_SCHEDULER_HEARTBEAT_PATH` — не
+production-facing конфигурация, не влияет на алгоритм). Обновляется **только** после того, как
+`await runAttendanceAutoSubmitTick(...)` реально **разрешился** (не бросил) — независимо от того,
+скольких кандидатов сам этот тик пометил как `failed` внутри (per-candidate failure — ожидаемая,
+retryable деградация, не признак того, что loop завис). Top-level ошибка (тик целиком бросил
+исключение) **не** обновляет heartbeat — это то, что должно в итоге сделать контейнер unhealthy,
+если повторяется дольше допустимого окна, а не маскироваться под успех.
+
+**Healthcheck** — отдельный скрипт `scripts/attendance-scheduler-healthcheck.ts`, без HTTP: читает
+heartbeat-файл, вычисляет возраст `lastTickCompletedAt` относительно текущего момента, `exit(0)`
+если возраст ≤ `max(intervalSeconds × 3, 120)` секунд, иначе `exit(1)` (файл отсутствует — тоже
+`exit(1)`, покрыто Compose `start_period` для первого тика). Docker `healthcheck.test` вызывает этот
+скрипт напрямую (`CMD npx tsx scripts/attendance-scheduler-healthcheck.ts`) — не создаёт и не
+открывает никакого сетевого порта/HTTP-сервера.
+
+### 7. Policy UI retry/idempotency semantics
+
+Клиентская форма (`/admin/attendance/policy`) держит один "attempt"-объект на попытку Save —
+`{ key: crypto.randomUUID(), payload: <снятый на момент клика по Save срез изменённых полей> }`,
+замороженный на всё время жизни этой попытки:
+
+```text
+- Save (обычный клик, форма в состоянии idle/saved/validation-error/server-error): вычислить diff
+  формы против последнего known-good policy (только реально изменённые поля, минимум одно); если
+  diff пуст — client-side validation error, HTTP не уходит; иначе создать НОВЫЙ attempt (новый key +
+  замороженный payload), перейти в saving.
+- Сетевой сбой/timeout (fetch бросил, ответа не было): состояние "network result unknown" — attempt
+  НЕ выбрасывается, поля формы остаются заблокированными (disabled), единственное действие —
+  "Retry", который повторно отправляет ТОТ ЖЕ key и byte-identical payload (сервер либо ещё
+  обрабатывает исходный запрос под тем же key и вернёт CACHED/IN_PROGRESS, либо уже завершил его и
+  вернёт CACHED 200 — оба случая безопасны благодаря существующему lib/idempotency.ts контракту
+  T7A.10A, дублирующей записи быть не может).
+- Успех (200): используем тело PATCH-ответа как немедленный authoritative policy (сервер уже вернул
+  свежую запись из той же транзакции) + router.refresh() для пересинхронизации серверного дерева —
+  attempt считается завершённым, поля разблокируются, следующее изменение создаст новый key.
+- Definitive server-ответ (400 VALIDATION_ERROR, 403, 409 IDEMPOTENCY_KEY_REUSED/другой конфликт):
+  attempt считается завершённым (не retryable этим же key) — показать fieldErrors/сообщение, поля
+  разблокируются, следующий Save (после правки хотя бы одного поля) создаёт новый key.
+- Синхронная защита от double-submit: pendingRef (обычный React ref, не state) выставляется ДО
+  первого await внутри обработчика — второй клик, случившийся до перерендера disabled-кнопки, всё
+  равно не создаёт второй одновременный запрос.
+```
+
+Ничего из этого не дублирует формулы валидации/DTO из `lib/attendance-policy.ts` — форма отправляет
+partial-patch тем же полям с теми же именами и полагается на серверные `fieldErrors` как
+единственный источник истины для допустимых диапазонов; клиентская валидация ограничена
+структурными проверками, которые не требуют повторения серверных границ (непустой diff, корректный
+формат числа в `<input>`).
+
+Этот addendum — запись решения до кода, не отдельное утверждение владельца поверх уже
+утверждённого 2026-08-12 checkpoint. Production deployment этого слайса не входит в scope (STOP-GATE
+задачи); после него остаётся отдельный T7A.10C (полный pilot E2E), ещё не выполненный.

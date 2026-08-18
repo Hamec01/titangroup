@@ -166,3 +166,67 @@ restoring service state without destroying the persistent volume:
 - The future Titanor Time application service (Next.js scaffold) — separate task.
 - Seed data, first `SUPER_ADMIN`, auth, API, UI — see `IMPLEMENTATION_STATUS.md` §9 ("Не начато").
 - Any change to `compose.yaml` (public site), CollabStudio, Caddy, DNS, or Zoho.
+
+## 11. Attendance auto-submit scheduler service (T7A.10B, 2026-08-18)
+
+`docs/titanor-time/T7A_1_ATTENDANCE_CLOCK_DESIGN.md` Addendum "T7A.10B" is the authoritative design
+text (lifecycle/interval/no-overlap/multi-replica/graceful-shutdown/health semantics) — this section
+is only the operational start/stop/diagnostics summary.
+
+**What it is.** A separate Compose service, `scheduler`, added alongside `app`/`db`. It reuses the
+exact same built image as `app` (`image: titanor-time-app:latest` — `scheduler` has no `build:` of
+its own), just runs a different command
+(`npx tsx scripts/attendance-auto-submit-scheduler.ts`) instead of the Next.js server. It calls one
+tick immediately on start, then repeats on `ATTENDANCE_SCHEDULER_INTERVAL_SECONDS` (default 60,
+valid range 30–3600) — never overlapping ticks, never a distributed lock of its own (T7A.10A's own
+DB-level locking/idempotency is the source of truth for correctness under restarts or multiple
+replicas).
+
+**Start** (after `db` is already running and migrated, per §3/§5 above):
+
+```bash
+docker compose -f compose.titanor-time.yaml build app   # produces the shared image scheduler reuses
+docker compose -f compose.titanor-time.yaml up -d scheduler
+```
+
+**Stop** (graceful — SIGTERM lets the current tick finish, then the process exits cleanly):
+
+```bash
+docker compose -f compose.titanor-time.yaml stop scheduler
+```
+
+**Diagnostics:**
+
+```bash
+docker compose -f compose.titanor-time.yaml logs -f scheduler   # one safe JSON line per tick — no
+                                                                  # employee/timesheet/user UUIDs,
+                                                                  # names, GPS, payload, DATABASE_URL,
+                                                                  # cookies/tokens, or raw Error text
+docker inspect --format '{{.State.Health.Status}}' titanor-time-scheduler-1
+```
+
+Health is a file-based heartbeat (`scripts/attendance-scheduler-healthcheck.ts`, no HTTP server, no
+published port) updated only after a tick genuinely completes — a hung loop or a database that stays
+unreachable longer than `max(intervalSeconds×3, 120)` seconds makes the container unhealthy; a single
+tick's own per-candidate `failed` count does not (that is an expected, retryable degradation, not a
+runner failure).
+
+**Restart safety.** Restarting (or crash-recovering) the `scheduler` container never creates a
+duplicate `TimesheetVersion`/`AutoSubmissionAttempt` — the immediate first tick on the new process
+just re-scans the same due candidates, and T7A.10A's own idempotency (`UNIQUE(timesheetId,
+systemReopenGeneration)`, `ON CONFLICT DO NOTHING`) makes an already-processed candidate a clean
+no-op. The same holds for running two replicas of this service simultaneously
+(`docker compose -f compose.titanor-time.yaml up -d --scale scheduler=2`, if ever needed) — verified
+directly (T7A.10B test suite, item 13) with two real separate scheduler processes against the same
+disposable database, resulting in exactly one version/attempt for the shared due candidate.
+
+**Environment.** Only `ATTENDANCE_SCHEDULER_INTERVAL_SECONDS` is scheduler-specific (optional, not a
+secret — see `.env.titanor-time.example`); everything else (`DATABASE_URL`, etc.) comes from the same
+`env_file: .env.titanor-time` as `app`/`db`. An invalid value (non-integer, or outside 30–3600) makes
+the process exit non-zero immediately, before any database access — Compose's `restart: unless-stopped`
+will keep restarting it into the same immediate failure until the env var is corrected, which is the
+intended fail-fast behavior, not a bug to work around.
+
+**Not yet done (T7A.10C):** this section describes running the scheduler service, not deploying it to
+production — production `titanor-time-app-1`/`titanor-time-db-1` do not currently have a `scheduler`
+sibling. Full pilot E2E (real workers, real cutoff in real time) is a separate, not-yet-started task.
