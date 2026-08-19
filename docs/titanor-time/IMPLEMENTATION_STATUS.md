@@ -1,6 +1,76 @@
 # Titanor Time — Implementation Status
 
-Обновлено: 2026-08-19 Europe/Helsinki (feat: add payroll period report UI — T8.3B)
+Обновлено: 2026-08-19 Europe/Helsinki (feat: add CSV export schema foundation — T8.4A)
+
+**`[2026-08-19]` T8.4A CSV Export Schema Foundation — feat(time): add CSV export schema
+foundation.** Только схема + permissions, **ноль** генерации CSV, export/download API, admin UI,
+PDF, payroll/TES-категорий (rates/overtime/night/sunday/holiday/travel) — всё явно отложено на
+T8.4B (generation/API/download) и T8.4C (admin UI). Design — `docs/titanor-time/
+T8_REPORTS_DESIGN.md` Addendum "T8.4A" (§AG–AL), написан ДО кода; фиксирует, что CSV_V1 — это
+отчёт по рабочему времени (canonical bucket `(employeeId, siteId, date)`, тот же что T8.1–T8.3), не
+payroll export.
+
+**Схема** (`prisma/migrations/20260819150000_add_export_batch_schema`): 2 новых enum
+(`ExportFormat{CSV_V1}`, `ExportBatchKind{FULL,CORRECTION}`), 2 новых таблицы. `ExportBatch` —
+`periodId`→`PayrollPeriod` RESTRICT, `createdByUserId`→`User` RESTRICT, nullable self-FK
+`correctsBatchId` CASCADE (FK-семантика только — `trg_export_batch_immutable` безусловно блокирует
+DELETE раньше, чем cascade мог бы сработать), `fileName`/`fileHash`(64 lowercase hex)/
+`fileSizeBytes`/`rowCount`/`content` (bytea, точные сгенерированные байты — скачивание в T8.4B не
+будет зависеть от пересборки файла). `ExportItem` — по одной строке на `(employeeId, siteId, date)`,
+snapshot-поля (`employeeNumberSnapshot`/`employeeNameSnapshot`/`siteNameSnapshot`), составной FK
+`(timesheetVersionId, employeeId)`→`TimesheetVersion(id, employeeId)` через уже существующий
+`@@unique` (без нового application-check). Ноль money/rate/TES-полей в обеих таблицах.
+
+**7 CHECK (CK-37..CK-43)**, 1 partial unique index (`ux_export_batch_full_per_period`, UX-04), 1
+составной FK (FK-17), 2 immutability-триггера (`trg_export_batch_immutable`,
+`trg_export_item_immutable` — безусловный запрет UPDATE/DELETE, тот же паттерн что
+`fn_audit_event_immutable`) и 1 correction-chain-триггер (`trg_export_batch_correction_chain_check`,
+BEFORE INSERT — предшественник существует, тот же period, без циклов). Полный реестр —
+`docs/titanor-time/05_RAW_SQL_REGISTER.md` §12. **Задокументированное расхождение формул**:
+`ExportItem.workedMinutes` CHECK требует `GREATEST(0, gross-paid-unpaid)` — это НЕ формула
+`lib/reporting/worked-time.ts` (`grossMs - unpaidBreakMs`, paid остаётся внутри worked там).
+`lib/reporting/worked-time.ts` и T8.1/T8.2/T8.3 не менялись; T8.4B должен считать эту колонку своей
+собственной формулой, не копировать T8.1/T8.2/T8.3's `workedMinutes`. Period-status gating (FULL
+только для LOCKED, CORRECTION только для EXPORTED+APPROVED CorrectionRequest.pendingExport=true)
+задокументирован, но не enforced на уровне constraint/trigger в этом слайсе (требует чтения
+мутабельной колонки другой таблицы — сервисная логика T8.4B).
+
+**Permissions** (отдельная чистая DML-миграция `20260819160000_seed_export_permissions`):
+`period.export`, `export.create`, `export.read` — выданы только ADMIN и SUPER_ADMIN (6 строк
+RolePermission), FOREMAN/WORKER — ноль новых грантов, SYSTEM структурно не может получить роль.
+
+**Тесты** — `scripts/_test-export-batch-schema.ts`, 51 проверка на 23 пронумерованных сценариях
+задачи, 100% pass на disposable PostgreSQL 16: migrate deploy from scratch + repeat (no-op),
+Prisma-модели↔БД, 6/6 RolePermission + 0/0 FOREMAN/WORKER, valid FULL+items, second-FULL/FULL-with-
+correctsBatchId/CORRECTION-without-correctsBatchId/cross-period/self-reference/invalid-hash/size-
+mismatch/negative-numbers/wrong-formula/duplicate-item/wrong-employee-TimesheetVersion — все
+отклонены с ожидаемым identifier, UPDATE/DELETE обеих таблиц отклонены, связанные Employee/
+WorkSite/TimesheetVersion/User не могут быть удалены (RESTRICT подтверждён через `pg_constraint`
+introspection — `confdeltype='r'` на всех четырёх новых FK), dump/restore на ОТДЕЛЬНОМ disposable
+PostgreSQL (не preview/production) — количество строк, `md5(content)`, `fileHash`, `fileSizeBytes`
+идентичны до/после, `trg_export_batch_immutable` продолжает работать после restore, ноль
+`AuditEvent`, ноль GPS/`payloadHash`/`deviceInstallationId`/`requestId` в схеме/миграциях.
+
+**Регрессия**: `_test-report-rounding-consistency.ts` — 105/105; `_test-period-time-report.ts` —
+110/110; `_test-activation.ts`, `_test-corrections.ts` — без изменений. Отдельных
+`_test-worker-time-report.ts`/`_test-site-time-report.ts` в кодовой базе нет — T8.1/T8.2 покрыты
+через rounding-consistency (оба эндпоинта). Все прогнаны на БД с новой T8.4A-миграцией.
+
+**Технические проверки**: `git diff --check`, `prisma validate`, `prisma generate` (известный
+побочный эффект — переустановка `@prisma/client` в НЕСВЯЗАННОМ корневом `package.json` — обнаружен
+и откачен `git checkout` оба раза), `tsc --noEmit` (0 ошибок), `npm run build` в изолированной
+scratch-копии (production standalone, тот же, что использован для HTTP-регрессии), `docker compose
+config --quiet`, `docker compose build app` (исходного локального тега `titanor-time-app:latest` не
+было — после проверки образ удалён), `prisma migrate deploy` дважды на заведомо чистом одноразовом
+PostgreSQL 16 (59 migrations, второй — no-op). Preview `127.0.0.1:3244` — `200`/`200` до и после, не
+трогался. Production (`titanor-time-app-1`/`titanor-time-app-1`) — `RestartCount=0`, `StartedAt` не
+менялся, оба до и после.
+
+**T8.4B (CSV generation/API/download) и T8.4C (admin UI) этим коммитом не начаты. PDF и
+payroll/TES-категории (rates/overtime/night/sunday/holiday/travel) отложены на отдельно
+согласованный этап.**
+
+---
 
 **`[2026-08-19]` T8.3B Payroll Period Report UI — feat(time): add payroll period report UI.** UI
 поверх уже реализованного и не изменённого T8.3A backend — `/admin/reports/periods`

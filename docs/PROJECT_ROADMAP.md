@@ -692,6 +692,20 @@ full period report»). Полный контракт — `docs/titanor-time/T8_R
 
 Сначала простой CSV. PDF позже.
 
+**T8.4A (schema foundation) 🟢 реализовано `[2026-08-19]`** — только модель `ExportBatch`/
+`ExportItem` (immutable, `FULL`/`CORRECTION`) + 3 permissions (`period.export`, `export.create`,
+`export.read`, только ADMIN/SUPER_ADMIN). Ноль CSV-генерации, ноль export/download API, ноль admin
+UI, ноль PDF, ноль payroll/TES-категорий (rates/overtime/night/sunday/holiday/travel) — CSV_V1 это
+отчёт по рабочему времени, canonical bucket `(employeeId, siteId, date)`, тот же что T8.1–T8.3.
+Полный контракт — `docs/titanor-time/T8_REPORTS_DESIGN.md` Addendum "T8.4A",
+`05_RAW_SQL_REGISTER.md` §12.
+
+**T8.4B (CSV generation/API/download) 🔴 не начато.**
+
+**T8.4C (admin UI) 🔴 не начато.**
+
+PDF и payroll/TES-категории отложены на отдельно согласованный этап.
+
 ## T8.5 — PWA manifest
 
 - name;

@@ -714,3 +714,122 @@ phone/email/GPS/device identifiers/payload/hash/requestId/exception detail/corre
 payload (T8_REPORTS_DESIGN.md Addendum "T8.3A" §Y) — UI-слой ничего нового не может утечь: рендерятся
 только поля, уже присутствующие в типизированном `PeriodTimeReport`. Blanket HTML/network scan —
 дополнительное доказательство, не единственная защита.
+
+## Addendum — T8.4A CSV Export Schema Foundation (2026-08-19)
+
+Написано **до** изменения schema. Только неизменяемая DB-модель для будущих CSV-экспортов и
+permissions — ноль генерации CSV, ноль export API, ноль download endpoint, ноль `/admin/export`
+UI, ноль PDF, ноль зарплаты/ставок/TES-категорий. Это фундамент, на который T8.4B (генерация +
+API + download) и T8.4C (admin UI) будут опираться.
+
+### AG. CSV_V1 — отчёт рабочего времени, не payroll export
+
+`ExportBatch.format = CSV_V1` — это первый (и на сегодня единственный) формат. Он документирует
+рабочее время (gross/paid break/unpaid break/worked minutes, сегменты) по образцу T8.1/T8.2/T8.3 —
+**не** зарплату. Ни одного денежного поля, ни одной payroll-категории (overtime/night/sunday/
+holiday/travel) в `ExportBatch`/`ExportItem` нет и не планируется в CSV_V1 — они отложены до
+отдельного, отдельно утверждённого payroll/TES-этапа (см. §0 design doc выше — тот же принцип,
+что T8.1–T8.3 уже устанавливают для всего ЭТАПа 8).
+
+### AH. Canonical bucket — без изменений
+
+`(employeeId, siteId, date)` — тот же bucket, что T8.1/T8.2/T8.3 (см. §2-3 плюс "T8 ROUNDING
+FOLLOW-UP" addendum выше). `ExportItem` — это строка на bucket: один `(exportBatchId, employeeId,
+siteId, date)` — `@@unique`, зеркалирует сам bucket один-в-один. `grossMinutes`/`paidBreakMinutes`/
+`unpaidBreakMinutes` на строке `ExportItem` — те же уже округлённые daily-bucket числа, что
+T8.1/T8.2/T8.3 уже вычисляют через `lib/reporting/worked-time.ts`; любые более высокие уровни
+(будущий company/period totals row, если T8.4B его добавит) обязаны складываться только из уже
+округлённых `ExportItem`-строк, никогда не пересчитывать ms заново — тот же принцип, что
+T8.1–T8.3 уже устанавливают.
+
+### AI. **Обнаруженное расхождение — `ExportItem.workedMinutes`'s формула**
+
+Задача этого слайса явно требует CHECK-предикат:
+
+```
+workedMinutes = max(0, grossMinutes - paidBreakMinutes - unpaidBreakMinutes)
+```
+
+Это **отличается** от canonical worked-time формулы, которую `lib/reporting/worked-time.ts`
+(`computeSegmentMs`) и, транзитивно, T8.1/T8.2/T8.3's собственные `workedMinutes` поля используют
+на всём ЭТАПе 8 уже сейчас:
+
+```
+workedMs = grossMs - unpaidBreakMs   (paid break ОСТАЁТСЯ внутри workedMs, не вычитается)
+```
+
+Это не опечатка и не то же самое число при отсутствии paid breaks (формулы совпадают, когда
+`paidBreakMinutes = 0`) — но расходятся, как только на bucket есть хотя бы один paid break.
+**Зафиксировано явно, не обойдено молча**, по прямому требованию STOP-GATE этого слайса:
+
+- CHECK-предикат в этой миграции реализован **дословно по формуле задачи**
+  (`GREATEST(0, gross - paid - unpaid)`) — это авторитетная спецификация для НОВОЙ колонки на
+  НОВОЙ таблице, у которой нет предыдущего прецедента; изменение canonical формулы в
+  `lib/reporting/worked-time.ts` **не производилось и не нужно** — тот модуль остаётся
+  единственным источником правды для T8.1/T8.2/T8.3, которые обязаны продолжать использовать
+  ИХ СОБСТВЕННУЮ (иную) формулу без изменений.
+- Это означает: когда T8.4B будет писать реальную generation-логику (заполнение `ExportItem` из
+  canonical source), она **не может** просто скопировать `workedMinutes` из T8.1/T8.2/T8.3's DTO
+  — она обязана вычислить `ExportItem.workedMinutes` по СВОЕЙ собственной формуле
+  (`gross - paid - unpaid`, не `gross - unpaid`), либо, если это окажется ошибкой спецификации,
+  явно вернуться к владельцу продукта за подтверждением перед тем, как писать T8.4B.
+- T8.4A (этот слайс) — только schema, ноль generation-кода, поэтому расхождение не проявляется в
+  реальных данных сейчас; оно зафиксировано здесь исключительно для того, чтобы T8.4B не
+  унаследовал его молча.
+
+### AJ. FULL/CORRECTION semantics
+
+- **FULL** — `correctsBatchId IS NULL` (CHECK). Один FULL на period — `ux_export_batch_full_per_period`,
+  partial unique index `("periodId") WHERE "kind" = 'FULL'`.
+- **CORRECTION** — `correctsBatchId IS NOT NULL` (CHECK), обязан ссылаться на batch **того же**
+  period (`fn_export_batch_correction_chain_check`, поскольку ни CHECK, ни FK не может сравнить
+  колонку одной строки с колонкой ДРУГОЙ строки — нужен trigger). Predecessor может быть FULL или
+  предыдущим CORRECTION — никакого дополнительного ограничения на тип predecessor не накладывается
+  (уже разрешено самой природой self-FK). Self-reference (`correctsBatchId = id`) отклоняется CHECK
+  `ck_export_batch_no_self_correction`. Цикл структурно недостижим через чистый INSERT-путь (batch
+  обязан существовать ДО того, как на него можно сослаться, а строки immutable — future batch не
+  может задним числом "стать" предком уже существующего), но trigger всё равно проверяет цикл
+  явно (`WITH RECURSIVE` вверх по цепочке) — defense-in-depth и тестируемость требования, а не
+  единственная защита.
+- **Период-статус gating** (FULL только для `LOCKED` period; CORRECTION только для `EXPORTED`
+  period при наличии `APPROVED` `CorrectionRequest` с `pendingExport=true`) — **документируется
+  здесь, но НЕ enforced DB-constraint'ом в T8.4A**. Причина: это не входит в явный список из 14
+  DB-инвариантов задачи (структурные свойства `ExportBatch`/`ExportItem` — то, что список
+  перечисляет), а требует чтения МУТАБЕЛЬНОЙ колонки на ДРУГОЙ таблице (`PayrollPeriod.status`,
+  `CorrectionRequest.status`/`pendingExport`) в момент создания batch — то есть это gate уровня
+  create-batch service, которого в этом слайсе физически не существует (T8.4B). `CorrectionRequest.
+  pendingExport` (уже существующее поле, не создаётся заново) — единственный крючок, который T8.4B
+  будет читать для этого.
+
+### AK. Immutable bytes — decision
+
+`ExportBatch.content` хранит **точные сформированные bytes** (Postgres `bytea`), не путь к файлу и
+не JSON-реконструкцию. Причина: последующий download (T8.4B) не должен зависеть от того, изменились
+ли имена работников/объектов (snapshot-колонки на `ExportItem` уже решают эту часть для
+per-row данных), от доступности файловой системы, или от повторной генерации, которая могла бы
+дать иной byte-for-byte результат при изменении форматирующего кода между генерацией и загрузкой.
+`fileSizeBytes` обязан буквально равняться `octet_length(content)` (CHECK) — колонка не может
+разъехаться с реальным содержимым. `fileHash` — lowercase SHA-256 hex ровно 64 символа (CHECK,
+regex) — вычисляется на уровне приложения (T8.4B) над `content` и хранится для integrity-проверки
+без повторного чтения полного blob'а на каждый запрос списка.
+
+### AL. PDF / payroll — явно отложены
+
+PDF не входит в CSV_V1 и не имеет собственного `ExportFormat` значения в этой миграции —
+добавление `PDF_V1` (или аналога) в enum `ExportFormat` — отдельная будущая additive-миграция,
+не в этом слайсе. `overtime`/`night`/`sunday`/`holiday`/`travel`/любые денежные категории —
+отдельный, отдельно утверждённый payroll/TES-этап, ни одного поля для них в этой schema нет.
+
+### AM. Статус реализации — `[2026-08-19]` завершено
+
+Реализовано ровно то, что описано в §AG–AL, без отклонений от спецификации задачи по 14
+DB-инвариантам. `scripts/_test-export-batch-schema.ts` — 51 проверка на 23 пронумерованных
+сценариях задачи, 100% pass на disposable PostgreSQL 16 (включая отдельный dump/restore на втором
+одноразовом экземпляре). Полная регрессия T8.1–T8.3/rounding-consistency/activation/corrections —
+без изменений, без побочных эффектов. Единственная находка при тестировании — порядок исполнения
+`BEFORE ROW` trigger'ов раньше CHECK constraint'ов в PostgreSQL означает, что два конкретных
+негативных случая (`CORRECTION` без `correctsBatchId`; self-reference) отклоняются с identifier'ом
+FN-25 (`EXPORT_BATCH_CORRECTION_PREDECESSOR_NOT_FOUND`), а не CK-37/CK-38 — сама строка всё равно
+всегда отклоняется, различается только то, какой identifier наблюдает вызывающий код;
+задокументировано подробно в `05_RAW_SQL_REGISTER.md` §12 (CK-37/CK-38 entries). T8.4B (генерация/
+API/download) и T8.4C (admin UI) этим коммитом не начаты.

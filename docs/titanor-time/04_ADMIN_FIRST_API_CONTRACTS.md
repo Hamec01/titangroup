@@ -2118,3 +2118,18 @@ exception detail/correction reason/audit payload в DTO; GET не создаёт
 БД; одна `REPEATABLE READ` транзакция с одним `asOf`; bounded query count — подтверждено: 1
 работник/1 объект, 50/5, 200/20 дают одинаковые 12 query-событий (окно транзакции без auth
 overhead).
+
+## 21. T8.4A — ноль новых HTTP-контрактов (2026-08-19)
+
+CSV Export Schema Foundation (`docs/titanor-time/T8_REPORTS_DESIGN.md` Addendum "T8.4A") добавляет
+**ноль** новых API-эндпоинтов и не меняет ни один существующий контракт из этого документа. Явно,
+для traceability:
+
+- Две новых таблицы (`ExportBatch`, `ExportItem`) и три новых permission (`period.export`,
+  `export.create`, `export.read`, выданы только ADMIN/SUPER_ADMIN) — ноль consuming-роутов в этом
+  коммите. Генерация CSV, `POST`/создание `ExportBatch`, download-эндпоинт — всё это T8.4B, которого
+  ещё не существует.
+- Ноль admin UI (`/admin/export` и т.п.) — T8.4C, не начат.
+- §18–20 (T8.1/T8.2/T8.3 контракты) — не менялись; их backend/DTO/permissions идентичны до и после
+  этого коммита (подтверждено `git diff` и полным прогоном их собственных regression-наборов —
+  105/105 rounding-consistency, 110/110 T8.3A).

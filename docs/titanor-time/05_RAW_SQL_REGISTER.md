@@ -1461,3 +1461,221 @@ Trigger instances: 14 (TRG-14..TRG-27)
 Preflight guards: 1 (SYSTEM_SCHEDULER_USERNAME_OCCUPIED, migration's first statement — §11.1 note)
 New PostgreSQL extensions: 0
 ```
+
+---
+
+## 12. T8.4A CSV Export Schema Foundation slice
+
+```text
+Status: ACTIVE
+Scope: prisma/migrations/20260819150000_add_export_batch_schema
+Authority: docs/titanor-time/T8_REPORTS_DESIGN.md Addendum "T8.4A" (2026-08-19)
+Prisma version: 6.19.0
+PostgreSQL target: 16
+```
+
+This section is additive to, and does not modify, Sections 1–11 above. Schema/permissions only —
+zero CSV generation, zero export/download API, zero admin UI (all deferred to T8.4B/T8.4C). Two new
+tables (`ExportBatch`, `ExportItem`); no changes to any pre-existing table's columns.
+
+**CK-37/CK-38 vs FN-25 ordering note (found during `scripts/_test-export-batch-schema.ts`
+scenarios 9 and 11)**: Postgres runs `BEFORE ROW` triggers before validating `CHECK` constraints on
+the same `INSERT`. `trg_export_batch_correction_chain_check` (FN-25/TRG-30) gates on
+`NEW."kind" = 'CORRECTION'` alone and always looks up the predecessor by `id` first. For a
+`CORRECTION` row with `correctsBatchId IS NULL` (the shape CK-37 names) or `correctsBatchId` equal to
+the row's own not-yet-inserted `id` (the shape CK-38 names), that lookup finds no matching row before
+either CHECK ever gets evaluated, so the row is actually rejected with
+`EXPORT_BATCH_CORRECTION_PREDECESSOR_NOT_FOUND`, not the CK-37/CK-38 constraint name. The row is
+still always rejected either way — this only affects which identifier a caller observes. CK-37 stays
+fully reachable (and is the true failure reason) for its other disjunct, `FULL` with
+`correctsBatchId` set — that shape never triggers FN-25's predecessor lookup at all, since it's gated
+on `kind = 'CORRECTION'`. CK-38 has no shape it is ever the true failure reason for under the current
+exposed INSERT-only interface — it remains a defense-in-depth backstop against a future change to
+FN-25's own logic, not a currently-reachable guard in its own right.
+
+### 12.1 CHECK constraint register (CK-37 .. CK-43)
+
+### CK-37 `ck_export_batch_kind_correction_shape`
+
+- Table: `ExportBatch`
+- Predicate:
+  ```sql
+  ("kind" = 'FULL' AND "correctsBatchId" IS NULL) OR
+  ("kind" = 'CORRECTION' AND "correctsBatchId" IS NOT NULL)
+  ```
+- Source: `T8_REPORTS_DESIGN.md` Addendum "T8.4A" §AJ; task invariants #3/#4.
+- Documentation synchronization: SYNCED.
+- Minimum negative test: `INSERT ExportBatch` with `kind='FULL'` and `correctsBatchId` set — expect
+  `23514` on this constraint by name (verified). A second shape, `kind='CORRECTION'` with
+  `correctsBatchId IS NULL`, is also rejected but surfaces as FN-25's
+  `EXPORT_BATCH_CORRECTION_PREDECESSOR_NOT_FOUND` instead — see the ordering note above.
+
+### CK-38 `ck_export_batch_no_self_correction`
+
+- Table: `ExportBatch`
+- Predicate: `"correctsBatchId" IS NULL OR "correctsBatchId" != "id"`
+- Source: task invariant #6 (no self-reference).
+- Documentation synchronization: SYNCED.
+- Minimum negative test: a hand-crafted `INSERT` supplying an explicit client-side `id` equal to
+  `correctsBatchId` is rejected — but, per the ordering note above, always as FN-25's
+  `EXPORT_BATCH_CORRECTION_PREDECESSOR_NOT_FOUND` (the row can never find "itself" by `id` before it
+  exists), never as this constraint's own name under the current exposed interface.
+
+### CK-39 `ck_export_batch_file_hash_format`
+
+- Table: `ExportBatch`
+- Predicate: `"fileHash" ~ '^[0-9a-f]{64}$'`
+- Source: task invariant #7.
+- Documentation synchronization: SYNCED.
+- Minimum negative test: `INSERT ExportBatch` with a non-hex/non-64-length `fileHash` — expect `23514`.
+
+### CK-40 `ck_export_batch_file_size_matches_content`
+
+- Table: `ExportBatch`
+- Predicate: `"fileSizeBytes" = octet_length("content")`
+- Source: task invariant #8.
+- Documentation synchronization: SYNCED.
+- Minimum negative test: `fileSizeBytes` off by one from the real `content` length — expect `23514`.
+
+### CK-41 `ck_export_batch_counts_nonnegative`
+
+- Table: `ExportBatch`
+- Predicate: `"fileSizeBytes" >= 0 AND "rowCount" >= 0`
+- Source: task invariant #9.
+- Documentation synchronization: SYNCED.
+- Minimum negative test: `rowCount = -1` — expect `23514`.
+
+### CK-42 `ck_export_item_minutes_nonnegative`
+
+- Table: `ExportItem`
+- Predicate: `"grossMinutes" >= 0 AND "paidBreakMinutes" >= 0 AND "unpaidBreakMinutes" >= 0 AND "workedMinutes" >= 0 AND "segmentCount" >= 0`
+- Source: task invariant #10.
+- Documentation synchronization: SYNCED.
+- Minimum negative test: `grossMinutes = -10` — expect `23514`.
+
+### CK-43 `ck_export_item_worked_minutes_formula`
+
+- Table: `ExportItem`
+- Predicate: `"workedMinutes" = GREATEST(0, "grossMinutes" - "paidBreakMinutes" - "unpaidBreakMinutes")`
+- Source: task invariant #11. **Deliberately differs from `lib/reporting/worked-time.ts`'s
+  `workedMs = grossMs - unpaidBreakMs`** (paid breaks stay inside worked time there) — see
+  `T8_REPORTS_DESIGN.md` Addendum "T8.4A" §AI for the full discrepancy writeup. `lib/reporting/
+  worked-time.ts` and T8.1/T8.2/T8.3 are unchanged; a future T8.4B generation step must compute this
+  column with its own formula, not copy T8.1/T8.2/T8.3's `workedMinutes` verbatim.
+- Documentation synchronization: SYNCED.
+- Minimum negative test: an item with `workedMinutes` not equal to the formula's result — expect `23514`.
+
+### 12.2 Partial unique index register (UX-04)
+
+### UX-04 `ux_export_batch_full_per_period`
+
+- Table: `ExportBatch`
+- Index: `("periodId") WHERE "kind" = 'FULL'`
+- Source: task invariant #2 (at most one FULL batch per period). Not expressible via Prisma
+  `@@unique` (filtered by a column, `kind`, other than the indexed column's own nullability — same
+  category as UX-01/UX-02).
+- Documentation synchronization: SYNCED.
+- Minimum negative test: two `INSERT`s with `kind='FULL'` and the same `periodId` — second expects
+  `23505`. Positive: a `CORRECTION` batch for the same period, and a second `FULL` batch for a
+  *different* period, both insert cleanly.
+
+### 12.3 Composite foreign key register (FK-17)
+
+| ID | Table | Columns | References | Source |
+|---|---|---|---|---|
+| FK-17 | `ExportItem` | `(timesheetVersionId, employeeId)` | `TimesheetVersion(id, employeeId)` | Task invariant #13 |
+
+Uses the same pre-existing `TimesheetVersion.@@unique([id, employeeId])` the §11.3 FK-01..FK-16
+pattern established — no new schema surface invented to satisfy this invariant. `MATCH SIMPLE`
+(Postgres default); both referencing columns are `NOT NULL` on `ExportItem`, so there is no nullable/
+unresolved-row case to test positively (same N/A category as FK-04/05/08/11 in §11.3).
+
+| ID | Table.columns → target | Negative test result | Positive (nullable) test |
+|---|---|---|---|
+| FK-17 | `ExportItem(timesheetVersionId,employeeId)` → `TimesheetVersion` | PASS `23503` — a `timesheetVersionId` belonging to a *different* employee than the item's own `employeeId` is rejected | N/A — both columns `NOT NULL`; every export item snapshots one specific, already-resolved timesheet version for one specific employee at generation time |
+
+### 12.4 Trigger function register (FN-23 .. FN-25)
+
+### FN-23 `fn_export_batch_immutable`
+
+- Table: `ExportBatch`.
+- Behavior: unconditional `RAISE EXCEPTION` on any invocation — full `UPDATE`/`DELETE` ban, same
+  pattern as `fn_audit_event_immutable` (the first instance of this convention in this schema).
+- Stable exception identifier: `EXPORT_BATCH_IMMUTABLE`.
+- Row-lock contract: N/A (unconditional).
+- Source: task invariant #1.
+- Minimum negative test: `UPDATE ExportBatch SET "fileName" = ...` and `DELETE FROM "ExportBatch"` —
+  both expect `EXPORT_BATCH_IMMUTABLE`.
+
+### FN-24 `fn_export_item_immutable`
+
+- Table: `ExportItem`.
+- Behavior: unconditional ban.
+- Stable exception identifier: `EXPORT_ITEM_IMMUTABLE`.
+- Source: task invariant #1.
+- Minimum negative test: `UPDATE ExportItem SET "grossMinutes" = ...` and `DELETE FROM "ExportItem"` —
+  both expect `EXPORT_ITEM_IMMUTABLE`.
+
+### FN-25 `fn_export_batch_correction_chain_check`
+
+- Table: `ExportBatch`.
+- Behavior: `BEFORE INSERT` only (no `BEFORE UPDATE` variant — FN-23 already rejects every `UPDATE`
+  unconditionally, so `correctsBatchId` can never actually change post-insert; there is nothing for
+  a second trigger to guard). No-op for `kind = 'FULL'` rows. For `kind = 'CORRECTION'` rows:
+  validates the predecessor exists, validates the predecessor's `periodId` matches the new row's own
+  `periodId`, and walks the correction chain via `WITH RECURSIVE` to reject a cycle. A true cycle is
+  structurally unreachable through the exposed INSERT-only interface (a row can only reference an
+  already-existing predecessor, and rows are immutable afterward, so nothing can retroactively become
+  an ancestor of an earlier row) — the cycle check is defense-in-depth/testability, not the sole
+  practical guard.
+- Stable exception identifiers: `EXPORT_BATCH_CORRECTION_PREDECESSOR_NOT_FOUND`,
+  `EXPORT_BATCH_CORRECTION_PERIOD_MISMATCH`, `EXPORT_BATCH_CORRECTION_CYCLE`.
+- Row-lock contract: N/A — reads via plain `SELECT`, no explicit row lock; the immutability triggers
+  (FN-23) mean no concurrent writer can ever be mutating a row this function reads.
+- Source: task invariants #5/#6.
+- Minimum negative test: see the CK-37/CK-38 ordering note above and scenarios 9–11 of
+  `scripts/_test-export-batch-schema.ts`.
+
+### 12.5 Trigger instance register (TRG-28 .. TRG-30)
+
+| ID | Table | Trigger | Function | Timing/Events |
+|---|---|---|---|---|
+| TRG-28 | `ExportBatch` | `trg_export_batch_immutable` | FN-23 | `BEFORE UPDATE OR DELETE` |
+| TRG-29 | `ExportItem` | `trg_export_item_immutable` | FN-24 | `BEFORE UPDATE OR DELETE` |
+| TRG-30 | `ExportBatch` | `trg_export_batch_correction_chain_check` | FN-25 | `BEFORE INSERT` |
+
+3 bindings total. Verified empirically: 3 non-internal triggers exist on the 2 T8.4A tables
+(disposable PostgreSQL 16, `pg_trigger` introspection via the regression script's own migration
+verification), each exercised by at least one positive and one negative runtime test (§12.6).
+
+### 12.6 Test register (T8.4A obligations — executed, not merely specified)
+
+Every object in this section (§12.1–§12.5) has been exercised on a disposable PostgreSQL 16 instance
+via `scripts/_test-export-batch-schema.ts` (51 checks covering the task's 23 numbered scenarios,
+100% pass) plus a separate dump/restore round trip on a second disposable PostgreSQL 16 instance
+(scenario 21 — row counts, `md5(content)`, `fileHash`, `fileSizeBytes` all identical before/after,
+and `trg_export_batch_immutable` still rejects an `UPDATE` on the restored database). The full
+existing T8 report regression suite (`_test-report-rounding-consistency.ts` 105/105,
+`_test-period-time-report.ts` 110/110, `_test-activation.ts`, `_test-corrections.ts`) was re-run
+unchanged against a database carrying this migration and passes identically to its pre-T8.4A
+baseline.
+
+### 12.7 Arithmetic assertions (T8.4A additions only)
+
+```text
+T8.4A CSV EXPORT SCHEMA FOUNDATION RAW-SQL TOTALS (additive to Sections 1–11 totals)
+New tables: 2 (ExportBatch, ExportItem)
+New enums: 2 (ExportFormat, ExportBatchKind)
+New columns on pre-T8.4A models: 0 (five back-relation fields added — Prisma-side only, no new
+  columns on any pre-existing table)
+CHECK constraints: 7 (CK-37..CK-43)
+Partial/expression unique indexes: 1 (UX-04)
+Composite foreign keys: 1 (FK-17)
+Plain (non-composite) foreign keys: 6 (ExportBatch.periodId/createdByUserId/correctsBatchId,
+  ExportItem.exportBatchId/employeeId/siteId)
+Trigger functions: 3 (FN-23..FN-25)
+Trigger instances: 3 (TRG-28..TRG-30)
+New permissions: 3 (period.export, export.create, export.read — separate DML migration
+  20260819160000_seed_export_permissions, granted to ADMIN+SUPER_ADMIN only, 6 RolePermission rows)
+New PostgreSQL extensions: 0
+```
