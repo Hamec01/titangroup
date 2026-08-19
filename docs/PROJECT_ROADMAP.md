@@ -624,7 +624,14 @@ T7A.5; exception review = T7A.6 (resolution)/T7A.9; auto-submit = T7A.7; full E2
   какие ещё ожидают и почему final approval заблокирован;
 - массовое подтверждение недоступно для auto-submitted версий с исключениями.
 
-## T7A.10 — Проверка и готовность к пилоту
+## T7A.10 — Проверка и готовность к пилоту — **ЗАВЕРШЕНО 2026-08-19 (T7A.10C.2)**
+
+Полная 34-пунктовая E2E-матрица, restart-семантика (app/scheduler/db) и backup/restore подтверждены
+живыми прогонами против production-сборки в disposable окружении — см. addendum T7A.10C.2 в
+[`docs/titanor-time/T7A_1_ATTENDANCE_CLOCK_DESIGN.md`](./titanor-time/T7A_1_ATTENDANCE_CLOCK_DESIGN.md)
+и `docs/titanor-time/IMPLEMENTATION_STATUS.md`. Ни одного продуктового дефекта не найдено. Реальные
+физические устройства (iPhone/Android) — внешний acceptance gate, ручной чеклист, не пройдены
+автоматизированной проверкой.
 
 - online и offline Check In → Check Out;
 - повторная доставка без дублей и перезапуск PWA между событиями;

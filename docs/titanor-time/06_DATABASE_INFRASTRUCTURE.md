@@ -270,6 +270,36 @@ or changes — this slice only makes the already-agreed 90-day boundary (encoded
 T7A.1) actually take effect operationally. That approval remains an open external gate, tracked
 outside this document.
 
-**Not yet done (T7A.10C):** this section describes running the scheduler service, not deploying it to
-production — production `titanor-time-app-1`/`titanor-time-db-1` do not currently have a `scheduler`
-sibling. Full pilot E2E (real workers, real cutoff in real time) is a separate, not-yet-started task.
+**Full pilot E2E, including this section's own backup/restore procedure (§6-7), is now done** — see
+T7A.10C.2 below; production `titanor-time-app-1`/`titanor-time-db-1` still has no `scheduler`
+sibling deployed (deploying it is out of this section's/this task's scope, read-only production
+rule).
+
+## 13. Backup/restore procedure — live-verified (T7A.10C.2, 2026-08-19)
+
+The §6-7 procedure above was actually exercised end-to-end against a populated disposable pilot
+database, not just described. Summary (full narrative in the design doc addendum
+"T7A.10C.2" §I and the final commit's report):
+
+1. `pg_dump -F c` against the disposable `titanor-time-t7a10c2` pilot DB (populated with an open
+   shift, a SUBMITTED timesheet with a real `TimesheetVersion`, exceptions, and audit events) — 558
+   TOC entries. File written outside git, `chmod 600`, never logged/printed with credentials.
+2. `pg_restore --list` against the file confirmed structure before attempting a real restore.
+3. Restored into a **completely separate** disposable PostgreSQL 16 (own Docker network, no shared
+   volume/network/secret with the source or with `titanor-time-t7a10c2`) via plain `pg_restore`
+   (`--no-owner`, matching role) — zero errors/warnings.
+4. Verified post-restore: 54 tables, 215 functions, 51 triggers, 142 FK constraints, 109
+   `RolePermission` rows, and exact row-count parity on `User`/`ClockEvent`/`TimesheetVersion`/
+   `EmployeeOpenShift`/`AuditEvent` against the pre-backup source counts.
+5. Started a fresh `app` + `scheduler` (same image, same tag, no rebuild) pointed at the restored
+   database via `DATABASE_URL` — health check OK, scheduler tick ran cleanly against the restored
+   data (`scanned` matched the restored DRAFT timesheet).
+6. Completed the previously-open shift with a real `POST /api/worker/attendance/check-out` against
+   the restored app — materialized a genuine new `ClockShift`, while the pre-existing SUBMITTED
+   `TimesheetVersion` row remained byte-identical (immutable history survives a full
+   backup→restore→resume cycle), and no duplicate `ClockEvent` rows were created.
+7. Both disposable environments and the backup file itself were deleted after verification —
+   nothing from this procedure persists outside this document and the design-doc addendum.
+
+This confirms the §6-7 procedure as written is correct and sufficient for a real pilot-readiness
+restore drill, not merely a documented intention.

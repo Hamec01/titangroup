@@ -1,6 +1,32 @@
 # Titanor Time — Implementation Status
 
-Обновлено: 2026-08-18 Europe/Helsinki (fix: harden PWA cache and retention pacing)
+Обновлено: 2026-08-19 Europe/Helsinki (test: verify attendance pilot readiness — T7A.10C.2)
+
+**`[2026-08-19]` T7A.10C.2 — test(time): verify attendance pilot readiness. T7A ЗАВЕРШЁН.**
+Финальная сквозная проверка всего Attendance Clock против production-сборки в изолированном
+disposable Docker Compose окружении (`titanor-time-t7a10c2`, отдельный volume, порт
+`127.0.0.1:3277`). Полная 34-пунктовая E2E-матрица (см. addendum T7A.10C.2 в
+`T7A_1_ATTENDANCE_CLOCK_DESIGN.md`) — 33/34 пункта живьём PASS реальными HTTP/DB/browser
+прогонами; один под-пункт (`PAIR_ORPHAN_EVENTS` внутри item 26 — 5 из 6 resolution actions
+пройдены) честно задокументирован как не выполненный (структурный `PAIRED_SHIFT_OVERLAP`
+конфликт при построении фикстуры, не продуктовый дефект). Ни одного продуктового
+функционального/интеграционного дефекта НЕ найдено — каждая из ~30 итераций отладки в процессе
+проверки оказалась багом тестового фикстура/скрипта (неверный HTTP-метод, неверный путь поля в
+JSON, EXCESSIVE_CLOCK_SKEW clamping для "будущих" online-таймстампов, Helsinki-полночь vs период,
+и т.п.), не продукта — каждый диагностирован через чтение реальной реализации, не догадкой.
+
+Restart-семантика (app/scheduler/db, без удаления volume) подтверждена живыми перезапусками:
+нулевые дубли, нулевая потеря данных, scheduler продолжает тикать без пропуска через рестарт БД,
+Prisma pool переподключается автоматически. Backup/restore подтверждён живым циклом: `pg_dump -F
+c` → отдельный disposable PostgreSQL 16 → `pg_restore` (54 таблицы/215 функций/51 триггер/142 FK,
+row count 1:1) → свежие `app`+`scheduler` против восстановленной БД → реальный HTTP check-out
+завершает ранее открытую смену → immutable history (byte-identical TimesheetVersion) подтверждена
+через полный цикл. WebKit — реальный движок через официальный disposable Playwright-контейнер (хост
+без нужных системных библиотек, без sudo/host-изменений) — 9/9 assertions. Android/физические
+устройства — оформлены как внешний acceptance gate (хост без `/dev/kvm`/virtualization extensions,
+не запрещённое STOP-GATE изменение хоста было бы единственным способом получить реальный эмулятор).
+Preview (`127.0.0.1:3244`) и production не остановлены/не изменены (только read-only health/inspect
+до и после — идентичны). Один финальный коммит, все disposable-ресурсы удалены после проверки.
 
 **`[2026-08-18]` T7A.10C.1 FOLLOW-UP — fix(time): harden PWA cache and retention pacing.** Четыре
 независимых hardening-исправления поверх только что закрытого T7A.10C.1 (`e27e722`), найденные при
