@@ -448,8 +448,9 @@ touch target ≥ 48px), `/foreman/*` — desktop-first с поддержкой �
 - Откуда: nav; `/admin/workers/[employeeId]` («View time report», предзаполненный `employeeId`);
   `/admin/periods/[periodId]` («View a worker's time report for this period», предзаполненный
   `periodId`)
-- Куда: `/admin/reports/sites` (переключатель вкладок "By worker"/"By site", `aria-current="page"`
-  на активной, T8.2B)
+- Куда: `/admin/reports/sites`/`/admin/reports/periods` (переключатель вкладок "By worker"/"By
+  site"/"By period" через общий `components/reports/AdminReportTabs.tsx`, `aria-current="page"` на
+  активной, T8.2B/T8.3B)
 - API: `GET /api/admin/reports/workers/:employeeId?periodId=<uuid>`
 - DoD: `total.workedMinutes` буквально равен сумме `site.workedMinutes` в ответе; `total.
   workedDayCount` — distinct даты по всем сегментам сразу, не сумма per-site; site sorting
@@ -481,8 +482,9 @@ touch target ≥ 48px), `/foreman/*` — desktop-first с поддержкой �
   Timesheet; zero-hour worker; excluded participant; DRAFT/RETURNED/CURRENT_VERSION+N/MANUAL+AUTO
 - Откуда: nav (`/admin/reports` — вкладка "By site"); `/admin/sites/[siteId]` («View this site's
   time report», предзаполненный `siteId`); `/admin/periods/[periodId]` («View a site's time report
-  for this period», предзаполненный `periodId`)
-- Куда: `/admin/reports` (вкладка "By worker")
+  for this period», предзаполненный `periodId`); `/admin/reports/periods` (drill-down с каждой
+  site-строки, оба фильтра предзаполнены, T8.3B)
+- Куда: `/admin/reports`/`/admin/reports/periods` (вкладки "By worker"/"By period")
 - API: `GET /api/admin/reports/sites/:siteId?periodId=&page=&pageSize=` (не менялся, T8.2A)
 - DoD: `summary.workedMinutes` = Σ `items[].total.workedMinutes`; `worker.total` = Σ
   `days[].*Minutes`; ноль запрещённых полей (phone/email/GPS/device/payload/hash/requestId/
@@ -514,6 +516,45 @@ touch target ≥ 48px), `/foreman/*` — desktop-first с поддержкой �
 - API: `GET /api/foreman/reports/sites/:siteId?periodId=&page=&pageSize=` (не менялся, T8.2A)
 - DoD: HTML/DOM FOREMAN-страницы не содержит ни одной `/admin/` ссылки; foreign и несуществующий
   `siteId` дают идентичный текст на экране, не только идентичный HTTP-код
+
+#### `/admin/reports/periods` 🟢 (T8.3B, `[2026-08-19]`)
+- Роли: `ADMIN`, `SUPER_ADMIN`
+- Приоритет: desktop, 390×844 без page-level horizontal overflow
+- Назначение: третий отчёт ЭТАПа 8 — выбор расчётного периода, company summary (работники,
+  статусы табелей, объекты, часы), paginated список объектов с drill-down в T8.2. Ноль
+  зарплаты/ставок, ноль employee rows (detail уже в T8.1/T8.2). UI поверх уже реализованного T8.3A
+  backend, contract не менялся
+- Данные: `period` (`status`)/`summary` (workerCount, participantCount, expected/excluded,
+  assigned/workedWorkerCount, withoutTimesheetCount, withoutSiteCount, siteCount, workedDayCount,
+  gross/paid break/unpaid break/worked minutes, segmentCount, timesheetStatusCounts)/`sites[]`
+  (site {id,name,active}, assigned/workedWorkerCount, withoutTimesheetCount, workedDayCount,
+  minutes, segmentCount, timesheetStatusCounts)/pagination — из `getPeriodTimeReport()`
+  (`lib/period-time-report.ts`, T8.3A, не менялся); переиспользует `lib/reporting/report-format.ts`
+- Фильтры: `<form method="GET">`, `periodId`/`pageSize` в URL; `page` — только в pagination-ссылках
+  (не поле формы) — смена period/pageSize структурно сбрасывает страницу на 1 без JS; lookup —
+  только `listPeriodOptions()` (`lib/attendance-overview-lookups.ts`, переиспользован как есть) —
+  ноль worker/site-специфичных запросов до выбора period
+- Действия: нет мутаций — read-only отчёт; пагинация — ссылки, сохраняющие текущие фильтры
+- Состояния: prompt; malformed periodId/page/pageSize → inline validation banner (`role="alert"`,
+  не 500, оба источника ошибок объединены); `PERIOD_NOT_FOUND`; пустая company population (`No
+  workers in this payroll period`); population есть, sites нет (отдельное сообщение, отличается от
+  «нет работников вообще»); active/inactive/zero-hour site; пустая pagination-страница
+  (`totalItems>0`, `page` вне диапазона) — честная ссылка "Back to page 1"
+- Откуда: `/admin/reports`/`/admin/reports/sites` (вкладка "By period"); `/admin/periods/[periodId]`
+  («View full period report», предзаполненный `periodId`)
+- Куда: `/admin/reports`/`/admin/reports/sites` (вкладки "By worker"/"By site"); каждая site-строка
+  → `/admin/reports/sites?siteId=&periodId=` (drill-down, оба фильтра предзаполнены)
+- API: `GET /api/admin/reports/periods/:periodId?page=&pageSize=` (не менялся, T8.3A)
+- DoD: `sites[i].*` буквально равны `GET /api/admin/reports/sites/:siteId`'s `summary` для того же
+  site/period; `summary.*` = Σ `sites[i].*` (полный набор, не страница); `summary.workedMinutes` = Σ
+  `GET /api/admin/reports/workers/:employeeId`'s `total.workedMinutes` по company population;
+  multi-site работник — один раз в `summary.workedWorkerCount`, но в каждой своей site-строке
+  (задокументировано); ноль employee name/number/id, phone/email/GPS/device/payload/hash/requestId/
+  correction reason/audit payload в HTML и во всех network-ответах; ровно один вызов
+  `getPeriodTimeReport()` на рендер, ноль client-side self-fetch к API route; ноль console
+  errors/error overlay; три admin report tab'а (`components/reports/AdminReportTabs.tsx`) с
+  `aria-current` на активной, FOREMAN-страницы — ноль этих tabs/admin-ссылок; 40/40 browser-сценария
+  зелёные (89/89 проверок, Chromium, production standalone build, `workers=1`)
 
 #### `/admin/review-fallback` ⚪
 

@@ -2050,7 +2050,10 @@ count — подтверждено: 1, 50 и 200 работников дают �
 ## 20. `GET /api/admin/reports/periods/:periodId` — Company Payroll Period Report (T8.3A, 2026-08-19)
 
 Полный контракт — `docs/titanor-time/T8_REPORTS_DESIGN.md` Addendum "T8.3A" (написан до
-реализации). Backend только — UI (T8.3B) не начат.
+реализации). **UI добавлен в T8.3B (`[2026-08-19]`) — `/admin/reports/periods`,
+`components/reports/PeriodTimeReportView.tsx`, вызывает `getPeriodTimeReport()` напрямую, без HTTP
+self-fetch.** Контракт ниже и `lib/period-time-report.ts` — T8.3B не менял ни строки (подтверждено
+`git diff` до и после, ноль изменений).
 
 ```
 GET /api/admin/reports/periods/:periodId?page=&pageSize=

@@ -76,6 +76,9 @@ export default async function AdminPeriodDetailPage({ params }: RouteParams) {
           <Link href={`/admin/reports/sites?periodId=${period.id}`}>View a site's time report for this period</Link>
         </p>
         <p>
+          <Link href={`/admin/reports/periods?periodId=${period.id}`}>View full period report</Link>
+        </p>
+        <p>
           <Link href="/admin/periods">Back to periods</Link>
         </p>
       </div>

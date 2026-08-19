@@ -672,18 +672,21 @@ T8.3/T8.4 обязаны переиспользовать. Полный конт
 `/admin/periods/[periodId]`, `/foreman` (новая ссылка "Site reports"). Полный контракт —
 `docs/titanor-time/T8_REPORTS_DESIGN.md` Addendum "T8.2B".
 
-## T8.3 — Отчёт по периоду
+## T8.3 — Отчёт по периоду 🟢 реализовано `[2026-08-19]`
 
 Без расчёта зарплаты в MVP.
 
-**T8.3A (backend) 🟢 реализовано `[2026-08-19]`** — `GET /api/admin/reports/periods/:periodId?page=`
+**T8.3A (backend) 🟢** — `GET /api/admin/reports/periods/:periodId?page=`
 (ADMIN/SUPER_ADMIN only), company/site-агрегат: работники, объекты, статусы табелей, дни, рабочее
 время, итоги. Ноль employee rows (detail уже в T8.1/T8.2), ноль зарплаты/ставок, ноль новых
 permissions/migrations. Новый общий `lib/reporting/canonical-source.ts`, на который переключены
 T8.1/T8.2 без изменения их DTO. Полный контракт — `docs/titanor-time/T8_REPORTS_DESIGN.md`
 Addendum "T8.3A".
 
-**T8.3B (UI) ⚪ не начато.**
+**T8.3B (UI) 🟢** — `/admin/reports/periods`, `components/reports/PeriodTimeReportView.tsx`.
+Backend T8.3A не менялся. Новый общий `components/reports/AdminReportTabs.tsx` — T8.1/T8.2 admin
+UI переключены на него без изменения поведения. Cross-link: `/admin/periods/[periodId]` («View
+full period report»). Полный контракт — `docs/titanor-time/T8_REPORTS_DESIGN.md` Addendum "T8.3B".
 
 ## T8.4 — CSV
 

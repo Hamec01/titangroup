@@ -650,3 +650,67 @@ exception detail, correction reason, audit payload — тот же redaction-п�
 Prisma-запросов внутри worker/site/day циклов — вся агрегация (§U) происходит в памяти после того,
 как все нужные строки уже получены bulk-запросами выше. GET создаёт ноль `AuditEvent`, не меняет
 `updatedAt`/`contentRevision` ни одной строки.
+
+## Addendum — T8.3B Payroll Period Report UI (2026-08-19)
+
+Написано **до** реализации. UI поверх уже реализованного и не меняемого T8.3A backend
+(`lib/period-time-report.ts`, `GET /api/admin/reports/periods/:periodId`). Ни contract, ни
+population/bucket/aggregation backend этим addendum'ом не меняются.
+
+### AA. Общий tab-компонент — `components/reports/AdminReportTabs.tsx`
+
+Единственное место, где рендерится переключатель типа отчёта для ADMIN — три вкладки "By
+worker"/"By site"/"By period" (`/admin/reports`, `/admin/reports/sites`, `/admin/reports/periods`),
+активная помечена `aria-current="page"`, остальные — ссылки. T8.1's страница и T8.2's
+`SiteTimeReportView` (только для `role="admin"`) переключены на этот компонент вместо двух
+независимых inline `<nav>` — поведение (текст, href, `aria-current`) не изменилось, только источник
+кода общий. FOREMAN (`SiteTimeReportView` c `role="foreman"`) по-прежнему рендерит `null` вместо
+этого компонента — ни одной admin-ссылки, ни одного лишнего URL.
+
+### AB. Route/filters — `/admin/reports/periods`
+
+`periodId`/`page`/`pageSize` — все три в URL query (не path param, в отличие от API route, который
+берёт `periodId` из пути; страница берёт его из query — тот же паттерн, что T8.1's `/admin/reports`
+уже использует для `employeeId`). `page` не является полем формы — только в pagination-ссылках,
+несущих текущие `periodId`+`pageSize` — смена period/pageSize через саму форму естественно уходит
+на URL без `page`, структурно сбрасывая на 1 (тот же приём, что T8.2B's §K уже устанавливает).
+`outcome`: `'prompt'` (ни periodId, ни page/pageSize не заданы вообще) → `'invalid'` (malformed
+periodId ЛИБО malformed page/pageSize — оба источника ошибок объединяются в один `fieldErrors`,
+тот же паттерн, что API route использует) → `getPeriodTimeReport()`'s собственный outcome
+(`PERIOD_NOT_FOUND`/`OK`). Reload/back/forward воспроизводят отчёт — URL единственный источник
+правды, Server Component без client state.
+
+### AC. Lookup
+
+`listPeriodOptions()` (`lib/attendance-overview-lookups.ts`, уже существует, переиспользован как
+есть — тот же bounded `take: 50` список, что T8.1/T8.2B уже используют). Никаких
+worker/site-специфичных lookup'ов на этой странице вообще — до выбора period ничего, кроме списка
+периодов, не загружается.
+
+### AD. `components/reports/PeriodTimeReportView.tsx`
+
+Презентационный компонент, получает `basePath`/`rawFilters`/`periodOptions`/`outcome` как props,
+ноль собственных DB/API вызовов. Рендерит: заголовок, `AdminReportTabs active="period"`, подсказку
+"Hours only — no salary or payroll calculation.", период (даты + `OPEN`/`LOCKED`/`EXPORTED` +
+`asOf`), company summary (все 15 полей `PeriodTimeReportSummary` дословно из задачи), timesheet
+status counts (5 меток), paginated `sites[]` (per-site все 11 полей `PeriodTimeReportSite`,
+`active`/`inactive` — текстовая метка, не только цвет), drill-down ссылка на `/admin/reports/sites?
+siteId=<id>&periodId=<periodId>` на каждой site-строке, пагинация (переиспользует `.exc-pagination`
+CSS и `buildOverviewQueryString`, тот же паттерн, что T8.2B уже устанавливает). Никакого
+пересчёта/суммирования чисел — только `formatWorkedDuration`/`timesheetStatusLabel` из уже
+существующего `lib/reporting/report-format.ts`.
+
+### AE. Cross-links
+
+`/admin/periods/[periodId]` получает третью ссылку "View full period report" →
+`/admin/reports/periods?periodId=<id>` (рядом с уже существующими "View a worker's..."/"View a
+site's..." из T8.1/T8.2B — обе не убираются, не меняются). Никакого CSV/PDF/export action на этой
+странице — то T8.4, вне scope.
+
+### AF. Security — DTO уже redaction-safe (T8.3A), UI ничего не добавляет
+
+`lib/period-time-report.ts`'s DTO (T8.3A) уже структурно не содержит employee name/number/id,
+phone/email/GPS/device identifiers/payload/hash/requestId/exception detail/correction reason/audit
+payload (T8_REPORTS_DESIGN.md Addendum "T8.3A" §Y) — UI-слой ничего нового не может утечь: рендерятся
+только поля, уже присутствующие в типизированном `PeriodTimeReport`. Blanket HTML/network scan —
+дополнительное доказательство, не единственная защита.

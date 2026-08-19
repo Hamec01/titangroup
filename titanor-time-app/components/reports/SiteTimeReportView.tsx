@@ -2,6 +2,7 @@ import Link from 'next/link';
 import type { SiteTimeReport } from '@/lib/site-time-report';
 import { formatWorkedDuration, timesheetStatusLabel, dataSourceLabel, submissionSourceLabel } from '@/lib/reporting/report-format';
 import { buildOverviewQueryString } from '@/lib/attendance-overview-ui';
+import { AdminReportTabs } from '@/components/reports/AdminReportTabs';
 
 // docs/titanor-time/T8_REPORTS_DESIGN.md Addendum "T8.2B" §J — the ONLY place the site time report
 // is rendered. app/admin/reports/sites/page.tsx and app/foreman/reports/sites/page.tsx are thin
@@ -112,19 +113,9 @@ export function SiteTimeReportView({ role, basePath, rawFilters, siteOptions, pe
 
 function ReportTypeTabs({ role }: { role: 'admin' | 'foreman' }) {
   if (role === 'foreman') {
-    return null; // FOREMAN has exactly one report type — no switcher to show.
+    return null; // FOREMAN has exactly one report type, zero admin URLs — no switcher to show.
   }
-  return (
-    <nav className="ov-legacy" aria-label="Report type">
-      <Link href="/admin/reports" className="wk-back-link">
-        By worker
-      </Link>
-      {' · '}
-      <Link href="/admin/reports/sites" className="wk-back-link" aria-current="page">
-        By site
-      </Link>
-    </nav>
-  );
+  return <AdminReportTabs active="site" />;
 }
 
 function ReportBody({ role, basePath, rawFilters, outcome }: { role: 'admin' | 'foreman'; basePath: string; rawFilters: RawSiteReportFilters; outcome: SiteReportOutcome }) {

@@ -1,6 +1,79 @@
 # Titanor Time — Implementation Status
 
-Обновлено: 2026-08-19 Europe/Helsinki (feat: add payroll period report API — T8.3A)
+Обновлено: 2026-08-19 Europe/Helsinki (feat: add payroll period report UI — T8.3B)
+
+**`[2026-08-19]` T8.3B Payroll Period Report UI — feat(time): add payroll period report UI.** UI
+поверх уже реализованного и не изменённого T8.3A backend — `/admin/reports/periods`
+(ADMIN/SUPER_ADMIN). Company summary, timesheet status counts, paginated site rows, drill-down в
+T8.2. Ноль зарплаты/ставок. Backend (`lib/period-time-report.ts`, API route,
+`lib/reporting/canonical-source.ts`, `lib/reporting/worked-time.ts`, T8.2's `lib/site-time-
+report.ts`/оба route, `prisma/`) **не менялся** — подтверждено `git diff` до и после (ноль
+изменений). Design — `docs/titanor-time/T8_REPORTS_DESIGN.md` Addendum "T8.3B" (§AA–AF), написан
+ДО кода.
+
+**Общий tab-компонент**: `components/reports/AdminReportTabs.tsx` — единственное место рендера
+переключателя "By worker"/"By site"/"By period" для ADMIN, активная вкладка помечена
+`aria-current="page"`. T8.1's `/admin/reports` и T8.2's `SiteTimeReportView` (только `role="admin"`)
+переключены на этот компонент вместо двух независимых inline `<nav>` — поведение (текст, href,
+`aria-current`) не изменилось, только источник общий; подтверждено полным прогоном их собственных
+regression (57/57, 80/80) после переключения. FOREMAN (`SiteTimeReportView` c `role="foreman"`)
+по-прежнему рендерит `null` — ноль admin-ссылок/URL.
+
+**Route/filters**: `/admin/reports/periods?periodId=&page=&pageSize=` — `periodId` в query (не path,
+как API route), тот же паттерн, что T8.1's `employeeId` уже использует. `page` не поле формы —
+только в pagination-ссылках; смена period/pageSize структурно сбрасывает на страницу 1 (без JS).
+`outcome`: `prompt` → `invalid` (malformed periodId ИЛИ malformed page/pageSize, оба источника
+объединены в один `fieldErrors`) → `PERIOD_NOT_FOUND`/`OK`. Reload/back/forward воспроизводят
+отчёт — URL единственный источник правды. Lookup — только `listPeriodOptions()` (уже существует,
+bounded), ноль worker/site-специфичных запросов до выбора period.
+
+**UI**: `components/reports/PeriodTimeReportView.tsx` — company summary (все 15 полей дословно),
+timesheet status counts (5 меток), paginated site rows (11 полей на строку, `active`/`Closed` —
+текстовая метка, не только цвет), drill-down `/admin/reports/sites?siteId=&periodId=` на каждой
+строке, пагинация (переиспользует `.exc-pagination`/`buildOverviewQueryString`, тот же паттерн, что
+T8.2B устанавливает). Ноль пересчёта чисел — только `formatWorkedDuration`/`timesheetStatusLabel`
+из уже существующего `lib/reporting/report-format.ts`. Cross-link: `/admin/periods/[periodId]`
+получил третью ссылку "View full period report" рядом с уже существующими T8.1/T8.2B-ссылками.
+
+**Browser-тесты — 89/89 проверок, 40/40 сценариев** (Chromium, production standalone build,
+`workers=1`): initial prompt, period selection, URL persistence, reload/back/forward, page
+reset/pagination-preserves-filters, company summary дословно из backend, status counts, multiple
+sites, multi-site worker не дублируется company-wide, site row totals, drill-down с обоими
+prefilled filters, active/inactive/zero-hour sites, empty period, workers-без-sites, without
+Timesheet/without site/excluded participant (через summary полей), invalid query, missing period,
+empty pagination page, OPEN/LOCKED/EXPORTED, cross-link из period detail, все три admin tabs с
+`aria-current` на T8.1/T8.2/T8.3, FOREMAN site report — ноль tabs/admin-ссылок, WORKER/FOREMAN
+denied, permission revocation блокирует следующий рендер, mobile 390×844 без overflow, desktop,
+keyboard/labels, forbidden-field scan (HTML+network), ноль console errors/error overlay, ноль
+client-side вызовов API route.
+
+**Найденное при тестировании (не backend defect)**: permission-revocation тест для ADMIN-страниц
+не может использовать паттерн T8.2B (dedicated custom role с ограниченным набором permissions) —
+`app/admin/layout.tsx` гейтит по буквальному имени роли `ADMIN`/`SUPER_ADMIN` ДО любой
+page-level permission-проверки, так что custom-роль без этого имени не доходит до страницы вообще.
+Тест переписан на отзыв одного гранта у реальной shared `ADMIN`-роли, запущен последним сценарием
+скрипта (после которого admin-токен для остальных проверок уже не нужен) — это архитектурное
+наблюдение о `/admin/*`, а не дефект.
+
+**Регрессия**: T8.3A own suite — 110/110; rounding-consistency — 105/105; T8.1 own suite — 57/57;
+T8.2A own suite — 80/80; T8.1 regression-UI smoke (overview/periods/workers/corrections/attendance
+policy) — 13/14 (один false negative — известный Playwright-таймингов артефакт из T8.2B-сессии,
+подтверждено прямым HTTP: реальный SSR-контент корректен). Query-count для 200-worker/20-site
+fixture — **12**, идентично исходному измерению T8.3A (backend byte-identical). GET создаёт ноль
+`AuditEvent`/мутаций (T8.3A's контракт не тронут).
+
+**Технические проверки**: `git diff --check`, `prisma validate` (schema не менялся — валиден),
+`tsc --noEmit` (0 ошибок), `npm run build` в изолированной чистой копии (все три admin report route
+в выводе), `docker compose config --quiet`, `docker compose build app` (успех; исходного локального
+тега `titanor-time-app:latest` не было — после проверки образ удалён), `prisma migrate deploy`
+дважды (57 migrations, второй — no-op). Preview `127.0.0.1:3244` — `200`/`200` до и после, не
+трогался, не использовался для тестов. Production (`titanor-time-app-1`) — `RestartCount=0`,
+`StartedAt` не менялся, `200`/`200`. Тяжёлые проверки выполнялись строго последовательно,
+disposable-ресурсы удалялись сразу после каждого шага.
+
+**T8.4 (CSV/PDF export) этим коммитом не начат.**
+
+---
 
 **`[2026-08-19]` T8.3A Company Payroll Period Report API — feat(time): add payroll period report
 API.** `GET /api/admin/reports/periods/:periodId?page=&pageSize=` — ADMIN/SUPER_ADMIN only,
