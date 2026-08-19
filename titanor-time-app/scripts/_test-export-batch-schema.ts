@@ -1,10 +1,16 @@
 import { randomUUID, randomBytes, createHash } from 'node:crypto';
 import { prisma } from '../lib/prisma';
 
-// docs/titanor-time/T8_REPORTS_DESIGN.md Addendum "T8.4A CSV Export Schema Foundation" — permanent
+// docs/titanor-time/T8_REPORTS_DESIGN.md Addendum "T8.4A CSV Export Schema Foundation" (+ its
+// "FOLLOW-UP — align ExportItem with canonical worked-time semantics" addendum) — permanent
 // regression for the schema-only slice: no API, no generation, no download. Every check here
 // exercises the actual DB constraints/triggers on disposable PostgreSQL 16, not application-level
 // validation (there is none yet — T8.4B).
+//
+// FOLLOW-UP checks are labelled "FU-n" (n matching that addendum's own 1-15 numbered scenario list)
+// to avoid colliding with this file's pre-existing 1-23 numbering from the original T8.4A task —
+// several FU items (1/2/12/13/15) are already fully exercised by the original numbered checks below
+// (1/2, 14b, 18-19, 4-5 respectively) and are only cross-referenced, not duplicated.
 
 let pass = 0;
 let fail = 0;
@@ -105,7 +111,7 @@ function goodItemFields(v: FixtureVersion, dateStr: string) {
     grossMinutes: 480,
     paidBreakMinutes: 30,
     unpaidBreakMinutes: 30,
-    workedMinutes: 420, // GREATEST(0, 480 - 30 - 30)
+    workedMinutes: 450, // canonical: gross - unpaid (480 - 30) — paid breaks stay inside worked time
     segmentCount: 1
   };
 }
@@ -163,7 +169,7 @@ async function main() {
     });
     const item = await prisma.exportItem.create({ data: { exportBatchId: batch.id, ...goodItemFields(v, '2090-01-02') } });
     check('3: ExportBatch round-trips through the Prisma client', batch.periodId === v.periodId && batch.format === 'CSV_V1' && batch.kind === 'FULL', batch);
-    check('3b: ExportItem round-trips through the Prisma client', item.exportBatchId === batch.id && item.workedMinutes === 420, item);
+    check('3b: ExportItem round-trips through the Prisma client', item.exportBatchId === batch.id && item.workedMinutes === 450, item);
     check('3c: period.status still OPEN (period-status gating is application-layer, not DB-enforced in T8.4A)', period.status === 'OPEN', period.status);
   }
 
@@ -341,26 +347,120 @@ async function main() {
     const v2 = await makeFixtureVersion('NegativeItem', 2097);
     const content2 = fakeCsvContent(['x']);
     const batch2 = await prisma.exportBatch.create({ data: { periodId: v2.periodId, format: 'CSV_V1', kind: 'FULL', createdByUserId: admin.id, fileName: 'x.csv', fileHash: sha256Hex(content2), fileSizeBytes: content2.byteLength, rowCount: 1, content: content2 } });
+    // unpaidBreakMinutes (not grossMinutes) made negative here, with grossMinutes left at
+    // goodItemFields' default 480: a negative value is trivially <= any non-negative gross, so
+    // ck_export_item_minute_bounds (FU-4) stays satisfied and this isolates
+    // ck_export_item_minutes_nonnegative specifically — negative grossMinutes itself would also
+    // (correctly) trip ck_export_item_minute_bounds first, since every other field would then
+    // exceed it, which would no longer isolate this specific constraint.
     await expectReject(
-      '14b: negative grossMinutes on an item is rejected',
-      () => prisma.exportItem.create({ data: { exportBatchId: batch2.id, ...goodItemFields(v2, '2097-01-02'), grossMinutes: -10 } }),
+      '14b: negative unpaidBreakMinutes on an item is rejected',
+      () => prisma.exportItem.create({ data: { exportBatchId: batch2.id, ...goodItemFields(v2, '2097-01-02'), unpaidBreakMinutes: -5 } }),
       'ck_export_item_minutes_nonnegative'
     );
   }
 
   // ===============================================================================================
-  // 15: wrong workedMinutes formula is rejected
+  // 15 (original numbering, now retired): the arithmetic-equality formula CHECK
+  // (ck_export_item_worked_minutes_formula) that scenario 15 used to test was REMOVED by the
+  // FOLLOW-UP corrective migration (20260819170000_fix_export_item_worked_minutes_bounds) — it was
+  // both semantically wrong (subtracted paid breaks, contradicting lib/reporting/worked-time.ts) and
+  // structurally impossible to hold in general after independent per-column rounding (see that
+  // migration's own header comment and the FU-3..FU-11 block below). Slot intentionally left empty
+  // rather than renumbering every later original-scheme check.
   // ===============================================================================================
+
+  // ===============================================================================================
+  // FOLLOW-UP — align ExportItem with canonical worked-time semantics
+  // (docs/titanor-time/T8_REPORTS_DESIGN.md Addendum "T8.4A FOLLOW-UP")
+  // ===============================================================================================
+
+  // FU-1/FU-2: clean migrate deploy + repeat (no pending) — the corrective migration's own artifact,
+  // same technique as scenarios 1/2 above.
   {
-    const v = await makeFixtureVersion('WrongFormula', 2098);
-    const content = fakeCsvContent(['x']);
-    const batch = await prisma.exportBatch.create({ data: { periodId: v.periodId, format: 'CSV_V1', kind: 'FULL', createdByUserId: admin.id, fileName: 'x.csv', fileHash: sha256Hex(content), fileSizeBytes: content.byteLength, rowCount: 1, content } });
+    const rows = await prisma.$queryRaw<{ migration_name: string; finished_at: Date | null; rolled_back_at: Date | null }[]>`
+      SELECT migration_name, finished_at, rolled_back_at FROM "_prisma_migrations"
+      WHERE migration_name = '20260819170000_fix_export_item_worked_minutes_bounds'
+    `;
+    check('FU-1: the corrective migration is recorded in _prisma_migrations', rows.length === 1, rows.length);
+    check('FU-2: the corrective migration finished cleanly with nothing rolled back', rows[0]?.finished_at != null && rows[0]?.rolled_back_at === null, rows[0]);
+  }
+
+  // FU-3/FU-4: the old arithmetic-equality CHECK is gone, the new bounds CHECK exists.
+  {
+    const cons = await prisma.$queryRaw<{ conname: string }[]>`
+      SELECT conname FROM pg_constraint WHERE conrelid = '"ExportItem"'::regclass AND contype = 'c'
+    `;
+    const names = new Set(cons.map((c) => c.conname));
+    check('FU-3: ck_export_item_worked_minutes_formula no longer exists', !names.has('ck_export_item_worked_minutes_formula'), [...names]);
+    check('FU-4: ck_export_item_minute_bounds exists', names.has('ck_export_item_minute_bounds'), [...names]);
+  }
+
+  // FU-5/FU-6/FU-7: canonical worked-time semantics (paid breaks stay INSIDE worked time) are
+  // accepted — none of these would have passed the old, removed arithmetic-equality CHECK.
+  {
+    const v5 = await makeFixtureVersion('FU5', 2100);
+    const batch5 = await prisma.exportBatch.create({ data: { periodId: v5.periodId, format: 'CSV_V1', kind: 'FULL', createdByUserId: admin.id, fileName: 'x.csv', fileHash: sha256Hex(fakeCsvContent(['x'])), fileSizeBytes: fakeCsvContent(['x']).byteLength, rowCount: 1, content: fakeCsvContent(['x']) } });
+    const item5 = await prisma.exportItem.create({ data: { exportBatchId: batch5.id, ...goodItemFields(v5, '2100-01-02'), grossMinutes: 60, paidBreakMinutes: 15, unpaidBreakMinutes: 0, workedMinutes: 60 } });
+    check('FU-5: gross=60,paid=15,unpaid=0,worked=60 (paid break stays inside worked time) is accepted', !!item5.id);
+
+    const v6 = await makeFixtureVersion('FU6', 2101);
+    const batch6 = await prisma.exportBatch.create({ data: { periodId: v6.periodId, format: 'CSV_V1', kind: 'FULL', createdByUserId: admin.id, fileName: 'x.csv', fileHash: sha256Hex(fakeCsvContent(['x'])), fileSizeBytes: fakeCsvContent(['x']).byteLength, rowCount: 1, content: fakeCsvContent(['x']) } });
+    const item6 = await prisma.exportItem.create({ data: { exportBatchId: batch6.id, ...goodItemFields(v6, '2101-01-02'), grossMinutes: 60, paidBreakMinutes: 0, unpaidBreakMinutes: 15, workedMinutes: 45 } });
+    check('FU-6: gross=60,paid=0,unpaid=15,worked=45 (gross - unpaid, no paid break) is accepted', !!item6.id);
+
+    const v7 = await makeFixtureVersion('FU7', 2102);
+    const batch7 = await prisma.exportBatch.create({ data: { periodId: v7.periodId, format: 'CSV_V1', kind: 'FULL', createdByUserId: admin.id, fileName: 'x.csv', fileHash: sha256Hex(fakeCsvContent(['x'])), fileSizeBytes: fakeCsvContent(['x']).byteLength, rowCount: 1, content: fakeCsvContent(['x']) } });
+    const item7 = await prisma.exportItem.create({ data: { exportBatchId: batch7.id, ...goodItemFields(v7, '2102-01-02'), grossMinutes: 60, paidBreakMinutes: 10, unpaidBreakMinutes: 15, workedMinutes: 45 } });
+    check('FU-7: gross=60,paid=10,unpaid=15,worked=45 (both break kinds present, paid ignored in worked) is accepted', !!item7.id);
+  }
+
+  // FU-8: adversarial independent rounding — grossMs=31000ms rounds to grossMinutes=1, but
+  // workedMs=2000ms (after subtracting unpaidBreakMs=29000ms) rounds to workedMinutes=0. This is
+  // exactly the counterexample that makes ANY arithmetic equality between the three rounded columns
+  // impossible in general (documented in the corrective migration's own header comment) — the new
+  // bounds CHECK (0 <= 1) must still accept it.
+  {
+    const v8 = await makeFixtureVersion('FU8', 2103);
+    const batch8 = await prisma.exportBatch.create({ data: { periodId: v8.periodId, format: 'CSV_V1', kind: 'FULL', createdByUserId: admin.id, fileName: 'x.csv', fileHash: sha256Hex(fakeCsvContent(['x'])), fileSizeBytes: fakeCsvContent(['x']).byteLength, rowCount: 1, content: fakeCsvContent(['x']) } });
+    const item8 = await prisma.exportItem.create({ data: { exportBatchId: batch8.id, ...goodItemFields(v8, '2103-01-02'), grossMinutes: 1, paidBreakMinutes: 0, unpaidBreakMinutes: 0, workedMinutes: 0 } });
+    check('FU-8: adversarial rounding gross=1,paid=0,unpaid=0,worked=0 is accepted', !!item8.id);
+  }
+
+  // FU-9/FU-10/FU-11: each of worked/paid/unpaid individually exceeding gross is rejected.
+  {
+    const v9 = await makeFixtureVersion('FU9', 2104);
+    const batch9 = await prisma.exportBatch.create({ data: { periodId: v9.periodId, format: 'CSV_V1', kind: 'FULL', createdByUserId: admin.id, fileName: 'x.csv', fileHash: sha256Hex(fakeCsvContent(['x'])), fileSizeBytes: fakeCsvContent(['x']).byteLength, rowCount: 1, content: fakeCsvContent(['x']) } });
     await expectReject(
-      '15: workedMinutes not equal to GREATEST(0, gross-paid-unpaid) is rejected',
-      () => prisma.exportItem.create({ data: { exportBatchId: batch.id, ...goodItemFields(v, '2098-01-02'), workedMinutes: 999 } }),
-      'ck_export_item_worked_minutes_formula'
+      'FU-9: workedMinutes > grossMinutes is rejected',
+      () => prisma.exportItem.create({ data: { exportBatchId: batch9.id, ...goodItemFields(v9, '2104-01-02'), grossMinutes: 60, paidBreakMinutes: 0, unpaidBreakMinutes: 0, workedMinutes: 61 } }),
+      'ck_export_item_minute_bounds'
+    );
+
+    const v10 = await makeFixtureVersion('FU10', 2105);
+    const batch10 = await prisma.exportBatch.create({ data: { periodId: v10.periodId, format: 'CSV_V1', kind: 'FULL', createdByUserId: admin.id, fileName: 'x.csv', fileHash: sha256Hex(fakeCsvContent(['x'])), fileSizeBytes: fakeCsvContent(['x']).byteLength, rowCount: 1, content: fakeCsvContent(['x']) } });
+    await expectReject(
+      'FU-10: paidBreakMinutes > grossMinutes is rejected',
+      () => prisma.exportItem.create({ data: { exportBatchId: batch10.id, ...goodItemFields(v10, '2105-01-02'), grossMinutes: 60, paidBreakMinutes: 61, unpaidBreakMinutes: 0, workedMinutes: 60 } }),
+      'ck_export_item_minute_bounds'
+    );
+
+    const v11 = await makeFixtureVersion('FU11', 2106);
+    const batch11 = await prisma.exportBatch.create({ data: { periodId: v11.periodId, format: 'CSV_V1', kind: 'FULL', createdByUserId: admin.id, fileName: 'x.csv', fileHash: sha256Hex(fakeCsvContent(['x'])), fileSizeBytes: fakeCsvContent(['x']).byteLength, rowCount: 1, content: fakeCsvContent(['x']) } });
+    await expectReject(
+      'FU-11: unpaidBreakMinutes > grossMinutes is rejected',
+      () => prisma.exportItem.create({ data: { exportBatchId: batch11.id, ...goodItemFields(v11, '2106-01-02'), grossMinutes: 60, paidBreakMinutes: 0, unpaidBreakMinutes: 61, workedMinutes: 0 } }),
+      'ck_export_item_minute_bounds'
     );
   }
+
+  // FU-12 (negative values still rejected): already exercised by scenario 14b above
+  // (ck_export_item_minutes_nonnegative, untouched by the corrective migration).
+  // FU-13 (ExportBatch/ExportItem still immutable): already exercised by scenarios 18/19 above.
+  // FU-15 (permissions unchanged): already exercised by scenarios 4/4b/5/5b above — the corrective
+  // migration is DDL-only on ExportItem, it does not touch Permission/RolePermission at all.
+  // FU-14 (dump/restore preserves the new constraint) is exercised as a separate procedure against a
+  // second disposable PostgreSQL instance, outside this script — see the session's own report.
 
   // ===============================================================================================
   // 16: duplicate daily item is rejected
@@ -455,10 +555,12 @@ async function main() {
     const fs = await import('node:fs');
     const migrationSql = fs.readFileSync(new URL('../../prisma/migrations/20260819150000_add_export_batch_schema/migration.sql', import.meta.url), 'utf8');
     const permissionSql = fs.readFileSync(new URL('../../prisma/migrations/20260819160000_seed_export_permissions/migration.sql', import.meta.url), 'utf8');
+    const followupSql = fs.readFileSync(new URL('../../prisma/migrations/20260819170000_fix_export_item_worked_minutes_bounds/migration.sql', import.meta.url), 'utf8');
     const forbidden = ['latitude', 'longitude', 'payloadHash', 'deviceInstallationId', 'deviceSequence', 'requestId', 'clientEventId'];
     for (const term of forbidden) {
       check(`23: forbidden term "${term}" absent from the schema migration`, !migrationSql.includes(term));
       check(`23b: forbidden term "${term}" absent from the permissions migration`, !permissionSql.includes(term));
+      check(`23c: forbidden term "${term}" absent from the follow-up corrective migration`, !followupSql.includes(term));
     }
   }
 

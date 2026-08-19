@@ -742,40 +742,58 @@ T8.1/T8.2/T8.3 уже вычисляют через `lib/reporting/worked-time.t
 округлённых `ExportItem`-строк, никогда не пересчитывать ms заново — тот же принцип, что
 T8.1–T8.3 уже устанавливают.
 
-### AI. **Обнаруженное расхождение — `ExportItem.workedMinutes`'s формула**
+### AI. `ExportItem.workedMinutes` — canonical worked-time semantics (исправлено `[2026-08-19]` FOLLOW-UP)
 
-Задача этого слайса явно требует CHECK-предикат:
-
-```
-workedMinutes = max(0, grossMinutes - paidBreakMinutes - unpaidBreakMinutes)
-```
-
-Это **отличается** от canonical worked-time формулы, которую `lib/reporting/worked-time.ts`
-(`computeSegmentMs`) и, транзитивно, T8.1/T8.2/T8.3's собственные `workedMinutes` поля используют
-на всём ЭТАПе 8 уже сейчас:
+**Текущее состояние (после FOLLOW-UP-миграции `20260819170000_fix_export_item_worked_minutes_bounds`)**:
+`ExportItem.workedMinutes` использует **ту же** canonical worked-time семантику, что и `lib/
+reporting/worked-time.ts` (`computeSegmentMs`) и, транзитивно, T8.1/T8.2/T8.3's собственные
+`workedMinutes`-поля:
 
 ```
 workedMs = grossMs - unpaidBreakMs   (paid break ОСТАЁТСЯ внутри workedMs, не вычитается)
 ```
 
-Это не опечатка и не то же самое число при отсутствии paid breaks (формулы совпадают, когда
-`paidBreakMinutes = 0`) — но расходятся, как только на bucket есть хотя бы один paid break.
-**Зафиксировано явно, не обойдено молча**, по прямому требованию STOP-GATE этого слайса:
+**CSV_V1, T8.1, T8.2 и T8.3 используют одну и ту же canonical worked-time семантику и обязаны
+давать одинаковые bucket totals** для одного и того же `(employeeId, siteId, date)` — это теперь
+явный, зафиксированный инвариант, не расхождение, которое T8.4B должен был бы воспроизводить
+отдельно.
 
-- CHECK-предикат в этой миграции реализован **дословно по формуле задачи**
-  (`GREATEST(0, gross - paid - unpaid)`) — это авторитетная спецификация для НОВОЙ колонки на
-  НОВОЙ таблице, у которой нет предыдущего прецедента; изменение canonical формулы в
-  `lib/reporting/worked-time.ts` **не производилось и не нужно** — тот модуль остаётся
-  единственным источником правды для T8.1/T8.2/T8.3, которые обязаны продолжать использовать
-  ИХ СОБСТВЕННУЮ (иную) формулу без изменений.
-- Это означает: когда T8.4B будет писать реальную generation-логику (заполнение `ExportItem` из
-  canonical source), она **не может** просто скопировать `workedMinutes` из T8.1/T8.2/T8.3's DTO
-  — она обязана вычислить `ExportItem.workedMinutes` по СВОЕЙ собственной формуле
-  (`gross - paid - unpaid`, не `gross - unpaid`), либо, если это окажется ошибкой спецификации,
-  явно вернуться к владельцу продукта за подтверждением перед тем, как писать T8.4B.
-- T8.4A (этот слайс) — только schema, ноль generation-кода, поэтому расхождение не проявляется в
-  реальных данных сейчас; оно зафиксировано здесь исключительно для того, чтобы T8.4B не
-  унаследовал его молча.
+**История (первая версия T8.4A, исправлена этим FOLLOW-UP'ом, сохранена здесь для
+прозрачности)**: исходная задача T8.4A по ошибке явно требовала другой CHECK-предикат —
+`workedMinutes = max(0, grossMinutes - paidBreakMinutes - unpaidBreakMinutes)` — который вычитал
+paid break из worked time, расходясь с canonical формулой на любом bucket с хотя бы одним paid
+break (пример: gross=60, paid=15, unpaid=0 → canonical worked=60, старая формула давала 45). Этот
+CHECK (`ck_export_item_worked_minutes_formula`, CK-43) был реализован дословно по тексту задачи в
+исходной миграции `20260819150000_add_export_batch_schema` и явно задокументирован здесь как
+"расхождение" с инструкцией для T8.4B вычислять `workedMinutes` по ЭТОЙ (неверной) формуле. Дальнейший
+review выявил, что сама эта формула была ошибкой спецификации, а не намеренным design-решением —
+FOLLOW-UP-задача её отменила.
+
+**Почему арифметическое равенство между этими тремя колонками невозможно в принципе (не только
+исходная формула была неверна)**: `grossMinutes`, `paidBreakMinutes`, `unpaidBreakMinutes` и
+`workedMinutes` каждый независимо округляется от своего собственного ms-значения на уровне ОДНОГО
+bucket (`msToMinutes = Math.round(ms / 60000)`), а не выводится из других уже округлённых колонок.
+Независимое округление не коммутирует с вычитанием. Контрпример: `grossMs=31000` (31с) →
+`grossMinutes=round(31000/60000)=1`; `unpaidBreakMs=29000` (29с) → `unpaidBreakMinutes=round(29000/
+60000)=0`; `workedMs=2000` (2с) → `workedMinutes=round(2000/60000)=0`. Но `grossMinutes -
+unpaidBreakMinutes = 1 - 0 = 1 ≠ 0`. Значит, никакой CHECK, выражающий точное арифметическое
+равенство между уже округлёнными целочисленными колонками, не может держаться в общем случае — даже
+формула `workedMinutes = grossMinutes - unpaidBreakMinutes` (без paid-члена) не является валидным DB-
+инвариантом.
+
+**Замена**: `ck_export_item_worked_minutes_formula` (CK-43) — **удалён**. Новый CHECK
+`ck_export_item_minute_bounds` (CK-44) — слабее, но верен всегда независимо от округления:
+`workedMinutes <= grossMinutes AND paidBreakMinutes <= grossMinutes AND unpaidBreakMinutes <=
+grossMinutes`. Существующий `ck_export_item_minutes_nonnegative` не тронут.
+
+**Что это означает для T8.4B**: `ExportItem.workedMinutes` должен буквально содержать canonical
+daily-bucket `workedMinutes`, вычисленный так же, как T8.1/T8.2/T8.3 уже это делают —
+`computeSegmentMs()` → суммирование внутри `(employeeId, siteId, date)` → `msToMinutes(workedMs)`.
+T8.4B **обязан переиспользовать** этот путь (например, через `lib/reporting/canonical-source.ts` +
+`lib/reporting/worked-time.ts`), а не вычислять `ExportItem.workedMinutes` какой-то отдельной,
+собственной формулой — предыдущая версия этого документа ошибочно требовала обратное, эта
+инструкция удалена. Paid break учитывается на строке отдельно (`paidBreakMinutes`) для отчётности,
+но никогда не вычитается из worked time — ни здесь, ни где-либо ещё на ЭТАПе 8.
 
 ### AJ. FULL/CORRECTION semantics
 
@@ -833,3 +851,18 @@ FN-25 (`EXPORT_BATCH_CORRECTION_PREDECESSOR_NOT_FOUND`), а не CK-37/CK-38 —
 всегда отклоняется, различается только то, какой identifier наблюдает вызывающий код;
 задокументировано подробно в `05_RAW_SQL_REGISTER.md` §12 (CK-37/CK-38 entries). T8.4B (генерация/
 API/download) и T8.4C (admin UI) этим коммитом не начаты.
+
+### AN. FOLLOW-UP — canonical worked-time semantics, статус `[2026-08-19]` завершено
+
+Исправлен ошибочный DB-инвариант из §AI (см. исправленный текст §AI выше — историческая версия
+сохранена там же для прозрачности, не удалена молча). Corrective migration
+`20260819170000_fix_export_item_worked_minutes_bounds` — additive, не редактирует уже закоммиченную
+`20260819150000_add_export_batch_schema`. `ck_export_item_worked_minutes_formula` (CK-43) удалён;
+`ck_export_item_minute_bounds` (CK-44) добавлен. `scripts/_test-export-batch-schema.ts` расширен —
+68 проверок (было 51), включая 15 FOLLOW-UP-сценариев (FU-1..FU-15, из них FU-1/2/12/13/15
+переиспользуют уже существующие проверки 1/2/14b/18-19/4-5 вместо дублирования), 100% pass на
+disposable PostgreSQL 16, включая повторный dump/restore на отдельном одноразовом экземпляре
+(новый constraint подтверждён переживающим restore). Полная регрессия
+rounding-consistency (105/105) и T8.3A period-time-report (110/110) — без изменений. `lib/
+reporting/worked-time.ts`, T8.1/T8.2/T8.3 services/DTO/API, колонки `ExportBatch`/`ExportItem`,
+permissions и старые миграции — не тронуты. T8.4B/T8.4C по-прежнему не начаты.

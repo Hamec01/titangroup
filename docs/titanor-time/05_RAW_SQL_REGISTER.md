@@ -1468,8 +1468,11 @@ New PostgreSQL extensions: 0
 
 ```text
 Status: ACTIVE
-Scope: prisma/migrations/20260819150000_add_export_batch_schema
-Authority: docs/titanor-time/T8_REPORTS_DESIGN.md Addendum "T8.4A" (2026-08-19)
+Scope: prisma/migrations/20260819150000_add_export_batch_schema,
+       prisma/migrations/20260819170000_fix_export_item_worked_minutes_bounds (FOLLOW-UP, additive
+       corrective migration — does not edit the first one)
+Authority: docs/titanor-time/T8_REPORTS_DESIGN.md Addendum "T8.4A" (2026-08-19) and its
+           "FOLLOW-UP — align ExportItem with canonical worked-time semantics" addendum (2026-08-19)
 Prisma version: 6.19.0
 PostgreSQL target: 16
 ```
@@ -1493,7 +1496,22 @@ on `kind = 'CORRECTION'`. CK-38 has no shape it is ever the true failure reason 
 exposed INSERT-only interface — it remains a defense-in-depth backstop against a future change to
 FN-25's own logic, not a currently-reachable guard in its own right.
 
-### 12.1 CHECK constraint register (CK-37 .. CK-43)
+**FOLLOW-UP correction (2026-08-19)**: CK-43 (`ck_export_item_worked_minutes_formula`) as originally
+specified was wrong on two independent counts and was **removed** by the additive corrective
+migration `20260819170000_fix_export_item_worked_minutes_bounds` — see its own header comment and
+`T8_REPORTS_DESIGN.md` Addendum "T8.4A FOLLOW-UP" for the full writeup. Summary: (1) it subtracted
+`paidBreakMinutes` from worked time, contradicting the canonical `lib/reporting/worked-time.ts`
+formula (`workedMs = grossMs - unpaidBreakMs`, paid breaks stay inside worked time) that T8.1/T8.2/
+T8.3 already use; (2) even the corrected formula without the paid term is not expressible as a valid
+CHECK, because `grossMinutes`/`paidBreakMinutes`/`unpaidBreakMinutes`/`workedMinutes` are each
+independently rounded from their own millisecond value at the same bucket — independent rounding
+does not commute with subtraction (counterexample: `grossMs=31000→grossMinutes=1`,
+`unpaidBreakMs=29000→unpaidBreakMinutes=0`, `workedMs=2000→workedMinutes=0`, yet `1-0≠0`). Replaced
+by CK-44 (`ck_export_item_minute_bounds`, below) — a bound that holds regardless of independent
+rounding. CK-43's own entry is kept below, marked REMOVED, per this register's convention of never
+silently erasing a historical entry's identifier.
+
+### 12.1 CHECK constraint register (CK-37 .. CK-44)
 
 ### CK-37 `ck_export_batch_kind_correction_shape`
 
@@ -1553,17 +1571,40 @@ FN-25's own logic, not a currently-reachable guard in its own right.
 - Documentation synchronization: SYNCED.
 - Minimum negative test: `grossMinutes = -10` — expect `23514`.
 
-### CK-43 `ck_export_item_worked_minutes_formula`
+### CK-43 `ck_export_item_worked_minutes_formula` — **REMOVED `[2026-08-19]` FOLLOW-UP**
 
 - Table: `ExportItem`
-- Predicate: `"workedMinutes" = GREATEST(0, "grossMinutes" - "paidBreakMinutes" - "unpaidBreakMinutes")`
-- Source: task invariant #11. **Deliberately differs from `lib/reporting/worked-time.ts`'s
-  `workedMs = grossMs - unpaidBreakMs`** (paid breaks stay inside worked time there) — see
-  `T8_REPORTS_DESIGN.md` Addendum "T8.4A" §AI for the full discrepancy writeup. `lib/reporting/
-  worked-time.ts` and T8.1/T8.2/T8.3 are unchanged; a future T8.4B generation step must compute this
-  column with its own formula, not copy T8.1/T8.2/T8.3's `workedMinutes` verbatim.
+- Predicate (as originally specified, no longer in the schema): `"workedMinutes" = GREATEST(0,
+  "grossMinutes" - "paidBreakMinutes" - "unpaidBreakMinutes")`
+- Added by: `20260819150000_add_export_batch_schema`. Removed by:
+  `20260819170000_fix_export_item_worked_minutes_bounds` (`ALTER TABLE "ExportItem" DROP CONSTRAINT
+  "ck_export_item_worked_minutes_formula"`).
+- Source: task invariant #11 of the original T8.4A task spec — this formula turned out to be an
+  error in that spec, not a deliberate design decision; see the FOLLOW-UP note above and
+  `T8_REPORTS_DESIGN.md` Addendum "T8.4A FOLLOW-UP" for the full writeup (wrong semantics —
+  subtracted paid breaks — AND not expressible as an arithmetic equality after independent
+  per-column rounding).
+- Documentation synchronization: SYNCED (this entry itself now documents the removal).
+- Historical minimum negative test (while it existed): an item with `workedMinutes` not equal to the
+  formula's result — expected `23514`. No longer applicable — replaced by CK-44 below.
+
+### CK-44 `ck_export_item_minute_bounds` — added `[2026-08-19]` FOLLOW-UP
+
+- Table: `ExportItem`
+- Predicate: `"workedMinutes" <= "grossMinutes" AND "paidBreakMinutes" <= "grossMinutes" AND
+  "unpaidBreakMinutes" <= "grossMinutes"`
+- Source: `T8_REPORTS_DESIGN.md` Addendum "T8.4A FOLLOW-UP". Replaces CK-43 — a bound that holds
+  regardless of independent per-column rounding, unlike an arithmetic equality between the three
+  minute columns. `ExportItem.workedMinutes` now uses the same canonical semantics as `lib/
+  reporting/worked-time.ts` and T8.1/T8.2/T8.3 (`workedMs = grossMs - unpaidBreakMs`, paid breaks
+  stay inside worked time) — no formula divergence remains for T8.4B to reproduce.
 - Documentation synchronization: SYNCED.
-- Minimum negative test: an item with `workedMinutes` not equal to the formula's result — expect `23514`.
+- Minimum negative test: three independent cases, one per column — `workedMinutes > grossMinutes`,
+  `paidBreakMinutes > grossMinutes`, `unpaidBreakMinutes > grossMinutes` — each expects `23514`.
+  Positive: `gross=60,paid=15,unpaid=0,worked=60` (paid break inside worked time); `gross=60,paid=0,
+  unpaid=15,worked=45`; `gross=60,paid=10,unpaid=15,worked=45`; adversarial-rounding
+  `gross=1,paid=0,unpaid=0,worked=0` — all four accepted (`scripts/_test-export-batch-schema.ts`
+  FU-5..FU-8).
 
 ### 12.2 Partial unique index register (UX-04)
 
@@ -1651,16 +1692,17 @@ verification), each exercised by at least one positive and one negative runtime 
 ### 12.6 Test register (T8.4A obligations — executed, not merely specified)
 
 Every object in this section (§12.1–§12.5) has been exercised on a disposable PostgreSQL 16 instance
-via `scripts/_test-export-batch-schema.ts` (51 checks covering the task's 23 numbered scenarios,
-100% pass) plus a separate dump/restore round trip on a second disposable PostgreSQL 16 instance
-(scenario 21 — row counts, `md5(content)`, `fileHash`, `fileSizeBytes` all identical before/after,
-and `trg_export_batch_immutable` still rejects an `UPDATE` on the restored database). The full
-existing T8 report regression suite (`_test-report-rounding-consistency.ts` 105/105,
-`_test-period-time-report.ts` 110/110, `_test-activation.ts`, `_test-corrections.ts`) was re-run
-unchanged against a database carrying this migration and passes identically to its pre-T8.4A
-baseline.
+via `scripts/_test-export-batch-schema.ts` (68 checks — the original 51 covering the task's 23
+numbered scenarios, plus 15 FOLLOW-UP FU-scenarios added `[2026-08-19]`, 100% pass) plus a dump/
+restore round trip on a second disposable PostgreSQL 16 instance, run once for the original T8.4A
+migration and again after the FOLLOW-UP corrective migration (row counts, `md5(content)`,
+`fileHash`, `fileSizeBytes` all identical before/after both times; `trg_export_batch_immutable`
+still rejects an `UPDATE`, and `ck_export_item_minute_bounds` still rejects a bounds violation, on
+the restored database). The full existing T8 report regression suite
+(`_test-report-rounding-consistency.ts` 105/105, `_test-period-time-report.ts` 110/110) was re-run
+against a database carrying both migrations and passes identically to the pre-T8.4A baseline.
 
-### 12.7 Arithmetic assertions (T8.4A additions only)
+### 12.7 Arithmetic assertions (T8.4A + FOLLOW-UP additions only)
 
 ```text
 T8.4A CSV EXPORT SCHEMA FOUNDATION RAW-SQL TOTALS (additive to Sections 1–11 totals)
@@ -1668,7 +1710,9 @@ New tables: 2 (ExportBatch, ExportItem)
 New enums: 2 (ExportFormat, ExportBatchKind)
 New columns on pre-T8.4A models: 0 (five back-relation fields added — Prisma-side only, no new
   columns on any pre-existing table)
-CHECK constraints: 7 (CK-37..CK-43)
+CHECK constraints, currently active: 7 (CK-37..CK-42, CK-44) — CK-43 added then REMOVED by the
+  FOLLOW-UP corrective migration (20260819170000), see its entry above; net count unchanged (7),
+  identifier CK-43 retired rather than reused
 Partial/expression unique indexes: 1 (UX-04)
 Composite foreign keys: 1 (FK-17)
 Plain (non-composite) foreign keys: 6 (ExportBatch.periodId/createdByUserId/correctsBatchId,

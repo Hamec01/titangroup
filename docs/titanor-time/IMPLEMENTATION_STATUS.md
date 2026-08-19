@@ -1,6 +1,60 @@
 # Titanor Time — Implementation Status
 
-Обновлено: 2026-08-19 Europe/Helsinki (feat: add CSV export schema foundation — T8.4A)
+Обновлено: 2026-08-19 Europe/Helsinki (fix: align export worked-time semantics — T8.4A FOLLOW-UP)
+
+**`[2026-08-19]` T8.4A FOLLOW-UP — fix(time): align export worked-time semantics.** Исправлен
+ошибочный DB-инвариант `ExportItem.workedMinutes` из T8.4A (см. запись ниже) до начала T8.4B. Root
+cause: исходный CHECK `ck_export_item_worked_minutes_formula` вычитал `paidBreakMinutes` из worked
+time — расходится с canonical `lib/reporting/worked-time.ts` (`workedMs = grossMs - unpaidBreakMs`,
+paid break остаётся внутри), которую T8.1/T8.2/T8.3 уже используют (пример: gross=60, paid=15,
+unpaid=0 → canonical worked=60, старая формула давала 45). Хуже: даже формула без paid-члена
+(`workedMinutes = grossMinutes - unpaidBreakMinutes`) не является валидным DB-инвариантом, т.к.
+`grossMinutes`/`unpaidBreakMinutes`/`workedMinutes` каждый независимо округляется от своего ms-
+значения — независимое округление не коммутирует с вычитанием (contrived: grossMs=31000с→
+grossMinutes=1, unpaidBreakMs=29000с→unpaidBreakMinutes=0, workedMs=2000с→workedMinutes=0, но
+1-0≠0). Ни один арифметический CHECK между тремя уже округлёнными колонками не может держаться в
+общем случае.
+
+**Исправление** — additive corrective migration `20260819170000_fix_export_item_worked_minutes_
+bounds` (НЕ редактирует уже закоммиченную `20260819150000_add_export_batch_schema`): удалён
+`ck_export_item_worked_minutes_formula` (CK-43, помечен REMOVED в реестре, не стёрт), добавлен
+новый безопасный CHECK `ck_export_item_minute_bounds` (CK-44) — `workedMinutes <= grossMinutes AND
+paidBreakMinutes <= grossMinutes AND unpaidBreakMinutes <= grossMinutes`. Верен всегда независимо
+от округления, в отличие от точного равенства. `ck_export_item_minutes_nonnegative` не тронут.
+**T8.4B теперь обязан хранить в `ExportItem.workedMinutes` буквально canonical daily-bucket
+workedMinutes** (`computeSegmentMs()` → сумма внутри `(employeeId, siteId, date)` →
+`msToMinutes(workedMs)`), тот же путь, что T8.1/T8.2/T8.3 уже используют — никакой отдельной
+формулы `gross-paid-unpaid` больше не требуется и не задокументировано. Paid break учитывается на
+строке отдельно для отчётности, но никогда не вычитается из worked time. Design —
+`docs/titanor-time/T8_REPORTS_DESIGN.md` Addendum "T8.4A FOLLOW-UP" (правит §AI, добавляет §AN).
+
+**Тесты**: `scripts/_test-export-batch-schema.ts` расширен с 51 до **68 проверок** — 15 новых
+FOLLOW-UP-сценариев (FU-1..FU-15; FU-1/2/12/13/15 переиспользуют уже существующие проверки
+1/2/14b/18-19/4-5, не дублируют их): clean/repeat migrate deploy для новой миграции, старый CHECK
+отсутствует, новый существует, `gross=60,paid=15,unpaid=0,worked=60` / `gross=60,paid=0,unpaid=15,
+worked=45` / `gross=60,paid=10,unpaid=15,worked=45` принимаются, adversarial rounding
+`gross=1,paid=0,unpaid=0,worked=0` принимается, worked/paid/unpaid каждый > gross отклоняется
+индивидуально. 100% pass, disposable PostgreSQL 16. Dump/restore на отдельном одноразовом
+PostgreSQL повторён — новый constraint переживает restore (row counts 9/15 идентичны, bounds-
+violating INSERT после restore всё равно отклонён).
+
+**Регрессия**: `_test-report-rounding-consistency.ts` — 105/105; `_test-period-time-report.ts` —
+110/110 (оба без изменений). Отдельных `_test-worker-time-report.ts`/`_test-site-time-report.ts` в
+кодовой базе всё ещё нет — покрыты через rounding-consistency.
+
+**Технические проверки**: `git diff --check`, `prisma validate`, `prisma generate` (тот же
+известный побочный эффект на корневом `package.json` — обнаружен и откачен), `tsc --noEmit` (0
+ошибок), `npm run build` в изолированной scratch-копии (успех, весь app компилируется), `docker
+compose config --quiet`, `docker compose build app` (тега `:latest` не было — после проверки образ
+удалён), `prisma migrate deploy` дважды на заведомо чистом одноразовом PostgreSQL 16 (60 migrations,
+второй — no-op). Preview `127.0.0.1:3244` — `200`/`200` до и после, не трогался. Production
+(`titanor-time-app-1`/`db-1`) — `RestartCount=0`, `StartedAt` не менялся, до и после.
+
+**Не менялись**: `lib/reporting/worked-time.ts`, T8.1/T8.2/T8.3 services/DTO/API, колонки
+`ExportBatch`/`ExportItem`, permissions, старые миграции. **T8.4B/T8.4C этим коммитом по-прежнему
+не начаты.**
+
+---
 
 **`[2026-08-19]` T8.4A CSV Export Schema Foundation — feat(time): add CSV export schema
 foundation.** Только схема + permissions, **ноль** генерации CSV, export/download API, admin UI,
@@ -26,11 +80,11 @@ snapshot-поля (`employeeNumberSnapshot`/`employeeNameSnapshot`/`siteNameSnap
 `trg_export_item_immutable` — безусловный запрет UPDATE/DELETE, тот же паттерн что
 `fn_audit_event_immutable`) и 1 correction-chain-триггер (`trg_export_batch_correction_chain_check`,
 BEFORE INSERT — предшественник существует, тот же period, без циклов). Полный реестр —
-`docs/titanor-time/05_RAW_SQL_REGISTER.md` §12. **Задокументированное расхождение формул**:
-`ExportItem.workedMinutes` CHECK требует `GREATEST(0, gross-paid-unpaid)` — это НЕ формула
-`lib/reporting/worked-time.ts` (`grossMs - unpaidBreakMs`, paid остаётся внутри worked там).
-`lib/reporting/worked-time.ts` и T8.1/T8.2/T8.3 не менялись; T8.4B должен считать эту колонку своей
-собственной формулой, не копировать T8.1/T8.2/T8.3's `workedMinutes`. Period-status gating (FULL
+`docs/titanor-time/05_RAW_SQL_REGISTER.md` §12. **`[2026-08-19]` ИСПРАВЛЕНО FOLLOW-UP'ом (см. запись
+выше)**: `ExportItem.workedMinutes` CHECK изначально требовал `GREATEST(0, gross-paid-unpaid)` — это
+было ошибкой спецификации, не намеренным расхождением с `lib/reporting/worked-time.ts`. Исправлено
+до начала T8.4B; `ExportItem.workedMinutes` теперь использует ту же canonical семантику, что T8.1/
+T8.2/T8.3 (`grossMs - unpaidBreakMs`, paid остаётся внутри worked). Period-status gating (FULL
 только для LOCKED, CORRECTION только для EXPORTED+APPROVED CorrectionRequest.pendingExport=true)
 задокументирован, но не enforced на уровне constraint/trigger в этом слайсе (требует чтения
 мутабельной колонки другой таблицы — сервисная логика T8.4B).

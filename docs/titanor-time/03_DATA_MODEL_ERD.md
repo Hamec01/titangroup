@@ -1717,10 +1717,18 @@ from it in two load-bearing ways):
   batch per period (partial unique index); both tables are immutable (`UPDATE`/`DELETE` unconditionally
   rejected by trigger) exactly as originally proposed.
 
-`ExportItem.workedMinutes` uses `GREATEST(0, grossMinutes - paidBreakMinutes - unpaidBreakMinutes)`
-— **deliberately not** the same formula as `lib/reporting/worked-time.ts` (`grossMs - unpaidBreakMs`,
-paid breaks stay inside worked time there). See the design doc addendum for the full writeup; a
-future T8.4B generation step must compute this column with its own formula, not copy T8.1–T8.3's.
+**`[2026-08-19]` FOLLOW-UP correction**: `ExportItem.workedMinutes` originally required
+`GREATEST(0, grossMinutes - paidBreakMinutes - unpaidBreakMinutes)` via `ck_export_item_worked_
+minutes_formula` (CK-43) — that was a specification error (it subtracted paid breaks, and was not
+even expressible as a valid CHECK once you account for each minute column being independently
+rounded from its own millisecond value at the bucket level). The additive corrective migration
+`20260819170000_fix_export_item_worked_minutes_bounds` removed CK-43 and added CK-44
+(`ck_export_item_minute_bounds`: `workedMinutes/paidBreakMinutes/unpaidBreakMinutes <= grossMinutes`,
+a bound that holds regardless of rounding). `ExportItem.workedMinutes` now uses the **same** canonical
+semantics as `lib/reporting/worked-time.ts` (`grossMs - unpaidBreakMs`, paid breaks stay inside
+worked time) and T8.1–T8.3 — no separate formula for T8.4B to reproduce. See `T8_REPORTS_DESIGN.md`
+Addendum "T8.4A FOLLOW-UP" and `05_RAW_SQL_REGISTER.md` §12 (CK-43 marked REMOVED, CK-44 added) for
+the full writeup.
 
 ### 4.9 Attendance Clock (T7A) — schema, geofence admin, online clock and materialization implemented
 

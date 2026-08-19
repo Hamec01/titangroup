@@ -1448,9 +1448,12 @@ model ExportBatch {
   @@index([correctsBatchId])
 }
 
-// One row per canonical (employeeId, siteId, date) bucket included in a batch — see Addendum
-// "T8.4A" §AH/§AI for the bucket/formula notes (workedMinutes here deliberately uses a different
-// formula than T8.1/T8.2/T8.3's own workedMinutes — documented, not a copy-paste target).
+// One row per canonical (employeeId, siteId, date) bucket included in a batch. workedMinutes uses
+// the SAME canonical worked-time semantics as T8.1/T8.2/T8.3 (lib/reporting/worked-time.ts —
+// workedMs = grossMs - unpaidBreakMs, paid breaks stay inside worked time) — see Addendum "T8.4A
+// FOLLOW-UP" for why an EARLIER version of this migration briefly required a different, incorrect
+// formula and why no arithmetic CHECK between the three already-independently-rounded minute
+// columns is possible at all (see ck_export_item_minute_bounds instead, 05_RAW_SQL_REGISTER.md §12).
 // UPDATE/DELETE are physically banned by trg_export_item_immutable (raw SQL, see migration).
 model ExportItem {
   id                     String           @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
