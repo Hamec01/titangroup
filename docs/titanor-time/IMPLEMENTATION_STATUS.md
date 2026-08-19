@@ -1,6 +1,88 @@
 # Titanor Time — Implementation Status
 
-Обновлено: 2026-08-19 Europe/Helsinki (feat: add immutable CSV export backend — T8.4B)
+Обновлено: 2026-08-19 Europe/Helsinki (fix: align correction export eligibility — T8.4B FOLLOW-UP)
+
+**`[2026-08-19]` T8.4B FOLLOW-UP — fix(time): align correction export eligibility.** Устранён
+невозможный вечный state: `CorrectionRequest.pendingExport=true` при
+`PayrollPeriodParticipant.expected=false`. Корректировка исключённого участника структурно никогда
+не входит ни в FULL, ни в CORRECTION population (`T8_REPORTS_DESIGN.md` §BA) — таким образом её
+`pendingExport` не мог быть очищен НИКАКИМ будущим export'ом ни разу; это не "correction намеренно
+исключена из экспорта" (как `expected=false` означает везде в T8.1-T8.3), а сломанный, вводящий в
+заблуждение флаг.
+
+**Root cause**: `lib/corrections.ts::decideCorrection` ставил `pendingExport = (period.status ===
+'EXPORTED')` — единственное условие, без учёта `PayrollPeriodParticipant.expected`.
+
+**Исправленная формула**:
+
+```
+pendingExport =
+  period.status === 'EXPORTED'
+  AND PayrollPeriodParticipant.expected === true
+```
+
+Читается внутри уже существующей authoritative FOR-UPDATE-locked транзакции (`participant: {
+select: { expected: true } }` добавлено к уже читаемому `timesheet`-select) — не отдельным unlocked
+pre-read. Ни `TimesheetVersion`, ни `currentVersionId`-switch, ни `ClockShiftAdjustment`, ни
+`AuditEvent`, ни export population (по-прежнему строго `expected=true`) не менялись.
+
+**DB enforcement**: additive corrective migration
+`20260819190000_fix_correction_pending_export_excluded_participant` (62 migrations всего, не
+редактирует `20260819180000` или любую другую старую миграцию) расширяет **тот же**
+`fn_correction_request_covered_batch_check`/`trg_correction_request_covered_batch_check` (FN-26/
+TRG-31, не новый trigger) новой веткой: `NEW.pendingExport=true` теперь cross-table-проверяется на
+`PayrollPeriod.status=EXPORTED` **и** `PayrollPeriodParticipant.expected=true` через
+`Timesheet`. Все прежние ветки (`coveredByExportBatchId` immutability/kind/period-match) сохранены
+без изменений. Новые стабильные identifiers: `CORRECTION_REQUEST_PENDING_EXPORT_PERIOD_NOT_EXPORTED`,
+`CORRECTION_REQUEST_PENDING_EXPORT_PARTICIPANT_EXCLUDED`,
+`CORRECTION_REQUEST_PENDING_EXPORT_PARTICIPANT_NOT_FOUND` (defense-in-depth, структурно недостижимо),
+`CORRECTION_REQUEST_PENDING_EXPORT_TIMESHEET_NOT_FOUND` (defense-in-depth). Существующий CK-45
+(`ck_correction_request_pending_export_shape`) не менялся — same-row условия (`status=APPROVED`,
+`resultingVersionId IS NOT NULL`, `coveredByExportBatchId IS NULL`) остаются его зоной
+ответственности, не продублированы в триггере. Регистрация — `05_RAW_SQL_REGISTER.md` §13 (FN-26
+запись расширена, историческая версия видна там же, не стёрта).
+
+**Legacy repair**: та же миграция атомарно приводит любые уже существующие `pendingExport=true`
+строки с отсутствующим/`expected=false` участником к `pendingExport=false,
+coveredByExportBatchId=NULL` — количество затронутых строк посчитано и залогировано через `RAISE
+NOTICE` (только integer, без PII) до repair; production/preview БД миграции T8.4B вообще не
+получали (по собственному STOP-GATE того слайса — только disposable-тестирование), поэтому там нет
+ни одной строки этой формы в принципе — корректность самого repair-запроса доказана отдельно, на
+вручную сконструированной legacy-фикстуре (`scripts/_test-csv-export.ts` G8).
+
+**Тесты**: `scripts/_test-csv-export.ts` расширен с 171 до **201/201** — новая секция G (12
+сценариев задачи): expected participant unchanged behavior (G1/G7/G9), excluded participant
+pendingExport=false+uncovered (G2), excluded-only pending -> `409 NOTHING_TO_EXPORT` (G3), excluded
+correction не блокирует expected correction в том же export (G4), прямые SQL negative тесты на новую
+trigger-ветку (G5 excluded, G6 period-not-exported, оба изолированы друг от друга отдельными
+фикстурами), migration repair query против вручную сконструированной legacy-строки (G8 — trigger
+временно `DISABLE`/`ENABLE`, чтобы создать состояние, которое приложение больше не может произвести
+само), approval-vs-export race для expected participant не сломан (G9), excluded participant
+approval не создаёт ExportBatch/ExportItem (G10), старые coveredByExportBatchId
+triggers (immutability/kind/period-mismatch) всё ещё работают после расширения FN-26 (G11),
+`AuditEvent(CORRECTION_APPROVED)` не содержит pendingExport/export/PII полей (G12). 100% pass на
+disposable PostgreSQL 16.
+
+**Регрессия**: `_test-export-batch-schema.ts` — 68/68; `_test-report-rounding-consistency.ts` —
+105/105; `_test-period-time-report.ts` — 110/110 (изолированный fresh DB, то же уже известное
+свойство этого скрипта); `_test-corrections.ts` (fixture/schema smoke) — без ошибок.
+`_test-csv-export-querycount.ts` (не входит в обязательный список задачи, прогнан дополнительно) —
+без изменений (15 SQL statements 1/50/200 workers, не тронуто этим слайсом).
+
+**Технические проверки**: `git diff --check` — чисто; `prisma validate` — валиден; `prisma generate`
+(тот же известный побочный эффект на несвязанных `package.json`/`next-env.d.ts` — обнаружен и
+откачен); `tsc --noEmit` — 0 ошибок; `npm run build` в изолированной scratch-копии — успех; `prisma
+migrate deploy` дважды на заведомо чистом одноразовом PostgreSQL 16 (62 migrations, второй — no-op).
+Preview `127.0.0.1:3244` — не трогался (уже известное свойство инсталляции — процесс не переживает
+между репликами, см. roadmap-заметку); production не трогался (только read-only inspect).
+
+**Не менялись**: export population/CSV generation (`lib/csv-export.ts` — ноль diff, его собственная
+`employeeId: {in: expectedEmployeeIds}` scoping в eligibility-запросе теперь доказуемо избыточна
+поверх нового DB-инварианта, но оставлена нетронутой per scope задачи), canonical bucket helper,
+CSV_V1 byte contract, API contracts, permissions/RolePermission, все старые миграции.
+**T8.4C (admin UI) этим коммитом по-прежнему не реализован.**
+
+---
 
 **`[2026-08-19]` T8.4B — feat(time): add immutable CSV export backend.** Полная генерация CSV_V1,
 FULL/CORRECTION export batching, 4 API-эндпоинта, download — поверх уже реализованного T8.4A schema

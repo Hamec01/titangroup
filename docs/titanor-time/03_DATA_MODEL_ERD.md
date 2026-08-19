@@ -1620,7 +1620,10 @@ batch_check` — cross-table проверка, что покрывший batch �
 что `Timesheet` этой correction, плюс immutability самого поля после установки), синхронизирован с
 `pendingExport` двумя CHECK (`ck_correction_request_pending_export_shape`/`ck_correction_request_
 covered_shape`): `pendingExport=true` возможно только при `coveredByExportBatchId IS NULL`, и
-наоборот.
+наоборот. **`[2026-08-19]` T8.4B FOLLOW-UP** — тот же `trg_correction_request_covered_batch_check`
+расширен ещё одной cross-table проверкой: `NEW.pendingExport=true` теперь также требует
+`PayrollPeriod.status=EXPORTED` **и** `PayrollPeriodParticipant.expected=true` (через `Timesheet`)
+— см. ниже "Отложенный корректирующий экспорт" и `05_RAW_SQL_REGISTER.md` §13.
 
 `correction.approve` требует `decidedByUserId != CorrectionDraft.openedByUserId` (четыре глаза),
 кроме `approvalOverride=true` (только `SUPER_ADMIN`, с `overrideReason`,
@@ -1693,13 +1696,31 @@ canonicalCorrectionProjection(basedOnVersionId)`, §4.5 — иначе `409 NO_C
 `correction.approve` (другой исполнитель) → `TimesheetVersion (source=CORRECTION)`,
 `Timesheet.status` остаётся `FINAL_APPROVED`.
 
-**Отложенный корректирующий экспорт.** Если `PayrollPeriod.status = EXPORTED` в момент
-`correction.approve` — `ExportBatch` не создаётся автоматически, `CorrectionRequest.pendingExport =
-true`. Повторный `export.create` для уже `EXPORTED` периода создаёт `ExportBatch(correctsBatchId=
-предыдущий)`, покрывающий все накопленные `pendingExport=true` записи разом. **`[2026-08-19]`
-Реализовано T8.4B** (`lib/csv-export.ts`) — покрытые записи получают `coveredByExportBatchId =
-<новый batch>` в той же транзакции, что вставляет batch; scoped к `expected=true` участникам
-периода (`T8_REPORTS_DESIGN.md` Addendum "T8.4B" §BC).
+**Отложенный корректирующий экспорт.** Повторный `export.create` для уже `EXPORTED` периода создаёт
+`ExportBatch(correctsBatchId=предыдущий)`, покрывающий все накопленные `pendingExport=true` записи
+разом. **`[2026-08-19]` Реализовано T8.4B** (`lib/csv-export.ts`) — покрытые записи получают
+`coveredByExportBatchId = <новый batch>` в той же транзакции, что вставляет batch; scoped к
+`expected=true` участникам периода (`T8_REPORTS_DESIGN.md` Addendum "T8.4B" §BC).
+
+**`[2026-08-19]` T8.4B FOLLOW-UP — исправлена формула `pendingExport`.** Изначально
+`correction.approve` ставил `CorrectionRequest.pendingExport = true` при одном единственном условии
+`PayrollPeriod.status = EXPORTED`, без учёта `PayrollPeriodParticipant.expected` — это создавало
+недостижимый вечный state для excluded-участника: `pendingExport=true`, которое НИКОГДА не могло
+быть очищено ни одним export'ом, потому что excluded участник структурно никогда не входит ни в
+одну export population (§BA design doc). Исправленная формула:
+
+```
+pendingExport =
+  period.status === 'EXPORTED'
+  AND PayrollPeriodParticipant.expected === true
+```
+
+Excluded-участник + `EXPORTED` → `pendingExport=false` сразу, `coveredByExportBatchId` остаётся
+`null` навсегда (никогда не становится "pending", поэтому никогда не нуждается в покрытии — не
+"забытая", а корректно исключённая запись, тот же смысл, что `expected=false` несёт везде в
+T8.1–T8.3). `LOCKED`/`OPEN` — по-прежнему `pendingExport=false`. Additive migration
+`20260819190000_fix_correction_pending_export_excluded_participant` расширяет DB-enforcement — см.
+§4.8 ниже и `05_RAW_SQL_REGISTER.md` §13 (FN-26, расширенная запись).
 
 ### 4.8 Аудит и экспорт
 

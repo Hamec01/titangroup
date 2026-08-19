@@ -1839,25 +1839,100 @@ same category as `ExportBatch.correctsBatchId` above it).
   `scripts/_test-csv-export.ts` F53. Positive: a genuinely valid same-period `CORRECTION` batch
   reference succeeds cleanly.
 
+### FN-26 v2 — extended `[2026-08-19]` FOLLOW-UP (same function/trigger, not replaced)
+
+**Status**: ACTIVE. The FN-26 entry above (behavior items 1-2, both stable identifier groups) is
+kept verbatim, not erased — it still describes the `coveredByExportBatchId` branch exactly as
+implemented, unchanged by this FOLLOW-UP. This entry documents the branch **added** to the *same*
+`fn_correction_request_covered_batch_check` function body (`CREATE OR REPLACE FUNCTION`, same name)
+by the additive corrective migration
+`20260819190000_fix_correction_pending_export_excluded_participant` — `trg_correction_request_
+covered_batch_check` (TRG-31) is unchanged as a trigger *instance* (still one `BEFORE INSERT OR
+UPDATE` binding, same function).
+
+**Root cause this branch fixes**: `lib/corrections.ts::decideCorrection` used to set
+`CorrectionRequest.pendingExport = (period.status === 'EXPORTED')` alone. A correction on an
+**excluded** (`PayrollPeriodParticipant.expected=false`) participant's `Timesheet` could reach
+`pendingExport=true` and then never be clearable by any future export — export population
+(`T8_REPORTS_DESIGN.md` §BA) is always `expected=true` only, so no `CORRECTION` batch snapshot could
+ever represent that row, and nothing in `lib/csv-export.ts` would ever set its `pendingExport` back
+to `false`. An unreachable, permanently-pending, DB-level-unenforced state.
+
+**New behavior — item 3, added to FN-26's existing body**: whenever `NEW."pendingExport"` is `true`
+(on `INSERT` or `UPDATE`, re-checked on every write while `true`, not only at a `false -> true`
+transition — `pendingExport` is expected to flip back and forth over a row's lifetime, unlike
+`coveredByExportBatchId`, which is genuinely write-once), the function now additionally resolves,
+through the correction's own `Timesheet`, the `PayrollPeriod.status` and the matching
+`PayrollPeriodParticipant.expected` in one `JOIN`/`LEFT JOIN` `SELECT ... INTO`, and rejects unless
+`status = 'EXPORTED'` **and** `expected = true`. The three same-row conditions the task's own DB-
+invariant list also names for this case (`status=APPROVED`, `resultingVersionId IS NOT NULL`,
+`coveredByExportBatchId IS NULL`) are **not** reimplemented here — `ck_correction_request_pending_
+export_shape` (CK-45, unchanged) already owns them; a CHECK constraint and a trigger deliberately
+split same-row vs. cross-table responsibility, same separation of concerns the original T8.4A/T8.4B
+CK-vs-FN split already established.
+
+- Stable exception identifiers (new): `CORRECTION_REQUEST_PENDING_EXPORT_PERIOD_NOT_EXPORTED`,
+  `CORRECTION_REQUEST_PENDING_EXPORT_PARTICIPANT_EXCLUDED`. Two more, defense-in-depth only
+  (structurally unreachable through the exposed application path — `CorrectionRequest.timesheetId`
+  is a `NOT NULL` FK to an always-existing `Timesheet`, and `Timesheet(periodId, employeeId)` has its
+  own composite FK to `PayrollPeriodParticipant`, so a resolvable `Timesheet` can never lack a
+  matching participant row — same reasoning as FN-25's own correction-chain cycle check):
+  `CORRECTION_REQUEST_PENDING_EXPORT_TIMESHEET_NOT_FOUND`,
+  `CORRECTION_REQUEST_PENDING_EXPORT_PARTICIPANT_NOT_FOUND`.
+- Row-lock contract: plain `SELECT ... INTO` via a `JOIN`/`LEFT JOIN`, no explicit row lock — runs
+  inside `lib/corrections.ts::decideCorrection`'s existing transaction, which already holds `FOR
+  UPDATE` on `Employee`/`Timesheet`/`CorrectionRequest` (unchanged by this FOLLOW-UP) before this
+  branch's `UPDATE` ever executes — no new TOCTOU window opened by this addition.
+- Source: T8.4B FOLLOW-UP task spec, DB enforcement list items 4-6 (`PayrollPeriod.status=EXPORTED`;
+  participant exists; `participant.expected=true`); items 1-3 of that same list are CK-45, unchanged.
+- Minimum negative test: two isolated scenarios, one per non-defense-in-depth identifier — a real
+  `APPROVED` correction on an excluded participant, with its period already genuinely `EXPORTED`
+  (isolates `PARTICIPANT_EXCLUDED` from `PERIOD_NOT_EXPORTED`, since the function checks period
+  status first); a real `APPROVED` correction on an *expected* participant whose period is still
+  `LOCKED` (isolates `PERIOD_NOT_EXPORTED` from `PARTICIPANT_EXCLUDED`) — both verified,
+  `scripts/_test-csv-export.ts` G5/G6. Positive: an expected participant's correction on an
+  `EXPORTED` period still sets/keeps `pendingExport=true` and is still covered normally by the next
+  `CORRECTION` export (G1/G7/G9 — re-verifies the pre-existing, unbroken behavior after this
+  extension). Legacy repair query correctness — G8 (see §13.5 below).
+
 ### 13.4 Trigger instance register (TRG-31)
 
 | ID | Table | Trigger | Function | Timing/Events |
 |---|---|---|---|---|
-| TRG-31 | `CorrectionRequest` | `trg_correction_request_covered_batch_check` | FN-26 | `BEFORE INSERT OR UPDATE` |
+| TRG-31 | `CorrectionRequest` | `trg_correction_request_covered_batch_check` | FN-26 (v2, `[2026-08-19]` extended) | `BEFORE INSERT OR UPDATE` |
 
 Verified empirically: the trigger exists on `CorrectionRequest` (disposable PostgreSQL 16, `\d
 "CorrectionRequest"` introspection) and is exercised by both positive and negative runtime tests
-(§13.3).
+(§13.3, §13.3 FN-26 v2). Still exactly one trigger instance — the FOLLOW-UP added a new branch to
+the same function body, not a second trigger.
 
 ### 13.5 Test register (T8.4B schema-completion obligations — executed, not merely specified)
 
 Every object in this section (§13.1–§13.4) has been exercised on a disposable PostgreSQL 16 instance
 via `scripts/_test-csv-export.ts` section F (F52-F54, F53 specifically for this section's own
-objects — 171/171 checks in the full script, 100% pass), plus a dump/restore round trip on a second
-disposable PostgreSQL 16 instance (row counts, `md5(content)` for every `ExportBatch`,
+objects — 171/171 checks in the full script at T8.4B, 100% pass), plus a dump/restore round trip on
+a second disposable PostgreSQL 16 instance (row counts, `md5(content)` for every `ExportBatch`,
 `coveredByExportBatchId` values, `fileHash`/`fileSizeBytes` all identical before/after; both
 `trg_export_batch_immutable` and this section's own `trg_correction_request_covered_batch_check`
 still reject their respective mutation attempts on the restored database).
+
+**`[2026-08-19]` FOLLOW-UP additions** — `scripts/_test-csv-export.ts` section G (12 scenarios,
+201/201 checks in the full script, 100% pass on disposable PostgreSQL 16): G1/G7/G9 re-verify
+unchanged expected-participant behavior after the FN-26 extension; G2/G3/G4/G10 cover the fixed
+excluded-participant lifecycle end to end (never becomes pending, never blocks/gets covered, never
+touches `ExportBatch`/`ExportItem`); G5/G6 are the FN-26 v2 negative tests above; **G8** proves the
+migration's own legacy-repair `UPDATE` query correctness by disabling `trg_correction_request_
+covered_batch_check` just long enough to force a real row into the otherwise now-unreachable bad
+state (a genuine `APPROVED` correction, real `resultingVersionId`, real excluded participant, real
+`EXPORTED` period — only `pendingExport` is forced true while the trigger is off), re-enabling the
+trigger, then running the exact repair query from the migration's Section A and confirming it clears
+`pendingExport`/`coveredByExportBatchId` back to `false`/`NULL`; G11 re-verifies the pre-existing
+`coveredByExportBatchId` immutability/kind/period-mismatch branches (§13.3 FN-26, original) still
+reject correctly after the FN-26 body was extended; G12 confirms `AuditEvent(CORRECTION_APPROVED)`
+carries no `pendingExport`/`coveredByExportBatchId`/export-lifecycle/PII fields. Dump/restore was not
+re-run for this FOLLOW-UP specifically (scope: a trigger-function body extension plus one column's
+runtime semantics, not a new byte-storage structure — already proven for `CorrectionRequest`/
+`ExportBatch` at T8.4B).
 
 ### 13.6 Arithmetic assertions (T8.4B schema-completion additions only)
 
@@ -1875,5 +1950,33 @@ Trigger functions: 1 (FN-26)
 Trigger instances: 1 (TRG-31)
 New permissions: 0 (period.export/export.create/export.read already seeded by T8.4A,
   20260819160000_seed_export_permissions — this slice adds zero new Permission/RolePermission rows)
+New PostgreSQL extensions: 0
+```
+
+### 13.7 Arithmetic assertions — `[2026-08-19]` FOLLOW-UP additions only
+
+```text
+T8.4B FOLLOW-UP (align correction export eligibility) RAW-SQL TOTALS (additive to §13.6 totals)
+New migrations: 1 (20260819190000_fix_correction_pending_export_excluded_participant — additive,
+  does not edit 20260819180000 or any earlier migration)
+New tables: 0
+New enums: 0
+New columns: 0
+New/changed CHECK constraints: 0 (ck_correction_request_pending_export_shape / _covered_shape,
+  CK-45/CK-46, both unchanged — same-row conditions remain their sole responsibility)
+Trigger functions changed (CREATE OR REPLACE, same identifier): 1 (fn_correction_request_covered_
+  batch_check, FN-26 -> v2 — one new IF branch added, all existing branches byte-identical)
+Trigger instances: 0 new (TRG-31 rebinds automatically to the replaced function body)
+New stable exception identifiers: 4 (CORRECTION_REQUEST_PENDING_EXPORT_PERIOD_NOT_EXPORTED,
+  CORRECTION_REQUEST_PENDING_EXPORT_PARTICIPANT_EXCLUDED,
+  CORRECTION_REQUEST_PENDING_EXPORT_PARTICIPANT_NOT_FOUND [defense-in-depth],
+  CORRECTION_REQUEST_PENDING_EXPORT_TIMESHEET_NOT_FOUND [defense-in-depth])
+Legacy data repair: 1 UPDATE statement (idempotent — zero-row no-op on a database with no
+  pre-existing bad state; this project's own preview/production databases have never received the
+  T8.4B migrations at all per that task's own STOP-GATE, so they hold no CorrectionRequest rows with
+  this shape either way — repair correctness itself proven via a manually-crafted fixture on
+  disposable PostgreSQL, scripts/_test-csv-export.ts G8, not via a real repair on a persistent
+  instance)
+New permissions: 0
 New PostgreSQL extensions: 0
 ```

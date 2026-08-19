@@ -2150,7 +2150,11 @@ Body — либо отсутствует, либо `{}`; любое поле в 
 Routing по статусу периода: `OPEN` → `409 PERIOD_NOT_EXPORTABLE`; `LOCKED` → создаёт `FULL`; `EXPORTED`
 с eligible pending correction (`APPROVED`+`pendingExport=true`, scoped к `expected=true` участникам) →
 создаёт `CORRECTION`; `EXPORTED` без — `409 NOTHING_TO_EXPORT`. Malformed `periodId` → `400
-VALIDATION_ERROR`; несуществующий — `404 PERIOD_NOT_FOUND`.
+VALIDATION_ERROR`; несуществующий — `404 PERIOD_NOT_FOUND`. **`[2026-08-19]` T8.4B FOLLOW-UP** —
+`pendingExport=true` теперь сам по себе гарантированно означает `expected=true` (исправлено в
+`lib/corrections.ts::decideCorrection` + DB enforcement, `T8_REPORTS_DESIGN.md` Addendum "T8.4B
+FOLLOW-UP") — контракт этого endpoint'а не изменился, только внутренняя корректность флага, который
+он читает.
 
 Response `201`:
 

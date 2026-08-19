@@ -940,25 +940,58 @@ permissions и старые миграции — не тронуты. T8.4B/T8.4
 
 ### BC. Correction coverage — scoping to expected participants (документированное архитектурное решение)
 
-Задача не описывает явно, что происходит с `pendingExport=true` correction, чей `Timesheet`
-принадлежит **не-expected** (excluded) участнику периода. T8.4B population (§BA) читает только
-`expected=true` participants — excluded участник структурно никогда не попадает ни в один
-`ExportItem` ни одного batch. Если бы "eligibility"-проверка (`§BB` — "минимум один pending
-correction") считала **любой** pending correction периода (включая принадлежащие excluded
-участникам), это создавало бы CORRECTION batch, который не может отразить эту correction ни одной
-строкой — а после коммита её `pendingExport` **не** очищается (см. ниже), то есть внешний наблюдатель
-увидел бы "batch создан, но эта correction всё ещё pending" — противоречиво и вводит в заблуждение.
+`pendingExport=true` correction, чей `Timesheet` принадлежит **не-expected** (excluded) участнику
+периода, никогда не входит ни в FULL, ни в CORRECTION population (§BA читает только `expected=true`
+participants) — excluded участник структурно никогда не попадает ни в один `ExportItem` ни одного
+batch. Eligibility-проверка (`§BB` — "минимум один pending correction") и coverage-шаг (§BF шаг 4/11)
+оба scoped к тем же `employeeId`, что и population — pending correction excluded-участника никогда
+не делает batch "нужным" (`NOTHING_TO_EXPORT`, если это единственная pending correction периода) и
+никогда не покрывается никаким batch.
 
-**Решение**: eligibility-проверка и coverage-шаг (§BF шаг 4/11) оба scoped к тем же `employeeId`,
-что и population (`expected=true` participants). Pending correction excluded-участника: (a) никогда
-не делает batch "нужным" (`NOTHING_TO_EXPORT`, если это единственная pending correction периода);
-(b) никогда не покрывается никаким batch — её `pendingExport` остаётся `true` навсегда, что честно
-отражает "эти данные намеренно исключены из экспорта", тот же смысл, что `expected=false` уже несёт
-везде в T8.1–T8.3. Не enforced отдельным DB CHECK (требовало бы cross-table чтения
-`PayrollPeriodParticipant.expected` в момент INSERT `coveredByExportBatchId`, что усложнило бы
-триггер §BE без чёткой пользы — некорректное покрытие уже структурно недостижимо через единственный
-существующий caller, `lib/csv-export.ts`) — задокументировано здесь и проверено тестом (§BJ, сценарий
-"excluded participant's pending correction never blocks/gets covered").
+**`[2026-08-19]` T8.4B FOLLOW-UP — исправлен смежный баг спецификации, найденный после
+первоначальной реализации.** Первая версия этого addendum'а здесь ошибочно утверждала, что
+`pendingExport` такой correction "остаётся `true` навсегда" — то есть `decideCorrection` сначала
+СТАВИЛ `pendingExport=true` (формула была буквально `period.status === 'EXPORTED'`, без учёта
+`expected`), а уже потом eligibility/coverage просто никогда её не трогали. Это создавало реально
+недостижимое, противоречивое состояние: `pendingExport=true` навечно у correction, которая
+структурно никогда не может быть покрыта ни одним batch — не "правильно исключённая из экспорта
+запись" (как `expected=false` означает везде в T8.1–T8.3), а сломанный, вводящий в заблуждение флаг.
+`pendingExport` обязан значить "существует реальный export snapshot, который мог бы покрыть эту
+correction, и ещё не покрыл" — а не просто "correction была одобрена после того, как период стал
+`EXPORTED`".
+
+**Исправленная формула** (`lib/corrections.ts::decideCorrection`, читается внутри уже существующей
+authoritative FOR-UPDATE-locked транзакции, без отдельного unlocked pre-read):
+
+```
+pendingExport =
+  period.status === 'EXPORTED'
+  AND PayrollPeriodParticipant.expected === true
+```
+
+Excluded participant + `EXPORTED` → `pendingExport=false` сразу, `coveredByExportBatchId` остаётся
+`null` — то же самое "формально удовлетворено, реально не покрыто" не возникает вообще, потому что
+`pendingExport` никогда не становится `true` для такой correction в первую очередь. `LOCKED`/`OPEN`
+периоды — `pendingExport=false`, как и раньше (без изменений).
+
+**DB enforcement** — `fn_correction_request_covered_batch_check` (FN-26/TRG-31, тот же trigger, не
+новый) расширен дополнительной веткой: `NEW.pendingExport=true` теперь cross-table-проверяется на
+`PayrollPeriod.status=EXPORTED` И `PayrollPeriodParticipant.expected=true` (through the correction's
+own `Timesheet`), поверх уже существующих same-row условий `ck_correction_request_pending_export_
+shape` (CK-45 — `status=APPROVED`, `resultingVersionId IS NOT NULL`, `coveredByExportBatchId IS
+NULL`, не переизобретены в триггере). Additive corrective migration
+`20260819190000_fix_correction_pending_export_excluded_participant` — не редактирует
+`20260819180000`. Полная регистрация — `05_RAW_SQL_REGISTER.md` §13 (FN-26 запись расширена, не
+заменена — историческая версия видна там же).
+
+**Legacy repair**: та же миграция атомарно приводит любые уже существующие строки с
+`pendingExport=true` при отсутствующем/excluded участнике к `pendingExport=false,
+coveredByExportBatchId=NULL` — количество затронутых строк считается и логируется через `RAISE
+NOTICE` (только целое число, без employee/correction/reason данных) до repair.
+
+Проверено тестами: `scripts/_test-csv-export.ts`, сценарии "excluded participant pending correction
+never becomes true / never blocks / never gets covered" + прямые SQL-негативные тесты на новую
+trigger-ветку.
 
 ### BD. Canonical arithmetic — `lib/reporting/canonical-daily-buckets.ts`
 

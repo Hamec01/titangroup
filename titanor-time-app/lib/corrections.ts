@@ -755,7 +755,21 @@ export async function decideCorrection(
         reason: true,
         timesheetId: true,
         draftOwner: { select: { id: true, employeeId: true, openedByUserId: true } },
-        timesheet: { select: { employeeId: true, currentVersionId: true, periodId: true, period: { select: { status: true } } } }
+        timesheet: {
+          select: {
+            employeeId: true,
+            currentVersionId: true,
+            periodId: true,
+            period: { select: { status: true } },
+            // §"Отложенный корректирующий экспорт" (03_DATA_MODEL_ERD.md) — pendingExport must
+            // reflect whether this correction is actually representable in a future export
+            // snapshot, not just "was the period already EXPORTED". An excluded participant
+            // (expected=false) is structurally never part of any export population (FULL or
+            // CORRECTION, T8_REPORTS_DESIGN.md §BA/§BC) — read here, under the same FOR UPDATE
+            // lock as the rest of this authoritative state, not via a separate unlocked pre-read.
+            participant: { select: { expected: true } }
+          }
+        }
       }
     });
     if (!request.draftOwner) {
@@ -975,7 +989,12 @@ export async function decideCorrection(
       }
     }
 
-    const pendingExport = request.timesheet.period.status === 'EXPORTED';
+    // pendingExport means "a real export snapshot could cover this correction and hasn't yet" —
+    // never just "this correction was approved after the period became EXPORTED". An excluded
+    // participant's correction can never appear in any FULL/CORRECTION snapshot (population is
+    // always expected=true only), so it must never be marked pending either — see the T8.4B
+    // FOLLOW-UP note in T8_REPORTS_DESIGN.md.
+    const pendingExport = request.timesheet.period.status === 'EXPORTED' && request.timesheet.participant.expected === true;
 
     await tx.correctionRequest.update({
       where: { id: correctionRequestId },

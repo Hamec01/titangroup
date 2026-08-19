@@ -1266,6 +1266,235 @@ async function main() {
     });
   }
 
+  // ============================================================================
+  // G. T8.4B FOLLOW-UP — excluded participant pendingExport lifecycle
+  // ============================================================================
+  // Root cause: decideCorrection used to set pendingExport = (period.status === 'EXPORTED') alone,
+  // with no regard for PayrollPeriodParticipant.expected — an excluded participant's correction
+  // could reach pendingExport=true and then stay there forever, since export population (§BA) is
+  // always expected=true only and never covers it. Fixed formula:
+  //   pendingExport = period.status === 'EXPORTED' AND PayrollPeriodParticipant.expected === true
+
+  // --- G1/G7: expected participant — unchanged behavior (pendingExport=true, then covered) ---
+  {
+    const { startDate, endDate } = nextPeriodDates();
+    const period = await makePeriod(startDate, endDate, 'LOCKED');
+    const site = await makeSite('G1');
+    const worker = await makeFinalApprovedWorker('G1', site.id, period);
+    const date = new Date(startDate);
+    await addVersionSegment(worker.version, worker.employee.id, site.id, worker.assignment.id, date, new Date(date.getTime() + 8 * 3600000), new Date(date.getTime() + 16 * 3600000));
+    await postExport(period.id, admin.token);
+
+    const corr = await makeApprovedCorrection(worker.timesheet.id, admin.user.id, admin2.user.id, date, [{ siteId: site.id, startAt: new Date(date.getTime() + 8 * 3600000), endAt: new Date(date.getTime() + 13 * 3600000) }]);
+    const fresh = await prisma.correctionRequest.findUniqueOrThrow({ where: { id: corr.correctionRequestId } });
+    check('G1: expected participant + EXPORTED period + approved correction -> pendingExport=true', fresh.pendingExport === true && fresh.coveredByExportBatchId === null, fresh);
+
+    const cov = await postExport(period.id, admin.token);
+    check('G7: expected pending correction still covered by the CORRECTION batch (201)', cov.status === 201 && cov.body.coveredCorrectionCount === 1, cov.body);
+    const freshCovered = await prisma.correctionRequest.findUniqueOrThrow({ where: { id: corr.correctionRequestId } });
+    check('G7: covered -> pendingExport=false, coveredByExportBatchId=batch.id', freshCovered.pendingExport === false && freshCovered.coveredByExportBatchId === cov.body.batch.id, freshCovered);
+  }
+
+  // --- G2/G3/G4/G10: excluded participant ---
+  {
+    const { startDate, endDate } = nextPeriodDates();
+    const period = await makePeriod(startDate, endDate, 'LOCKED');
+    const site = await makeSite('G2');
+
+    // Excluded worker — real FINAL_APPROVED timesheet + segment, but expected=false.
+    const excludedWorker = await makeFinalApprovedWorker('G2excl', site.id, period, { expected: false });
+    await addVersionSegment(excludedWorker.version, excludedWorker.employee.id, site.id, excludedWorker.assignment.id, new Date(startDate), new Date(startDate.getTime() + 8 * 3600000), new Date(startDate.getTime() + 16 * 3600000));
+
+    // Expected worker in the same period, so the initial FULL export has at least one real row.
+    const expectedWorker = await makeFinalApprovedWorker('G2exp', site.id, period);
+    const expDate = new Date(startDate);
+    await addVersionSegment(expectedWorker.version, expectedWorker.employee.id, site.id, expectedWorker.assignment.id, expDate, new Date(expDate.getTime() + 8 * 3600000), new Date(expDate.getTime() + 16 * 3600000));
+
+    const full = await postExport(period.id, admin.token);
+    check('G: setup FULL export succeeds', full.status === 201, full.body);
+
+    const batchCountBeforeExcludedApproval = await prisma.exportBatch.count({ where: { periodId: period.id } });
+    const itemCountBeforeExcludedApproval = await prisma.exportItem.count();
+    const auditCountBeforeExcludedApproval = await prisma.auditEvent.count();
+
+    const excludedCorr = await makeApprovedCorrection(excludedWorker.timesheet.id, admin.user.id, admin2.user.id, new Date(startDate), [{ siteId: site.id, startAt: new Date(startDate.getTime() + 8 * 3600000), endAt: new Date(startDate.getTime() + 12 * 3600000) }]);
+
+    // G2 — the core fix.
+    const freshExcluded = await prisma.correctionRequest.findUniqueOrThrow({ where: { id: excludedCorr.correctionRequestId } });
+    check('G2: excluded participant + EXPORTED period + approved correction -> pendingExport=false', freshExcluded.pendingExport === false, freshExcluded);
+    check('G2: coveredByExportBatchId stays null (never marked pending, so never needs coverage)', freshExcluded.coveredByExportBatchId === null, freshExcluded);
+
+    // G10 — approving an excluded participant's correction must not touch ExportBatch/ExportItem at all.
+    const batchCountAfterExcludedApproval = await prisma.exportBatch.count({ where: { periodId: period.id } });
+    const itemCountAfterExcludedApproval = await prisma.exportItem.count();
+    check('G10: approving excluded participant correction creates zero new ExportBatch rows', batchCountAfterExcludedApproval === batchCountBeforeExcludedApproval, { before: batchCountBeforeExcludedApproval, after: batchCountAfterExcludedApproval });
+    check('G10: approving excluded participant correction creates zero new ExportItem rows', itemCountAfterExcludedApproval === itemCountBeforeExcludedApproval, { before: itemCountBeforeExcludedApproval, after: itemCountAfterExcludedApproval });
+
+    // G12 — AuditEvent for the correction approval itself carries no export-lifecycle or PII fields.
+    const auditCountAfterExcludedApproval = await prisma.auditEvent.count();
+    // makeApprovedCorrection runs the full pipeline (request -> open -> patch -> submit -> decide),
+    // and requestCorrection/submitCorrection/decideCorrection each write their own AuditEvent
+    // (CORRECTION_REQUESTED/CORRECTION_SUBMITTED/CORRECTION_APPROVED) — not just decideCorrection's.
+    check('G10: the excluded-participant approval pipeline creates new AuditEvent rows (request+submit+approve), none of them export-related', auditCountAfterExcludedApproval > auditCountBeforeExcludedApproval, { before: auditCountBeforeExcludedApproval, after: auditCountAfterExcludedApproval });
+    const correctionAuditRow = await prisma.auditEvent.findFirstOrThrow({ where: { eventType: 'CORRECTION_APPROVED', entityId: excludedCorr.correctionRequestId } });
+    const correctionAfterValue = correctionAuditRow.afterValue as Record<string, unknown>;
+    const forbiddenAuditKeys = ['pendingExport', 'coveredByExportBatchId', 'participant', 'expected', 'employeeNumberSnapshot', 'employeeNameSnapshot', 'siteNameSnapshot'];
+    check('G12: CORRECTION_APPROVED AuditEvent.afterValue never mentions export-lifecycle fields', forbiddenAuditKeys.every((k) => !(k in correctionAfterValue)), correctionAfterValue);
+    check('G12: CORRECTION_APPROVED AuditEvent.reason is null (not populated for a plain, non-override approval)', correctionAuditRow.reason === null, correctionAuditRow.reason);
+    const correctionAuditRowText = JSON.stringify({ before: correctionAuditRow.beforeValue, after: correctionAuditRow.afterValue });
+    check('G12: CORRECTION_APPROVED AuditEvent before/afterValue never contains the correction reason text', !correctionAuditRowText.includes('test correction'), correctionAuditRowText);
+    check('G12: CORRECTION_APPROVED AuditEvent before/afterValue never contains the employee number', !correctionAuditRowText.includes(excludedWorker.employee.employeeNumber), correctionAuditRowText);
+
+    // G3 — excluded-only pending correction never makes a CORRECTION export "needed".
+    const onlyExcludedPending = await postExport(period.id, admin.token);
+    check('G3: excluded-only pending correction -> 409 NOTHING_TO_EXPORT (not covered, not creating a batch)', onlyExcludedPending.status === 409 && onlyExcludedPending.body?.error?.code === 'NOTHING_TO_EXPORT', onlyExcludedPending.body);
+    const freshExcludedStillUncovered = await prisma.correctionRequest.findUniqueOrThrow({ where: { id: excludedCorr.correctionRequestId } });
+    check('G3: excluded correction remains pendingExport=false, uncovered, after a NOTHING_TO_EXPORT attempt', freshExcludedStillUncovered.pendingExport === false && freshExcludedStillUncovered.coveredByExportBatchId === null, freshExcludedStillUncovered);
+
+    // G4 — an excluded pending (non-)correction never blocks a genuinely eligible expected correction.
+    const expectedCorr = await makeApprovedCorrection(expectedWorker.timesheet.id, admin.user.id, admin2.user.id, expDate, [{ siteId: site.id, startAt: new Date(expDate.getTime() + 8 * 3600000), endAt: new Date(expDate.getTime() + 14 * 3600000) }]);
+    const mixedExport = await postExport(period.id, admin.token);
+    check('G4: expected correction still exports normally alongside an excluded (never-pending) one', mixedExport.status === 201 && mixedExport.body.batch.kind === 'CORRECTION' && mixedExport.body.coveredCorrectionCount === 1, mixedExport.body);
+    const freshExpectedCorr = await prisma.correctionRequest.findUniqueOrThrow({ where: { id: expectedCorr.correctionRequestId } });
+    check('G4: expected correction covered by the new batch', freshExpectedCorr.coveredByExportBatchId === mixedExport.body.batch.id, freshExpectedCorr);
+    const finalExcludedState = await prisma.correctionRequest.findUniqueOrThrow({ where: { id: excludedCorr.correctionRequestId } });
+    check('G4: excluded correction untouched by the expected-correction export (still uncovered, still false)', finalExcludedState.pendingExport === false && finalExcludedState.coveredByExportBatchId === null, finalExcludedState);
+  }
+
+  // --- G5/G6: direct SQL negative tests for the new trigger branch ---
+  {
+    const { startDate, endDate } = nextPeriodDates();
+    const period = await makePeriod(startDate, endDate, 'LOCKED');
+    const site = await makeSite('G5');
+
+    // A real APPROVED, resultingVersionId-carrying correction on an EXCLUDED participant — satisfies
+    // CK-45's own same-row shape entirely, isolating the new trigger branch as the only possible
+    // rejection reason. The period is exported FIRST (zero expected participants -> header-only FULL
+    // batch, same as the A8 zero-hours case) so PERIOD_NOT_EXPORTED cannot mask
+    // PARTICIPANT_EXCLUDED — the trigger checks period status before participant.expected.
+    const excludedWorker = await makeFinalApprovedWorker('G5excl', site.id, period, { expected: false });
+    await addVersionSegment(excludedWorker.version, excludedWorker.employee.id, site.id, excludedWorker.assignment.id, new Date(startDate), new Date(startDate.getTime() + 8 * 3600000), new Date(startDate.getTime() + 12 * 3600000));
+    await postExport(period.id, admin.token); // period -> EXPORTED (zero expected participants, header-only)
+    const excludedCorr = await makeApprovedCorrection(excludedWorker.timesheet.id, admin.user.id, admin2.user.id, new Date(startDate), [{ siteId: site.id, startAt: new Date(startDate.getTime() + 8 * 3600000), endAt: new Date(startDate.getTime() + 11 * 3600000) }]);
+    // decideCorrection already correctly left pendingExport=false for this excluded participant —
+    // confirm the DB itself independently rejects forcing it to true, regardless of what the
+    // application would ever send.
+    await expectReject(
+      'G5: direct SQL pendingExport=true for an excluded participant is rejected by a stable DB identifier',
+      () => prisma.$executeRaw`UPDATE "CorrectionRequest" SET "pendingExport" = true WHERE id = ${excludedCorr.correctionRequestId}::uuid`,
+      'CORRECTION_REQUEST_PENDING_EXPORT_PARTICIPANT_EXCLUDED'
+    );
+
+    // Now export the period (FULL) so it becomes EXPORTED, then build a fresh EXPECTED-participant
+    // correction on this same now-EXPORTED period and try to force pendingExport=true while the
+    // period status is rewound to LOCKED on a throwaway period instead — isolates "period not
+    // EXPORTED" from "participant excluded" by using an expected participant this time.
+    const { startDate: sd2, endDate: ed2 } = nextPeriodDates();
+    const lockedPeriod = await makePeriod(sd2, ed2, 'LOCKED');
+    const site2 = await makeSite('G6');
+    const expectedWorker = await makeFinalApprovedWorker('G6exp', site2.id, lockedPeriod);
+    await addVersionSegment(expectedWorker.version, expectedWorker.employee.id, site2.id, expectedWorker.assignment.id, new Date(sd2), new Date(sd2.getTime() + 8 * 3600000), new Date(sd2.getTime() + 16 * 3600000));
+    const expectedCorrOnLocked = await makeApprovedCorrection(expectedWorker.timesheet.id, admin.user.id, admin2.user.id, new Date(sd2), [{ siteId: site2.id, startAt: new Date(sd2.getTime() + 8 * 3600000), endAt: new Date(sd2.getTime() + 11 * 3600000) }]);
+    // lockedPeriod is still LOCKED (never exported) — decideCorrection left pendingExport=false here
+    // too (LOCKED never sets it true). Force it directly to prove the DB independently rejects
+    // pendingExport=true while the period itself is not EXPORTED, even for an expected participant.
+    await expectReject(
+      'G6: direct SQL pendingExport=true while period != EXPORTED is rejected by a stable DB identifier',
+      () => prisma.$executeRaw`UPDATE "CorrectionRequest" SET "pendingExport" = true WHERE id = ${expectedCorrOnLocked.correctionRequestId}::uuid`,
+      'CORRECTION_REQUEST_PENDING_EXPORT_PERIOD_NOT_EXPORTED'
+    );
+  }
+
+  // --- G8: migration repair logic correctly clears a manually-crafted legacy invalid row ---
+  {
+    const { startDate, endDate } = nextPeriodDates();
+    const period = await makePeriod(startDate, endDate, 'LOCKED');
+    const site = await makeSite('G8');
+    const excludedWorker = await makeFinalApprovedWorker('G8', site.id, period, { expected: false });
+    await addVersionSegment(excludedWorker.version, excludedWorker.employee.id, site.id, excludedWorker.assignment.id, new Date(startDate), new Date(startDate.getTime() + 8 * 3600000), new Date(startDate.getTime() + 12 * 3600000));
+    const excludedCorr = await makeApprovedCorrection(excludedWorker.timesheet.id, admin.user.id, admin2.user.id, new Date(startDate), [{ siteId: site.id, startAt: new Date(startDate.getTime() + 8 * 3600000), endAt: new Date(startDate.getTime() + 11 * 3600000) }]);
+    await postExport(period.id, admin.token); // period -> EXPORTED
+
+    // Simulate a genuinely pre-existing "legacy" bad row (as the OLD, pre-fix decideCorrection would
+    // have left behind) by disabling the new trigger just long enough to force the row into the
+    // otherwise-now-unreachable bad state, then re-enabling it — the row itself is real (real
+    // APPROVED correction, real resultingVersionId, real excluded participant, real EXPORTED period).
+    await prisma.$executeRaw`ALTER TABLE "CorrectionRequest" DISABLE TRIGGER trg_correction_request_covered_batch_check`;
+    await prisma.$executeRaw`UPDATE "CorrectionRequest" SET "pendingExport" = true WHERE id = ${excludedCorr.correctionRequestId}::uuid`;
+    await prisma.$executeRaw`ALTER TABLE "CorrectionRequest" ENABLE TRIGGER trg_correction_request_covered_batch_check`;
+    const forcedBad = await prisma.correctionRequest.findUniqueOrThrow({ where: { id: excludedCorr.correctionRequestId } });
+    check('G8: legacy-bad-state fixture actually has pendingExport=true (setup sanity check)', forcedBad.pendingExport === true, forcedBad);
+
+    // The exact repair query from migration 20260819190000's Section A.
+    await prisma.$executeRaw`
+      UPDATE "CorrectionRequest" cr
+      SET "pendingExport" = false, "coveredByExportBatchId" = NULL
+      FROM "Timesheet" t
+      LEFT JOIN "PayrollPeriodParticipant" ppp
+        ON ppp."periodId" = t."periodId" AND ppp."employeeId" = t."employeeId"
+      WHERE cr."timesheetId" = t."id"
+        AND cr."pendingExport" = true
+        AND (ppp."expected" IS NULL OR ppp."expected" = false)
+    `;
+
+    const repaired = await prisma.correctionRequest.findUniqueOrThrow({ where: { id: excludedCorr.correctionRequestId } });
+    check('G8: migration repair query clears pendingExport back to false', repaired.pendingExport === false, repaired);
+    check('G8: migration repair query clears coveredByExportBatchId back to null', repaired.coveredByExportBatchId === null, repaired);
+  }
+
+  // --- G9: correction approval vs export race for an EXPECTED participant is not broken by this change ---
+  {
+    const { startDate, endDate } = nextPeriodDates();
+    const period = await makePeriod(startDate, endDate, 'LOCKED');
+    const site = await makeSite('G9');
+    const worker = await makeFinalApprovedWorker('G9', site.id, period);
+    const date = new Date(startDate);
+    await addVersionSegment(worker.version, worker.employee.id, site.id, worker.assignment.id, date, new Date(date.getTime() + 8 * 3600000), new Date(date.getTime() + 16 * 3600000));
+    await postExport(period.id, admin.token);
+
+    // Approval-before-export ordering (D39-equivalent, re-verified after the trigger extension).
+    const corr = await makeApprovedCorrection(worker.timesheet.id, admin.user.id, admin2.user.id, date, [{ siteId: site.id, startAt: new Date(date.getTime() + 8 * 3600000), endAt: new Date(date.getTime() + 12 * 3600000) }]);
+    const freshBeforeExport = await prisma.correctionRequest.findUniqueOrThrow({ where: { id: corr.correctionRequestId } });
+    check('G9: approval before export still sets pendingExport=true for an expected participant', freshBeforeExport.pendingExport === true, freshBeforeExport);
+
+    const cov = await postExport(period.id, admin.token);
+    check('G9: export still covers it normally (201, CORRECTION, coveredCorrectionCount=1)', cov.status === 201 && cov.body.batch.kind === 'CORRECTION' && cov.body.coveredCorrectionCount === 1, cov.body);
+    const freshAfterExport = await prisma.correctionRequest.findUniqueOrThrow({ where: { id: corr.correctionRequestId } });
+    check('G9: covered correctly — pendingExport=false, coveredByExportBatchId=batch.id', freshAfterExport.pendingExport === false && freshAfterExport.coveredByExportBatchId === cov.body.batch.id, freshAfterExport);
+  }
+
+  // --- G11: pre-existing coveredByExportBatchId triggers (immutability/kind/period) still work after the FN-26 extension ---
+  {
+    const { startDate, endDate } = nextPeriodDates();
+    const period = await makePeriod(startDate, endDate, 'LOCKED');
+    const site = await makeSite('G11');
+    const worker = await makeFinalApprovedWorker('G11', site.id, period);
+    const date = new Date(startDate);
+    await addVersionSegment(worker.version, worker.employee.id, site.id, worker.assignment.id, date, new Date(date.getTime() + 8 * 3600000), new Date(date.getTime() + 16 * 3600000));
+    const fullBatch = (await postExport(period.id, admin.token)).body.batch;
+
+    const corr = await makeApprovedCorrection(worker.timesheet.id, admin.user.id, admin2.user.id, date, [{ siteId: site.id, startAt: new Date(date.getTime() + 8 * 3600000), endAt: new Date(date.getTime() + 12 * 3600000) }]);
+    await expectReject(
+      'G11: coveredByExportBatchId referencing a FULL batch (wrong kind) still rejected after FN-26 extension',
+      () => prisma.correctionRequest.update({ where: { id: corr.correctionRequestId }, data: { coveredByExportBatchId: fullBatch.id } }),
+      'CORRECTION_REQUEST_COVERED_BATCH_WRONG_KIND'
+    );
+    await expectReject(
+      'G11: coveredByExportBatchId referencing a nonexistent batch still rejected after FN-26 extension',
+      () => prisma.correctionRequest.update({ where: { id: corr.correctionRequestId }, data: { coveredByExportBatchId: randomUUID() } }),
+      'CORRECTION_REQUEST_COVERED_BATCH_NOT_FOUND'
+    );
+
+    const cov = await postExport(period.id, admin.token);
+    const freshCovered = await prisma.correctionRequest.findUniqueOrThrow({ where: { id: corr.correctionRequestId } });
+    check('G11: real coverage still succeeds after FN-26 extension', freshCovered.coveredByExportBatchId === cov.body.batch.id, freshCovered);
+    await expectReject(
+      'G11: coveredByExportBatchId still immutable after FN-26 extension',
+      () => prisma.correctionRequest.update({ where: { id: corr.correctionRequestId }, data: { coveredByExportBatchId: fullBatch.id } }),
+      'CORRECTION_REQUEST_COVERED_BATCH_IMMUTABLE'
+    );
+  }
+
   console.log(`\n${pass} passed, ${fail} failed`);
   process.exit(fail > 0 ? 1 : 0);
 }
