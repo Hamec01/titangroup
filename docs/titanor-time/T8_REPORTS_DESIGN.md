@@ -61,14 +61,26 @@ independently, суммарно). Никакого специального ко
 
 **Округление — зафиксировано раз навсегда для T8.1–T8.4:**
 1. Всё складывается в миллисекундах, пока не будет причины остановиться (`sumWorkedTimeMs`).
-2. Округление в минуты (`msToMinutes`, `Math.round`) происходит **на каждом уровне группировки
-   отдельно** (T8.1: на уровне site bucket), не один раз на весь отчёт.
-3. Более высокий уровень группировки (T8.1: `total`) — это **сумма уже округлённых чисел** более
-   низкого уровня, не повторное округление суммы миллисекунд. Так `total.workedMinutes` всегда
-   буквально равен `Σ site.workedMinutes` в JSON, без визуального расхождения на ±1 минуту, которое
-   давало бы отдельное округление total из мс.
-4. Единственное исключение — `workedDayCount` (см. §3): это **count distinct calendar dates**, не
-   сумма и не миллисекунды, у него нет ms-уровня вообще.
+2. Округление в минуты (`msToMinutes`, `Math.round`) происходит **ровно один раз, на уровне
+   минимального canonical bucket `(employeeId, siteId, date)`** — не на уровне всего site за период
+   (это была ошибка T8.1's первой реализации, исправленная в T8 ROUNDING FOLLOW-UP, `[2026-08-19]`,
+   см. врезку после §3) и не один раз на весь отчёт.
+3. Любой более высокий уровень группировки — T8.1's `site` bucket и `total`, T8.2's `worker.total` и
+   `summary`, будущие T8.3 site/company totals и T8.4 CSV — это **только сумма уже округлённых
+   daily-bucket чисел**, никогда повторное округление суммы миллисекунд. Так `total.workedMinutes`
+   всегда буквально равен `Σ (daily bucket).workedMinutes` (через любое число промежуточных уровней
+   группировки), без визуального расхождения на ±1 минуту, которое давало бы отдельное округление
+   более высокого уровня из мс.
+4. Единственное исключение — `workedDayCount` (см. §3): это **count distinct calendar dates** в
+   соответствующем scope, не сумма и не миллисекунды, у него нет ms-уровня вообще.
+
+**Canonical reporting bucket — `(employeeId, siteId, date)`.** Это минимальная единица округления
+для ЛЮБОГО T8-отчёта (T8.1–T8.4). Округление на любом более крупном уровне (например, «весь site за
+период», без разбивки по датам) даёт **другое** число при sub-minute сегментах: два дня по 31
+секунде — `round(31s) + round(31s) = 1 + 1 = 2 min` на уровне daily bucket, но `round(62s) = 1 min`,
+если просуммировать миллисекунды всего site заранее и округлить один раз. T8.1 и T8.2 обязаны
+сходиться на одном и том же числе для одного и того же (employee, site, period) — это была причина
+инцидента, см. врезку ниже.
 
 `lib/attendance-overview.ts`'s `segmentReportedMs` (текущий source of truth формулы, до этого
 слайса) переписывается на `computeSegmentMs`+`sumWorkedTimeMs`+`msToMinutes` без изменения
@@ -77,13 +89,20 @@ independently, суммарно). Никакого специального ко
 
 ## 3. Правила группировки (T8.1)
 
-- Группировка по `siteId` — один bucket на объект, где у работника есть хотя бы один сегмент в этом
-  Timesheet за выбранный период.
-- Bucket-уровень: `grossMinutes`/`paidBreakMinutes`/`unpaidBreakMinutes`/`workedMinutes` — округление
-  §2 п.2 (сумма ms всех сегментов этого site, один `msToMinutes` в конце).
-- `segmentCount` — количество сегментов (WorkSegment/TimesheetDraftSegment) с этим `siteId`.
-- `workedDayCount` (per site) — `COUNT(DISTINCT date)` среди сегментов этого site.
-- `total.*Minutes` — сумма соответствующих **уже округлённых** site-полей (§2 п.3).
+- **Шаг 1 — canonical daily bucket**: сегменты сначала группируются по `(siteId, date)` — один bucket
+  на пару объект+дата, где у работника есть хотя бы один сегмент. Внутри bucket — `sumWorkedTimeMs`
+  по всем сегментам этого bucket, один `msToMinutes` на bucket (§2 п.2). Это тот же bucket, что T8.2's
+  `lib/site-time-report.ts::buildDays` уже использует для своих `days[]` — общий уровень округления
+  между T8.1 и T8.2, не два независимых.
+- **Шаг 2 — site bucket**: один bucket на объект — сумма уже округлённых daily-bucket
+  `grossMinutes`/`paidBreakMinutes`/`unpaidBreakMinutes`/`workedMinutes` внутри этого site (§2 п.3),
+  никогда повторное округление ms.
+- `segmentCount` (per site) — количество сегментов (WorkSegment/TimesheetDraftSegment) с этим
+  `siteId`, суммируется по daily buckets этого site (целое число, не подвержено rounding).
+- `workedDayCount` (per site) — `COUNT(DISTINCT date)` среди daily buckets этого site (= число daily
+  buckets, раз bucket уникален по date внутри site).
+- `total.*Minutes` — сумма соответствующих **уже округлённых** site-полей (§2 п.3; транзитивно — сумма
+  всех daily-bucket чисел работника, независимо от порядка группировки).
 - `total.workedDayCount` — `COUNT(DISTINCT date)` **по всем** сегментам timesheet'а разом (не сумма
   per-site `workedDayCount` — один календарный день с сегментами на двух объектах не должен считаться
   дважды в total).
@@ -92,6 +111,17 @@ independently, суммарно). Никакого специального ко
 - `total.siteCount` — `sites.length`.
 - Site sorting: `siteName ASC, siteId ASC` (детерминированная сортировка даже при совпадающих именах
   объектов — тест п.25).
+
+> **Исправлено `[2026-08-19]` (T8 ROUNDING FOLLOW-UP)**: до этого исправления шаг 1 отсутствовал —
+> `lib/worker-time-report.ts::groupSegments` группировал сразу по `siteId` (весь период целиком, без
+> промежуточной группировки по дате) и округлял один раз на весь site. При sub-minute сегментах это
+> расходилось с T8.2, которое уже округляло per-day: два дня по 31 секунде давали T8.1 `1 min`
+> (`round(62s)`), но T8.2 `2 min` (`round(31s) + round(31s)`). Исправление — только внутренняя
+> перестройка `groupSegments` (bucket по `(siteId, date)`, затем sum-of-rounded в site bucket); DTO,
+> API-контракт и UI T8.1 не менялись. Постоянный регрессионный тест —
+> `titanor-time-app/scripts/_test-report-rounding-consistency.ts` (реальные HTTP-запросы к обоим
+> endpoint, `/api/admin/reports/workers/:employeeId` и `/api/admin/reports/sites/:siteId`, сверяет
+> T8.1 и T8.2 построчно на 15 обязательных сценариях).
 
 ## 4. Response contract
 

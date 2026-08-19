@@ -77,35 +77,73 @@ interface RawSegment extends WorkedTimeSegmentInput {
   date: Date;
 }
 
+interface SiteAccumulator {
+  siteName: string;
+  grossMinutes: number;
+  paidBreakMinutes: number;
+  unpaidBreakMinutes: number;
+  workedMinutes: number;
+  segmentCount: number;
+  dates: Set<string>;
+}
+
 function groupSegments(segments: RawSegment[]): { sites: WorkerTimeReportSiteBucket[]; total: WorkerTimeReportTotal } {
   if (segments.length === 0) {
     return { sites: [], total: ZERO_TOTAL };
   }
 
-  const bySite = new Map<string, { siteName: string; segments: RawSegment[] }>();
+  // docs/titanor-time/T8_REPORTS_DESIGN.md — canonical reporting bucket is (siteId, date), shared
+  // with T8.2's own lib/site-time-report.ts::buildDays. Rounding per (siteId) alone (summing every
+  // day's ms first) used to disagree with T8.2 on sub-minute segments — e.g. two 31-second days:
+  // round(62s) = 1 min here vs round(31s) + round(31s) = 2 min there. Bucketing by date FIRST and
+  // rounding once per bucket, THEN summing already-rounded bucket minutes into the site row, makes
+  // the two reports reconcile exactly.
+  const byBucket = new Map<string, { siteId: string; siteName: string; date: string; segments: RawSegment[] }>();
   for (const seg of segments) {
-    const bucket = bySite.get(seg.siteId);
+    const dateKey = formatDate(seg.date);
+    const key = `${seg.siteId}:${dateKey}`;
+    const bucket = byBucket.get(key);
     if (bucket) {
       bucket.segments.push(seg);
     } else {
-      bySite.set(seg.siteId, { siteName: seg.siteName, segments: [seg] });
+      byBucket.set(key, { siteId: seg.siteId, siteName: seg.siteName, date: dateKey, segments: [seg] });
     }
   }
 
+  const bySite = new Map<string, SiteAccumulator>();
+  for (const bucket of byBucket.values()) {
+    // Round once per (siteId, date) bucket — never per segment, never at the site or total level.
+    const ms = sumWorkedTimeMs(bucket.segments.map((s) => computeSegmentMs(s)));
+    const dayGrossMinutes = msToMinutes(ms.grossMs);
+    const dayPaidBreakMinutes = msToMinutes(ms.paidBreakMs);
+    const dayUnpaidBreakMinutes = msToMinutes(ms.unpaidBreakMs);
+    const dayWorkedMinutes = msToMinutes(ms.workedMs);
+
+    let acc = bySite.get(bucket.siteId);
+    if (!acc) {
+      acc = { siteName: bucket.siteName, grossMinutes: 0, paidBreakMinutes: 0, unpaidBreakMinutes: 0, workedMinutes: 0, segmentCount: 0, dates: new Set() };
+      bySite.set(bucket.siteId, acc);
+    }
+    // §3 — site row is the sum of already-rounded daily bucket minutes, never a second ms-level sum.
+    acc.grossMinutes += dayGrossMinutes;
+    acc.paidBreakMinutes += dayPaidBreakMinutes;
+    acc.unpaidBreakMinutes += dayUnpaidBreakMinutes;
+    acc.workedMinutes += dayWorkedMinutes;
+    acc.segmentCount += bucket.segments.length;
+    acc.dates.add(bucket.date);
+  }
+
   const sites: WorkerTimeReportSiteBucket[] = [];
-  for (const [siteId, { siteName, segments: siteSegments }] of bySite) {
-    // §2 п.2 — sum in ms per site, round once here (not per-segment, not at the total level below).
-    const ms = sumWorkedTimeMs(siteSegments.map((s) => computeSegmentMs(s)));
-    const distinctDates = new Set(siteSegments.map((s) => formatDate(s.date)));
+  for (const [siteId, acc] of bySite) {
     sites.push({
       siteId,
-      siteName,
-      grossMinutes: msToMinutes(ms.grossMs),
-      paidBreakMinutes: msToMinutes(ms.paidBreakMs),
-      unpaidBreakMinutes: msToMinutes(ms.unpaidBreakMs),
-      workedMinutes: msToMinutes(ms.workedMs),
-      segmentCount: siteSegments.length,
-      workedDayCount: distinctDates.size
+      siteName: acc.siteName,
+      grossMinutes: acc.grossMinutes,
+      paidBreakMinutes: acc.paidBreakMinutes,
+      unpaidBreakMinutes: acc.unpaidBreakMinutes,
+      workedMinutes: acc.workedMinutes,
+      segmentCount: acc.segmentCount,
+      workedDayCount: acc.dates.size
     });
   }
 

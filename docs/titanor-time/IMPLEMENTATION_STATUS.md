@@ -1,6 +1,52 @@
 # Titanor Time — Implementation Status
 
-Обновлено: 2026-08-19 Europe/Helsinki (feat: add site time report UI — T8.2B)
+Обновлено: 2026-08-19 Europe/Helsinki (fix: align report rounding across views — T8 ROUNDING FOLLOW-UP)
+
+**`[2026-08-19]` T8 ROUNDING FOLLOW-UP — fix(time): align report rounding across views.** T8.1 и
+T8.2 расходились на sub-minute сегментах: T8.1 группировал ms по `(employeeId, siteId)` за весь
+период и округлял один раз; T8.2 уже группировал по `(employeeId, siteId, date)` и округлял per-day.
+Два дня по 31 секунде: T8.1 давал `round(62s)=1 min`, T8.2 — `round(31s)+round(31s)=2 min`. Зафиксирован
+единый canonical bucket `(employeeId, siteId, date)` для T8.1–T8.4 (`docs/titanor-time/
+T8_REPORTS_DESIGN.md` §2–3, T8.2 уже соответствовал изначально).
+
+**Исправление**: только `lib/worker-time-report.ts::groupSegments` — теперь сначала строит daily
+buckets `(siteId, date)`, округляет каждый через `msToMinutes` один раз, и только потом суммирует уже
+округлённые daily-числа в site bucket (шаг 2). `total` — по-прежнему сумма site-полей, без изменений.
+Ноль изменений в: `lib/reporting/worked-time.ts` (не имеет дефекта — сама формула в ms корректна, была
+неправильна только точка округления в T8.1); `lib/site-time-report.ts`/оба API route T8.2 (уже
+корректны); DTO/API-контракт/UI T8.1 (не менялись, подтверждено `git diff` — ни одна строка вне
+`groupSegments`'s внутренней реализации); schema/migrations/permissions (не менялись).
+
+**Постоянный регрессионный тест**: `titanor-time-app/scripts/_test-report-rounding-consistency.ts` —
+**105/105** проверок через оба настоящих HTTP endpoint (`GET /api/admin/reports/workers/:employeeId`,
+`GET /api/admin/reports/sites/:siteId`), не pure-helper вызовы. 15 обязательных сценариев: два дня по
+31с (T8.1 site total = T8.2 worker total = 2 min — сам инцидент), два дня по 29с (оба 0), два объекта
+в один день + `total = Σ sites`, несколько сегментов один site/date (сумма ms до округления), paid
+break, unpaid break, несколько unpaid breaks, cross-midnight fragments уже разделённые по date, DRAFT
+source, RETURNED source (stale currentVersionId с заведомо неверными числами игнорируется, читается
+draft), CURRENT_VERSION source (`FOREMAN_APPROVED`), approved correction (version 2 стал current),
+T8.1↔T8.2 построчная сверка gross/paid/unpaid/worked на каждом сценарии, `T8.2 summary = Σ items[]`
+(3 работника один site). Плюс: zero mutations (`AuditEvent` count = 0 после всех GET), forbidden-field
+scan (оба endpoint, JSON).
+
+**Query-count** — измерено через Postgres `log_statement='all'` (черный ящик, независимо от Prisma
+engine internals), окно `BEGIN...COMMIT` (сама транзакция report-функции, без auth-middleware
+overhead): **T8.1 = 12** (small и large fixture — идентично, bounded), **T8.2 = 13** (small и large —
+идентично, bounded) — оба числа совпадают с baseline T8.1/T8.2A, ноль регрессии.
+
+**Регрессия**: T8.1's собственный полный набор — **57/57**; T8.2A's собственный полный набор —
+**80/80** (T8.2A не менялся, прогнан для подтверждения совместимости); T8.1/T8.2 browser smoke —
+**5/5** (визуальное подтверждение: `/admin/reports` и `/admin/reports/sites` показывают одинаковые
+`0 h 2 min` для одного и того же fixture двух 31-секундных дней, ноль console errors).
+
+**Технические проверки**: `git diff --check`, `prisma validate` (не менялся — валиден), `tsc --noEmit`
+(0 ошибок), `npm run build` в изолированной чистой копии — все чисто. Preview `127.0.0.1:3244` —
+`200`/`200` до и после, не трогался. Production (`titanor-time-app-1`) — `RestartCount=0`, `StartedAt`
+не менялся, `200`/`200`. Disposable Postgres/scratch-копии удалены сразу после каждого шага.
+
+**T8.3 (отчёт по периоду) этим коммитом не начат.**
+
+---
 
 **`[2026-08-19]` T8.2B Site Time Report UI — feat(time): add site time report UI.** UI поверх уже
 реализованного T8.2A backend — `/admin/reports/sites` (ADMIN/SUPER_ADMIN, любой объект) и
