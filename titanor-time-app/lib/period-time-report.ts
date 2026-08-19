@@ -1,8 +1,9 @@
 import { Prisma } from '@prisma/client';
 import { prisma } from '@/lib/prisma';
 import { UUID_PATTERN } from '@/lib/attendance-exceptions';
-import { computeSegmentMs, sumWorkedTimeMs, msToMinutes, type WorkedTimeSegmentInput } from '@/lib/reporting/worked-time';
+import type { WorkedTimeSegmentInput } from '@/lib/reporting/worked-time';
 import { resolveCanonicalSource } from '@/lib/reporting/canonical-source';
+import { buildCanonicalDailyBuckets } from '@/lib/reporting/canonical-daily-buckets';
 
 // docs/titanor-time/T8_REPORTS_DESIGN.md Addendum "T8.3A Company Payroll Period Report API" — this
 // module owns company population (§Q), site population (§R), canonical-source resolution (§S,
@@ -123,16 +124,9 @@ export function isValidPeriodId(periodId: string): boolean {
 
 interface RawSegment extends WorkedTimeSegmentInput {
   employeeId: string;
+  timesheetVersionId: string | null;
   siteId: string;
   date: Date;
-}
-
-interface DailyBucketMinutes {
-  grossMinutes: number;
-  paidBreakMinutes: number;
-  unpaidBreakMinutes: number;
-  workedMinutes: number;
-  segmentCount: number;
 }
 
 interface SiteAccumulator {
@@ -231,41 +225,15 @@ export async function getPeriodTimeReport(periodId: string, pagination: { page: 
     ]);
 
     const rawSegments: RawSegment[] = [
-      ...draftSegments.map((s) => ({ employeeId: draftIdToEmployeeId.get(s.draftId)!, siteId: s.siteId, date: s.date, startAt: s.startAt, endAt: s.endAt, breaks: s.breaks })),
-      ...versionSegments.map((s) => ({ employeeId: versionIdToEmployeeId.get(s.timesheetVersionId)!, siteId: s.siteId, date: s.date, startAt: s.startAt, endAt: s.endAt, breaks: s.breaks }))
+      ...draftSegments.map((s) => ({ employeeId: draftIdToEmployeeId.get(s.draftId)!, timesheetVersionId: null, siteId: s.siteId, date: s.date, startAt: s.startAt, endAt: s.endAt, breaks: s.breaks })),
+      ...versionSegments.map((s) => ({ employeeId: versionIdToEmployeeId.get(s.timesheetVersionId)!, timesheetVersionId: s.timesheetVersionId, siteId: s.siteId, date: s.date, startAt: s.startAt, endAt: s.endAt, breaks: s.breaks }))
     ];
 
-    // §T — canonical rounding bucket (employeeId, siteId, date). Sum ms within the bucket, round
-    // once via msToMinutes. Every higher level below is only ever a sum of these already-rounded
-    // bucket numbers, never a second ms-level round.
-    const bucketMap = new Map<string, { employeeId: string; siteId: string; date: string; segments: RawSegment[] }>();
-    for (const seg of rawSegments) {
-      const dateKey = formatDate(seg.date);
-      const key = `${seg.employeeId}:${seg.siteId}:${dateKey}`;
-      const bucket = bucketMap.get(key);
-      if (bucket) {
-        bucket.segments.push(seg);
-      } else {
-        bucketMap.set(key, { employeeId: seg.employeeId, siteId: seg.siteId, date: dateKey, segments: [seg] });
-      }
-    }
-
-    const roundedBuckets: { employeeId: string; siteId: string; date: string; minutes: DailyBucketMinutes }[] = [];
-    for (const bucket of bucketMap.values()) {
-      const ms = sumWorkedTimeMs(bucket.segments.map((s) => computeSegmentMs(s)));
-      roundedBuckets.push({
-        employeeId: bucket.employeeId,
-        siteId: bucket.siteId,
-        date: bucket.date,
-        minutes: {
-          grossMinutes: msToMinutes(ms.grossMs),
-          paidBreakMinutes: msToMinutes(ms.paidBreakMs),
-          unpaidBreakMinutes: msToMinutes(ms.unpaidBreakMs),
-          workedMinutes: msToMinutes(ms.workedMs),
-          segmentCount: bucket.segments.length
-        }
-      });
-    }
+    // §T — canonical rounding bucket (employeeId, siteId, date), shared with CSV_V1 via
+    // lib/reporting/canonical-daily-buckets.ts (T8_REPORTS_DESIGN.md Addendum "T8.4B" §BD). Sum ms
+    // within the bucket, round once via msToMinutes. Every higher level below is only ever a sum of
+    // these already-rounded bucket numbers, never a second ms-level round.
+    const roundedBuckets = buildCanonicalDailyBuckets(rawSegments);
 
     const workedEmployeeIds = new Set(roundedBuckets.map((b) => b.employeeId));
     const workedEmployeeIdsBySite = new Map<string, Set<string>>();
@@ -328,11 +296,11 @@ export async function getPeriodTimeReport(periodId: string, pagination: { page: 
     }
     for (const b of roundedBuckets) {
       const acc = siteAccumulators.get(b.siteId)!;
-      acc.grossMinutes += b.minutes.grossMinutes;
-      acc.paidBreakMinutes += b.minutes.paidBreakMinutes;
-      acc.unpaidBreakMinutes += b.minutes.unpaidBreakMinutes;
-      acc.workedMinutes += b.minutes.workedMinutes;
-      acc.segmentCount += b.minutes.segmentCount;
+      acc.grossMinutes += b.grossMinutes;
+      acc.paidBreakMinutes += b.paidBreakMinutes;
+      acc.unpaidBreakMinutes += b.unpaidBreakMinutes;
+      acc.workedMinutes += b.workedMinutes;
+      acc.segmentCount += b.segmentCount;
       acc.dates.add(b.date);
     }
 

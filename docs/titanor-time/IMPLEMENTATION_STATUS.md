@@ -1,6 +1,105 @@
 # Titanor Time — Implementation Status
 
-Обновлено: 2026-08-19 Europe/Helsinki (fix: align export worked-time semantics — T8.4A FOLLOW-UP)
+Обновлено: 2026-08-19 Europe/Helsinki (feat: add immutable CSV export backend — T8.4B)
+
+**`[2026-08-19]` T8.4B — feat(time): add immutable CSV export backend.** Полная генерация CSV_V1,
+FULL/CORRECTION export batching, 4 API-эндпоинта, download — поверх уже реализованного T8.4A schema
+foundation (запись ниже). Design — `docs/titanor-time/T8_REPORTS_DESIGN.md` Addendum "T8.4B"
+(§BA-BP), написан ДО кода per STOP-GATE. `/admin/export` UI (T8.4C) и PDF/payroll/TES-категории —
+явно не в этом слайсе.
+
+**Population/semantics**: FULL — только `PayrollPeriodParticipant.expected=true` этого периода
+(**уже** — не union-based, как T8.1-T8.3), каждый обязан иметь `Timesheet.status=FINAL_APPROVED` +
+валидный `currentVersionId` (re-verified внутри собственной транзакции, не доверяет `period.lock`'у
+слепо); после успешной транзакции `PayrollPeriod: LOCKED → EXPORTED`, `exportedAt` один раз.
+CORRECTION — та же population (полный replacement snapshot, не дельта — единственный способ честно
+представить удаление последнего bucket отсутствием строки), `correctsBatchId` = последний committed
+batch периода, eligibility scoped к pending corrections `expected=true` участников (задокументированное
+архитектурное решение, design doc §BC — excluded участник никогда не блокирует и не покрывается
+никаким batch).
+
+**Schema completion**: additive migration `20260819180000_add_correction_covered_by_export_batch`
+(61 migrations всего) — `CorrectionRequest.coveredByExportBatchId` (nullable FK → `ExportBatch`,
+`RESTRICT`), индекс, 2 новых CHECK (`ck_correction_request_pending_export_shape`/`_covered_shape`),
+1 новый trigger (`fn_correction_request_covered_batch_check`/`trg_correction_request_covered_batch_
+check` — cross-table kind/period validation + column immutability). Регистрация —
+`05_RAW_SQL_REGISTER.md` §13. Не редактирует ни одну старую миграцию.
+
+**Canonical bucket helper**: новый `lib/reporting/canonical-daily-buckets.ts` (`(employeeId, siteId,
+date)`, ноль Prisma/HTTP) — выносит group-by-Map + `msToMinutes`-округление, ранее скопированный
+инлайн в T8.1/T8.2/T8.3. T8.3 (`lib/period-time-report.ts`) переключён на него (обязательное
+минимальное требование задачи) — поведение/DTO/query count не изменились
+(`_test-report-rounding-consistency.ts` 105/105, `_test-period-time-report.ts` 110/110, оба
+идентичны до/после). T8.1/T8.2 **не переключены** — задокументированное, разрешённое задачей решение
+(их grouping уже фиксирует одно измерение через URL; принудительная унификация — риск без выгоды для
+уже задеплоенного, полностью протестированного кода).
+
+**CSV_V1 exact byte contract**: UTF-8 + BOM, RFC 4180, CRLF (включая terminal), все cells в кавычках,
+17 колонок в фиксированном порядке, одна data row = один `ExportItem` bucket, zero-hours →
+BOM+header+CRLF only. Deterministic ordering — `employeeNumberSnapshot, employeeId, date,
+siteNameSnapshot, siteId`, code-point/binary сравнение (`a < b`), ни одного `localeCompare`.
+Spreadsheet formula injection (`=,+,-,@,tab,CR,LF`) нейтрализован ведущим `'` только для
+`employee_number`/`employee_name`/`site_name` — проверено 7 отдельных сценариев (по одному на
+триггер-символ, ротация по трём колонкам).
+
+**API**: `POST /api/admin/periods/:periodId/export` (`period.export`+`export.create` одновременно,
+`Idempotency-Key` обязателен, тело — только пустой объект), `GET /api/admin/export-batches`
+(list, `export.read`), `GET /api/admin/export-batches/:batchId` (detail + covered correction ids),
+`GET /api/admin/export-batches/:batchId/download` (точные bytes, никогда не реконструирует).
+Контракт — `04_ADMIN_FIRST_API_CONTRACTS.md` §22.
+
+**Найденный и исправленный реальный concurrency-баг (до коммита в код)**: изначальная транзакционная
+конфигурация `createExportBatch` копировала T8.1-T8.3's `RepeatableRead`-изоляцию — под ней
+конкурентный экспорт, чей `SELECT ... FOR UPDATE` блокируется за уже держащим лок конкурентом и
+затем разблокируется после его коммита, не просто видит свежую строку, а падает с настоящим `40001
+could not serialize access due to concurrent update` (обнаружено тестами D37/D38 двух конкурентных
+export'ов). Исправлено переключением на Postgres/Prisma default `READ COMMITTED` (без
+`isolationLevel` override) — тот же паттерн, что `lib/periods.ts::lockPeriod`/
+`lib/corrections.ts::decideCorrection` уже используют для "лочим FOR UPDATE, затем перечитываем
+fresh state". Design doc обновлён (`T8_REPORTS_DESIGN.md` §BF), объясняет разницу с read-only T8.1-
+T8.3 отчётами явно.
+
+**Тесты**: `scripts/_test-csv-export.ts` — **171/171**, реальный HTTP против всех 4 эндпоинтов +
+прямые DB-assertions, покрывает все 58 сценариев задачи (A. FULL 1-12, B. exact CSV 13-21, C.
+CORRECTION 22-33, D. replay/concurrency 34-41 включая D41 — реальные разные PostgreSQL backend PID
+через held-lock + `pg_stat_activity.wait_event_type='Lock'`, не только `Promise.all`-тайминг, E.
+reads/download/security 42-51, F. DB/performance 52-58 частично здесь). `scripts/_test-csv-export-
+querycount.ts` (F.55-57, отдельный скрипт по паттерну `_test-overview-querycount.ts`) —
+инструментированный `PrismaClient` через `globalThis`-override: **15 SQL statements** для 1/50/200
+worker фикстур одинаково (bounded, не растёт), ровно **1** `INSERT` в `ExportItem` для любого N (bulk
+`createMany`, не цикл), `EXPLAIN ANALYZE` захвачен для `WorkSegment`-bulk-read и `Timesheet`-lock
+query на 200-worker фикстуре. Dump/restore round trip на отдельном одноразовом PostgreSQL 16 — row
+counts/`md5(content)`/`fileHash`/`fileSizeBytes`/`coveredByExportBatchId` идентичны до/после, обе
+immutability-триггера (`trg_export_batch_immutable`, `trg_correction_request_covered_batch_check`)
+переживают restore.
+
+**Регрессия** (каждый скрипт — на своей изолированной disposable PostgreSQL 16, не на общей с другими
+скриптами — известное свойство `_test-period-time-report.ts`'s company-wide population, задокументировано
+в самом файле): `_test-export-batch-schema.ts` — 68/68; `_test-report-rounding-consistency.ts` —
+105/105; `_test-period-time-report.ts` — 110/110; `_test-activation.ts` — все проверки прошли;
+`_test-corrections.ts` (fixture/schema smoke) — без ошибок. `period.lock`/`timesheet.final_approve`
+код не менялся этим слайсом (подтверждено `git diff`) — риск регрессии там структурно отсутствует.
+
+**Технические проверки**: `git diff --check` — чисто; `prisma validate` — валиден; `prisma generate`
+(известный побочный эффект — переустановка `@prisma/client`/`next-env.d.ts` в НЕСВЯЗАННЫХ файлах —
+обнаружен и откачен `git checkout`); `tsc --noEmit` — 0 ошибок; `npm run build` в изолированной
+scratch-копии — успех, все 4 export-роута в выводе; `docker compose config --quiet` — чисто; `docker
+compose build app` — успех (исходного локального тега `titanor-time-app:latest` не было — после
+проверки образ удалён); `prisma migrate deploy` дважды на заведомо чистом одноразовом PostgreSQL 16
+(61 migration, второй — no-op) — повторено несколько раз в ходе разработки, финальный прогон чистый.
+Preview `127.0.0.1:3244` — обнаружен недоступным (`000`) на момент проверки (уже известное свойство
+этой преview-инсталляции — процесс `next dev` не переживает между репликами conversation, см.
+[[titanor_time_conventions]]/roadmap-заметку) — **не перезапускался**, per STOP-GATE инструкция; сам
+контейнер `titanor-time-preview-db` — `Up`, не тронут. Production (`titanor-time-app-1`/
+`titanor-time-db-1`) — `RestartCount=0`, `StartedAt`/`Image` не менялись, до и после `docker compose
+build`.
+
+**Не менялись**: `lib/reporting/worked-time.ts`, `lib/periods.ts`, `lib/corrections.ts` (кроме
+использования уже существующего `pendingExport`-поля, ноль изменений кода), T8.1/T8.2 services/DTO/
+API, permissions/RolePermission (уже все три существовали с T8.4A), старые миграции. **T8.4C (admin
+UI) и PDF/payroll/TES-категории этим коммитом не реализованы.**
+
+---
 
 **`[2026-08-19]` T8.4A FOLLOW-UP — fix(time): align export worked-time semantics.** Исправлен
 ошибочный DB-инвариант `ExportItem.workedMinutes` из T8.4A (см. запись ниже) до начала T8.4B. Root

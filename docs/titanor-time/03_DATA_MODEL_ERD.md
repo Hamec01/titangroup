@@ -138,6 +138,7 @@ erDiagram
     ExportBatch ||--o{ ExportItem : contains
     TimesheetVersion ||--o{ ExportItem : "snapshot of"
     Employee ||--o{ ExportItem : has
+    ExportBatch |o--o{ CorrectionRequest : "covers (T8.4B)"
 ```
 
 ## 3. Сквозные механизмы
@@ -1610,6 +1611,17 @@ CorrectionDraft` (да), `decidedByUserId FK` (да), `decidedAt` (да), `resul
 TimesheetVersion` (да), `approvalOverride boolean` (default `false`), `overrideReason text`
 (обязателен при override), `pendingExport boolean` (default `false`).
 
+**`[2026-08-19]` T8.4B — `coveredByExportBatchId FK → ExportBatch` (да, `ON DELETE RESTRICT`).**
+Additive migration `20260819180000_add_correction_covered_by_export_batch` (`docs/titanor-time/
+T8_REPORTS_DESIGN.md` Addendum "T8.4B" §BE, `05_RAW_SQL_REGISTER.md` §13). Закрывает пробел, который
+`pendingExport=false` само по себе не решало: какой именно `ExportBatch` покрыл эту correction.
+Установлен ровно один раз (`ck_correction_request_covered_shape` + `trg_correction_request_covered_
+batch_check` — cross-table проверка, что покрывший batch имеет `kind=CORRECTION` и тот же `periodId`,
+что `Timesheet` этой correction, плюс immutability самого поля после установки), синхронизирован с
+`pendingExport` двумя CHECK (`ck_correction_request_pending_export_shape`/`ck_correction_request_
+covered_shape`): `pendingExport=true` возможно только при `coveredByExportBatchId IS NULL`, и
+наоборот.
+
 `correction.approve` требует `decidedByUserId != CorrectionDraft.openedByUserId` (четыре глаза),
 кроме `approvalOverride=true` (только `SUPER_ADMIN`, с `overrideReason`,
 `AuditEvent(CORRECTION_SELF_APPROVED_OVERRIDE)`).
@@ -1684,7 +1696,10 @@ canonicalCorrectionProjection(basedOnVersionId)`, §4.5 — иначе `409 NO_C
 **Отложенный корректирующий экспорт.** Если `PayrollPeriod.status = EXPORTED` в момент
 `correction.approve` — `ExportBatch` не создаётся автоматически, `CorrectionRequest.pendingExport =
 true`. Повторный `export.create` для уже `EXPORTED` периода создаёт `ExportBatch(correctsBatchId=
-предыдущий)`, покрывающий все накопленные `pendingExport=true` записи разом.
+предыдущий)`, покрывающий все накопленные `pendingExport=true` записи разом. **`[2026-08-19]`
+Реализовано T8.4B** (`lib/csv-export.ts`) — покрытые записи получают `coveredByExportBatchId =
+<новый batch>` в той же транзакции, что вставляет batch; scoped к `expected=true` участникам
+периода (`T8_REPORTS_DESIGN.md` Addendum "T8.4B" §BC).
 
 ### 4.8 Аудит и экспорт
 

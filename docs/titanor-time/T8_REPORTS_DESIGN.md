@@ -866,3 +866,546 @@ disposable PostgreSQL 16, включая повторный dump/restore на о
 rounding-consistency (105/105) и T8.3A period-time-report (110/110) — без изменений. `lib/
 reporting/worked-time.ts`, T8.1/T8.2/T8.3 services/DTO/API, колонки `ExportBatch`/`ExportItem`,
 permissions и старые миграции — не тронуты. T8.4B/T8.4C по-прежнему не начаты.
+
+## Addendum — T8.4B Immutable CSV Generation, Export APIs and Download (2026-08-19)
+
+Написано **до** реализации, как требует STOP-GATE задачи. Строит генерацию/API/download поверх
+уже реализованного и не редактируемого T8.4A schema foundation (§AG–AN выше). Явно не входит:
+`/admin/export` UI (T8.4C, отдельный слайс), PDF, зарплата/ставки/TES-категории
+(overtime/night/sunday/holiday/travel), production deployment.
+
+### BA. FULL export — semantics
+
+- Разрешён **только** для `PayrollPeriod.status = LOCKED`.
+- Population — **ровно** `PayrollPeriodParticipant.expected = true` этого `periodId`. Это **не** та
+  же (более широкая, union-based) population, что T8.1–T8.3 используют — здесь она намеренно узкая
+  и буквальная, как того требует задача: только официально ожидаемые участники периода, ни assignment-
+  only, ни segment-only "исторические" работники (T8.2A §A/T8.3A §Q) сюда не попадают. Не-`expected`
+  (`excluded`) участники периода **никогда** не появляются ни в одном `ExportBatch` (ни FULL, ни
+  CORRECTION) — это тот же смысл, что `expected=false` уже несёт в T8.1–T8.3 ("официально исключён
+  из отчётности за этот период"), только здесь population вообще не строит union с assignment/segment
+  путями.
+- Каждый expected participant **обязан** иметь `Timesheet.status = FINAL_APPROVED` и непустой,
+  валидный `currentVersionId` — это уже гарантировано существующим инвариантом `period.lock`
+  (`lib/periods.ts::lockPeriod` не переводит период в `LOCKED`, пока хотя бы один expected participant
+  не `FINAL_APPROVED`, §"Владелец блокеров" — `LockBlocker[]`), но `lib/csv-export.ts` **не доверяет**
+  этому проверенному-в-прошлом факту слепо: он перечитывает и валидирует его заново внутри своей
+  собственной транзакции (тот же "TOCTOU-safe re-check under the lock" принцип, что `lockPeriod` уже
+  устанавливает для себя). Нарушение инварианта (participant без Timesheet, либо Timesheet не
+  `FINAL_APPROVED`, либо `currentVersionId`/`currentVersion` отсутствует) — **throw** (500,
+  safe-логированный), никогда не молчаливый пропуск строки — тот же принцип, что
+  `resolveCanonicalSource` уже устанавливает для T8.1–T8.3 (§1 выше).
+- Данные — только из immutable current `TimesheetVersion` (`WorkSegment`/`BreakSegment` по
+  `currentVersionId`) — FULL/CORRECTION **никогда** не читают `TimesheetDraft` (в отличие от
+  T8.1–T8.3, которые переключаются по статусу — здесь статус всегда `FINAL_APPROVED`, поэтому
+  единственный источник и есть `CURRENT_VERSION`; `lib/csv-export.ts` не импортирует
+  `resolveCanonicalSource`/`usesDraftSource` вообще — они не нужны, ветвление там было бы мёртвым
+  кодом).
+- После успешной транзакции: `PayrollPeriod.status: LOCKED → EXPORTED`, `exportedAt` устанавливается
+  **один раз** (только эта единственная FULL-транзакция когда-либо переводит период в `EXPORTED` —
+  CORRECTION никогда не трогает `exportedAt`, он уже установлен).
+- Ровно один FULL batch на period — гарантировано на трёх независимых уровнях: (1) сервисная логика
+  ниже (§BF) читает `PayrollPeriod.status` под `FOR UPDATE`-локом и создаёт FULL только пока статус
+  `LOCKED`; как только он становится `EXPORTED` внутри той же транзакции, следующий вызов (после
+  коммита) уже не видит `LOCKED`; (2) T8.4A's `ux_export_batch_full_per_period` (partial unique index)
+  — DB-уровневый backstop даже если бы сервисная логика содержала баг; (3) конкурентный тест §BJ.
+
+### BB. CORRECTION export — semantics
+
+- Разрешён **только** для `PayrollPeriod.status = EXPORTED`.
+- Требует минимум один `CorrectionRequest(status=APPROVED, pendingExport=true)`, **чей `Timesheet`
+  принадлежит expected-участнику этого периода** (см. §BC ниже за обоснование этого сужения — задача
+  не описывает этот пограничный случай явно, это задокументированное архитектурное решение этого
+  слайса). Если таких нет — `409 NOTHING_TO_EXPORT`, batch не создаётся.
+- Создаёт **полный replacement snapshot** всех expected participants периода — **буквально та же**
+  population-логика, что FULL (§BA), не CSV-дельту. Причина (дословно из задачи, подтверждена
+  архитектурно): отсутствие строки `(employeeId, siteId, date)` в новом snapshot, которая
+  присутствовала в предыдущем batch, — единственный способ корректно представить "этот bucket больше
+  не существует" (например, последний рабочий сегмент дня был удалён корректировкой) без отдельного
+  tombstone/delete-маркера в append-only CSV формате. Consumer (внешняя payroll-система) обязан
+  **заменить** предыдущий snapshot новым **целиком**, не накладывать построчный diff.
+- `correctsBatchId` указывает на **последний committed batch** этого period — `ExportBatch` этого
+  `periodId` с максимальным `createdAt` (`id DESC` как детерминированный tie-break на случай равного
+  `createdAt`, той же гранулярности, что и `ExportBatch_periodId_createdAt_id_idx`, T8.4A). Это может
+  быть либо FULL, либо более ранний CORRECTION — самой FK/trigger-схемой (T8.4A FN-25) оба варианта
+  уже разрешены, T8.4B не добавляет ограничения на тип предшественника.
+- Старые `ExportBatch`/`ExportItem` строки **не изменяются** — immutability-триггеры (T8.4A FN-23/24)
+  и так физически запрещают `UPDATE`/`DELETE`; T8.4B ничего не пишет в уже существующие batch/item.
+- Все pending corrections, **зафиксированные транзакцией** (т.е. видимые под `FOR UPDATE`-локом в
+  момент построения snapshot — см. §BF шаг 4/11), связываются с новым batch:
+  `coveredByExportBatchId = <новый batch id>`, `pendingExport = false`. Correction, `APPROVED`
+  **после** того, как эта транзакция уже сделала свой snapshot/commit, остаётся `pendingExport=true`
+  для следующего вызова `export.create` — она физически не могла быть частью snapshot, который
+  строился до её появления.
+
+### BC. Correction coverage — scoping to expected participants (документированное архитектурное решение)
+
+Задача не описывает явно, что происходит с `pendingExport=true` correction, чей `Timesheet`
+принадлежит **не-expected** (excluded) участнику периода. T8.4B population (§BA) читает только
+`expected=true` participants — excluded участник структурно никогда не попадает ни в один
+`ExportItem` ни одного batch. Если бы "eligibility"-проверка (`§BB` — "минимум один pending
+correction") считала **любой** pending correction периода (включая принадлежащие excluded
+участникам), это создавало бы CORRECTION batch, который не может отразить эту correction ни одной
+строкой — а после коммита её `pendingExport` **не** очищается (см. ниже), то есть внешний наблюдатель
+увидел бы "batch создан, но эта correction всё ещё pending" — противоречиво и вводит в заблуждение.
+
+**Решение**: eligibility-проверка и coverage-шаг (§BF шаг 4/11) оба scoped к тем же `employeeId`,
+что и population (`expected=true` participants). Pending correction excluded-участника: (a) никогда
+не делает batch "нужным" (`NOTHING_TO_EXPORT`, если это единственная pending correction периода);
+(b) никогда не покрывается никаким batch — её `pendingExport` остаётся `true` навсегда, что честно
+отражает "эти данные намеренно исключены из экспорта", тот же смысл, что `expected=false` уже несёт
+везде в T8.1–T8.3. Не enforced отдельным DB CHECK (требовало бы cross-table чтения
+`PayrollPeriodParticipant.expected` в момент INSERT `coveredByExportBatchId`, что усложнило бы
+триггер §BE без чёткой пользы — некорректное покрытие уже структурно недостижимо через единственный
+существующий caller, `lib/csv-export.ts`) — задокументировано здесь и проверено тестом (§BJ, сценарий
+"excluded participant's pending correction never blocks/gets covered").
+
+### BD. Canonical arithmetic — `lib/reporting/canonical-daily-buckets.ts`
+
+Bucket — `(employeeId, siteId, date)`, буквально тот же, что T8.1–T8.3 (§2-3 плюс "T8 ROUNDING
+FOLLOW-UP" addendum выше) и T8.4A's `ExportItem` (§AH). Новый чистый (`ноль Prisma/HTTP/UI`)
+reusable-модуль:
+
+```ts
+export interface CanonicalDailyBucketSegmentInput {
+  employeeId: string;
+  timesheetVersionId: string | null;
+  siteId: string;
+  date: Date;
+  startAt: Date;
+  endAt: Date;
+  breaks: WorkedTimeBreakInput[];
+}
+
+export interface CanonicalDailyBucket {
+  employeeId: string;
+  timesheetVersionId: string | null;
+  siteId: string;
+  date: string; // YYYY-MM-DD
+  grossMinutes: number;
+  paidBreakMinutes: number;
+  unpaidBreakMinutes: number;
+  workedMinutes: number;
+  segmentCount: number;
+}
+
+export function buildCanonicalDailyBuckets(segments: CanonicalDailyBucketSegmentInput[]): CanonicalDailyBucket[]
+```
+
+Группирует по `(employeeId, siteId, formatDate(date))`, суммирует ms всех сегментов bucket'а через
+`computeSegmentMs`/`sumWorkedTimeMs` (буквально `lib/reporting/worked-time.ts`, без копии формулы),
+округляет **один раз на bucket** через `msToMinutes` — тот же §2 п.2 rounding rule. `timesheetVersionId`
+— `string | null`, а не обязательный `string`: T8.1–T8.3 иногда читают `TimesheetDraft`-сегменты (нет
+версии вообще), поэтому строгая обязательность поля сделала бы helper непригодным для них без
+фиктивного значения. CSV_V1 (единственный вызывающий, где источник всегда `CURRENT_VERSION` — §BA)
+всегда передаёт реальный `timesheetVersionId`; helper не проверяет и не требует его непустоты — это
+обязанность вызывающего (`lib/csv-export.ts` уже отвергает FULL/CORRECTION population без
+`currentVersionId` до вызова helper'а, §BA).
+
+**Никакого повторного округления выше bucket-уровня** — `ExportItem` пишет уже округлённые
+bucket-числа буквально как helper их вернул; более высоких уровней агрегации (site/period totals) в
+CSV_V1 нет вообще (одна CSV data row = один bucket, §BG) — поэтому вопрос "повторной суммы округлённых
+чисел", актуальный для T8.1–T8.3, здесь не возникает: нет более высокого уровня, который бы что-то
+складывал.
+
+**T8.3 переключён на этот helper** (обязательное минимальное требование задачи — "Минимум T8.3 и
+новый CSV service должны использовать этот helper"). `lib/period-time-report.ts`'s инлайновый
+`bucketMap`/`roundedBuckets`-блок (было: локальная `Map<string, {...}>` + локальный
+`sumWorkedTimeMs`/`msToMinutes`-проход) заменён на прямой вызов `buildCanonicalDailyBuckets()`,
+передавая `timesheetVersionId: null` для draft-сегментов (T8.3 не использует это поле дальше — его
+собственный `DailyBucketMinutes`-DTO как не имел, так и не имеет `timesheetVersionId`) и реальный
+`s.timesheetVersionId` для version-сегментов. Поведение/DTO/query count **не изменились** — доказано
+регрессией (`_test-report-rounding-consistency.ts` 105/105, `_test-period-time-report.ts` 110/110,
+оба без изменений численных результатов до/после переключения).
+
+**T8.1 (`lib/worker-time-report.ts`) и T8.2 (`lib/site-time-report.ts`) НЕ переключены** —
+задокументированное, разрешённое задачей решение ("Если это создаёт ненужный риск, оставить их и
+доказать равенство regression-тестами"). Причина: их собственная внутренняя группировка уже
+фиксирует одно измерение bucket'а через URL (T8.1 фиксирует `employeeId`, группирует только по
+`(siteId, date)`; T8.2 фиксирует `siteId`, группирует только по `(employeeId используется отдельно,
+date)`) — принудительное протягивание через общий 3-осевой `(employeeId, siteId, date)`-helper
+потребовало бы реструктуризации их собственного, уже полностью протестированного и задеплоенного
+grouping-кода (57/57 и 80/80 own regression) ради нулевой продуктовой выгоды (арифметика и так уже
+общая через `lib/reporting/worked-time.ts` — дублируется только сама group-by-Map-механика, не
+формула). Эквивалентность их текущей арифметики T8.3/CSV_V1 доказывается тем же
+`_test-report-rounding-consistency.ts` (105/105) и явными cross-endpoint reconciliation-тестами T8.3A
+(§V design doc выше) — не нужен отдельный повторный proof в этом addendum.
+
+**Никакого `localeCompare`** нигде в byte-deterministic export path (helper сам не сортирует —
+сортировка бакетов в CSV-строки происходит в `lib/csv-export.ts`, §BH).
+
+### BE. Schema completion — `CorrectionRequest.coveredByExportBatchId`
+
+Additive migration `20260819180000_add_correction_covered_by_export_batch` (не редактирует ни
+`20260819150000_add_export_batch_schema`, ни `20260819170000_fix_export_item_worked_minutes_bounds`).
+
+Prisma:
+
+```prisma
+model CorrectionRequest {
+  // ...существующие поля без изменений...
+  coveredByExportBatchId String?      @db.Uuid
+  coveredByExportBatch   ExportBatch? @relation("ExportBatchCoveredCorrections", fields: [coveredByExportBatchId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  // ...существующие индексы...
+  @@index([coveredByExportBatchId])
+}
+
+model ExportBatch {
+  // ...существующие поля без изменений...
+  coveredCorrections CorrectionRequest[] @relation("ExportBatchCoveredCorrections")
+}
+```
+
+Raw SQL (Section B, зарегистрировано `05_RAW_SQL_REGISTER.md` §13):
+
+- Столбец + FK (`ON DELETE RESTRICT` — покрытая correction не даёт удалить свой batch; batch и так
+  immutable/неудаляем через FN-23, это защита на случай гипотетического будущего изменения того
+  триггера) + индекс `CorrectionRequest(coveredByExportBatchId)` — буквально как в задаче.
+- **CK-45 `ck_correction_request_pending_export_shape`**: `NOT "pendingExport" OR ("status" =
+  'APPROVED' AND "resultingVersionId" IS NOT NULL AND "coveredByExportBatchId" IS NULL)`.
+- **CK-46 `ck_correction_request_covered_shape`**: `"coveredByExportBatchId" IS NULL OR ("status" =
+  'APPROVED' AND "resultingVersionId" IS NOT NULL AND NOT "pendingExport")`.
+- **FN-26 `fn_correction_request_covered_batch_check`** / **TRG-31
+  `trg_correction_request_covered_batch_check`** (`BEFORE INSERT OR UPDATE` — в отличие от
+  `ExportBatch`/`ExportItem`, `CorrectionRequest` остаётся mutable-таблицей, поэтому здесь нужен и
+  `UPDATE`-путь, не только `INSERT`, в отличие от FN-25):
+  1. Immutability одного конкретного поля: `IF TG_OP = 'UPDATE' AND OLD."coveredByExportBatchId" IS
+     NOT NULL AND NEW."coveredByExportBatchId" IS DISTINCT FROM OLD."coveredByExportBatchId"` →
+     `CORRECTION_REQUEST_COVERED_BATCH_IMMUTABLE`. Проверяется **первой**, безусловно — даже если
+     остальная строка меняется, однажды установленный `coveredByExportBatchId` никогда не может ни
+     очиститься, ни замениться на другой batch.
+  2. Только в момент **перехода** `NULL → значение` (`TG_OP = 'INSERT'` **или** `OLD.
+     coveredByExportBatchId IS NULL`) — валидирует ссылку: batch существует
+     (`CORRECTION_REQUEST_COVERED_BATCH_NOT_FOUND` — belt-and-suspenders рядом с самим FK, тот же
+     стиль, что FN-25 уже устанавливает для `ExportBatch.correctsBatchId`), `batch.kind = 'CORRECTION'`
+     (`CORRECTION_REQUEST_COVERED_BATCH_WRONG_KIND`), `batch.periodId` совпадает с `Timesheet.periodId`
+     этого correction request'а (`CORRECTION_REQUEST_COVERED_BATCH_PERIOD_MISMATCH`, тот же паттерн
+     cross-table сравнения, что FN-25 уже использует для `correctsBatchId`'s period).
+  - Row-lock contract: читает `ExportBatch`/`Timesheet` плоским `SELECT` без явного лока — оба чтения
+    происходят **внутри** транзакции `lib/csv-export.ts`, которая уже держит `FOR UPDATE` на
+    затрагиваемых `Timesheet`/`CorrectionRequest`/`PayrollPeriod` строках (§BF) и никогда не читает
+    ещё не закоммиченный `ExportBatch` (тот вставляется в этой же транзакции раньше UPDATE
+    `CorrectionRequest`, см. §BF порядок шагов) — нет TOCTOU-окна.
+- **Ordering note (тот же класс, что T8.4A's CK-37/38 vs FN-25)**: `BEFORE ROW`-триггеры выполняются
+  раньше CHECK на том же `INSERT`/`UPDATE`. Установка `coveredByExportBatchId` на batch неправильного
+  `kind` всегда наблюдается как `CORRECTION_REQUEST_COVERED_BATCH_WRONG_KIND` (из триггера), а не как
+  какое-либо нарушение CK-45/46 — но CK-45/46 сами по себе (проверка status/resultingVersionId/
+  pendingExport shape **без** упоминания `coveredByExportBatchId`'s ссылочной валидности) остаются
+  полностью независимо достижимы через прямой `INSERT`/`UPDATE`, не пересекающийся с триггером's
+  условиями (например: `pendingExport=true` с `status != APPROVED`, без затрагивания
+  `coveredByExportBatchId` вообще — чистое попадание в CK-45, триггер даже не запускает свою
+  валидационную ветку).
+
+Никакие старые миграции не редактируются. Полная регистрация — `05_RAW_SQL_REGISTER.md` §13.
+
+### BF. Service layer — `lib/csv-export.ts`
+
+Единый владелец CSV_V1-логики. Экспортирует:
+
+```ts
+export async function createExportBatch(periodId: string, actorUserId: string, requestId: string): Promise<CreateExportBatchResult | CreateExportBatchError>
+export async function listExportBatches(filter, pagination): Promise<ExportBatchListResult>
+export async function getExportBatchDetail(batchId: string, itemPagination): Promise<ExportBatchDetail | null>
+export async function getExportBatchDownload(batchId: string): Promise<{ fileName: string; fileHash: string; content: Buffer } | null>
+```
+
+`createExportBatch` — одна `prisma.$transaction`, шаги буквально по задаче:
+
+1. `SELECT ... FROM "PayrollPeriod" WHERE id = $1 FOR UPDATE` — тот же idiom, что `lockPeriod`.
+2. Re-read `status` под локом. `OPEN` → `PERIOD_NOT_EXPORTABLE`. `LOCKED` → `kind = FULL`. `EXPORTED`
+   → смотреть шаг 3 для eligibility. Любой другой (structurally unreachable, `PayrollPeriodStatus` —
+   закрытый enum из трёх значений) не имеет отдельной ветки.
+3. Для `EXPORTED`: читает expected participant `employeeId[]` (нужны для eligibility-scoping, §BC) и
+   считает `CorrectionRequest.count({status: APPROVED, pendingExport: true, timesheet: {periodId,
+   employeeId: {in: expectedEmployeeIds}}})`. Ноль → `NOTHING_TO_EXPORT`. Иначе → `kind = CORRECTION`.
+4. Timesheet rows expected participants блокируются `FOR UPDATE` в порядке `ORDER BY id` (тот же
+   `SELECT id FROM "Timesheet" WHERE id = ANY($1) ORDER BY id FOR UPDATE` idiom, что `createPeriod`
+   уже использует для `Employee`). Для `CORRECTION` — следом, pending `CorrectionRequest` рядов (тот
+   же eligibility-scope, что шаг 3) блокируются `ORDER BY id FOR UPDATE`.
+5. Свежепрочитанный (под локом) `currentVersionId` каждого expected Timesheet фиксируется — инвариант
+   (`FINAL_APPROVED` + непустой `currentVersionId`) проверяется здесь; нарушение → throw (§BA).
+6. Один `employee.findMany({where: {id: {in: employeeIds}}})`, один
+   `workSegment.findMany({where: {timesheetVersionId: {in: versionIds}}, include: {breaks: true}})`
+   (включает breaks через `include`, не отдельный запрос на сегмент), один `workSite.findMany`
+   ограниченный только теми `siteId`, что реально встретились в сегментах — все три set-based, ни
+   одного запроса внутри worker/day-цикла.
+7. `buildCanonicalDailyBuckets()` (§BD) над всеми сегментами разом.
+8. `randomUUID()` для batch id — **до** генерации CSV bytes (нужен внутри каждой строки, §BH). CSV
+   bytes/hash/fileName/fileSizeBytes строятся чистой функцией (§BG-BI) над отсортированными buckets +
+   snapshot-полями (resolved из шага 6's employee/site maps).
+9. `tx.exportBatch.create({data: {id: batchId, ...}})`.
+10. `tx.exportItem.createMany({data: rows})` — один bulk insert, не цикл `create()` на строку.
+11. `CORRECTION`: `tx.correctionRequest.updateMany({where: {id: {in: pendingIds}}, data:
+    {coveredByExportBatchId: batchId, pendingExport: false}})`.
+12. `FULL`: `tx.payrollPeriod.update({where: {id: periodId}, data: {status: 'EXPORTED', exportedAt:
+    new Date()}})`.
+13. Один `createAuditEvent(tx, {eventType: 'EXPORT_CREATED', ...})` — только whitelisted поля (§BM).
+14. Commit — функция возвращает `{ batch, period, coveredCorrectionCount }`.
+
+Транзакционные опции — `{ maxWait: 10_000, timeout: 20_000 }`, **без** `isolationLevel` override —
+т.е. Postgres/Prisma's обычный default `READ COMMITTED`, **не** `RepeatableRead`, который T8.1-T8.3's
+`*_TX_OPTIONS` использует. Это не тот же паттерн, что read-only отчёты, а тот же паттерн, что
+`lib/periods.ts::lockPeriod`/`lib/corrections.ts::decideCorrection` — обе тоже "лочим FOR UPDATE,
+затем перечитываем и условно пишем", обе тоже без isolation override. Причина, найденная эмпирически
+при написании тестов D37/D38 (два конкурентных export'а): под `RepeatableRead` `SELECT ... FOR UPDATE`,
+который блокируется за уже держащим лок конкурентом и затем разблокируется после его коммита, не
+просто перечитывает свежую закоммиченную строку — Postgres поднимает настоящий `40001 could not
+serialize access due to concurrent update`, потому что `RepeatableRead`-транзакция не имеет права
+увидеть запись, сделанную транзакцией, которая закоммитилась ПОСЛЕ начала её собственного snapshot.
+`READ COMMITTED` не имеет этой проблемы — заблокированный `FOR UPDATE` после разблокировки просто
+видит свежую строку, ровно то поведение, на которое рассчитаны шаги "залочили → перечитали fresh
+state" по всему §BF. Единственный реальный concurrency-риск по-прежнему сериализуется явными
+`FOR UPDATE`-локами шагов 1/4, не изоляцией транзакции — но именно поэтому `READ COMMITTED`
+достаточен и корректен, а `RepeatableRead` был бы не просто избыточен, а активно ошибочен здесь.
+
+### BG. CSV_V1 — exact byte contract
+
+Зафиксировано буквально по тексту задачи, реализовано в `lib/csv-export.ts`:
+
+- Encoding UTF-8, BOM `EF BB BF` в начале, RFC 4180, delimiter `,`, line ending `CRLF`, terminal
+  `CRLF` после последней строки (естественное следствие того, что каждая строка, включая последнюю,
+  заканчивается `\r\n` — нет отдельного "последняя строка без терминатора" пути).
+- **Все** cells в двойных кавычках (не только те, что формально требуют — литеральное требование
+  задачи, отступление от "quote-if-needed" RFC 4180 экономии).
+- Внутренняя `"` удваивается (`"` → `""`) до оборачивания в кавычки.
+- Header — ровно 17 колонок, в заданном порядке (§BH).
+- Одна data row = один `ExportItem` bucket. `rowCount` = число data rows (без header). Zero-hours
+  period — допустим: content = `BOM + header + CRLF`, `rowCount = 0`, `ExportItem` строк нет вообще
+  (естественное следствие: `buildCanonicalDailyBuckets([])` возвращает `[]`, дальше по конвейеру
+  ничего не меняется — не отдельная ветка кода).
+
+### BH. Header, columns, deterministic ordering
+
+Header (буквально, в этом порядке):
+
+```
+period_id,period_start_date,period_end_date,export_batch_id,export_kind,employee_id,
+employee_number,employee_name,site_id,site_name,date,timesheet_version_id,
+gross_minutes,paid_break_minutes,unpaid_break_minutes,worked_minutes,segment_count
+```
+
+(17 колонок; перенос строки здесь — только для читаемости этого документа, в реальном файле header —
+одна CRLF-строка). Row order — сортировка `ExportItem`-строк перед записью в CSV:
+
+1. `employeeNumberSnapshot` ASC, code-point/binary (**не** `localeCompare`).
+2. `employeeId` ASC (tie-break при равном `employeeNumberSnapshot` — не должно происходить, т.к.
+   `employeeNumber` уникален на `Employee`, но снимок технически мог быть скопирован до переименования
+   другого работника; tie-break делает порядок детерминированным независимо).
+3. `date` ASC (строковое `YYYY-MM-DD` сравнение — лексикографически совпадает с хронологическим).
+4. `siteNameSnapshot` ASC, code-point/binary.
+5. `siteId` ASC.
+
+Компаратор — цепочка `a < b ? -1 : a > b ? 1 : 0` на JS-строках (UTF-16 code unit сравнение), без
+`Intl`/`localeCompare` где бы то ни было в этом пути.
+
+### BI. Spreadsheet formula injection
+
+До escaping, для **только** трёх human-controlled text колонок (`employee_number`,
+`employee_name`, `site_name` — **не** `period_id`/UUID/дат/целых чисел/`export_kind`): если значение
+после ведущих `ASCII space`-символов (**не** любого whitespace — само правило задачи перечисляет
+`tab`/`CR`/`LF` как отдельные триггер-символы, а не как то, что "leading whitespace" уже съедает)
+начинается с `=`, `+`, `-`, `@`, tab, CR или LF — добавляется ведущий ASCII apostrophe `'` **в самое
+начало** исходной строки (до любых ведущих пробелов, не после них — гарантирует, что символ, который
+формульный движок видит первым, всегда `'`).
+
+```ts
+const CSV_FORMULA_TRIGGER = /^ *[=+\-@\t\r\n]/;
+function sanitizeHumanTextCell(value: string): string {
+  return CSV_FORMULA_TRIGGER.test(value) ? `'${value}` : value;
+}
+```
+
+Применяется **до** quote-doubling/wrapping (§BG) — apostrophe становится частью cell-содержимого,
+затем вся cell проходит обычный CSV-escaping. Реальные injection-cases (`=1+1`, `+SUM(A1:A9)`,
+`-2+3`, `@SUM(...)`, `\tCMD(...)`, значение начинающееся с CR/LF) проверены тестом §BJ item 19 —
+литеральным содержимым CSV, не только вызовом функции изолированно.
+
+### BJ. File identity
+
+- Batch UUID (`randomUUID()`) генерируется **до** построения CSV bytes — входит в CSV как
+  `export_batch_id` каждой строки (§BF шаг 8).
+- `fileName`: `titanor-time_<startDate>_<endDate>_<full|correction>_<batchId>.csv` — все компоненты
+  уже ASCII-safe (даты — `YYYY-MM-DD`, kind — литерал `full`/`correction`, batchId — UUID hex);
+  никакого пользовательского ввода в имени файла.
+- `fileHash` — lowercase SHA-256 hex **точных** сохранённых bytes (включая BOM и все CRLF) —
+  `createHash('sha256').update(contentBuffer).digest('hex')`.
+- `fileSizeBytes` — `contentBuffer.byteLength` (точная длина в байтах, не `.length` JS-строки, которая
+  считает UTF-16 code units, а не байты — не эквивалентно для не-ASCII содержимого вроде кириллицы/
+  финских букв в именах). CHECK `ck_export_batch_file_size_matches_content` (T8.4A, `= octet_length
+  (content)`) — DB-уровневый backstop, совпадает по построению.
+- `ExportBatch.content` = точные сгенерированные bytes, вставленные как есть — download (§BL) **никогда**
+  не реконструирует CSV из текущей БД, только отдаёт уже сохранённый `content` буквально.
+
+### BK. API contracts
+
+Четыре endpoint'а, все под `/api/admin/*`. `X-Requested-With: titanor-time` обязателен на POST (тот
+же `403 CSRF_REJECTED`, что весь остальной admin API) — GET-эндпоинты (list/detail/download) CSRF не
+проверяют (тот же паттерн, что весь остальной read-only admin API этого проекта).
+
+#### `POST /api/admin/periods/:periodId/export`
+
+Permissions: **обе одновременно** — `period.export` **и** `export.create` (`hasPermission`-цикл, не
+`||`). `Idempotency-Key` (UUID) **обязателен** (`400 VALIDATION_ERROR`, если отсутствует/не UUID) —
+тот же паттерн, что `POST .../geofence-versions` уже устанавливает для mandatory-idempotency
+endpoint'ов. Body — либо отсутствует, либо `{}`; **любое** поле в теле → `400 VALIDATION_ERROR` (нет
+ни одного допустимого поля вообще, так что "неизвестное" = "любое").
+
+State routing → HTTP:
+
+| Состояние периода | Действие | HTTP |
+|---|---|---|
+| malformed `periodId` | — | `400 VALIDATION_ERROR` |
+| period не существует | — | `404 PERIOD_NOT_FOUND` |
+| `OPEN` | — | `409 PERIOD_NOT_EXPORTABLE` |
+| `LOCKED` | создаёт FULL | `201` |
+| `EXPORTED`, есть eligible pending correction | создаёт CORRECTION | `201` |
+| `EXPORTED`, нет eligible pending correction | — | `409 NOTHING_TO_EXPORT` |
+
+Response `201` — буквально по контракту задачи (`batch`/`period`/`coveredCorrectionCount`,
+`downloadUrl: /api/admin/export-batches/:id/download`). Idempotency replay — тот же контракт, что
+`04_ADMIN_FIRST_API_CONTRACTS.md` §0 уже фиксирует для всего API: тот же key/period/body →
+byte-identical cached `201`; тот же key, другая цель/тело → `409 IDEMPOTENCY_KEY_REUSED`; конкурентный
+тот же key → `409 IDEMPOTENCY_KEY_IN_PROGRESS` (естественно из `beginIdempotentRequest`, без нового
+кода).
+
+#### `GET /api/admin/export-batches`
+
+Permission: `export.read`. Query: `periodId?` (UUID, если задан и невалиден — `400`), `page`
+(default 1), `pageSize` (default 20, max 100). Sort: `createdAt DESC, id DESC`. Response —
+`{items, page, pageSize, totalItems, totalPages}`, тот же общий пагинационный контракт
+(`04_ADMIN_FIRST_API_CONTRACTS.md` §0). Каждый item — та же форма, что `batch` в POST-ответе
+(без `content`).
+
+#### `GET /api/admin/export-batches/:batchId`
+
+Permission: `export.read`. Malformed UUID → `400`. Отсутствующий batch → `404
+EXPORT_BATCH_NOT_FOUND` (единый код, тот же, что malformed путь не отдаёт — оба ведут к одному и тому
+же "no oracle" 404 для malformed-vs-missing, тот же принцип, что остальной API уже устанавливает,
+кроме самого формата UUID, который проверяется первым и даёт `400`, а не `404`, — валидный, но
+несуществующий UUID даёт `404`). Response — `batch`-метаданные (та же форма, без `content`),
+`coveredCorrectionIds: string[]` + `coveredCorrectionCount`, и paginated `items` (`page`/`pageSize`,
+query params, default 1/20 max 100) — каждый item: `id, employeeId, employeeNumberSnapshot,
+employeeNameSnapshot, siteId, siteNameSnapshot, date, timesheetVersionId, grossMinutes,
+paidBreakMinutes, unpaidBreakMinutes, workedMinutes, segmentCount`. **Не** отдаёт correction reason
+или любой другой correction-payload — только `id` покрытых `CorrectionRequest`.
+
+#### `GET /api/admin/export-batches/:batchId/download`
+
+Permission: `export.read`. Возвращает **точный** `ExportBatch.content` без какой-либо
+реконструкции. Заголовки:
+
+```
+Content-Type: text/csv; charset=utf-8
+Content-Disposition: attachment; filename="<stored fileName>"
+Content-Length: <fileSizeBytes>
+Cache-Control: private, no-store
+X-Content-Type-Options: nosniff
+X-Content-SHA256: <fileHash>
+```
+
+Malformed/missing batch → тот же безопасный `404 EXPORT_BATCH_NOT_FOUND` JSON-envelope (не
+HTML/stack trace — `jsonError()`, тот же путь, что весь остальной API).
+
+GET-эндпоинты (list/detail/download) **не создают** `AuditEvent` и ничего не мутируют — только
+`tx.*.findMany`/`findUnique` (list/detail — внутри короткой read-only транзакции для консистентного
+`page`/`totalItems`-снимка; download — один `findUnique` по `id`, без транзакции, поскольку это
+единственное чтение).
+
+### BL. Audit — allowed fields only
+
+`AuditEvent(EXPORT_CREATED)` — `afterValue` содержит **только**: `exportBatchId`, `periodId`,
+`format`, `kind`, `correctsBatchId`, `rowCount`, `fileSizeBytes`, `fileHash`, `coveredCorrectionCount`.
+**Никогда**: CSV content, employee names/numbers, individual `ExportItem`, correction reason,
+GPS/device/payload/request data — тот же redaction-принцип, что весь T8-этап уже устанавливает.
+`entityType: 'EXPORT_BATCH'`, `entityId: <batch id>`, `actorUserId`, `requestId` — стандартные поля
+`createAuditEvent()` (`lib/audit.ts`, не меняется).
+
+### BM. Locking/concurrency — доказательство
+
+Lock order внутри `createExportBatch`: `PayrollPeriod` → `Timesheet[]` (`ORDER BY id`) →
+(`CORRECTION` only) `CorrectionRequest[]` (`ORDER BY id`) — расширяет существующий canonical order
+§8.1 (`docs/titanor-time/T7A_1_ATTENDANCE_CLOCK_DESIGN.md`), добавляя `PayrollPeriod` как самую
+внешнюю позицию (period-level операции, `lockPeriod`, уже устанавливают этот же приоритет — период
+блокируется раньше входящих в него Timesheet-строк).
+
+Поскольку **и** `createExportBatch`, **и** `decideCorrection` оба блокируют затронутые `Timesheet`-
+строки `FOR UPDATE` (последний — по одной, `lib/corrections.ts:748`; первый — bulk, `ORDER BY id`),
+Postgres-уровневая row-lock serialization на общей `Timesheet`-строке — единственный реальный
+координационный механизм между этими двумя независимыми путями (ни один явно не знает о другом):
+
+- **Correction approval выигрывает первым** (коммитит до того, как export взял свой Timesheet-лок):
+  export видит `pendingExport=true` уже выставленным (поскольку approval сам проверяет `period.status
+  === 'EXPORTED'` в момент своего коммита) → correction входит в новый batch.
+- **Export выигрывает первым** (уже держит/закоммитил Timesheet-лок до начала approval): approval
+  блокируется на `FOR UPDATE`, затем продолжает с уже закоммиченным состоянием после — его
+  `pendingExport=true` устанавливается уже ПОСЛЕ snapshot предыдущего export'а → остаётся pending для
+  следующего вызова.
+- **Два FULL** (разные idempotency keys, конкурентно): оба берут `PayrollPeriod FOR UPDATE` — второй
+  блокируется до коммита первого, затем перечитывает статус (уже `EXPORTED`, не `LOCKED`) → второй
+  либо видит eligible pending correction (маловероятно тут же) → CORRECTION, либо `NOTHING_TO_EXPORT`.
+  Ровно один FULL batch (§BA, тройная гарантия).
+- **Два CORRECTION** (конкурентно, один pending item): оба берут `PayrollPeriod FOR UPDATE` — второй
+  блокируется, затем видит `pendingExport=false` (уже очищено первым) → `NOTHING_TO_EXPORT`. Ровно
+  один batch покрывает pending snapshot.
+- Нет lost `pendingExport`-update: `pendingExport=false` устанавливается **в той же транзакции**, что
+  вставляет покрывающий batch (§BF шаг 11) — не отдельным, потенциально гонка-подверженным вызовом.
+- Нет duplicate batch/item: `tx.exportBatch.create`/`createMany` — единственные insert-точки, обе
+  внутри единственной транзакции на попытку; при откате транзакции (см. §BN) ничего не остаётся.
+
+Тест §BJ (concurrency-раздел задачи) доказывает это через реальные **разные PostgreSQL backend PID**
+(`pg_stat_activity`), не только `Promise.all`-таймингом на одном соединении — та же техника, что T7A's
+"held-open-transaction + `wait_event_type='Lock'`" паттерн (см. `[[titanor_time_conventions]]`).
+
+### BN. Security / redaction — сводка
+
+- WORKER/FOREMAN — `403` на все четыре endpoint'а (ни `period.export`/`export.create`/`export.read`
+  не выданы им, T8.4A permissions-миграция).
+- Отзыв **любого** из `period.export`/`export.create` блокирует следующий `POST` (`hasPermission`
+  перечитывается на каждый запрос, без кэша — тот же принцип, что весь остальной API).
+- Отзыв `export.read` блокирует list/detail/download на следующий запрос.
+- CSRF (`X-Requested-With`) — только `POST`.
+- `content` **никогда** не попадает в JSON list/detail-ответ, ни в лог, ни в `AuditEvent`.
+- CSV не содержит: `phone`/`email`/GPS/device identifiers/`payloadHash`/`requestId`/correction reason
+  — структурно (17 фиксированных колонок §BH, ни одна не ссылается на эти поля).
+- Formula injection — нейтрализован (§BI), проверено реальным содержимым.
+- `fileName` не зависит от пользовательского ввода (§BJ — все компоненты server-generated).
+- Никакого filesystem temp CSV — bytes существуют только в памяти процесса (JS `Buffer`) до записи
+  `content` в PostgreSQL; ни один шаг не пишет на диск.
+
+### BO. Transaction rollback / query-count / EXPLAIN — обязательства
+
+- Rollback (любая ошибка внутри транзакции — invariant failure throw, DB constraint violation) не
+  оставляет half-batch/half-item/half-мутированный `PayrollPeriod`/`CorrectionRequest` — вся работа
+  §BF шагов 1–13 — одна Postgres-транзакция, атомарна по построению; проверяется тестом (F.54).
+- Query count — ограничено и не растёт с числом workers (§BF шаги 1/4/6 — все bulk/set-based, ни
+  одного per-worker/per-day цикла с собственным Prisma-вызовом); измеряется на 1/50/200-worker
+  фикстурах (F.55).
+- `ExportItem`-вставка — один `createMany`, не цикл (F.56).
+- `EXPLAIN ANALYZE` — на большой фикстуре, подтверждает индексное использование (F.57).
+
+### BP. Область, явно не реализованная этим слайсом
+
+`/admin/export` UI (T8.4C — отдельный, не начатый слайс), PDF (`ExportFormat` — по-прежнему только
+`CSV_V1`, добавление `PDF_V1` — отдельная будущая additive-миграция), зарплата/ставки/деньги, любые
+payroll/TES-категории (overtime/night/sunday/holiday/travel — по-прежнему ноль полей для них ни в
+`ExportBatch`, ни в `ExportItem`), production deployment (все проверки — на disposable-ресурсах;
+preview `127.0.0.1:3244` и production контейнеры — не трогаются, только read-only inspect/health).
+
+### BQ. Статус реализации — `[2026-08-19]` завершено
+
+Реализовано ровно то, что описано в §BA-BP, без отклонений от спецификации задачи. Одна находка,
+исправленная до коммита: изначальная транзакционная конфигурация `createExportBatch` копировала
+T8.1-T8.3's `RepeatableRead`-изоляцию — под ней конкурентный экспорт, чей `FOR UPDATE` блокируется за
+уже держащим лок конкурентом и затем разблокируется после его коммита, падает с настоящим `40001
+could not serialize access due to concurrent update` вместо простого перечитывания свежей строки
+(обнаружено тестами concurrency-раздела). Исправлено переключением на Postgres/Prisma default `READ
+COMMITTED` (§BF) — тот же паттерн, что `lockPeriod`/`decideCorrection` уже используют.
+
+`scripts/_test-csv-export.ts` — 171/171 проверок на всех 58 сценариях задачи (A-F), 100% pass на
+disposable PostgreSQL 16, включая реальные многопроцессные concurrency-доказательства (`pg_stat_
+activity` distinct backend PID) и dump/restore round trip на отдельном одноразовом экземпляре.
+`scripts/_test-csv-export-querycount.ts` подтверждает bounded query count (15 SQL statements
+одинаково для 1/50/200 workers) и единственный bulk `INSERT` в `ExportItem`. Полная регрессия
+T8.1-T8.3/rounding-consistency/activation/corrections — без изменений (каждый скрипт на своей
+изолированной disposable БД). T8.4C (admin UI) и PDF/payroll/TES-категории этим коммитом по-прежнему
+не начаты.

@@ -2133,3 +2133,74 @@ CSV Export Schema Foundation (`docs/titanor-time/T8_REPORTS_DESIGN.md` Addendum 
 - §18–20 (T8.1/T8.2/T8.3 контракты) — не менялись; их backend/DTO/permissions идентичны до и после
   этого коммита (подтверждено `git diff` и полным прогоном их собственных regression-наборов —
   105/105 rounding-consistency, 110/110 T8.3A).
+
+## 22. T8.4B — Immutable CSV Generation, Export APIs and Download (2026-08-19)
+
+Четыре новых эндпоинта, все под `/api/admin/*`. Полный дизайн — `docs/titanor-time/T8_REPORTS_DESIGN.md`
+Addendum "T8.4B" §BA-BN, написан ДО кода. `lib/csv-export.ts` — единственный владелец логики; route'ы
+делают только auth/permission/idempotency/query-validation/HTTP-mapping.
+
+#### `POST /api/admin/periods/:periodId/export`
+
+Permissions: `period.export` **и** `export.create` одновременно. `X-Requested-With: titanor-time`
+обязателен. `Idempotency-Key` (UUID) обязателен — `400 VALIDATION_ERROR`, если отсутствует/не UUID.
+Body — либо отсутствует, либо `{}`; любое поле в теле → `400 VALIDATION_ERROR` (ни одного допустимого
+поля вообще).
+
+Routing по статусу периода: `OPEN` → `409 PERIOD_NOT_EXPORTABLE`; `LOCKED` → создаёт `FULL`; `EXPORTED`
+с eligible pending correction (`APPROVED`+`pendingExport=true`, scoped к `expected=true` участникам) →
+создаёт `CORRECTION`; `EXPORTED` без — `409 NOTHING_TO_EXPORT`. Malformed `periodId` → `400
+VALIDATION_ERROR`; несуществующий — `404 PERIOD_NOT_FOUND`.
+
+Response `201`:
+
+```json
+{
+  "batch": {
+    "id": "uuid", "periodId": "uuid", "format": "CSV_V1", "kind": "FULL|CORRECTION",
+    "correctsBatchId": "uuid|null", "fileName": "string", "fileHash": "sha256 hex",
+    "fileSizeBytes": 0, "rowCount": 0, "createdAt": "ISO",
+    "downloadUrl": "/api/admin/export-batches/:id/download"
+  },
+  "period": { "id": "uuid", "status": "EXPORTED", "exportedAt": "ISO" },
+  "coveredCorrectionCount": 0
+}
+```
+
+Idempotency — стандартный контракт §0: тот же key/period/body → byte-identical cached `201`; тот же
+key, другая цель → `409 IDEMPOTENCY_KEY_REUSED`; конкурентный тот же key → `409
+IDEMPOTENCY_KEY_IN_PROGRESS`.
+
+#### `GET /api/admin/export-batches`
+
+Permission: `export.read`. Query: `periodId?` (UUID), `page` (default 1), `pageSize` (default 20, max
+100). Sort: `createdAt DESC, id DESC`. Response — `{items, page, pageSize, totalItems, totalPages}`,
+каждый item — та же форма, что `batch` выше, без `content`.
+
+#### `GET /api/admin/export-batches/:batchId`
+
+Permission: `export.read`. Malformed UUID → `400`; несуществующий — `404 EXPORT_BATCH_NOT_FOUND`
+(единый код для malformed-vs-missing различается только на уровне 400-vs-404, не по тексту).
+Response — `batch`-метаданные (без `content`), `coveredCorrectionIds: string[]` +
+`coveredCorrectionCount`, paginated `items` (`page`/`pageSize`, те же default/max) — каждый item:
+`id, employeeId, employeeNumberSnapshot, employeeNameSnapshot, siteId, siteNameSnapshot, date,
+timesheetVersionId, grossMinutes, paidBreakMinutes, unpaidBreakMinutes, workedMinutes, segmentCount`.
+Никогда correction reason/payload.
+
+#### `GET /api/admin/export-batches/:batchId/download`
+
+Permission: `export.read`. Возвращает точный `ExportBatch.content`, никогда не реконструирует.
+Заголовки: `Content-Type: text/csv; charset=utf-8`, `Content-Disposition: attachment;
+filename="<stored fileName>"`, `Content-Length`, `Cache-Control: private, no-store`,
+`X-Content-Type-Options: nosniff`, `X-Content-SHA256: <fileHash>`. Malformed/missing batchId — тот же
+безопасный `404 EXPORT_BATCH_NOT_FOUND` JSON-envelope, никогда HTML/stack trace.
+
+Все три GET — read-only: ноль `AuditEvent`, ноль мутаций, подтверждено тестом. CSRF применяется
+только к `POST`. `content` никогда не попадает ни в один JSON-ответ. `AuditEvent(EXPORT_CREATED)` —
+только 9 whitelisted полей (`exportBatchId`/`periodId`/`format`/`kind`/`correctsBatchId`/`rowCount`/
+`fileSizeBytes`/`fileHash`/`coveredCorrectionCount`), никогда CSV content/employee names/individual
+ExportItem/correction reason/GPS/device/payload/request data.
+
+Полная эталонная реализация и тесты — `lib/csv-export.ts`, `scripts/_test-csv-export.ts` (171/171),
+`scripts/_test-csv-export-querycount.ts` (bounded query count 1/50/200 workers, EXPLAIN ANALYZE).
+CSV_V1 exact byte contract — `docs/titanor-time/T8_REPORTS_DESIGN.md` Addendum "T8.4B" §BG-BJ.

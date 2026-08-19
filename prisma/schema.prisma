@@ -985,18 +985,26 @@ model CorrectionRequest {
   approvalOverride   Boolean                 @default(false)
   overrideReason     String?                 @db.Text
   pendingExport      Boolean                 @default(false)
+  // T8.4B — docs/titanor-time/T8_REPORTS_DESIGN.md Addendum "T8.4B" §BE. Which ExportBatch (always
+  // kind=CORRECTION, same period as this request's Timesheet — enforced by
+  // trg_correction_request_covered_batch_check, not expressible as a CHECK/FK) covered this
+  // correction, once pendingExport flips back to false. Set exactly once — immutable after that,
+  // same trigger.
+  coveredByExportBatchId String?              @db.Uuid
   createdAt          DateTime                @default(now()) @db.Timestamptz(6)
   updatedAt          DateTime                @updatedAt @db.Timestamptz(6)
   timesheet          Timesheet               @relation(fields: [timesheetId], references: [id], onDelete: Restrict, onUpdate: Cascade)
   requestedByUser    User                    @relation("CorrectionRequestRequestedBy", fields: [requestedByUserId], references: [id], onDelete: Restrict, onUpdate: Cascade)
   decidedByUser      User?                   @relation("CorrectionRequestDecidedBy", fields: [decidedByUserId], references: [id], onDelete: Restrict, onUpdate: Cascade)
   resultingVersion   TimesheetVersion?       @relation("CorrectionRequestResultingVersion", fields: [resultingVersionId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  coveredByExportBatch ExportBatch?          @relation("ExportBatchCoveredCorrections", fields: [coveredByExportBatchId], references: [id], onDelete: Restrict, onUpdate: Cascade)
   draft              CorrectionDraft?        @relation("CorrectionRequestDraftPointer", fields: [draftId], references: [id], onDelete: SetNull, onUpdate: Cascade)
   draftOwner         CorrectionDraft?        @relation("CorrectionDraftOwnRequest")
 
   @@index([timesheetId, status])
   @@index([requestedByUserId])
   @@index([decidedByUserId])
+  @@index([coveredByExportBatchId])
 }
 
 model CorrectionDraft {
@@ -1442,6 +1450,8 @@ model ExportBatch {
   correctsBatch   ExportBatch?      @relation("ExportBatchCorrection", fields: [correctsBatchId], references: [id], onDelete: Cascade, onUpdate: Cascade)
   correctedBy     ExportBatch[]     @relation("ExportBatchCorrection")
   items           ExportItem[]
+  // T8.4B — reverse side of CorrectionRequest.coveredByExportBatchId (§BE).
+  coveredCorrections CorrectionRequest[] @relation("ExportBatchCoveredCorrections")
 
   @@index([periodId, createdAt(sort: Desc), id(sort: Desc)])
   @@index([createdByUserId])

@@ -700,7 +700,14 @@ UI, ноль PDF, ноль payroll/TES-категорий (rates/overtime/night/
 Полный контракт — `docs/titanor-time/T8_REPORTS_DESIGN.md` Addendum "T8.4A",
 `05_RAW_SQL_REGISTER.md` §12.
 
-**T8.4B (CSV generation/API/download) 🔴 не начато.**
+**T8.4B (CSV generation/API/download) 🟢 реализовано `[2026-08-19]`** — deterministic CSV_V1
+generation, FULL export для `LOCKED` period, CORRECTION export (full replacement snapshot) для
+`EXPORTED` period с pending corrections, `CorrectionRequest.coveredByExportBatchId` (новая additive
+миграция `20260819180000`), 4 endpoint'а (`POST /api/admin/periods/:periodId/export`,
+`GET /api/admin/export-batches`, `GET /api/admin/export-batches/:batchId`,
+`GET /api/admin/export-batches/:batchId/download`). Ноль admin UI (T8.4C), ноль PDF, ноль
+payroll/TES. Полный контракт — `docs/titanor-time/T8_REPORTS_DESIGN.md` Addendum "T8.4B",
+`05_RAW_SQL_REGISTER.md` §13.
 
 **T8.4C (admin UI) 🔴 не начато.**
 

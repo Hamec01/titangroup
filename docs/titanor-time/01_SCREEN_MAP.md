@@ -667,9 +667,14 @@ touch target ≥ 48px), `/foreman/*` — desktop-first с поддержкой �
 - Действия: `export.create`, скачать существующий batch
 - Состояния: loading; empty (нет `LOCKED` периодов); error
 - Откуда: nav, `/admin/periods/[periodId]`
-- API: `GET /api/admin/export-batches`, `POST /api/admin/periods/:periodId/export`
+- API: `POST /api/admin/periods/:periodId/export`, `GET /api/admin/export-batches`,
+  `GET /api/admin/export-batches/:batchId`, `GET /api/admin/export-batches/:batchId/download`
 - DoD: повторный экспорт создаёт новый `ExportBatch`, не перезаписывает предыдущий; для уже
   `EXPORTED` периода с накопленными корректировками создаёт корректирующий batch
+- **`[2026-08-19]` Backend (T8.4B) полностью готов** — все четыре API уже реализованы и протестированы
+  (`docs/titanor-time/T8_REPORTS_DESIGN.md` Addendum "T8.4B", `04_ADMIN_FIRST_API_CONTRACTS.md` §22,
+  `lib/csv-export.ts`, 171/171 тестов). Сам экран `/admin/export` — по-прежнему ⚪, не построен; это
+  T8.4C, отдельный не начатый слайс.
 
 #### `/admin/audit` ⚪
 - Роли: `ADMIN`, `SUPER_ADMIN`

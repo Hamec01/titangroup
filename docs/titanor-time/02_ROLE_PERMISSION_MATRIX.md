@@ -347,24 +347,25 @@ reactivate шаблона — нет утверждённого контракт
 
 ### 2.10 Экспорт и аудит
 
-**`[2026-08-19] T8.4A реализовано (permissions только)`** — `period.export`, `export.create`,
-`export.read` теперь реальные `Permission`-строки, выданные (`RolePermission`, 6 строк) только
-`ADMIN`/`SUPER_ADMIN`; `FOREMAN`/`WORKER` — ноль новых грантов; `SYSTEM` структурно не может
-получить роль вообще. Отдельная чистая DML-миграция `20260819160000_seed_export_permissions`
-(`docs/titanor-time/T8_REPORTS_DESIGN.md` Addendum "T8.4A", `05_RAW_SQL_REGISTER.md` §12). **Ноль
-consuming-эндпоинтов в этом коммите** — ни одна из трёх permission ещё не проверяется ни одним
-route (`04_ADMIN_FIRST_API_CONTRACTS.md` §21); первый реальный потребитель — T8.4B, которого пока
-нет. Строки `export.create`/`export.read` ниже описывают их ЦЕЛЕВОЕ (design-time, T8.4B) поведение,
-не то, что enforced сегодня — на уровне схемы T8.4A только гарантирует структурную форму
-`ExportBatch`/`ExportItem` (immutable, `FULL`/`CORRECTION`, at most one `FULL` per period и т.д.,
-§12 выше), а не что LOCKED/EXPORTED-статус периода реально проверяется при создании — это
-сервисная проверка T8.4B, не constraint/trigger.
+**`[2026-08-19] T8.4A` — `period.export`, `export.create`, `export.read` — реальные `Permission`-строки,
+выданные (`RolePermission`, 6 строк) только `ADMIN`/`SUPER_ADMIN`; `FOREMAN`/`WORKER` — ноль новых
+грантов; `SYSTEM` структурно не может получить роль вообще. Отдельная чистая DML-миграция
+`20260819160000_seed_export_permissions` (`docs/titanor-time/T8_REPORTS_DESIGN.md` Addendum "T8.4A",
+`05_RAW_SQL_REGISTER.md` §12).
+
+**`[2026-08-19] T8.4B реализовано`** — все три permission теперь имеют реальных consuming-эндпоинтов
+(`04_ADMIN_FIRST_API_CONTRACTS.md` §22, `lib/csv-export.ts`). `period.export` **и** `export.create`
+проверяются **одновременно** (`hasPermission`-цикл, не `||`) на `POST /api/admin/periods/:periodId/export`
+— отсутствие любого из двух → `403`; `export.read` — на всех трёх GET-эндпоинтах
+(list/detail/download). Строки ниже теперь описывают **реализованное** поведение, не design-time
+цель — `LOCKED`/`EXPORTED`-gating, `FULL`/`CORRECTION`-routing и correction-coverage (§BB/§BC design
+doc) — все проверены `scripts/_test-csv-export.ts` (171/171).
 
 | Permission | Держатели | Область | Ограничения | Причина | Аудит | Массовое |
 |---|---|---|---|---|---|---|
-| `period.export` | `ADMIN`, `SUPER_ADMIN` | вся компания | экспорт данных периода как CSV-батч (T8.4B) | нет | да | нет |
-| `export.create` | `ADMIN`, `SUPER_ADMIN` | вся компания | только для `LOCKED`/`EXPORTED` периодов; для `EXPORTED` создаёт корректирующий `ExportBatch(correctsBatchId=...)`, покрывающий накопленные `pendingExport=true` | нет | да (`EXPORT_CREATED`) | нет |
-| `export.read` | `ADMIN`, `SUPER_ADMIN` | вся компания | доступ к `ExportBatch`/`ExportItem` | нет | нет | — |
+| `period.export` | `ADMIN`, `SUPER_ADMIN` | вся компания | экспорт данных периода как CSV-батч; проверяется вместе с `export.create` на одном и том же `POST` | нет | да | нет |
+| `export.create` | `ADMIN`, `SUPER_ADMIN` | вся компания | только для `LOCKED`/`EXPORTED` периодов; для `EXPORTED` создаёт корректирующий `ExportBatch(correctsBatchId=...)`, покрывающий накопленные `pendingExport=true` (scoped к `expected=true` участникам, `T8_REPORTS_DESIGN.md` §BC); `EXPORTED` без накопленных → `409 NOTHING_TO_EXPORT`; `Idempotency-Key` обязателен | нет | да (`EXPORT_CREATED`, только whitelisted поля — §BL) | нет |
+| `export.read` | `ADMIN`, `SUPER_ADMIN` | вся компания | доступ к `ExportBatch`/`ExportItem` (list/detail/download); download отдаёт точные сохранённые bytes, никогда не реконструирует | нет | нет | — |
 | `audit.read` | `ADMIN`, `SUPER_ADMIN` | вся компания | `AuditEvent` — append-only, недоступен для записи через API вовсе | нет | нет (само чтение аудита не аудируется) | — |
 
 ### 2.11 GPS (зарезервировано, не реализуется в первом срезе)

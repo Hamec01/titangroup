@@ -1723,3 +1723,157 @@ New permissions: 3 (period.export, export.create, export.read — separate DML m
   20260819160000_seed_export_permissions, granted to ADMIN+SUPER_ADMIN only, 6 RolePermission rows)
 New PostgreSQL extensions: 0
 ```
+
+## 13. T8.4B Immutable CSV Generation, Export APIs and Download — schema completion slice
+
+```text
+Status: ACTIVE
+Scope: prisma/migrations/20260819180000_add_correction_covered_by_export_batch
+Authority: docs/titanor-time/T8_REPORTS_DESIGN.md Addendum "T8.4B" (2026-08-19), §BE
+Prisma version: 6.19.0
+PostgreSQL target: 16
+```
+
+This section is additive to, and does not modify, Sections 1–12 above. One additive migration —
+`CorrectionRequest.coveredByExportBatchId` (nullable UUID FK → `ExportBatch`), its supporting index,
+two new CHECK constraints, and one new trigger function/instance. No changes to `ExportBatch`/
+`ExportItem` (Section 12) or any other pre-existing table.
+
+### 13.1 CHECK constraint register (CK-45 .. CK-46)
+
+### CK-45 `ck_correction_request_pending_export_shape`
+
+- Table: `CorrectionRequest`
+- Predicate:
+  ```sql
+  NOT "pendingExport" OR (
+    "status" = 'APPROVED' AND "resultingVersionId" IS NOT NULL AND "coveredByExportBatchId" IS NULL
+  )
+  ```
+- Source: task DB-invariant list, item 1 ("pendingExport=true возможно только при: status=APPROVED,
+  resultingVersionId IS NOT NULL, coveredByExportBatchId IS NULL").
+- Documentation synchronization: SYNCED.
+- Minimum negative test: `pendingExport=true` with `status` forced to `REJECTED` (via raw SQL,
+  `coveredByExportBatchId` left `NULL` so CK-46 cannot also fire) — expect `23514` on this
+  constraint by name (verified, `scripts/_test-csv-export.ts` F53). A second shape —
+  `pendingExport=true` with `coveredByExportBatchId` set — is also rejected, but CK-46 fires on the
+  identical row shape too (its own predicate requires `NOT pendingExport` whenever
+  `coveredByExportBatchId` is non-NULL) — either identifier is a correct, expected rejection reason
+  for that combination; see the CK-45/CK-46 ordering note below.
+
+### CK-46 `ck_correction_request_covered_shape`
+
+- Table: `CorrectionRequest`
+- Predicate:
+  ```sql
+  "coveredByExportBatchId" IS NULL OR (
+    "status" = 'APPROVED' AND "resultingVersionId" IS NOT NULL AND NOT "pendingExport"
+  )
+  ```
+- Source: task DB-invariant list, item 2 ("coveredByExportBatchId IS NOT NULL возможно только при:
+  status=APPROVED, resultingVersionId IS NOT NULL, pendingExport=false").
+- Documentation synchronization: SYNCED.
+- Minimum negative test: `coveredByExportBatchId` set (to a genuinely valid, same-period
+  `CORRECTION` batch — isolating this CHECK from FN-26's own reference checks) while `status` is
+  forced away from `APPROVED` — expect `23514` on this constraint by name (verified).
+
+**CK-45/CK-46 overlap note**: the two CHECKs are not mutually exclusive. Any row with
+`pendingExport=true` AND `coveredByExportBatchId` set simultaneously violates both — CK-45's own
+clause requires `coveredByExportBatchId IS NULL` whenever `pendingExport` is true, and CK-46's own
+clause requires `NOT pendingExport` whenever `coveredByExportBatchId` is set. This is expected: the
+task lists them as two separate invariants, but they describe overlapping regions of the same
+underlying state machine (`pendingExport` and `coveredByExportBatchId` are mutually exclusive by
+construction — a row is never simultaneously "still pending" and "already covered"). Which of the
+two constraint names Postgres reports for that specific combined violation is not guaranteed by this
+schema and is not treated as a meaningful distinction by the application (`lib/csv-export.ts` never
+constructs that combination in the first place).
+
+### 13.2 Composite / plain foreign key register
+
+| ID | Table | Columns | References | Source |
+|---|---|---|---|---|
+| — | `CorrectionRequest` | `coveredByExportBatchId` | `ExportBatch(id)` | Task schema completion spec |
+
+Plain (non-composite) FK, `ON DELETE RESTRICT ON UPDATE CASCADE` — a correction that references a
+batch as its coverage must never be left dangling by deleting the batch. `ExportBatch` is already
+structurally undeletable (`trg_export_batch_immutable`, FN-23) — this `RESTRICT` is defense-in-depth
+against a future change to that trigger, not an operational path exercised today. Not given its own
+FK-NN identifier — the §11.3/§12.3 composite-FK numbering (FK-01..FK-17) is reserved for *composite*
+foreign keys specifically (this one is a single-column FK, the ordinary Prisma-expressible kind,
+same category as `ExportBatch.correctsBatchId` above it).
+
+### 13.3 Trigger function register (FN-26)
+
+### FN-26 `fn_correction_request_covered_batch_check`
+
+- Table: `CorrectionRequest`.
+- Behavior: `BEFORE INSERT OR UPDATE` — unlike `ExportBatch`/`ExportItem` (fully immutable via
+  FN-23/FN-24), `CorrectionRequest` remains a mutable table, so this needs an `UPDATE` path too, not
+  only `INSERT`.
+  1. Immutability of this one column: `IF TG_OP = 'UPDATE' AND OLD."coveredByExportBatchId" IS NOT
+     NULL AND NEW."coveredByExportBatchId" IS DISTINCT FROM OLD."coveredByExportBatchId"` → reject.
+     Checked unconditionally first — once set, `coveredByExportBatchId` can never be cleared or
+     replaced by a different batch (task DB-invariant item 4).
+  2. Only at the `NULL -> value` transition (`TG_OP = 'INSERT'` or `OLD."coveredByExportBatchId" IS
+     NULL`): validates the referenced `ExportBatch` exists (own explicit check, belt-and-suspenders
+     alongside the FK in §13.2 — same style as FN-25's own predecessor check), has `kind =
+     'CORRECTION'` (a `FULL` batch can never "cover" a correction — `FULL` batches only ever happen
+     for a `LOCKED` period, before any correction could exist), and belongs to the SAME period as the
+     `CorrectionRequest`'s own `Timesheet` (not expressible as a CHECK or a plain FK — neither can
+     compare one row's column against a DIFFERENT table's row; same cross-table-comparison category
+     as FN-25's own period-match check for `ExportBatch.correctsBatchId`).
+- Stable exception identifiers: `CORRECTION_REQUEST_COVERED_BATCH_IMMUTABLE`,
+  `CORRECTION_REQUEST_COVERED_BATCH_NOT_FOUND`, `CORRECTION_REQUEST_COVERED_BATCH_WRONG_KIND`,
+  `CORRECTION_REQUEST_COVERED_BATCH_PERIOD_MISMATCH`.
+- Row-lock contract: reads `ExportBatch`/`Timesheet` via a plain `SELECT`, no explicit row lock —
+  both reads happen inside the transaction `lib/csv-export.ts::createExportBatch` runs, which already
+  holds `FOR UPDATE` on the affected `Timesheet`/`CorrectionRequest`/`PayrollPeriod` rows (§BF) and
+  never reads an as-yet-uncommitted `ExportBatch` (that row is inserted earlier in the same
+  transaction than the `CorrectionRequest` `UPDATE`, see §BF step ordering) — no TOCTOU window.
+- Source: task DB-invariant list, items 3-4.
+- Minimum negative test: four scenarios, one per stable identifier — nonexistent batch id; a real
+  `FULL` batch (wrong kind); a real `CORRECTION` batch of a *different* period (period mismatch,
+  isolated from the wrong-kind case by using a genuine same-kind, different-period predecessor); and
+  attempting to change or clear an already-set `coveredByExportBatchId` (immutability, both
+  "replace with a different batch" and "clear to NULL" tested separately) — all four verified,
+  `scripts/_test-csv-export.ts` F53. Positive: a genuinely valid same-period `CORRECTION` batch
+  reference succeeds cleanly.
+
+### 13.4 Trigger instance register (TRG-31)
+
+| ID | Table | Trigger | Function | Timing/Events |
+|---|---|---|---|---|
+| TRG-31 | `CorrectionRequest` | `trg_correction_request_covered_batch_check` | FN-26 | `BEFORE INSERT OR UPDATE` |
+
+Verified empirically: the trigger exists on `CorrectionRequest` (disposable PostgreSQL 16, `\d
+"CorrectionRequest"` introspection) and is exercised by both positive and negative runtime tests
+(§13.3).
+
+### 13.5 Test register (T8.4B schema-completion obligations — executed, not merely specified)
+
+Every object in this section (§13.1–§13.4) has been exercised on a disposable PostgreSQL 16 instance
+via `scripts/_test-csv-export.ts` section F (F52-F54, F53 specifically for this section's own
+objects — 171/171 checks in the full script, 100% pass), plus a dump/restore round trip on a second
+disposable PostgreSQL 16 instance (row counts, `md5(content)` for every `ExportBatch`,
+`coveredByExportBatchId` values, `fileHash`/`fileSizeBytes` all identical before/after; both
+`trg_export_batch_immutable` and this section's own `trg_correction_request_covered_batch_check`
+still reject their respective mutation attempts on the restored database).
+
+### 13.6 Arithmetic assertions (T8.4B schema-completion additions only)
+
+```text
+T8.4B SCHEMA COMPLETION RAW-SQL TOTALS (additive to Sections 1–12 totals)
+New tables: 0
+New enums: 0
+New columns on pre-existing models: 1 (CorrectionRequest.coveredByExportBatchId)
+CHECK constraints, currently active: 2 (CK-45, CK-46)
+Partial/expression unique indexes: 0
+Composite foreign keys: 0
+Plain (non-composite) foreign keys: 1 (CorrectionRequest.coveredByExportBatchId -> ExportBatch)
+Plain indexes: 1 (CorrectionRequest(coveredByExportBatchId))
+Trigger functions: 1 (FN-26)
+Trigger instances: 1 (TRG-31)
+New permissions: 0 (period.export/export.create/export.read already seeded by T8.4A,
+  20260819160000_seed_export_permissions — this slice adds zero new Permission/RolePermission rows)
+New PostgreSQL extensions: 0
+```
