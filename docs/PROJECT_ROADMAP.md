@@ -656,19 +656,23 @@ T7A.5; exception review = T7A.6 (resolution)/T7A.9; auto-submit = T7A.7; full E2
 T8.3/T8.4 обязаны переиспользовать. Полный контракт —
 `docs/titanor-time/T8_REPORTS_DESIGN.md`.
 
-## T8.2 — Отчёт по объекту
+## T8.2 — Отчёт по объекту 🟢 реализовано `[2026-08-19]`
 
 Работники, даты, часы, общий итог.
 
-**T8.2A (backend) 🟢 реализовано `[2026-08-19]`** — `GET /api/admin/reports/sites/:siteId?periodId=`
+**T8.2A (backend) 🟢** — `GET /api/admin/reports/sites/:siteId?periodId=`
 (ADMIN/SUPER_ADMIN, любой объект) и `GET /api/foreman/reports/sites/:siteId?periodId=` (FOREMAN,
 только текущие собственные объекты), один общий `lib/site-time-report.ts`. Новые permissions
 `site.read.assigned`/`period.read.assigned` (FOREMAN only, additive DML migration
 `20260819000000`). Полный контракт — `docs/titanor-time/T8_REPORTS_DESIGN.md` Addendum "T8.2A".
 
-**T8.2B (UI) ⚪ не начато.**
+**T8.2B (UI) 🟢** — `/admin/reports/sites`, `/foreman/reports/sites`,
+`components/reports/SiteTimeReportView.tsx` (единый компонент для обеих ролей). Backend T8.2A не
+менялся. Cross-links: `/admin/reports` (вкладка "By worker"/"By site"), `/admin/sites/[siteId]`,
+`/admin/periods/[periodId]`, `/foreman` (новая ссылка "Site reports"). Полный контракт —
+`docs/titanor-time/T8_REPORTS_DESIGN.md` Addendum "T8.2B".
 
-## T8.3 — Отчёт по периоду
+## T8.3 — Отчёт по периоду ⚪ не начато
 
 Без расчёта зарплаты в MVP.
 

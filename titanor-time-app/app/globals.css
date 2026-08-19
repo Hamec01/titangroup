@@ -1727,6 +1727,10 @@ a.ov-summary-card:focus-visible {
 }
 
 .ov-worker-card {
+  /* min-width: 0 overrides the grid item default of min-width: auto — without it, a wide
+     descendant (e.g. T8.2B's per-day table) forces this single-column grid track wider than its
+     container instead of shrinking, causing page-level horizontal overflow on narrow viewports. */
+  min-width: 0;
   border: 1px solid rgba(255, 255, 255, 0.08);
   border-radius: 6px;
   padding: 16px;

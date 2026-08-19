@@ -336,3 +336,103 @@ GET /api/foreman/reports/sites/:siteId?periodId=&page=&pageSize=
 string; today: Date }`. Ни одна бизнес-логика не дублируется между route-файлами — они делают
 только auth/permission/query-validation/HTTP-mapping (тот же split, что `lib/attendance-exceptions.ts`
 и T8.1's `worker-time-report.ts` уже устанавливают).
+
+## Addendum — T8.2B Site Time Report UI (2026-08-19)
+
+Написано **до** реализации. UI поверх уже реализованного и не меняемого T8.2A backend
+(`lib/site-time-report.ts`, оба route). Ни contract, ни formula/population/scope backend этим
+addendum'ом не меняются.
+
+### J. Общий presentation-компонент
+
+`components/reports/SiteTimeReportView.tsx` — единственное место, где рендерится сам отчёт. Обе
+страницы (`/admin/reports/sites`, `/foreman/reports/sites`) — тонкие Server Component обёртки,
+которые: резолвят сессию, проверяют permission-тройку через `hasPermission` (не `roles.includes`),
+парсят `searchParams`, вызывают `getSiteTimeReport()` **напрямую** (без HTTP self-fetch — тот же
+принцип, что уже `/admin/reports` (T8.1) и `app/admin/page.tsx` (overview) устанавливают), получают
+lookup-списки (§L), и передают всё как props в `SiteTimeReportView`:
+
+```ts
+interface SiteTimeReportViewProps {
+  role: 'admin' | 'foreman';
+  basePath: string; // '/admin/reports/sites' | '/foreman/reports/sites'
+  rawFilters: { siteId: string | null; periodId: string | null; page: string | null; pageSize: string | null };
+  siteOptions: { id: string; name: string }[];
+  periodOptions: { id: string; label: string; status: string }[];
+  outcome: SiteReportOutcome; // 'prompt' | 'invalid' | 'site-not-found' | 'period-not-found' | 'ok'
+}
+```
+
+Компонент не делает ни одного собственного запроса к БД/API — чистая презентация уже готового
+`SiteTimeReport`-объекта (или его отсутствия). Разница admin/foreman — это ТОЛЬКО: (1) `role` меняет
+заголовок/навигационные ссылки (admin видит переключатель "By worker"/"By site", foreman — только
+"By site", без единой admin-ссылки); (2) `siteOptions` заранее отфильтрован каждой страницей под
+свой scope (§L) — сам компонент не знает и не проверяет scope повторно, он доверяет уже
+отфильтрованному списку.
+
+### K. Filters/URL
+
+`<form method="GET">`, query — `siteId`/`periodId`/`page`/`pageSize`, та же схема, что T8.1 и
+overview уже используют. Правила:
+- Смена `site`/`period`/`pageSize` через сам `<select>` **не может** технически "сбросить page в 1"
+  на чистом HTML `<form>` уровне (все поля одной формы отправляются вместе) — вместо этого форма
+  **не содержит** `page` как видимое поле вообще: `page` передаётся только через отдельные
+  pagination-ссылки (`<a href="...&page=N">`), которые всегда несут ТЕКУЩИЕ `siteId`/`periodId`/
+  `pageSize` рядом. Сабмит фильтр-формы (смена site/period/pageSize) естественно уходит на URL без
+  `page` → страница читает его как `page=1` по умолчанию. Так "смена фильтра сбрасывает page"
+  достигается структурно, без JS.
+- `page` вне `[1, totalPages]` (при `totalItems > 0`) — не 404 и не ошибка: честный empty-page
+  state с текстом и ссылкой "Back to page 1" (та же query, `page=1`).
+- Malformed `siteId`/`periodId`/`page`/`pageSize` — `outcome: 'invalid'`, inline validation banner
+  (`role="alert"`), не 500 и не throw — тот же `parseSiteReportQuery()` (`lib/site-time-report.ts`,
+  уже существует, экспортирован), что и API route, переиспользуется без копии.
+- Reload/back/forward воспроизводят тот же отчёт "бесплатно" — URL это единственный источник
+  правды, страница не хранит никакого client state (Server Component, без `'use client'`).
+
+### L. Lookups — без нового N+1, без client fetch
+
+- ADMIN: `listSiteOptionsForAdmin()` + `listPeriodOptions()` (оба уже существуют,
+  `lib/attendance-overview-lookups.ts`, переиспользуются как есть — не копируются).
+- FOREMAN: `listSiteOptionsForForeman(foremanUserId, today)` (уже существует, тот же файл) — сам
+  список сайтов уже фильтрован по текущим `ForemanAssignment`, тот же scope, что
+  `getSiteTimeReport()`'s собственная `getForemanSiteIds()`-проверка внутри транзакции ниже.
+  `listPeriodOptions()` — тот же company-wide список периодов, что и у ADMIN (периоды сами по себе
+  не site-scoped; "period.read.assigned" ограничивает не САМ список периодов, а его использование в
+  контексте foreman's site, что и проверяет backend).
+- Оба lookup-вызова — `Promise.all` рядом с основным вызовом `getSiteTimeReport()`, не внутри цикла,
+  не пересчитываются на каждый item.
+- Если FOREMAN вручную подставит в URL `siteId` объекта не из своего scope — этот id не появится ни
+  в одном `<option>` (список построен только из его собственных assignments), а сам
+  `getSiteTimeReport()` всё равно вернёт `SITE_REPORT_NOT_FOUND` независимо от содержимого select'а
+  (defense in depth — UI-уровень fильтрации lookup'а не единственная защита).
+
+### M. Состояния (`SiteReportOutcome`)
+
+`'prompt'` (нет `siteId`/`periodId`) → `'invalid'` (malformed query) → `outcome` от
+`getSiteTimeReport()` (`SITE_NOT_FOUND`/`SITE_REPORT_NOT_FOUND`/`PERIOD_NOT_FOUND`/`OK`). Foreign и
+несуществующий site для FOREMAN — **один и тот же** текст на экране (не просто одинаковый HTTP-код
+в API — сам UI-текст тоже не должен намекать на разницу), напрямую отражая `SITE_REPORT_NOT_FOUND`'s
+собственную "no oracle" семантику. Дальше внутри `'ok'`: `items.length === 0` (empty site report —
+либо нет ни assignment, ни segment вообще, либо `page` вне диапазона) — различаются по `totalItems`
+(0 → "no workers", `page` вне диапазона при `totalItems > 0` → "empty page" с ссылкой на page 1).
+
+### N. Формат времени — переиспользование, не копия
+
+`formatWorkedDuration`/`timesheetStatusLabel`/`dataSourceLabel` перенесены из T8.1-специфичного
+`lib/worker-time-report-ui.ts` в общий `lib/reporting/report-format.ts` (тот же core/UI split, что
+`lib/reporting/worked-time.ts` уже устанавливает для формулы) — T8.1's `/admin/reports` переключён
+на новый путь импорта БЕЗ изменения своего результата (тот же regression-принцип, что T8.1 само
+применило к `lib/attendance-overview.ts`). Новый `submissionSourceLabel` (MANUAL/AUTO) добавлен
+туда же — T8.2B первый показывает это поле в UI (T8.1's worker report никогда не рендерил
+`submissionSource`, только хранил его в DTO — этот addendum не трогает T8.1's собственный вывод).
+
+UI никогда не пересчитывает и не суммирует минуты заново — только форматирует уже готовые
+`grossMinutes`/`workedMinutes`/etc. из `SiteTimeReport`, буквально как backend их вернул.
+
+### O. Security — DTO уже redaction-safe, UI ничего не добавляет
+
+`lib/site-time-report.ts`'s DTO (T8.2A) уже структурно не содержит phone/email/GPS/device
+identifiers/payload/hash/requestId/exception detail/audit payload/correction reason/точные
+timestamps segments (§F design doc выше) — UI-слой ничего нового не может утечь, потому что нечему
+утекать: рендерятся только поля, уже присутствующие в типизированном `SiteTimeReport`. Blanket
+scan (тест п.31 списка задачи) — просто дополнительное доказательство, не единственная защита.

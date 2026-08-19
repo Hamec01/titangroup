@@ -448,7 +448,8 @@ touch target ≥ 48px), `/foreman/*` — desktop-first с поддержкой �
 - Откуда: nav; `/admin/workers/[employeeId]` («View time report», предзаполненный `employeeId`);
   `/admin/periods/[periodId]` («View a worker's time report for this period», предзаполненный
   `periodId`)
-- Куда: —
+- Куда: `/admin/reports/sites` (переключатель вкладок "By worker"/"By site", `aria-current="page"`
+  на активной, T8.2B)
 - API: `GET /api/admin/reports/workers/:employeeId?periodId=<uuid>`
 - DoD: `total.workedMinutes` буквально равен сумме `site.workedMinutes` в ответе; `total.
   workedDayCount` — distinct даты по всем сегментам сразу, не сумма per-site; site sorting
@@ -457,6 +458,62 @@ touch target ≥ 48px), `/foreman/*` — desktop-first с поддержкой �
   `AuditEvent` и не меняет `updatedAt`/`contentRevision` ни одной строки; query-count не зависит от
   числа сегментов/объектов (подтверждено: 1 сегмент vs 20 сегментов на 2 объектах — оба 12 query
   events)
+
+#### `/admin/reports/sites` 🟢 (T8.2B, `[2026-08-19]`)
+- Роли: `ADMIN`, `SUPER_ADMIN`
+- Приоритет: desktop, 390×844 без page-level horizontal overflow (day table — local scroll)
+- Назначение: второй отчёт ЭТАПа 8 — выбор объекта и расчётного периода, сводка по объекту,
+  таблица работников с их днями. UI поверх уже реализованного T8.2A backend, contract не менялся
+- Данные: `site` (`name`, `active`)/`period` (`status`)/`summary` (workerCount,
+  withoutTimesheetCount, workedDayCount, gross/paid break/unpaid break/worked minutes,
+  segmentCount, timesheetStatusCounts)/`items[]` (employee, assignmentInPeriod,
+  participantExpected, timesheet, days[], total)/pagination — из `getSiteTimeReport()`
+  (`lib/site-time-report.ts`, T8.2A, не менялся); переиспользует `lib/reporting/report-format.ts`
+  (T8.1's `lib/worker-time-report-ui.ts` удалён, перенесён туда же)
+- Фильтры: `<form method="GET">`, `siteId`/`periodId`/`pageSize` в URL; `page` — только в
+  pagination-ссылках (не поле формы) — смена любого фильтра структурно сбрасывает страницу на 1 без
+  JS; lookup — `listSiteOptionsForAdmin()`/`listPeriodOptions()` (`lib/attendance-overview-
+  lookups.ts`, переиспользованы как есть)
+- Действия: нет мутаций — read-only отчёт; пагинация — ссылки, сохраняющие текущие фильтры
+- Состояния: prompt; malformed query → inline validation banner (`role="alert"`, не 500); нет
+  объектов/периодов вообще; `SITE_NOT_FOUND`/`PERIOD_NOT_FOUND`; пустой отчёт (`totalItems=0`) vs
+  `page` вне диапазона (`totalItems>0`, честная empty-page ссылка "Back to page 1"); worker без
+  Timesheet; zero-hour worker; excluded participant; DRAFT/RETURNED/CURRENT_VERSION+N/MANUAL+AUTO
+- Откуда: nav (`/admin/reports` — вкладка "By site"); `/admin/sites/[siteId]` («View this site's
+  time report», предзаполненный `siteId`); `/admin/periods/[periodId]` («View a site's time report
+  for this period», предзаполненный `periodId`)
+- Куда: `/admin/reports` (вкладка "By worker")
+- API: `GET /api/admin/reports/sites/:siteId?periodId=&page=&pageSize=` (не менялся, T8.2A)
+- DoD: `summary.workedMinutes` = Σ `items[].total.workedMinutes`; `worker.total` = Σ
+  `days[].*Minutes`; ноль запрещённых полей (phone/email/GPS/device/payload/hash/requestId/
+  correction reason/audit payload/точные timestamps) в HTML и во всех network-ответах; ровно один
+  вызов `getSiteTimeReport()` на рендер, ноль client-side self-fetch к API route; ноль console
+  errors/error overlay; 33/33 browser-сценария зелёные (Chromium, production standalone build,
+  `workers=1`)
+
+#### `/foreman/reports/sites` 🟢 (T8.2B, `[2026-08-19]`)
+- Роли: `FOREMAN`
+- Приоритет: mobile, 390×844 без page-level horizontal overflow
+- Назначение: тот же отчёт по объекту, что `/admin/reports/sites`, но только для текущих
+  собственных объектов прораба — единственный тип отчёта, доступный FOREMAN (без переключателя "By
+  worker")
+- Данные: тот же `SiteTimeReport`, тот же общий `SiteTimeReportView` компонент, `role="foreman"` —
+  меняет только заголовок/навигацию, не данные
+- Фильтры: те же `siteId`/`periodId`/`pageSize`/`page`; lookup —
+  `listSiteOptionsForForeman(foremanUserId, today)` (уже существовал, тот же scope, что
+  `getForemanSiteIds()` внутри `getSiteTimeReport()`'s собственной транзакции); чужой/несуществующий
+  `siteId`, вручную подставленный в URL, не появляется в select И даёт одинаковый безопасный текст
+  (no oracle)
+- Действия: нет мутаций — read-only отчёт
+- Состояния: те же, что `/admin/reports/sites`, плюс: expired/future `ForemanAssignment` объект
+  отсутствует в select; revoked permission блокирует следующий рендер (`Access denied`); dual-role
+  FOREMAN+WORKER остаётся в собственной строке (report read-only, не review-exclusion)
+- Откуда: `/foreman` (новая безусловная — не завязана на `pendingCount` — ссылка "Site reports" в
+  `ForemanLegacySection`)
+- Куда: — (ноль admin-ссылок, подтверждено blanket-scan)
+- API: `GET /api/foreman/reports/sites/:siteId?periodId=&page=&pageSize=` (не менялся, T8.2A)
+- DoD: HTML/DOM FOREMAN-страницы не содержит ни одной `/admin/` ссылки; foreign и несуществующий
+  `siteId` дают идентичный текст на экране, не только идентичный HTTP-код
 
 #### `/admin/review-fallback` ⚪
 

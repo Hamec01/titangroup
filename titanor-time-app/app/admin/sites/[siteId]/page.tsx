@@ -1,4 +1,5 @@
 import { redirect } from 'next/navigation';
+import Link from 'next/link';
 import { resolveServerSession } from '@/lib/server-session';
 import { getSiteDetail } from '@/lib/sites';
 import { listAssignableForemen } from '@/lib/foreman-assignments';
@@ -57,6 +58,9 @@ export default async function SiteDetailPage({ params }: { params: Promise<{ sit
         <p className="setup-subtitle">
           {site.active ? 'Active' : 'Closed'}
           {site.defaultForemanUsername ? ` · default foreman: ${site.defaultForemanUsername}` : ''}
+        </p>
+        <p>
+          <Link href={`/admin/reports/sites?siteId=${site.id}`}>View this site&apos;s time report</Link>
         </p>
 
         <WorkAreaSection siteId={site.id} workAreas={site.workAreas} />

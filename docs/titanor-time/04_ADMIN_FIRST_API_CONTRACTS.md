@@ -1987,7 +1987,10 @@ ASC, siteId ASC`; ноль phone/email/GPS/device identifiers/payload/hash/reque
 ## 19. Site Time Report APIs (T8.2A, 2026-08-19)
 
 Полный контракт — `docs/titanor-time/T8_REPORTS_DESIGN.md` Addendum "T8.2A" (написан до
-реализации). Backend только — UI (T8.2B) не начат.
+реализации). **UI добавлен в T8.2B (`[2026-08-19]`) — `/admin/reports/sites` и
+`/foreman/reports/sites`, `components/reports/SiteTimeReportView.tsx`, оба вызывают
+`getSiteTimeReport()` напрямую, без HTTP self-fetch.** Контракт ниже, оба route и
+`lib/site-time-report.ts` — T8.2B не менял ни строки (подтверждено `git diff`, ноль изменений).
 
 ```
 GET /api/admin/reports/sites/:siteId?periodId=&page=&pageSize=

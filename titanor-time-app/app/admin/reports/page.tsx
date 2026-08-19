@@ -6,7 +6,7 @@ import { UUID_PATTERN } from '@/lib/attendance-exceptions';
 import { getWorkerTimeReport, type WorkerTimeReport } from '@/lib/worker-time-report';
 import { listEmployeesForReportSelect } from '@/lib/users';
 import { listPeriodOptions } from '@/lib/attendance-overview-lookups';
-import { formatWorkedDuration, timesheetStatusLabel, dataSourceLabel } from '@/lib/worker-time-report-ui';
+import { formatWorkedDuration, timesheetStatusLabel, dataSourceLabel } from '@/lib/reporting/report-format';
 
 export const dynamic = 'force-dynamic';
 
@@ -66,6 +66,13 @@ export default async function AdminReportsPage({ searchParams }: RouteParams) {
     <main className="setup-page">
       <div className="setup-card worker-card">
         <h1>Worker time report</h1>
+        <nav className="ov-legacy" aria-label="Report type">
+          <span aria-current="page">By worker</span>
+          {' · '}
+          <Link href="/admin/reports/sites" className="wk-back-link">
+            By site
+          </Link>
+        </nav>
         <p className="setup-subtitle">Select a worker and a payroll period to see their timesheet status, hours by site, and total.</p>
 
         {employeeOptions.length === 0 ? (

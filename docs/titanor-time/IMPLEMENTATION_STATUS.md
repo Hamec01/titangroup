@@ -1,6 +1,91 @@
 # Titanor Time — Implementation Status
 
-Обновлено: 2026-08-19 Europe/Helsinki (feat: add site time report APIs — T8.2A)
+Обновлено: 2026-08-19 Europe/Helsinki (feat: add site time report UI — T8.2B)
+
+**`[2026-08-19]` T8.2B Site Time Report UI — feat(time): add site time report UI.** UI поверх уже
+реализованного T8.2A backend — `/admin/reports/sites` (ADMIN/SUPER_ADMIN, любой объект) и
+`/foreman/reports/sites` (FOREMAN, только текущие собственные объекты). Backend
+(`lib/site-time-report.ts`, оба API route, миграция/гранты T8.2A) **не менялся** — подтверждено
+`git diff` (ноль изменений). Design — `docs/titanor-time/T8_REPORTS_DESIGN.md` Addendum "T8.2B"
+(§J–O), написан ДО кода.
+
+**Общий компонент**: `components/reports/SiteTimeReportView.tsx` — единственное место рендера
+отчёта; обе страницы — тонкие Server Component обёртки (сессия → permission-тройка через
+`hasPermission`, не `roles.includes` → `parseSiteReportQuery()` → `getSiteTimeReport()` **напрямую**,
+без HTTP self-fetch → lookup-списки → props в `SiteTimeReportView`). FOREMAN использует
+`listSiteOptionsForForeman()`/`listPeriodOptions()` (`lib/attendance-overview-lookups.ts`,
+переиспользованы как есть); scope пересчитывается внутри `getSiteTimeReport()`'s собственной
+транзакции, lookup-список — только UI-уровень фильтрации, не единственная защита.
+
+**Filters/URL**: `siteId`/`periodId`/`pageSize` в форме, `page` — только в pagination-ссылках (не
+поле формы) — смена site/period/pageSize структурно уходит на URL без `page`, что "сбрасывает"
+страницу на 1 без единой строки JS. Malformed query → `parseSiteReportQuery()` (тот же, что API
+route) → inline validation banner (`role="alert"`), не 500. `page` вне диапазона при `totalItems >
+0` → честный empty-page state со ссылкой "Back to page 1". Reload/back/forward — URL единственный
+источник правды (Server Component, ноль client state).
+
+**Формат времени**: `formatWorkedDuration`/`timesheetStatusLabel`/`dataSourceLabel` перенесены из
+T8.1-специфичного `lib/worker-time-report-ui.ts` (удалён) в общий `lib/reporting/report-format.ts` —
+T8.1's `/admin/reports` переключён на новый импорт БЕЗ изменения своего вывода (`tsc --noEmit` +
+regression подтвердили). Новый `submissionSourceLabel` (MANUAL/AUTO) — T8.2B первый показывает это
+поле в UI. UI нигде не пересчитывает/не суммирует минуты заново — только форматирует уже готовые
+числа из `SiteTimeReport`.
+
+**Навигация**: `/admin/reports` — переключатель "By worker"/"By site" (`aria-current="page"` на
+активной вкладке); `/admin/sites/[siteId]` → "View this site's time report" (prefilled `siteId`);
+`/admin/periods/[periodId]` → второй, отдельный от T8.1's "View a worker's..." — "View a site's time
+report for this period" (prefilled `periodId`); `/foreman` — новая безусловная (не завязана на
+`pendingCount`) ссылка "Site reports" в `ForemanLegacySection`. FOREMAN-страницы содержат ноль
+`/admin/` ссылок (blanket-scan подтвердил).
+
+**Найденный и исправленный баг**: `.ov-worker-card` (переиспользуемый CSS-класс из T7A.9B overview,
+`app/globals.css`) — CSS Grid item без `min-width: 0` не сжимался ниже min-content своего самого
+широкого потомка. Overview-карточки этой проблемы не показывали (нет широких таблиц внутри), но
+T8.2B впервые вложил в такую карточку 6-колоночную day-table — на 390px viewport это раздувало
+`.ov-worker-list`'s grid-track шире контейнера, вызывая **page-level** horizontal overflow (day
+table's собственный `.worker-table-scroll { overflow-x: auto }` не помогал — переполнял не он сам, а
+его grid-item-родитель). Найдено Playwright-тестом (`document.documentElement.scrollWidth`),
+исправлено добавлением `min-width: 0` на `.ov-worker-card` — стандартный, безопасный фикс: только
+разрешает сжатие, не меняет рендер существующих (не переполняющих) overview-карточек.
+
+**Browser-тесты — 33/33 сценария (82/82 проверки), Chromium, production standalone build (`node
+.next/standalone/server.js`, как в Dockerfile), `workers=1`**: ADMIN prompt/normal
+report/multi-worker/multi-day, filters→URL, reload/back/forward, pagination preserves filters, page
+resets after filter change, summary/status-counts = backend дословно, worker-без-Timesheet,
+excluded participant, zero-hour worker, DRAFT/RETURNED/CURRENT_VERSION+N/MANUAL+AUTO labels,
+paid/unpaid breaks, empty site report, invalid query, missing site/period, admin deep-links (site и
+period), worker report по-прежнему доступен, FOREMAN own/foreign site (одинаковый текст — no
+oracle), expired/future assignment отсутствуют в select, revoked permission блокирует следующий
+рендер, dual-role FOREMAN+WORKER в собственной строке, FOREMAN — ноль admin-ссылок, mobile
+390×844 без page-level overflow (после фикса выше), desktop, keyboard/focus/labels/`aria-current`,
+forbidden-field scan (HTML+network: телефон/email/GPS/device identifiers/payload/hash/requestId/
+correction reason/audit payload — ноль), ноль client-side вызовов API route (Server Component, без
+self-fetch), ноль console errors.
+
+**Регрессия**: T8.2A — полный набор 83 → **80/80** зелёных (число тестов чуть меньше исходных из-за
+переиспользования того же скрипта без query-count fixture-sanity части, вынесенной отдельно) на
+чистой disposable БД, включая ADMIN↔FOREMAN parity и foreign-site isolation; T8.1 — 57/57 зелёных
+(включая browser regression: nav/periods/workers/corrections/attendance-policy страницы); query-count
+для 200 работников подтверждён неизменным **не тестом, а `git diff`** — `lib/site-time-report.ts`,
+оба API route и `prisma/` byte-identical нулевому diff, поэтому T8.2A's уже измеренные 13
+query-событий остаются в силе без передоказательства. Admin/foreman overview, activation, corrections
+— зелёные. GET создаёт ноль AuditEvent/мутаций (T8.2A's собственный контракт не тронут).
+
+**Технические проверки**: `git diff --check`, `prisma validate` (schema не менялся — валиден),
+`tsc --noEmit` (0 ошибок), `npm run build` в изолированной чистой копии (оба новых route
+`/admin/reports/sites`, `/foreman/reports/sites` в выводе), `docker compose config --quiet`,
+`docker compose build app` (успех; исходного локального тега `titanor-time-app:latest` не было —
+после проверки образ удалён, как в T8.2A), `prisma migrate deploy` дважды (57 migrations, второй —
+no-op). Preview `127.0.0.1:3244` — `200`/`200` до и после, не трогался, не использовался для тестов
+(соблюдено более строгое требование этого STOP-GATE). Production (`titanor-time-app-1`) —
+`State=running`, `Health=healthy`, `StartedAt` не менялся (2026-08-06), `200`/`200`. Тяжёлые проверки
+выполнялись строго последовательно; при обнаружении, что стоп предыдущего `next dev`/`next start`
+процесса не освобождал порт полностью (осиротевший `next-server` worker), процесс был найден через
+`ss -ltnp` и остановлен явно по PID — ни preview, ни production не задеты.
+
+**T8.3 (отчёт по периоду) этим коммитом не начат.**
+
+---
 
 **`[2026-08-19]` T8.2A Site Time Report APIs — feat(time): add site time report APIs.** Backend
 для отчёта по объекту за расчётный период — ADMIN/SUPER_ADMIN видят любой объект, FOREMAN только

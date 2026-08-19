@@ -98,6 +98,9 @@ function ForemanLegacySection({ legacy }: { legacy: { pendingCount: number; exce
       <Link href="/foreman/attendance/exceptions" className="wk-action-button">
         Go to attendance exceptions
       </Link>
+      <Link href="/foreman/reports/sites" className="wk-action-button">
+        Site reports
+      </Link>
     </div>
   );
 }
