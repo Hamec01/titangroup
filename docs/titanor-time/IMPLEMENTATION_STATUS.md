@@ -1,6 +1,83 @@
 # Titanor Time — Implementation Status
 
-Обновлено: 2026-08-19 Europe/Helsinki (feat: add worker time report — T8.1)
+Обновлено: 2026-08-19 Europe/Helsinki (feat: add site time report APIs — T8.2A)
+
+**`[2026-08-19]` T8.2A Site Time Report APIs — feat(time): add site time report APIs.** Backend
+для отчёта по объекту за расчётный период — ADMIN/SUPER_ADMIN видят любой объект, FOREMAN только
+текущие собственные. UI — отдельный T8.2B, этим коммитом не начат. Полный design —
+`docs/titanor-time/T8_REPORTS_DESIGN.md` Addendum "T8.2A", написан ДО кода.
+
+**Permissions**: `site.read.assigned`/`period.read.assigned` **отсутствовали** — подтверждено прямым
+SQL на чистой disposable БД (ноль строк `Permission`/`RolePermission` для обоих кодов) до написания
+миграции. Новая additive DML migration `20260819000000_seed_site_period_read_assigned_permissions` —
+тот же паттерн, что `20260805140000_seed_foreman_review_permissions`: создаёт оба permission,
+выдаёт **только** `FOREMAN`. `ADMIN`/`SUPER_ADMIN`/`WORKER` — ноль новых grants (уже держат
+`site.read.all`/`period.read.all` company-wide с более раннего слайса). `schema.prisma` не менялся.
+
+**Population** — работник входит в отчёт при выполнении хотя бы одного: (1) `SiteAssignment` этого
+site пересекает период (тот же inclusive-both-ends overlap, что `lib/periods.ts`'s
+`createPeriod`); (2) canonical source содержит хотя бы один segment этого site в этом периоде.
+Union, не приоритет — назначенный-но-не-отработавший виден с нулём часов; historical/corrected
+segment не теряется, даже если его `sourceAssignmentId` больше не пересекает период (два теста на
+disposable БД доказали это конкретно: DB-триггеры `PLANNED_SHIFT_OUTSIDE_ASSIGNMENT_VALIDITY` и
+`ASSIGNMENT_DEPENDENTS_CONFLICT` не дают ни вставить, ни задним числом сузить assignment под уже
+существующий segment — но ничто не мешает Timesheet одного периода содержать segment, дата которого
+физически лежит вне диапазона этого периода, что и делает path 2 населения не-избыточным).
+
+**Canonical source/формула** — дословно T8.1: `Timesheet.status` → `TimesheetDraft` или
+`TimesheetVersion` по `currentVersionId`, применяется per-employee независимо; invariant failure —
+throw для всего запроса. `lib/reporting/worked-time.ts` — ноль новых копий формулы, добавлен ОДИН
+новый уровень группировки (day bucket, между segment и worker-total).
+
+**FOREMAN scope** — пересчитывается ВНУТРИ той же snapshot-транзакции через уже существующий
+`getForemanSiteIds(foremanUserId, today, tx)` (`lib/foreman-review.ts`, не менялся). Foreign site и
+несуществующий site дают **одинаковый** `404 SITE_REPORT_NOT_FOUND` — no oracle. Report read-only —
+в отличие от overview's review-exclusion, dual-role FOREMAN+WORKER никогда не исключается из
+собственного site total.
+
+**API**: `GET /api/admin/reports/sites/:siteId?periodId=&page=&pageSize=` (permission:
+`site.read.all`+`period.read.all`+`timesheet.read.all`) и
+`GET /api/foreman/reports/sites/:siteId?periodId=&page=&pageSize=` (permission:
+`site.read.assigned`+`period.read.assigned`+`timesheet.read.assigned`) — оба вызывают один
+`getSiteTimeReport()` (`lib/site-time-report.ts`), ни одна бизнес-логика не дублируется. Один
+`REPEATABLE READ` transaction; query-count не зависит от числа работников — измерено: 1, 50 и 200
+работников дают одинаковые 13 query-событий. `summary` считается по полному (непагинированному)
+result set; `summary.workedMinutes` = Σ `items[].total.workedMinutes` для полного набора;
+`worker.total` = Σ `days[].*Minutes`. Ноль timestamps отдельных segments в DTO — только даты и суммы.
+
+**Тесты — 83/83** (реальные HTTP endpoints, disposable PostgreSQL 16): роли/permissions (admin
+трио + foreman трио, оба отзываются независимо), foreman scope (own/foreign/expired/future/
+revocation — все дают единообразный `404`), все 5 `TimesheetStatus` + RETURNED-со-stale-version,
+pending/approved correction, один/несколько worker, несколько дней, несколько объектов (изоляция
+по `siteId`), assignment+zero-hours, closed-assignment-с-historical-segment, segment-без-
+overlapping-assignment (population path 2 independently), worker-без-Timesheet,
+`participantExpected: false`, paid/unpaid/multiple breaks, cross-midnight, stable ordering
+(lastName/firstName/employeeNumber/id), pagination+summary-over-full-set, totals reconcile на всех
+трёх уровнях (summary/worker/days), malformed/missing UUID и query, redaction (JSON), zero
+mutations, REPEATABLE READ snapshot, query-count 1/50/200 (13/13/13), ADMIN и FOREMAN — идентичные
+totals для одного site, FOREMAN не получает foreign-site segment того же multi-site работника.
+
+**Регрессия**: T8.1 worker report endpoint — не задет (`git diff` подтверждает ноль изменений в
+`lib/worker-time-report.ts`/`lib/reporting/worked-time.ts`), 200 с ожидаемой формой; admin overview
+— не задет (`lib/attendance-overview.ts` не менялся), 200; foreman overview (`getForemanSiteIds`
+переиспользован, не изменён) — 200; activation vertical slice — все проверки зелёные; corrections
+fixture-builder — без ошибок.
+
+**Технические проверки**: `git diff --check`, `prisma validate` (`schema.prisma` не менялся — новая
+permission-миграция чистое DML), `tsc --noEmit`, `npm run build` (изолированная copy, оба новых
+route в выводе), `docker compose config --quiet`, `docker compose build app` (образ подтверждённо
+содержит `lib/site-time-report.ts` и оба новых `.next/server/app/api/{admin,foreman}/reports/sites`
+route; исходного локального тега `titanor-time-app:latest` на хосте не было — после проверки образ
+удалён), `prisma migrate deploy` дважды на чистой БД (57 migrations, второй — no-op) — все чисто.
+Preview `127.0.0.1:3244` — `200`/`200` до и после (не останавливался, не перезапускался, не
+использовался для тестов). Production (`titanor-time-app-1`/`titanor-time-db-1`) — `RestartCount=0`,
+`StartedAt` не менялся, `200`/`200`. Тяжёлые проверки (тесты, изолированный build, docker build)
+выполнялись строго последовательно, disposable-ресурсы освобождались сразу после каждого шага —
+повторного инцидента с памятью (см. предыдущую запись T8.1) не произошло.
+
+**T8.2B (UI отчёта по объекту) этим коммитом явно не начат.**
+
+---
 
 **`[2026-08-19]` T8.1 Admin Worker Time Report — feat(time): add worker time report.** Первый отчёт
 ЭТАПа 8 (`docs/PROJECT_ROADMAP.md`): администратор выбирает работника и расчётный период, видит

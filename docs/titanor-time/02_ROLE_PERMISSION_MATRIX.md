@@ -234,6 +234,30 @@ of REQUIRED_PERMISSIONS`), что уже `GET /api/admin/overview` (§2.4e) ис
 меняет существующие ограничения `worker.read.all`/`period.read.all`/`timesheet.read.all` в их
 собственных секциях (§2.2/§2.7/§2.8) — только добавляет ещё один потребитель той же тройки.
 
+### 2.4h Site Time Report APIs (T8.2A) — **`[2026-08-19] реализовано`**
+(`docs/titanor-time/T8_REPORTS_DESIGN.md` Addendum "T8.2A", `04_ADMIN_FIRST_API_CONTRACTS.md`
+§9.1h). **Два новых permission**, оба держит только `FOREMAN` — подтверждено прямым SQL на чистой
+disposable БД до написания миграции: `site.read.assigned`/`period.read.assigned` отсутствовали
+полностью (ноль строк `Permission`, ноль `RolePermission`). `ADMIN`/`SUPER_ADMIN` уже держат
+company-wide `site.read.all`/`period.read.all` (§2.4/§2.7) — ноль новых grants для них.
+
+Обе permission засеяны одной миграцией `20260819000000_seed_site_period_read_assigned_permissions`
+— чистый DML (тот же паттерн, что `20260805140000_seed_foreman_review_permissions`; проверено
+прямым SQL после применения — ровно 2 новых гранта, оба `FOREMAN`; `ADMIN`/`SUPER_ADMIN`/`WORKER` —
+ноль). `schema.prisma` не менялся.
+
+| Permission | Держатели | Область | Ограничения | Причина | Аудит | Массовое |
+|---|---|---|---|---|---|---|
+| `site.read.assigned` | `FOREMAN` | объекты, где у прораба есть **текущий** (не expired/future) `ForemanAssignment` | `GET /api/foreman/reports/sites/:siteId` — обязателен вместе с `period.read.assigned`+`timesheet.read.assigned`, отзыв любого из трёх → `403` на следующий запрос (проверено тестом); scope пересчитывается заново на каждый запрос ВНУТРИ той же snapshot-транзакции, что и сами данные отчёта — не отдельным pre-check; foreign site и несуществующий site дают одинаковый `404 SITE_REPORT_NOT_FOUND` (no oracle, проверено тестом) | нет | нет (read-only) | — |
+| `period.read.assigned` | `FOREMAN` | расчётные периоды, но только в контексте `site.read.assigned`'s объектов — никогда company-wide список периодов сам по себе (нет `GET /api/foreman/periods`) | тот же `GET /api/foreman/reports/sites/:siteId`, та же тройка, то же поведение при отзыве | нет | нет (read-only) | — |
+
+`GET /api/admin/reports/sites/:siteId?periodId=` (ADMIN/SUPER_ADMIN) требует **все три**:
+`site.read.all`+`period.read.all`+`timesheet.read.all` — те же company-wide permissions из §2.4/
+§2.7/§2.8, без изменений их собственных секций, только новый потребитель. Оба route (admin и
+foreman) вызывают один `getSiteTimeReport()` — ни permission-набор, ни бизнес-логика не дублируются
+отдельной реализацией; различается только то, ЧТО каждый route требует и какой `scope` передаёт в
+общую функцию.
+
 ### 2.5 Назначения
 
 | Permission | Держатели | Область | Ограничения | Причина | Аудит | Массовое |

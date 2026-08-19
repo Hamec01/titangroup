@@ -1983,3 +1983,63 @@ ASC, siteId ASC`; ноль phone/email/GPS/device identifiers/payload/hash/reque
 **Canonical source** (не подменяется никаким fallback): `DRAFT`/`RETURNED` → `TimesheetDraft`;
 `SUBMITTED`/`FOREMAN_APPROVED`/`FINAL_APPROVED` → `TimesheetVersion` по `currentVersionId`.
 Нарушение обязательной связи status/source — invariant failure (500), не нулевой отчёт.
+
+## 19. Site Time Report APIs (T8.2A, 2026-08-19)
+
+Полный контракт — `docs/titanor-time/T8_REPORTS_DESIGN.md` Addendum "T8.2A" (написан до
+реализации). Backend только — UI (T8.2B) не начат.
+
+```
+GET /api/admin/reports/sites/:siteId?periodId=&page=&pageSize=
+  permission: site.read.all + period.read.all + timesheet.read.all (все три)
+GET /api/foreman/reports/sites/:siteId?periodId=&page=&pageSize=
+  permission: site.read.assigned + period.read.assigned + timesheet.read.assigned (все три)
+```
+
+Оба вызывают один `getSiteTimeReport()` (`lib/site-time-report.ts`) — бизнес-логика не дублируется.
+
+**Query**: `periodId` обязателен (UUID); `page` (целое ≥1, по умолчанию 1); `pageSize` (целое
+1..100, по умолчанию 20).
+
+**Успех — `200`**:
+```json
+{
+  "asOf": "ISO",
+  "site": { "id": "uuid", "name": "string", "active": true },
+  "period": { "id": "uuid", "startDate": "YYYY-MM-DD", "endDate": "YYYY-MM-DD", "status": "OPEN|LOCKED|EXPORTED" },
+  "summary": {
+    "workerCount": number, "withoutTimesheetCount": number, "workedDayCount": number,
+    "grossMinutes": number, "paidBreakMinutes": number, "unpaidBreakMinutes": number, "workedMinutes": number, "segmentCount": number,
+    "timesheetStatusCounts": { "DRAFT": number, "SUBMITTED": number, "RETURNED": number, "FOREMAN_APPROVED": number, "FINAL_APPROVED": number }
+  },
+  "items": [
+    {
+      "employee": { "id": "uuid", "employeeNumber": "string", "firstName": "string", "lastName": "string" },
+      "assignmentInPeriod": true, "participantExpected": true,
+      "timesheet": { "id": "uuid", "status": "...", "dataSource": "DRAFT|CURRENT_VERSION", "versionNumber": number | null, "submissionSource": "MANUAL|AUTO" | null } | null,
+      "days": [ { "date": "YYYY-MM-DD", "grossMinutes": number, "paidBreakMinutes": number, "unpaidBreakMinutes": number, "workedMinutes": number, "segmentCount": number } ],
+      "total": { "workedDayCount": number, "grossMinutes": number, "paidBreakMinutes": number, "unpaidBreakMinutes": number, "workedMinutes": number, "segmentCount": number }
+    }
+  ],
+  "page": number, "pageSize": number, "totalItems": number, "totalPages": number
+}
+```
+
+**Ошибки**: malformed `siteId`/`periodId`/`page`/`pageSize` → `400 VALIDATION_ERROR`; ADMIN,
+несуществующий site → `404 SITE_NOT_FOUND`; несуществующий period → `404 PERIOD_NOT_FOUND`;
+FOREMAN, несуществующий ИЛИ foreign (не в scope) site → **одинаковый** `404
+SITE_REPORT_NOT_FOUND` — никогда не различимы (no enumeration oracle).
+
+**Population** (union, не приоритет): (1) `SiteAssignment` этого site пересекает период
+(inclusive-both-ends overlap, как `lib/periods.ts`); (2) canonical source содержит хотя бы один
+segment этого site в этом периоде. Назначенный-без-часов виден с нулём; historical/corrected
+segment без period-overlapping assignment не теряется.
+
+**Инварианты**: `summary` считается по полному result set (до пагинации), не по текущей странице;
+`summary.workedMinutes = Σ items[].total.workedMinutes` (полный набор); `item.total.* = Σ
+days[].*` буквально; `items` отсортированы `lastName ASC, firstName ASC, employeeNumber ASC, id
+ASC`; `days` — `date ASC`; ноль timestamps отдельных segments в DTO (только даты и агрегаты); ноль
+phone/email/GPS/device identifiers/payload/hash/requestId/exception detail/audit payload/
+correction reason; GET не создаёт `AuditEvent`, не мутирует БД; `no-store`; одна `REPEATABLE READ`
+транзакция с одним `asOf`; FOREMAN scope пересчитывается внутри той же транзакции; bounded query
+count — подтверждено: 1, 50 и 200 работников дают одинаковые 13 query-событий.

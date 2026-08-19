@@ -656,9 +656,17 @@ T7A.5; exception review = T7A.6 (resolution)/T7A.9; auto-submit = T7A.7; full E2
 T8.3/T8.4 обязаны переиспользовать. Полный контракт —
 `docs/titanor-time/T8_REPORTS_DESIGN.md`.
 
-## T8.2 — Отчёт по объекту ⚪ не начато
+## T8.2 — Отчёт по объекту
 
 Работники, даты, часы, общий итог.
+
+**T8.2A (backend) 🟢 реализовано `[2026-08-19]`** — `GET /api/admin/reports/sites/:siteId?periodId=`
+(ADMIN/SUPER_ADMIN, любой объект) и `GET /api/foreman/reports/sites/:siteId?periodId=` (FOREMAN,
+только текущие собственные объекты), один общий `lib/site-time-report.ts`. Новые permissions
+`site.read.assigned`/`period.read.assigned` (FOREMAN only, additive DML migration
+`20260819000000`). Полный контракт — `docs/titanor-time/T8_REPORTS_DESIGN.md` Addendum "T8.2A".
+
+**T8.2B (UI) ⚪ не начато.**
 
 ## T8.3 — Отчёт по периоду
 

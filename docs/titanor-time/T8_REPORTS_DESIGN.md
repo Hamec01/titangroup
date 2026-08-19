@@ -175,3 +175,164 @@ GET не создаёт `AuditEvent`, не мутирует `updatedAt`/`content
 - **T8.4** — CSV/PDF export batch — потребитель тех же DTO-форм, что и T8.1-T8.3; НЕ начат.
 - FOREMAN reports, WORKER self-report — вне scope всех T8.1-T8.4 в текущей роадмап-разбивке, не
   проектируются здесь.
+
+## Addendum — T8.2A Site Time Report APIs (2026-08-19)
+
+Написано **до** реализации. Backend только — `lib/site-time-report.ts` (shared service) + два route
+(`GET /api/admin/reports/sites/:siteId`, `GET /api/foreman/reports/sites/:siteId`). UI — отдельный
+T8.2B, не начат этим слайсом.
+
+### A. Population — кто входит в отчёт
+
+Работник входит в site report для `(siteId, periodId)`, если выполнено **хотя бы одно**:
+
+1. У него есть `SiteAssignment` с этим `siteId`, чей `[validFrom, validTo]` **пересекается** с
+   `[period.startDate, period.endDate]` — тот же inclusive-both-ends overlap-паттерн, что уже
+   `lib/periods.ts`'s `createPeriod` использует при материализации участников нового периода:
+   `validFrom <= period.endDate AND (validTo IS NULL OR validTo >= period.startDate)`. Оба поля —
+   `@db.Date` с обеих сторон, прямое сравнение без cast.
+2. Canonical report source (§C ниже) для этого работника в этом периоде содержит **хотя бы один**
+   segment с этим `siteId` — независимо от того, есть ли у него СЕЙЧАС активное assignment на этот
+   site (могло закончиться, но исторический segment остаётся в отчёте).
+
+Ни один из двух путей не первичен — это union, не приоритет. Из этого следует:
+- Назначенный, но ещё не отработавший ни часа работник виден с нулём часов (`assignmentInPeriod:
+  true`, `days: []`, `total` — весь ноль).
+- Работник, чьё assignment закончилось ДО начала периода, но у которого есть corrected/historical
+  segment с этим site в каноническом источнике (например, поздняя корректировка), не теряется
+  (`assignmentInPeriod: false`, но `days`/`total` заполнены).
+- Segment без текущего assignment (сотрудник переведён на другой site уже после того, как
+  отработал этот period) не теряется — путь 2 не зависит от пути 1.
+
+`participantExpected` — из `PayrollPeriodParticipant.expected` для этой пары `(periodId,
+employeeId)`, если строка существует; `null`, если участника вообще нет (человек никогда не был
+частью этого периода — такое возможно для пути 2: historical segment есть, а
+`PayrollPeriodParticipant` мог быть создан позже или не для этого периода вовсе — честно
+показываем `null`, не `false`).
+
+### B. FOREMAN scope
+
+- Пересчитывается **внутри той же snapshot-транзакции**, что и сам отчёт — не отдельным
+  pre-check запросом до `$transaction`, чтобы scope и данные согласованно относились к одному
+  `asOf` (revocation мог случиться ровно в этот момент — используется `tx`, не `prisma`).
+  Переиспользует `getForemanSiteIds(foremanUserId, today, tx)` (уже существует,
+  `lib/foreman-review.ts:22`) — тот же "только текущие" (`validFrom <= today AND (validTo IS NULL
+  OR validTo >= today)`) паттерн, что уже используют overview/review-scopes.
+- Выбранный `siteId` **обязан** входить в этот scope — иначе `404 SITE_REPORT_NOT_FOUND`,
+  **тот же код**, что и для реально несуществующего site (задача §"FOREMAN scope" — foreign site не
+  должен быть oracle, различимый ответ дал бы прорабу способ enumerate чужие site id).
+- Report — read-only. В отличие от `buildOperationalOverview`'s `excludeEmployeeId` (foreman не
+  видит/не review'ит собственный approve-queue item, чтобы не самоодобрять себя), **T8.2 никогда
+  не исключает собственную строку прораба**, даже если у него dual-role FOREMAN+WORKER и он сам
+  входит в population этого site — это не approve/return action, это read-only company data о
+  реально отработанном времени; исключение имело бы смысл только для action-эндпоинтов.
+- FOREMAN никогда не получает данные ДРУГИХ site через worker/day aggregation — population (§A) и
+  все агрегаты фильтруются по ОДНОМУ `siteId` из URL на каждом уровне (SQL `WHERE siteId = $1`, не
+  постфильтрация в JS), не "все site работника, потом показать только этот" — секция сегментов
+  ДРУГИХ site того же (мульти-объектного) работника структурно не попадает ни в один запрос этого
+  отчёта.
+
+### C. Canonical source — дословно T8.1 (`docs/titanor-time/T8_REPORTS_DESIGN.md` §1 выше)
+
+Тот же `Timesheet.status` → `TimesheetDraft` (DRAFT/RETURNED) или `TimesheetVersion` по
+`currentVersionId` (SUBMITTED/FOREMAN_APPROVED/FINAL_APPROVED) переключатель, применяется **на
+уровне каждого работника независимо** (у разных работников одного site в один момент могут быть
+Timesheet в разных статусах — это нормально, не смешивается). Invariant failure (status требует
+version/draft, а его нет) — throw для ВСЕГО запроса, не пропуск одной строки: частичный отчёт с
+молча пропущенным работником хуже честной ошибки. Pending correction не меняет `currentVersionId` —
+то же рассуждение, что T8.1 §1, применённое per-employee.
+
+### D. Формула — дословно `lib/reporting/worked-time.ts`, ноль новых копий
+
+`computeSegmentMs`/`sumWorkedTimeMs`/`msToMinutes` — импортируются как есть. Округление — тот же
+двухуровневый rule, что T8.1, но с ОДНИМ дополнительным уровнем группировки:
+
+1. **Day bucket** (per employee, per calendar date, per site — но site уже зафиксирован URL'ом, так
+   что фактически per employee+date): сумма ms всех segments этой даты, один `msToMinutes` здесь.
+2. **Worker total**: сумма уже округлённых `day.*Minutes` (не повторное округление суммы мс) —
+   `worker.total.workedMinutes = Σ day.workedMinutes` буквально в JSON.
+3. **Summary** (по всему result set, не текущей странице — §E): сумма уже округлённых
+   `worker.total.*Minutes` по ВСЕМ работникам population, не пересчёт из сырых ms заново —
+   `summary.workedMinutes = Σ items[].total.workedMinutes` для полного (непагинированного) набора.
+
+`worker.total.workedDayCount` — количество `days[]`-записей (каждая date уже уникальна внутри
+одного работника по построению группировки, distinct не нужен отдельно). `summary.workedDayCount`
+— `COUNT(DISTINCT date)` по ВСЕМ segments всех работников этого site разом (день, когда на объекте
+работали трое, считается одним днём объекта — та же logика, что T8.1's `total.workedDayCount`,
+на уровень выше).
+
+### E. Pagination и summary
+
+- `summary` считается по **полной** (непагинированной) population — вычисляется ДО среза
+  `page`/`pageSize`, не из текущей страницы. Это значит: агрегаты для summary и для per-worker
+  `items[].total` считаются из ОДНОГО и того же набора сырых segment-строк за один проход (в
+  памяти после одного bulk `findMany`, не два раздельных запроса с риском рассинхронизации между
+  ними при конкурентной правке — тот же REPEATABLE READ snapshot покрывает оба).
+- `items` — постранично; `page`/`pageSize`/`totalItems`/`totalPages` — тот же контракт, что уже
+  `attendance-overview.ts`'s `OverviewResult` (`lib/attendance-overview.ts:240-251`), только здесь
+  единица пагинации — работники population, а не строки лога.
+- `summary.timesheetStatusCounts` — по всем пяти `TimesheetStatus`, посчитано из population (работник
+  без Timesheet не попадает ни в одну из пяти корзин, но учитывается в отдельном
+  `summary.withoutTimesheetCount`).
+
+### F. Redaction — то же самое, расширено списком задачи
+
+Структурно отсутствуют: phone/email, raw GPS, `deviceInstallationId`/`deviceSequence`,
+`clientEventId`/`payloadHash`/`requestId`, exception detail, audit payload, correction reason,
+**точные timestamps отдельных segments** (T8.2 показывает только даты и агрегированные суммы по
+дню — ни `startAt`/`endAt` ни одного segment никогда не попадают в DTO, даже без разбивки на
+часы/минуты отдельного интервала). DTO строится явным `select` на каждом уровне запроса — не
+маппингом целой Prisma-модели с последующим удалением полей.
+
+### G. Consistency / query-count
+
+Один `prisma.$transaction(..., { isolationLevel: RepeatableRead })`, один `asOf` внутри. Bounded,
+set-based запросы (тот же принцип, что уже `buildOperationalOverview`: IN-clause по уже
+резолвленному списку employeeId/assignmentId, не per-worker/per-day loop):
+
+1. `site` (`findUnique` by id) — заодно проверка существования → `404 SITE_NOT_FOUND`/
+   `SITE_REPORT_NOT_FOUND`.
+2. `period` (`findUnique` by id) → `404 PERIOD_NOT_FOUND`.
+3. (только FOREMAN) `foremanAssignment.findMany` для scope — `getForemanSiteIds`.
+4. `siteAssignment.findMany` (path 1 популяции) — один запрос, `WHERE siteId = $1 AND
+   <overlap-condition>`.
+5. Population-объединение требует знать, у КАКИХ employee вообще есть Timesheet с сегментом этого
+   site в этом периоде (path 2) — один `findMany` по `Timesheet` этого `periodId`, JOIN на
+   draft/version сегменты фильтрованные по `siteId` (два варианта — draft-side и version-side,
+   каждый один `findMany` с `siteId`-фильтром, аналогично T8.1's сегмент-запросу, но не per-employee).
+6. Итоговый employee-list — union множеств шагов 4 и 5 → один `employee.findMany({ where: { id: {
+   in: [...] } } })` для DTO-полей.
+7. `payrollPeriodParticipant.findMany` для всего union-списка (`participantExpected`) — один запрос.
+
+Итого — фиксированное малое число query-событий (измерено: 13 — тот же порядок, что и T8.1's 12,
+плюс один дополнительный запрос за счёт FOREMAN-scope-ветки/участников), не растущее с числом
+работников (подтверждено: 1, 50 и 200 работников дают одинаковые 13 query-событий) и не растущее с
+числом segments.
+
+GET не создаёт `AuditEvent`, не мутирует `updatedAt`/`contentRevision` ни одной строки — читает
+исключительно через `tx.*.findMany`/`findUnique`.
+
+### H. Permissions — миграция
+
+`site.read.assigned`/`period.read.assigned` **отсутствовали** до этого слайса — подтверждено прямым
+SQL (`SELECT` по `Permission`/`RolePermission` на чистой disposable БД: ноль строк для обоих кодов).
+Новая additive DML migration `20260819000000_seed_site_period_read_assigned_permissions` — тот же
+паттерн, что уже `20260805140000_seed_foreman_review_permissions` (INSERT в `Permission`, затем
+INSERT в `RolePermission` только для роли `FOREMAN`). `ADMIN`/`SUPER_ADMIN`/`WORKER` — ноль новых
+grants. `schema.prisma` не меняется — `Permission`/`RolePermission` таблицы уже существуют, это
+чистые данные.
+
+### I. Endpoints
+
+```
+GET /api/admin/reports/sites/:siteId?periodId=&page=&pageSize=
+  permission: site.read.all + period.read.all + timesheet.read.all (все три)
+GET /api/foreman/reports/sites/:siteId?periodId=&page=&pageSize=
+  permission: site.read.assigned + period.read.assigned + timesheet.read.assigned (все три)
+```
+
+Оба вызывают один `getSiteTimeReport(siteId, periodId, { page, pageSize }, scope)` из
+`lib/site-time-report.ts`, где `scope` — `{ kind: 'unrestricted' } | { kind: 'foreman'; foremanUserId:
+string; today: Date }`. Ни одна бизнес-логика не дублируется между route-файлами — они делают
+только auth/permission/query-validation/HTTP-mapping (тот же split, что `lib/attendance-exceptions.ts`
+и T8.1's `worker-time-report.ts` уже устанавливают).
