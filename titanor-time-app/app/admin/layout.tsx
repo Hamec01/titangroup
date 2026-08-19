@@ -13,6 +13,7 @@ const ADMIN_NAVIGATION = [
   { href: '/admin/assignments', label: 'Assignments' },
   { href: '/admin/periods', label: 'Periods' },
   { href: '/admin/timesheets', label: 'Timesheets' },
+  { href: '/admin/reports', label: 'Reports' },
   { href: '/admin/review-scopes', label: 'Review' },
   { href: '/admin/corrections', label: 'Corrections' },
   { href: '/admin/attendance/exceptions', label: 'Attendance exceptions' },

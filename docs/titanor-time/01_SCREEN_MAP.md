@@ -426,6 +426,38 @@ touch target ≥ 48px), `/foreman/*` — desktop-first с поддержкой �
 - API: `GET /api/admin/periods/:periodId`, `POST /api/admin/periods/:periodId/lock`
 - DoD: попытка закрыть период с неутверждёнными табелями показывает точный список, что мешает
 
+#### `/admin/reports` 🟢 (T8.1, `[2026-08-19]`)
+- Роли: `ADMIN`, `SUPER_ADMIN`
+- Приоритет: desktop, 390×844 без horizontal overflow проверено
+- Назначение: первый отчёт ЭТАПа 8 — выбор работника и расчётного периода, статус Timesheet, часы
+  по объектам, общий итог. Только минуты — зарплата/ставки/деньги вне scope
+- Данные: `employee`/`period`/`participant`/`timesheet` (`status`, `dataSource: DRAFT|
+  CURRENT_VERSION`, `versionNumber`, `submissionSource`)/`sites[]` (gross/paid break/unpaid
+  break/worked minutes, segmentCount, workedDayCount)/`total` — из `getWorkerTimeReport()`
+  (`lib/worker-time-report.ts`), формула — `lib/reporting/worked-time.ts` (общее ядро, T8.2/T8.3/
+  T8.4 обязаны переиспользовать)
+- Фильтры: `<form method="GET">`, `employeeId`/`periodId` в URL, submit — обычная навигация, без
+  client-side fetch; lookup-списки — `listEmployeesForReportSelect()` (`lib/users.ts`, полный
+  список, без пагинации — assumption: штат одной пилотной компании) и переиспользованный
+  `listPeriodOptions()` (bounded `take: 50`, уже существовал для overview-фильтров)
+- Действия: нет мутаций — read-only отчёт
+- Состояния: prompt (ни один фильтр не выбран); нет работников/периодов вообще; нет `Timesheet`
+  для пары работник+период (`timesheet: null`, честный 200, не ошибка); excluded participant
+  (`expected: false`); ноль сегментов; `404 WORKER_NOT_FOUND`/`404 PERIOD_NOT_FOUND` (валидный
+  формат id, не существует) — свои страницы, не общий error boundary
+- Откуда: nav; `/admin/workers/[employeeId]` («View time report», предзаполненный `employeeId`);
+  `/admin/periods/[periodId]` («View a worker's time report for this period», предзаполненный
+  `periodId`)
+- Куда: —
+- API: `GET /api/admin/reports/workers/:employeeId?periodId=<uuid>`
+- DoD: `total.workedMinutes` буквально равен сумме `site.workedMinutes` в ответе; `total.
+  workedDayCount` — distinct даты по всем сегментам сразу, не сумма per-site; site sorting
+  стабильна (`siteName ASC, siteId ASC`); ноль запрещённых полей (phone/GPS/device/payload/
+  requestId) в JSON и в отрендеренном HTML (подтверждено сканированием); GET не создаёт
+  `AuditEvent` и не меняет `updatedAt`/`contentRevision` ни одной строки; query-count не зависит от
+  числа сегментов/объектов (подтверждено: 1 сегмент vs 20 сегментов на 2 объектах — оба 12 query
+  events)
+
 #### `/admin/review-fallback` ⚪
 
 Административный аналог `/foreman/review` — реальный экран, обслуживает два случая: единственный

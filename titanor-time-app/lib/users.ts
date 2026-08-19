@@ -321,3 +321,25 @@ export async function listEmployeesForForemanSelect(): Promise<ForemanSelectable
     userStatus: employee.user?.status ?? null
   }));
 }
+
+export interface ReportSelectableEmployee {
+  id: string;
+  employeeNumber: string;
+  firstName: string;
+  lastName: string;
+}
+
+/**
+ * docs/titanor-time/T8_REPORTS_DESIGN.md — for the /admin/reports worker picker. Unbounded, full
+ * company roster in one query — same "reasonable full lookup, no pagination" choice already made
+ * for listEmployeesForForemanSelect() above (same file, same precedent); documented limit: this
+ * assumes the workforce stays small enough (a single pilot company) for one unpaginated dropdown
+ * request. Revisit with a searchable/paginated selector if the roster grows past a few hundred.
+ */
+export async function listEmployeesForReportSelect(): Promise<ReportSelectableEmployee[]> {
+  const employees = await prisma.employee.findMany({
+    orderBy: [{ lastName: 'asc' }, { firstName: 'asc' }],
+    select: { id: true, employeeNumber: true, firstName: true, lastName: true }
+  });
+  return employees;
+}

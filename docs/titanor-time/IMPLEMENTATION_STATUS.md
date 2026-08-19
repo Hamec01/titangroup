@@ -1,6 +1,98 @@
 # Titanor Time — Implementation Status
 
-Обновлено: 2026-08-19 Europe/Helsinki (test: prove orphan event pairing in pilot flow — T7A.10C.2 FOLLOW-UP)
+Обновлено: 2026-08-19 Europe/Helsinki (feat: add worker time report — T8.1)
+
+**`[2026-08-19]` T8.1 Admin Worker Time Report — feat(time): add worker time report.** Первый отчёт
+ЭТАПа 8 (`docs/PROJECT_ROADMAP.md`): администратор выбирает работника и расчётный период, видит
+статус Timesheet, часы по объектам, общий итог. Создаёт reusable worked-time core, который T8.2
+(отчёт по объекту), T8.3 (отчёт по периоду) и T8.4 (CSV export) обязаны переиспользовать без
+копирования формулы. Полный design — `docs/titanor-time/T8_REPORTS_DESIGN.md`, написан ДО кода.
+
+**Canonical data source**: `DRAFT`/`RETURNED` → текущий `TimesheetDraft`; `SUBMITTED`/
+`FOREMAN_APPROVED`/`FINAL_APPROVED` → только immutable `TimesheetVersion` по `currentVersionId`.
+Никакого fallback в обе стороны — нарушение считается invariant failure (throw), не нулевым
+отчётом. `RETURNED` доказано читает изменённый draft, даже когда `currentVersionId` по-прежнему
+указывает на старую version (RETURNED никогда её не очищает) — отдельный тест, не просто "draft
+существует". Pending correction (`CorrectionRequest.status IN (PENDING,DRAFT_OPEN,SUBMITTED)`) не
+меняет `currentVersionId` вообще → отчёт не видит черновик корректировки. Approved correction
+(`lib/corrections.ts:904`, не менялся) атомарно переключает `currentVersionId` → отчёт после этого
+коммита естественно видит новую version, без специального кода.
+
+**Формула**: новый `lib/reporting/worked-time.ts` — `computeSegmentMs`/`sumWorkedTimeMs`/
+`msToMinutes`, ноль зависимостей от Prisma/HTTP/UI. `grossMs = endAt - startAt`; unpaid break
+вычитается ровно один раз на break; paid break входит в `workedMs`, учитывается отдельно только для
+отображения. Округление: сумма в мс на уровне site bucket, один `Math.round` там; `total.*` — сумма
+уже округлённых site-полей (не повторное округление суммы мс) — `total.workedMinutes` буквально
+равен `Σ site.workedMinutes` в JSON. Исключение — `total.workedDayCount`: `COUNT(DISTINCT date)` по
+ВСЕМ сегментам сразу, не сумма per-site day count (один день на двух объектах не задваивается).
+`lib/attendance-overview.ts`'s `segmentReportedMs` (T7A.9A) переписан на тот же shared core —
+identical `recordedMinutes`/`reportedMinutes`/`deltaMinutes` до и после (regression-тест, 3/3).
+
+**API**: `GET /api/admin/reports/workers/:employeeId?periodId=<uuid>` — три permission одновременно
+(`worker.read.all`+`period.read.all`+`timesheet.read.all`, тот же цикл-паттерн, что уже
+`GET /api/admin/overview`; отзыв любого блокирует следующий запрос). Malformed `employeeId`/
+отсутствующий или malformed `periodId` → `400 VALIDATION_ERROR` (в отличие от некоторых существующих
+роутов, path-параметр явно валидируется `UUID_PATTERN` до похода в Prisma — не полагается на
+Postgres syntax error). Несуществующий, но валидный по формату → `404 WORKER_NOT_FOUND`/
+`404 PERIOD_NOT_FOUND`. Один `prisma.$transaction(..., { isolationLevel: RepeatableRead })` — ровно
+5 запросов (employee/period/participant/timesheet+draft-or-version-id/сегменты одним `findMany`),
+не зависит от числа сегментов/объектов (проверено: 1 сегмент vs 20 сегментов на 2 объектах — оба
+дают 12 query events). Ноль запрещённых полей (phone/GPS/device/payload/requestId) — DTO строится
+явным `select`, не сериализацией целой модели. GET не создаёт `AuditEvent`, не меняет
+`updatedAt`/`contentRevision` ни одной строки.
+
+**UI**: новый `/admin/reports` (Server Component, фильтры в URL `?employeeId=&periodId=`, submit —
+обычный `<form method="GET">`, без client-side fetch — вызывает `getWorkerTimeReport()` напрямую,
+как и API route). Добавлен в admin navigation. Cross-links: `/admin/workers/:id` → "View time
+report", `/admin/periods/:id` → "View a worker's time report for this period", оба с предзаполненным
+фильтром. Lookup: `listEmployeesForReportSelect()` (новый, `lib/users.ts`, unbounded — тот же
+прецедент, что уже `listEmployeesForForemanSelect`, документирован явно как assumption "весь штат
+одной пилотной компании") + переиспользованный `listPeriodOptions()` (уже существовал, bounded
+`take: 50`). Формат `X h Y min`. Empty states: нет работников/периодов, нет Timesheet, ноль
+сегментов, excluded participant (`expected: false`).
+
+**Тесты** (реальный HTTP + реальный Playwright Chromium, disposable PostgreSQL 16, production
+build): **57/57** — роли/permissions/revoke, все 5 `TimesheetStatus` (включая RETURNED-со-stale-
+version отдельно), pending/approved correction, 2+ объекта, множественные сегменты, paid/unpaid
+break (включая несколько breaks), cross-midnight (проверка `ck_work_segment_local_date` — `date`
+обязан быть Europe/Helsinki-local датой `startAt`, не UTC), confirmed-zero, excluded participant,
+worker без Timesheet, malformed/missing UUID, redaction (JSON), audit/mutation-freedom, snapshot
+consistency, query-count boundedness. **15/15** — Playwright browser: filters/URL/reload/back-
+forward, normal/empty/error/access-denied states, redaction (rendered HTML), 390×844 no overflow,
+keyboard focus, zero console errors. **3/3** — attendance-overview formula regression после
+рефакторинга на shared helper.
+
+**Регрессия**: admin overview UI/API (200, nav содержит Reports) — не задет рефакторингом formula;
+admin periods list/detail (новый cross-link на месте, корректный `periodId`); admin workers list/
+detail (новый cross-link на месте, корректный `employeeId`); admin corrections/attendance policy
+страницы — загружаются; activation vertical slice — все проверки зелёные; corrections fixture-
+builder — без ошибок. Ни один файл `lib/corrections.ts`/`lib/worker-timesheets.ts`/
+`lib/foreman-review.ts`/`lib/periods.ts`/`lib/review-scopes.ts` не менялся (`git diff --stat` — пусто).
+
+**Технические проверки**: `git diff --check`, `prisma validate` (схема не менялась — ноль новых
+permission/migrations), `tsc --noEmit`, `npm run build` (изолированная copy, оба новых route в
+выводе), `docker compose config --quiet`, `docker compose build app` (образ подтверждённо содержит
+`lib/reporting/worked-time.ts` и `.next/server/app/{admin,api/admin}/reports`; исходного локального
+тега `titanor-time-app:latest` на хосте не было до этой проверки — после подтверждения содержимого
+образ удалён, хост возвращён к тому же состоянию, что и до сборки), `prisma migrate deploy` дважды
+на чистой БД (56 migrations, второй прогон — no-op) — все чисто. Production
+(`titanor-time-app-1`/`titanor-time-db-1`) — `RestartCount=0`, `StartedAt` не менялся,
+`200`/`200` до и после.
+
+**Инцидент, не связанный с кодом этого слайса**: во время интенсивного тестирования (много
+параллельных Chromium/Node/tsx процессов на разделяемом хосте) preview-процесс
+(`next dev -p 3244`, `127.0.0.1:3244`) исчез из списка процессов — health/ready стали `000`/`000`.
+Своп на хосте на тот момент был полностью исчерпан (4.0/4.0 GiB) — по всем признакам OOM-killer
+(доступа к `dmesg`/`journalctl` для окончательного подтверждения нет). Ни одна команда этой сессии
+не была направлена на preview-процесс; после обнаружения владелец подтвердил, что перезапустит
+preview самостоятельно (STOP-GATE этой задачи прямо запрещал делать это самому). Production не
+затронут (`200`/`200`, `RestartCount=0` всё время). Disposable-ресурсы этой сессии (Postgres-
+контейнер, scratch-копии, Playwright-профили) освобождены сразу после обнаружения инцидента, чтобы
+снизить нагрузку.
+
+**T8.2 (отчёт по объекту) этим коммитом не начат.**
+
+---
 
 **`[2026-08-19]` T7A.10C.2 FOLLOW-UP — test(time): prove orphan event pairing in pilot flow.**
 Закрывает единственный пробел, оставшийся после T7A.10C.2 (запись ниже): живой, детерминированный

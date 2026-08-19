@@ -1943,3 +1943,43 @@ Pilot gap closure slice (raw GPS retention + offline PWA shell,
   изменение — `WorkerClockPanel` теперь параметризован структурным типом assignment'ов вместо
   конкретного server-типа (чисто TypeScript-уровневый рефакторинг компонента, не влияет ни на один
   HTTP-контракт).
+
+## 18. `GET /api/admin/reports/workers/:employeeId` — Admin Worker Time Report (T8.1, 2026-08-19)
+
+Полный контракт — `docs/titanor-time/T8_REPORTS_DESIGN.md` (написан до реализации). Здесь —
+сжатая, консистентная с остальным документом форма.
+
+**Permission**: `worker.read.all` + `period.read.all` + `timesheet.read.all` одновременно (§2.4g
+`02_ROLE_PERMISSION_MATRIX.md`) — ноль новых permission/migrations.
+
+**Query**: `periodId` (обязателен, UUID).
+
+**Успех — `200`**:
+```json
+{
+  "asOf": "ISO",
+  "employee": { "id": "uuid", "employeeNumber": "string", "firstName": "string", "lastName": "string" },
+  "period": { "id": "uuid", "startDate": "YYYY-MM-DD", "endDate": "YYYY-MM-DD", "status": "OPEN|LOCKED|EXPORTED" },
+  "participant": { "expected": true } | null,
+  "timesheet": { "id": "uuid", "status": "DRAFT|SUBMITTED|RETURNED|FOREMAN_APPROVED|FINAL_APPROVED", "dataSource": "DRAFT|CURRENT_VERSION", "versionNumber": number | null, "submissionSource": "MANUAL|AUTO" | null } | null,
+  "sites": [ { "siteId": "uuid", "siteName": "string", "grossMinutes": number, "paidBreakMinutes": number, "unpaidBreakMinutes": number, "workedMinutes": number, "segmentCount": number, "workedDayCount": number } ],
+  "total": { "grossMinutes": number, "paidBreakMinutes": number, "unpaidBreakMinutes": number, "workedMinutes": number, "segmentCount": number, "workedDayCount": number, "siteCount": number }
+}
+```
+
+**Ошибки**: malformed `employeeId` (path) или отсутствующий/malformed `periodId` (query) →
+`400 VALIDATION_ERROR` (`fieldErrors`); валидный формат, но не существует → `404 WORKER_NOT_FOUND`/
+`404 PERIOD_NOT_FOUND` (employeeId проверяется первым, если оба некорректны).
+
+**Инварианты**: `timesheet: null` (нет `Timesheet` для пары) — честный `200`, не ошибка;
+`participant.expected: false` — исключённый участник отображается честно, не скрывается;
+`total.workedMinutes = Σ site.workedMinutes` буквально (не независимое округление);
+`total.workedDayCount` — distinct даты по всем сегментам сразу; `sites` отсортированы `siteName
+ASC, siteId ASC`; ноль phone/email/GPS/device identifiers/payload/hash/requestId в теле; GET не
+создаёт `AuditEvent`, не мутирует БД; `no-store`; одна `REPEATABLE READ` read-only транзакция с
+одним `asOf`; bounded query count (не зависит от числа segments/sites — подтверждено: 12 запросов
+что при 1 сегменте, что при 20 сегментах на 2 объектах).
+
+**Canonical source** (не подменяется никаким fallback): `DRAFT`/`RETURNED` → `TimesheetDraft`;
+`SUBMITTED`/`FOREMAN_APPROVED`/`FINAL_APPROVED` → `TimesheetVersion` по `currentVersionId`.
+Нарушение обязательной связи status/source — invariant failure (500), не нулевой отчёт.

@@ -649,11 +649,14 @@ T7A.5; exception review = T7A.6 (resolution)/T7A.9; auto-submit = T7A.7; full E2
 
 # ЭТАП 8. ОТЧЁТЫ И PWA
 
-## T8.1 — Отчёт по работнику
+## T8.1 — Отчёт по работнику 🟢 реализовано `[2026-08-19]`
 
-Период, объект, статус, сумма часов.
+Период, объект, статус, сумма часов. `GET /api/admin/reports/workers/:employeeId?periodId=`,
+`/admin/reports` UI. Reusable `lib/reporting/worked-time.ts` — общее ядро формулы, которое T8.2/
+T8.3/T8.4 обязаны переиспользовать. Полный контракт —
+`docs/titanor-time/T8_REPORTS_DESIGN.md`.
 
-## T8.2 — Отчёт по объекту
+## T8.2 — Отчёт по объекту ⚪ не начато
 
 Работники, даты, часы, общий итог.
 

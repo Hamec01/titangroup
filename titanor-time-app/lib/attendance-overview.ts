@@ -2,6 +2,7 @@ import { Prisma } from '@prisma/client';
 import { prisma } from '@/lib/prisma';
 import { UUID_PATTERN } from '@/lib/attendance-exceptions';
 import { getForemanOverview, getForemanSiteIds, type ForemanOverview } from '@/lib/foreman-review';
+import { computeSegmentMs, sumWorkedTimeMs, msToMinutes } from '@/lib/reporting/worked-time';
 
 // docs/titanor-time/T7A_1_ATTENDANCE_CLOCK_DESIGN.md §16 п.9 + Addendum "T7A.9A Attendance
 // Operational Overview Read Foundation" (2026-08-18) — exact operational-state definitions and the
@@ -631,18 +632,13 @@ async function computeDiffs(tx: Prisma.TransactionClient, timesheets: TimesheetF
     draftSegmentsByDraft.set(s.draftId, list);
   }
 
+  // docs/titanor-time/T8_REPORTS_DESIGN.md §2 — shared formula core (computeSegmentMs/
+  // sumWorkedTimeMs), not a local copy. Only workedMs is used here (paid break stays in, unpaid
+  // break subtracted once) — grossMs/paidBreakMs/unpaidBreakMs aren't part of this diff's shape.
   function segmentReportedMs(segs: { startAt: Date; endAt: Date; originClockShiftFragmentId: string | null; breaks: { startAt: Date; endAt: Date; paid: boolean }[] }[]): { ms: number; fragmentIds: string[] } {
-    let ms = 0;
-    const usedFragmentIds: string[] = [];
-    for (const seg of segs) {
-      let segMs = seg.endAt.getTime() - seg.startAt.getTime();
-      for (const b of seg.breaks) {
-        if (!b.paid) segMs -= b.endAt.getTime() - b.startAt.getTime();
-      }
-      ms += segMs;
-      if (seg.originClockShiftFragmentId) usedFragmentIds.push(seg.originClockShiftFragmentId);
-    }
-    return { ms, fragmentIds: usedFragmentIds };
+    const totals = sumWorkedTimeMs(segs.map((seg) => computeSegmentMs(seg)));
+    const usedFragmentIds = segs.map((seg) => seg.originClockShiftFragmentId).filter((id): id is string => !!id);
+    return { ms: totals.workedMs, fragmentIds: usedFragmentIds };
   }
 
   for (const t of frozenTimesheets) {
@@ -651,10 +647,12 @@ async function computeDiffs(tx: Prisma.TransactionClient, timesheets: TimesheetF
     const segs = t.currentVersionId ? (workSegmentsByVersion.get(t.currentVersionId) ?? []) : [];
     const { ms: reportedMs, fragmentIds: usedFragmentIds } = segmentReportedMs(segs);
     const adjustmentCount = myFragments.reduce((sum, f) => sum + (adjustmentCountByFragment.get(f.id) ?? 0), 0);
+    const recordedMinutes = msToMinutes(recordedMs);
+    const reportedMinutes = msToMinutes(reportedMs);
     result.set(t.employeeId, {
-      recordedMinutes: Math.round(recordedMs / 60000),
-      reportedMinutes: Math.round(reportedMs / 60000),
-      deltaMinutes: Math.round(reportedMs / 60000) - Math.round(recordedMs / 60000),
+      recordedMinutes,
+      reportedMinutes,
+      deltaMinutes: reportedMinutes - recordedMinutes,
       adjustmentCount
     });
     void usedFragmentIds; // parity with draft branch's shape; not separately needed here
@@ -666,10 +664,12 @@ async function computeDiffs(tx: Prisma.TransactionClient, timesheets: TimesheetF
     const segs = t.draft ? (draftSegmentsByDraft.get(t.draft.id) ?? []) : [];
     const { ms: reportedMs } = segmentReportedMs(segs);
     const adjustmentCount = myFragments.reduce((sum, f) => sum + (adjustmentCountByFragment.get(f.id) ?? 0), 0);
+    const recordedMinutes = msToMinutes(recordedMs);
+    const reportedMinutes = msToMinutes(reportedMs);
     result.set(t.employeeId, {
-      recordedMinutes: Math.round(recordedMs / 60000),
-      reportedMinutes: Math.round(reportedMs / 60000),
-      deltaMinutes: Math.round(reportedMs / 60000) - Math.round(recordedMs / 60000),
+      recordedMinutes,
+      reportedMinutes,
+      deltaMinutes: reportedMinutes - recordedMinutes,
       adjustmentCount
     });
   }

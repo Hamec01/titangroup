@@ -219,6 +219,21 @@ DML (проверено прямым SQL — ровно 4 новых грант�
 | `attendance.policy.read` | `ADMIN`, `SUPER_ADMIN` | единственная строка `CompanyAttendancePolicy` (singleton) | `GET /api/admin/attendance/policy` — strict allowlist ответа; не подразумевает `.update` | нет | нет (read-only) | — |
 | `attendance.policy.update` | `ADMIN`, `SUPER_ADMIN` | единственная строка `CompanyAttendancePolicy` (singleton) | `PATCH /api/admin/attendance/policy` — обязателен вместе с `.read` независимо (оба нужны отдельно, отзыв любого → `403` на следующий запрос); `timezone` никогда не принимается ни при какой permission — заморожена на уровне БД constraint'ом; конкурентный `PATCH` сериализуется через `FOR UPDATE`, lost update невозможен | нет | да (`ATTENDANCE_POLICY_UPDATED`, before/after только по 4 изменяемым полям, без `timezone`) | нет |
 
+### 2.4g Admin Worker Time Report (T8.1) — **`[2026-08-19] реализовано`**
+(`docs/titanor-time/T8_REPORTS_DESIGN.md`, `04_ADMIN_FIRST_API_CONTRACTS.md` §9.1g). **Ноль новых
+permissions/migrations** — переиспользует три уже существующих grant'а, каждый уже засеян и
+использован в других контекстах (§2.2/§2.5/§2.7).
+
+`GET /api/admin/reports/workers/:employeeId?periodId=` требует **все три** одновременно:
+`worker.read.all` + `period.read.all` + `timesheet.read.all` — тот же цикл-паттерн (`for permission
+of REQUIRED_PERMISSIONS`), что уже `GET /api/admin/overview` (§2.4e) использует для своей тройки;
+отзыв любого из трёх → `403 FORBIDDEN` на следующий запрос (проверено тестом: custom-роль с полным
+набором → `200`, после `RolePermission.delete` одного гранта → `403`). `FOREMAN`/`WORKER` — `403`
+до какого-либо чтения `Timesheet`/`TimesheetDraft`/`TimesheetVersion`/сегментов (роль сначала
+блокируется уровнем `/admin/*` layout, эта тройка — вторая, более гранулярная линия защиты). Не
+меняет существующие ограничения `worker.read.all`/`period.read.all`/`timesheet.read.all` в их
+собственных секциях (§2.2/§2.7/§2.8) — только добавляет ещё один потребитель той же тройки.
+
 ### 2.5 Назначения
 
 | Permission | Держатели | Область | Ограничения | Причина | Аудит | Массовое |

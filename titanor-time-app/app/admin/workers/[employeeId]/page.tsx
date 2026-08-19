@@ -1,4 +1,5 @@
 import { redirect } from 'next/navigation';
+import Link from 'next/link';
 import { resolveServerSession } from '@/lib/server-session';
 import { getWorkerDetail } from '@/lib/workers';
 import { WorkerActions } from './WorkerActions';
@@ -58,6 +59,9 @@ export default async function WorkerDetailPage({ params }: { params: Promise<{ e
           Employee number: {worker.employeeNumber} · Login username: {worker.username} ·{' '}
           {worker.employment?.active ? 'Active employment' : 'Employment ended'} ·{' '}
           {ACTIVATION_STATUS_LABEL[worker.activationStatus]}
+        </p>
+        <p>
+          <Link href={`/admin/reports?employeeId=${employeeId}`}>View time report</Link>
         </p>
 
         <h2>Current assignments</h2>

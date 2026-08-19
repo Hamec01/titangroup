@@ -70,6 +70,9 @@ export default async function AdminPeriodDetailPage({ params }: RouteParams) {
         {period.status === 'OPEN' ? <LockPeriodAction periodId={period.id} /> : null}
 
         <p>
+          <Link href={`/admin/reports?periodId=${period.id}`}>View a worker's time report for this period</Link>
+        </p>
+        <p>
           <Link href="/admin/periods">Back to periods</Link>
         </p>
       </div>
