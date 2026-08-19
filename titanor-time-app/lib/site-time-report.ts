@@ -3,6 +3,7 @@ import { prisma } from '@/lib/prisma';
 import { getForemanSiteIds } from '@/lib/foreman-review';
 import { UUID_PATTERN } from '@/lib/attendance-exceptions';
 import { computeSegmentMs, sumWorkedTimeMs, msToMinutes, type WorkedTimeSegmentInput } from '@/lib/reporting/worked-time';
+import { resolveCanonicalSource } from '@/lib/reporting/canonical-source';
 
 // docs/titanor-time/T8_REPORTS_DESIGN.md Addendum "T8.2A Site Time Report APIs" — this module owns
 // population (§A), FOREMAN scope (§B), canonical-source selection (§C, identical to T8.1's
@@ -253,23 +254,22 @@ export async function getSiteTimeReport(siteId: string, periodId: string, pagina
       }
     });
 
-    const draftTimesheets = timesheets.filter((t) => t.status === 'DRAFT' || t.status === 'RETURNED');
-    const versionTimesheets = timesheets.filter((t) => t.status !== 'DRAFT' && t.status !== 'RETURNED');
+    // §C — the shared canonical-source rule (also used by T8.1/T8.3); throws for the whole request
+    // on an invariant failure, never a silently-skipped employee.
+    const sourceByTimesheetId = new Map(
+      timesheets.map((t) => [t.id, resolveCanonicalSource({ id: t.id, status: t.status, currentVersionId: t.currentVersionId, draft: t.draft, currentVersion: t.currentVersion })])
+    );
 
-    for (const t of draftTimesheets) {
-      if (!t.draft) {
-        // §C invariant — throw for the whole request, never a silently-skipped employee.
-        throw new Error(`SITE_TIME_REPORT_INVARIANT_FAILURE: timesheet ${t.id} has status ${t.status} but no TimesheetDraft`);
+    const draftIdToEmployeeId = new Map<string, string>();
+    const versionIdToEmployeeId = new Map<string, string>();
+    for (const t of timesheets) {
+      const source = sourceByTimesheetId.get(t.id)!;
+      if (source.dataSource === 'DRAFT') {
+        draftIdToEmployeeId.set(source.draftId!, t.employeeId);
+      } else {
+        versionIdToEmployeeId.set(source.versionId!, t.employeeId);
       }
     }
-    for (const t of versionTimesheets) {
-      if (!t.currentVersionId || !t.currentVersion) {
-        throw new Error(`SITE_TIME_REPORT_INVARIANT_FAILURE: timesheet ${t.id} has status ${t.status} but no currentVersionId`);
-      }
-    }
-
-    const draftIdToEmployeeId = new Map(draftTimesheets.map((t) => [t.draft!.id, t.employeeId]));
-    const versionIdToEmployeeId = new Map(versionTimesheets.map((t) => [t.currentVersionId as string, t.employeeId]));
     const draftIds = [...draftIdToEmployeeId.keys()];
     const versionIds = [...versionIdToEmployeeId.keys()];
 
@@ -344,16 +344,9 @@ export async function getSiteTimeReport(siteId: string, periodId: string, pagina
 
     const items: SiteTimeReportItem[] = employees.map((employee) => {
       const t = timesheetByEmployee.get(employee.id);
-      const usesDraft = t ? t.status === 'DRAFT' || t.status === 'RETURNED' : false;
-      const timesheetDto: SiteTimeReportTimesheet | null = t
-        ? {
-            id: t.id,
-            status: t.status,
-            dataSource: usesDraft ? 'DRAFT' : 'CURRENT_VERSION',
-            versionNumber: usesDraft ? null : (t.currentVersion?.versionNumber ?? null),
-            submissionSource: usesDraft ? null : (t.currentVersion?.submissionSource ?? null)
-          }
-        : null;
+      const source = t ? sourceByTimesheetId.get(t.id)! : null;
+      const timesheetDto: SiteTimeReportTimesheet | null =
+        t && source ? { id: t.id, status: t.status, dataSource: source.dataSource, versionNumber: source.versionNumber, submissionSource: source.submissionSource } : null;
       const { days, total } = buildDays(segmentsByEmployee.get(employee.id) ?? []);
       const participantExpectedRaw = participantByEmployee.get(employee.id);
       return {

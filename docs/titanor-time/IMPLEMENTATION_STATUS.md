@@ -1,6 +1,94 @@
 # Titanor Time — Implementation Status
 
-Обновлено: 2026-08-19 Europe/Helsinki (fix: align report rounding across views — T8 ROUNDING FOLLOW-UP)
+Обновлено: 2026-08-19 Europe/Helsinki (feat: add payroll period report API — T8.3A)
+
+**`[2026-08-19]` T8.3A Company Payroll Period Report API — feat(time): add payroll period report
+API.** `GET /api/admin/reports/periods/:periodId?page=&pageSize=` — ADMIN/SUPER_ADMIN only,
+company/site-агрегированный отчёт по расчётному периоду: работники, объекты, статусы табелей, дни,
+рабочее время, общие итоги. Без employee rows (detail уже есть в T8.1/T8.2), без зарплаты/ставок.
+UI (T8.3B) этим коммитом не начат. Design — `docs/titanor-time/T8_REPORTS_DESIGN.md` Addendum
+"T8.3A" (§P–Z), написан ДО кода.
+
+**Shared canonical-source helper**: `lib/reporting/canonical-source.ts` (новый, чистый — ноль
+Prisma/I/O) — `resolveCanonicalSource()` выносит правило "DRAFT/RETURNED → `TimesheetDraft`,
+иначе → `currentVersion`, invariant failure = throw" в одно место. T8.1 (`lib/worker-time-
+report.ts`) и T8.2 (`lib/site-time-report.ts`) переключены на этот helper **без изменения своего
+DTO/результата** — подтверждено полным прогоном их собственных regression (57/57, 80/80) и
+105/105 rounding-consistency после переключения. T8.3 использует тот же helper — единая точка
+правды для всех трёх отчётов вместо трёх копий status/source branching.
+
+**Company population** (union, не приоритет): (1) `PayrollPeriodParticipant` существует; (2)
+`Timesheet` существует; (3) `SiteAssignment` (любой объект) пересекает период; (4) canonical
+source содержит segment — доказано подмножество (2), сохранено в реализации для симметрии с
+формулировкой задачи. **Site population**: (1) `SiteAssignment` из company population на этом
+объекте; (2) canonical source содержит segment этого объекта. Inactive site с historical hours не
+скрывается; participant без assignment остаётся видимым; multi-site работник — один раз в company
+`workerCount`, но в КАЖДОЙ своей site row (документировано как ожидаемое поведение).
+
+**Canonical rounding bucket** — тот же `(employeeId, siteId, date)`, что T8.1/T8.2 (после "T8
+ROUNDING FOLLOW-UP", `[2026-08-19]`, более ранняя запись ниже): сумма ms внутри bucket, один
+`msToMinutes`; site totals — сумма daily buckets; company summary — сумма site totals; ни одного
+повторного ms-уровня округления выше daily bucket.
+
+**Reconciliation — обязательная сверяемость, проверена тестами**: `periodReport.sites[i].*` ==
+`GET /api/admin/reports/sites/:siteId`'s `summary` для того же site/period; `periodReport.summary.*`
+== `Σ periodReport.sites[i].*` (полный набор, не страница); `periodReport.summary.workedMinutes` ==
+`Σ` `GET /api/admin/reports/workers/:employeeId`'s `total.workedMinutes` по company population.
+
+**Response** — `summary` (workerCount/participantCount/expected/excluded/assignedWorkerCount/
+workedWorkerCount/withoutTimesheetCount/withoutSiteCount/siteCount/workedDayCount/gross-paid-
+unpaid-worked Minutes/segmentCount/timesheetStatusCounts) + paginated `sites[]` (та же форма без
+employee-специфичных полей, plus assignedWorkerCount/workedWorkerCount per site). `sites` sorting
+`site.name ASC, site.id ASC`. Ноль employee rows в DTO целиком — architectural + redaction
+decision разом.
+
+**Permissions**: `period.read.all`+`site.read.all`+`worker.read.all`+`timesheet.read.all`
+одновременно (все четыре уже существовали — T8.1/T8.2A их создали), проверка через
+`hasPermission`. Ноль новых permissions/migrations/schema changes. Ноль FOREMAN-варианта.
+
+**Set-based реализация**: `lib/period-time-report.ts` — ни одного вызова `getSiteTimeReport`/
+`getWorkerTimeReport` внутри цикла, ни одного per-worker/per-site Prisma-запроса; один bulk-проход
+на каждый тип строки (period/participant/assignment/timesheet/draft-segment/version-segment/site),
+вся агрегация — в памяти после того, как данные уже получены.
+
+**Тесты — 110/110** (`titanor-time-app/scripts/_test-period-time-report.ts`, реальные HTTP,
+disposable PostgreSQL 16): ADMIN/SUPER_ADMIN success, WORKER/FOREMAN forbidden, отзыв каждого из
+четырёх permissions, malformed periodId/page/pageSize, missing period, empty period, все
+population edge cases (participant-only, assignment-only, timesheet-без-segments, expected/
+excluded, historical-segment-only, multi-site-once), active-zero/inactive-historical/multiple
+sites, множественные работники, все 5 `TimesheetStatus`, DRAFT/RETURNED-со-stale-version/
+CURRENT_VERSION source, pending correction unchanged/approved correction switches totals, paid/
+unpaid/multiple breaks, multiple-segments-in-bucket, multiple days, cross-midnight без double
+count, 31s+31s/29s+29s canonical rounding, stable site sorting, pagination, summary independent
+of page, все три reconciliation equality (site==T8.2, company==Σsites, company==ΣT8.1), distinct
+worker/day counts, status counts company vs site, withoutTimesheet/withoutSite definitions, OPEN/
+LOCKED/EXPORTED periods, forbidden-field JSON scan, zero mutations, REPEATABLE READ snapshot
+(concurrent write visible only to a later request), canonical-source helper pure-function
+regression.
+
+**Query-count** — измерено через Postgres `log_statement='all'` (окно `BEGIN...COMMIT`, без auth
+overhead): **12 запросов**, идентично для 1 работника/1 объекта, 50 работников/5 объектов, 200
+работников/20 объектов (bounded, не O(N)). `EXPLAIN ANALYZE` на 200-worker/20-site fixture — все
+запросы sub-2ms, эффективные Seq Scan/Hash Join планы при текущем объёме тестовых данных; новый
+индекс не добавлен — не доказана необходимость (задача явно требует добавлять индекс только при
+доказанной необходимости).
+
+**Регрессия**: T8.1 own suite — 57/57; T8.2A own suite — 80/80 (ни T8.2A, ни T8.1's контракт не
+менялись — только внутренняя реализация canonical-source, подтверждено byte-for-byte идентичным
+DTO через оба прогона); rounding-consistency — 105/105. GET создаёт ноль `AuditEvent`/мутаций.
+
+**Технические проверки**: `git diff --check`, `prisma validate` (schema не менялся — валиден),
+`tsc --noEmit` (0 ошибок), `npm run build` в изолированной чистой копии (новый route
+`/api/admin/reports/periods/[periodId]` в выводе), `docker compose config --quiet`, `docker
+compose build app` (успех; исходного локального тега `titanor-time-app:latest` не было — после
+проверки образ удалён), `prisma migrate deploy` дважды (57 migrations, второй — no-op). Preview
+`127.0.0.1:3244` — `200`/`200` до и после, не трогался, не использовался для тестов. Production
+(`titanor-time-app-1`) — `RestartCount=0`, `StartedAt` не менялся, `200`/`200`. Тяжёлые проверки
+выполнялись строго последовательно, disposable-ресурсы удалялись сразу после каждого шага.
+
+**T8.3B (UI отчёта по периоду) этим коммитом явно не начат.**
+
+---
 
 **`[2026-08-19]` T8 ROUNDING FOLLOW-UP — fix(time): align report rounding across views.** T8.1 и
 T8.2 расходились на sub-minute сегментах: T8.1 группировал ms по `(employeeId, siteId)` за весь

@@ -466,3 +466,187 @@ identifiers/payload/hash/requestId/exception detail/audit payload/correction rea
 timestamps segments (§F design doc выше) — UI-слой ничего нового не может утечь, потому что нечему
 утекать: рендерятся только поля, уже присутствующие в типизированном `SiteTimeReport`. Blanket
 scan (тест п.31 списка задачи) — просто дополнительное доказательство, не единственная защита.
+
+## Addendum — T8.3A Company Payroll Period Report API (2026-08-19)
+
+Написано **до** реализации. Company/site-агрегированный отчёт по расчётному периоду —
+ADMIN/SUPER_ADMIN only, без разбивки по работникам (detail уже есть в T8.1/T8.2). UI (T8.3B) этим
+addendum'ом не начат.
+
+### P. Shared canonical-source helper
+
+`lib/reporting/canonical-source.ts` (новый, чистый — ноль Prisma/I/O) выносит правило §1 в одно
+место: `resolveCanonicalSource({id, status, currentVersionId, draft, currentVersion})` →
+`{dataSource, versionNumber, submissionSource, draftId, versionId}`, throw при нарушении инварианта
+(DRAFT/RETURNED без `TimesheetDraft`, либо не-draft статус без `currentVersionId`/`currentVersion`).
+T8.1 (`lib/worker-time-report.ts`) и T8.2 (`lib/site-time-report.ts`) переключены на этот helper
+**без изменения своего DTO/результата** — подтверждено полным прогоном их собственных regression
+(57/57, 80/80) и 105/105 rounding-consistency после переключения. T8.3 использует тот же helper —
+теперь единая точка правды для всех трёх отчётов, не три независимые копии status/source branching.
+Pending correction никогда не трогает `currentVersionId` (только approved меняет его атомарно вместе
+с созданием новой `TimesheetVersion`) — поэтому helper, читающий `currentVersionId` напрямую, уже
+корректно обрабатывает оба случая без отдельной correction-специфичной ветки.
+
+### Q. Company population
+
+Работник входит в отчёт периода, если выполнено хотя бы одно (union, не приоритет):
+1. существует `PayrollPeriodParticipant` этого `periodId`;
+2. существует `Timesheet` этого `periodId`;
+3. существует `SiteAssignment` (на любом объекте), пересекающий даты периода (тот же
+   inclusive-both-ends overlap, что T8.2A использует per-site: `validFrom <= period.endDate AND
+   (validTo IS NULL OR validTo >= period.startDate)`, здесь — без фильтра по `siteId`, company-wide);
+4. canonical source содержит хотя бы один segment, принадлежащий `Timesheet` этого `periodId`.
+
+**Важное наблюдение**: условие 4 всегда является подмножеством условия 2 — любой segment (draft или
+version) принадлежит конкретному `TimesheetDraft`/`TimesheetVersion`, который принадлежит конкретному
+`Timesheet` с конкретным `employeeId`+`periodId`; запрос сегментов в этом модуле стартует от уже
+отобранных по `periodId` timesheets (§S), поэтому 4 не добавляет новых employeeId сверх 2. Условие
+сохранено в реализации и в этом документе для симметрии с формулировкой задачи и на случай будущих
+изменений схемы, но фактическое company population вычисляется как `participantIds ∪ timesheetIds ∪
+assignmentIds` — три множества, не четыре, с доказанной эквивалентностью.
+
+Следствия (все проверены тестами §54 списка задачи, п.9–14, 18):
+- участник (`PayrollPeriodParticipant`) без `SiteAssignment` остаётся видимым (условие 1);
+- работник, назначенный на объект уже после создания периода, но ещё без `Timesheet`, виден
+  (условие 3);
+- excluded participant (`expected: false`) виден наравне с expected — population не фильтрует по
+  `expected`, это отдельное поле сводки (§T);
+- historical/corrected segment не теряется — если `Timesheet` существует в периоде и его canonical
+  source содержит segment, работник в population независимо от того, пересекает ли его текущий
+  `SiteAssignment` период (тот же принцип, что T8.2A's population path 2, только не привязан к
+  одному конкретному site);
+- один worker на нескольких sites — ровно один раз в company `workerCount` (Set по `employeeId`, не
+  сумма per-site).
+
+### R. Site population
+
+Объект входит в отчёт (появляется в `sites[]`), если хотя бы одно:
+1. есть `SiteAssignment` **из company population** (§Q), пересекающий период, с этим `siteId`;
+2. canonical source содержит segment этого `siteId`, принадлежащий `Timesheet` этого `periodId`.
+
+Та же union-логика, что T8.2A's собственная per-site population (§A design doc выше), применённая
+сразу ко всем объектам компании одним проходом — не N вызовов `getSiteTimeReport`. Inactive
+(`active: false`) или объект, чей единственный `SiteAssignment` уже закончился до периода, но с
+historical segment внутри периода — не скрывается (условие 2 срабатывает независимо от условия 1).
+
+### S. Canonical source — использование P
+
+Один bulk-запрос `Timesheet.findMany({where: {periodId}})` (с `draft`/`currentVersion` select, как
+T8.2A), затем `resolveCanonicalSource()` (§P) на каждую строку → построение `draftId → employeeId` и
+`versionId → employeeId` карт → **один** `timesheetDraftSegment.findMany({where: {draftId: {in:
+[...]}}})` и **один** `workSegment.findMany({where: {timesheetVersionId: {in: [...]}}})`, оба **без**
+фильтра по `siteId` (в отличие от T8.2A, которому нужен только один объект) — T8.3 читает сегменты
+сразу всех объектов компании за период одним проходом каждого типа.
+
+### T. Canonical rounding bucket — `(employeeId, siteId, date)`
+
+Тот же bucket, что T8_REPORTS_DESIGN.md §2 п.2/§3 addendum "T8 ROUNDING FOLLOW-UP" уже зафиксировали
+для T8.1/T8.2:
+1. Внутри bucket — сумма ms всех сегментов этого работника на этом объекте в этот день.
+2. Округление `gross`/`paid break`/`unpaid break`/`worked` через `msToMinutes` — **один раз на
+   bucket**.
+3. **Site totals** — сумма daily-bucket чисел всех работников этого объекта (`Σ` по employeeId и
+   date внутри siteId) — уже округлённых, без повторного ms-уровня.
+4. **Company summary** — сумма site totals (эквивалентно прямой сумме всех company buckets — оба
+   способа дают одно число, т.к. каждый bucket принадлежит ровно одному site).
+5. Ни на одном уровне выше daily bucket повторное округление ms не происходит.
+
+### U. Aggregation hierarchy и agregated DTO
+
+`daily bucket (employeeId, siteId, date)` → `site row` (сумма daily buckets этого siteId, плюс
+distinct-count'ы по этому siteId) → `company summary` (сумма site rows, плюс distinct-count'ы
+company-wide). Никакого промежуточного per-worker DTO — T8.3A не возвращает employee rows вообще
+(§X) — worker-level detail уже есть в T8.1 (per worker) и T8.2 (per site, с работниками).
+
+Все count'ы (§W) вычисляются как размеры `Set<employeeId>`/`Set<date>`, собираемых при проходе по
+buckets/assignments/timesheets — ни одного отдельного `COUNT(DISTINCT ...)` SQL, ни одного
+per-worker/per-site JS-цикла с собственным Prisma-запросом внутри.
+
+### V. Reconciliation с T8.1/T8.2 — обязательная сверяемость
+
+- `periodReport.sites[i].{grossMinutes,paidBreakMinutes,unpaidBreakMinutes,workedMinutes,
+  segmentCount,workedDayCount,timesheetStatusCounts}` **буквально равны** соответствующим полям
+  `GET /api/admin/reports/sites/:siteId?periodId=`'s `summary` для того же `siteId`+`periodId` —
+  оба читают один и тот же `(employeeId, siteId, date)` bucket, просто T8.2 фильтрует его по одному
+  siteId, T8.3 группирует сразу по всем.
+- `periodReport.summary.{grossMinutes,...}` **равны** `Σ periodReport.sites[i].{...}` по ПОЛНОМУ
+  (непагинированному) набору sites — считается один раз, до среза страницы (§W).
+- `periodReport.summary.{grossMinutes,...}` **равны** `Σ` соответствующих `total.*Minutes` из
+  `GET /api/admin/reports/workers/:employeeId?periodId=` по каждому работнику company population —
+  тот же bucket, просуммированный по всем employeeId вместо всех siteId.
+
+Эти три равенства — не совпадение, а прямое следствие того, что все три отчёта (T8.1, T8.2, T8.3)
+читают один и тот же canonical source (§P) и один и тот же rounding bucket (§T addendum выше,
+изначально §2-3 плюс "T8 ROUNDING FOLLOW-UP"). Постоянный тест
+`titanor-time-app/scripts/_test-period-time-report.ts` проверяет все три равенства через настоящие
+HTTP-запросы ко всем трём endpoint (не pure-helper вызовы).
+
+### W. Response contract, pagination, definitions
+
+`GET /api/admin/reports/periods/:periodId?page=&pageSize=` — `page` по умолчанию 1, `pageSize` по
+умолчанию 20 (max 100), та же схема валидации, что `parseSiteReportQuery` (переиспользуется паттерн,
+не код — periodId здесь путь, не query param). `no-store`.
+
+Полный response — см. текст задачи (JSON-контракт зафиксирован дословно, не повторяется здесь).
+Определения:
+- `summary` — по ПОЛНОМУ result set (все sites company population), не по текущей странице;
+  `sites[]` — paginated;
+- `participantCount`/`expectedParticipantCount`/`excludedParticipantCount` — все
+  `PayrollPeriodParticipant` этого периода / с `expected=true` / `expected=false`;
+- `assignedWorkerCount` (company) — distinct `employeeId` с ≥1 overlap `SiteAssignment` (любой
+  объект); `workedWorkerCount` (company) — distinct `employeeId` с ≥1 canonical segment (любой
+  объект); ни один multi-site работник не дублируется — `Set`, не сумма per-site;
+- `withoutTimesheetCount` (company) — company population employeeId без `Timesheet` в этом периоде;
+- `withoutSiteCount` (company) — company population employeeId **без** overlap `SiteAssignment`
+  **и без** canonical segment (виден только через participant или через Timesheet без сегментов и
+  без назначения) — диагностика "числится в периоде, но неизвестно, на каком объекте";
+- `sites[i].assignedWorkerCount`/`workedWorkerCount`/`withoutTimesheetCount` — та же семантика, но
+  scoped на один `siteId` (site population = assigned ∪ worked для этого site, §R);
+- `workedDayCount` (company) — distinct `date` по ВСЕМ buckets company-wide; `sites[i].
+  workedDayCount` — distinct `date` только этого site;
+- `timesheetStatusCounts` (company) — один `Timesheet` считается ровно один раз, даже если работник
+  на нескольких sites; `sites[i].timesheetStatusCounts` — по работникам site population этого
+  конкретного site — **multi-site работник намеренно считается в КАЖДОМ своём site row** (документируемое
+  поведение, не баг: агрегат "сколько submitted-статусов относится к этому объекту" по смыслу должен
+  включать каждого причастного к объекту работника, даже если его Timesheet общий на несколько
+  объектов);
+- `sites` sorting: `site.name ASC, site.id ASC` (детерминированно даже при совпадающих именах).
+
+### X. Не возвращать employee rows
+
+T8.3A — company/site aggregates только. Ни одного employee-специфичного поля (name, employeeNumber,
+id) в DTO целиком — worker-level detail уже доступен через T8.1 (`GET /api/admin/reports/workers/
+:employeeId`) и T8.2 (`GET /api/admin/reports/sites/:siteId`, с per-worker items). Это одновременно
+architectural-decision (не дублировать T8.2) и redaction-decision (§Y) — employeeId используется
+только как ВНУТРЕННИЙ ключ группировки в памяти, никогда не сериализуется в JSON.
+
+### Y. Permissions/redaction
+
+Endpoint требует одновременно (проверка через `hasPermission`, не `roles.includes`, как T8.1/T8.2):
+`period.read.all` + `site.read.all` + `worker.read.all` + `timesheet.read.all` — все четыре уже
+существуют (T8.1/T8.2A их создали), ноль новых permissions/migrations/schema changes. Никакого
+FOREMAN-варианта — T8.3A ADMIN/SUPER_ADMIN only (company-wide агрегат по определению не line up с
+per-site FOREMAN scope; FOREMAN period report explicitly не в этом слайсе).
+
+DTO структурно не содержит: employee name/number (§X), phone/email, raw GPS, точные segment
+timestamps, `deviceInstallationId`/`deviceSequence`, `clientEventId`/`payloadHash`/`requestId`,
+exception detail, correction reason, audit payload — тот же redaction-принцип, что T8.1/T8.2A/T8.2B
+уже устанавливают (структурная невозможность утечки: поля просто не селектятся/не сериализуются).
+
+### Z. Consistency/query-count
+
+Одна `REPEATABLE READ` read-only транзакция, один `asOf`, зафиксированный один раз в начале. Запросы
+внутри транзакции — фиксированное множество, НЕ растущее с числом workers/sites/segments:
+1. `payrollPeriod.findUnique` (существование + даты + статус);
+2. `siteAssignment.findMany` (company-wide overlap, без фильтра по siteId);
+3. `payrollPeriodParticipant.findMany` (весь периода);
+4. `timesheet.findMany` (весь период, с draft/currentVersion select);
+5. `timesheetDraftSegment.findMany` (`WHERE draftId IN [...]`, только если draftIds непусто);
+6. `workSegment.findMany` (`WHERE timesheetVersionId IN [...]`, только если versionIds непусто);
+7. `workSite.findMany` (`WHERE id IN [...]` — только объекты, попавшие в site population).
+
+Итого до 7 запросов + `BEGIN`/`SET TRANSACTION`/`COMMIT` — независимо от 1, 50 или 200 работников и
+1, 5 или 20 объектов (доказывается фикстурами того же размера, что T8.2A уже использовал). Ноль
+Prisma-запросов внутри worker/site/day циклов — вся агрегация (§U) происходит в памяти после того,
+как все нужные строки уже получены bulk-запросами выше. GET создаёт ноль `AuditEvent`, не меняет
+`updatedAt`/`contentRevision` ни одной строки.

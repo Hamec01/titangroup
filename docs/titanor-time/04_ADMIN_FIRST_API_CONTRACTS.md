@@ -2046,3 +2046,72 @@ phone/email/GPS/device identifiers/payload/hash/requestId/exception detail/audit
 correction reason; GET не создаёт `AuditEvent`, не мутирует БД; `no-store`; одна `REPEATABLE READ`
 транзакция с одним `asOf`; FOREMAN scope пересчитывается внутри той же транзакции; bounded query
 count — подтверждено: 1, 50 и 200 работников дают одинаковые 13 query-событий.
+
+## 20. `GET /api/admin/reports/periods/:periodId` — Company Payroll Period Report (T8.3A, 2026-08-19)
+
+Полный контракт — `docs/titanor-time/T8_REPORTS_DESIGN.md` Addendum "T8.3A" (написан до
+реализации). Backend только — UI (T8.3B) не начат.
+
+```
+GET /api/admin/reports/periods/:periodId?page=&pageSize=
+  permission: period.read.all + site.read.all + worker.read.all + timesheet.read.all (все четыре)
+```
+
+Company/site-агрегированный отчёт по расчётному периоду — ADMIN/SUPER_ADMIN only, ноль
+FOREMAN-варианта. Вызывает `getPeriodTimeReport()` (`lib/period-time-report.ts`) — ни `getSiteTimeReport`,
+ни `getWorkerTimeReport` не вызываются в цикле (T8.3A — не сумма N site/worker-репортов, а один
+bulk-проход).
+
+**Query**: `page` (целое ≥1, по умолчанию 1); `pageSize` (целое 1..100, по умолчанию 20). `no-store`.
+
+**Успех — `200`**:
+```json
+{
+  "asOf": "ISO",
+  "period": { "id": "uuid", "startDate": "YYYY-MM-DD", "endDate": "YYYY-MM-DD", "status": "OPEN|LOCKED|EXPORTED" },
+  "summary": {
+    "workerCount": number, "participantCount": number, "expectedParticipantCount": number, "excludedParticipantCount": number,
+    "assignedWorkerCount": number, "workedWorkerCount": number, "withoutTimesheetCount": number, "withoutSiteCount": number,
+    "siteCount": number, "workedDayCount": number,
+    "grossMinutes": number, "paidBreakMinutes": number, "unpaidBreakMinutes": number, "workedMinutes": number, "segmentCount": number,
+    "timesheetStatusCounts": { "DRAFT": number, "SUBMITTED": number, "RETURNED": number, "FOREMAN_APPROVED": number, "FINAL_APPROVED": number }
+  },
+  "sites": [
+    {
+      "site": { "id": "uuid", "name": "string", "active": true|false },
+      "assignedWorkerCount": number, "workedWorkerCount": number, "withoutTimesheetCount": number, "workedDayCount": number,
+      "grossMinutes": number, "paidBreakMinutes": number, "unpaidBreakMinutes": number, "workedMinutes": number, "segmentCount": number,
+      "timesheetStatusCounts": { "DRAFT": number, "SUBMITTED": number, "RETURNED": number, "FOREMAN_APPROVED": number, "FINAL_APPROVED": number }
+    }
+  ],
+  "page": number, "pageSize": number, "totalItems": number, "totalPages": number
+}
+```
+
+**Ошибки**: malformed `periodId`/`page`/`pageSize` → `400 VALIDATION_ERROR`; несуществующий period
+→ `404 PERIOD_NOT_FOUND`.
+
+**Company population** (union): (1) `PayrollPeriodParticipant` существует; (2) `Timesheet`
+существует; (3) `SiteAssignment` (любой объект) пересекает период; (4) canonical source содержит
+segment — доказанное подмножество (2). **Site population**: (1) `SiteAssignment` из company
+population на этом объекте; (2) canonical source содержит segment этого объекта. Никаких employee
+rows в ответе целиком — per-worker detail уже есть в T8.1/T8.2.
+
+**Canonical rounding bucket** — `(employeeId, siteId, date)`, тот же, что T8.1/T8.2 (см. §18-19
+выше и T8 ROUNDING FOLLOW-UP): сумма ms внутри bucket, один `msToMinutes`; site totals — сумма
+daily buckets; company summary — сумма site totals.
+
+**Обязательная сверяемость**: `sites[i].* == GET /api/admin/reports/sites/:siteId`'s `summary` для
+того же site/period; `summary.* == Σ sites[i].*` (полный набор, не страница); `summary.
+workedMinutes == Σ GET /api/admin/reports/workers/:employeeId`'s `total.workedMinutes` по company
+population.
+
+**Инварианты**: `summary` считается по полному result set (до пагинации), не по текущей странице;
+`sites` — paginated, sorting `site.name ASC, site.id ASC`; company `timesheetStatusCounts` — один
+`Timesheet` один раз; site `timesheetStatusCounts` — по работникам site population этого
+конкретного объекта (multi-site работник намеренно считается в каждом своём site row — задокументировано,
+не баг); ноль employee name/number/id, phone/email/GPS/device identifiers/payload/hash/requestId/
+exception detail/correction reason/audit payload в DTO; GET не создаёт `AuditEvent`, не мутирует
+БД; одна `REPEATABLE READ` транзакция с одним `asOf`; bounded query count — подтверждено: 1
+работник/1 объект, 50/5, 200/20 дают одинаковые 12 query-событий (окно транзакции без auth
+overhead).

@@ -258,6 +258,19 @@ foreman) вызывают один `getSiteTimeReport()` — ни permission-н�
 отдельной реализацией; различается только то, ЧТО каждый route требует и какой `scope` передаёт в
 общую функцию.
 
+### 2.4i Company Payroll Period Report API (T8.3A) — **`[2026-08-19] реализовано`**
+(`docs/titanor-time/T8_REPORTS_DESIGN.md` Addendum "T8.3A", `04_ADMIN_FIRST_API_CONTRACTS.md` §20).
+**Ноль новых permissions** — `GET /api/admin/reports/periods/:periodId` требует **все четыре**
+одновременно: `period.read.all`+`site.read.all`+`worker.read.all`+`timesheet.read.all`, все четыре
+уже существуют и уже держатся только `ADMIN`/`SUPER_ADMIN` (§2.4/§2.7/§2.2/§2.8) — тот же
+цикл-паттерн (`for permission of REQUIRED_PERMISSIONS`), что T8.1/T8.2A уже используют; отзыв
+любого из четырёх → `403` на следующий запрос (проверено тестом для каждого из четырёх независимо).
+Ноль FOREMAN-варианта этого endpoint (company-wide агрегат не line up с per-site FOREMAN scope) —
+`site.read.assigned`/`period.read.assigned`/`timesheet.read.assigned` (§2.4h) этим endpoint'ом не
+используются вообще. Не меняет существующие ограничения `period.read.all`/`site.read.all`/
+`worker.read.all`/`timesheet.read.all` в их собственных секциях — только ещё один потребитель уже
+существующей четвёрки.
+
 ### 2.5 Назначения
 
 | Permission | Держатели | Область | Ограничения | Причина | Аудит | Массовое |

@@ -672,9 +672,18 @@ T8.3/T8.4 обязаны переиспользовать. Полный конт
 `/admin/periods/[periodId]`, `/foreman` (новая ссылка "Site reports"). Полный контракт —
 `docs/titanor-time/T8_REPORTS_DESIGN.md` Addendum "T8.2B".
 
-## T8.3 — Отчёт по периоду ⚪ не начато
+## T8.3 — Отчёт по периоду
 
 Без расчёта зарплаты в MVP.
+
+**T8.3A (backend) 🟢 реализовано `[2026-08-19]`** — `GET /api/admin/reports/periods/:periodId?page=`
+(ADMIN/SUPER_ADMIN only), company/site-агрегат: работники, объекты, статусы табелей, дни, рабочее
+время, итоги. Ноль employee rows (detail уже в T8.1/T8.2), ноль зарплаты/ставок, ноль новых
+permissions/migrations. Новый общий `lib/reporting/canonical-source.ts`, на который переключены
+T8.1/T8.2 без изменения их DTO. Полный контракт — `docs/titanor-time/T8_REPORTS_DESIGN.md`
+Addendum "T8.3A".
+
+**T8.3B (UI) ⚪ не начато.**
 
 ## T8.4 — CSV
 

@@ -1,6 +1,7 @@
 import { Prisma } from '@prisma/client';
 import { prisma } from '@/lib/prisma';
 import { computeSegmentMs, sumWorkedTimeMs, msToMinutes, type WorkedTimeSegmentInput } from '@/lib/reporting/worked-time';
+import { resolveCanonicalSource } from '@/lib/reporting/canonical-source';
 
 // docs/titanor-time/T8_REPORTS_DESIGN.md — T8.1 Admin Worker Time Report. This module owns the
 // canonical-source selection (§1), grouping/rounding rules (§3), and the bounded read transaction
@@ -216,28 +217,20 @@ export async function getWorkerTimeReport(employeeId: string, periodId: string):
       };
     }
 
-    const usesDraft = timesheet.status === 'DRAFT' || timesheet.status === 'RETURNED';
+    // §1 — the shared canonical-source rule (also used by T8.2/T8.3); throws on an invariant
+    // failure (never a partial/zero report) rather than returning here.
+    const source = resolveCanonicalSource({ id: timesheet.id, status: timesheet.status, currentVersionId: timesheet.currentVersionId, draft: timesheet.draft, currentVersion: timesheet.currentVersion });
 
     let rawSegments: RawSegment[];
-    if (usesDraft) {
-      if (!timesheet.draft) {
-        // §1 invariant — DRAFT/RETURNED must always own a TimesheetDraft row (created atomically
-        // with the timesheet/on return). Not a zero report — a genuine data-integrity failure.
-        throw new Error(`WORKER_TIME_REPORT_INVARIANT_FAILURE: timesheet ${timesheet.id} has status ${timesheet.status} but no TimesheetDraft`);
-      }
+    if (source.dataSource === 'DRAFT') {
       const segments = await tx.timesheetDraftSegment.findMany({
-        where: { draftId: timesheet.draft.id },
+        where: { draftId: source.draftId! },
         select: { siteId: true, date: true, startAt: true, endAt: true, site: { select: { name: true } }, breaks: { select: { startAt: true, endAt: true, paid: true } } }
       });
       rawSegments = segments.map((s) => ({ siteId: s.siteId, siteName: s.site.name, date: s.date, startAt: s.startAt, endAt: s.endAt, breaks: s.breaks }));
     } else {
-      if (!timesheet.currentVersionId || !timesheet.currentVersion) {
-        // §1 invariant — SUBMITTED/FOREMAN_APPROVED/FINAL_APPROVED must always carry a
-        // currentVersionId, set atomically with the status transition. Never falls back to draft.
-        throw new Error(`WORKER_TIME_REPORT_INVARIANT_FAILURE: timesheet ${timesheet.id} has status ${timesheet.status} but no currentVersionId`);
-      }
       const segments = await tx.workSegment.findMany({
-        where: { timesheetVersionId: timesheet.currentVersionId },
+        where: { timesheetVersionId: source.versionId! },
         select: { siteId: true, date: true, startAt: true, endAt: true, site: { select: { name: true } }, breaks: { select: { startAt: true, endAt: true, paid: true } } }
       });
       rawSegments = segments.map((s) => ({ siteId: s.siteId, siteName: s.site.name, date: s.date, startAt: s.startAt, endAt: s.endAt, breaks: s.breaks }));
@@ -248,9 +241,9 @@ export async function getWorkerTimeReport(employeeId: string, periodId: string):
     const timesheetDto: WorkerTimeReportTimesheet = {
       id: timesheet.id,
       status: timesheet.status,
-      dataSource: usesDraft ? 'DRAFT' : 'CURRENT_VERSION',
-      versionNumber: usesDraft ? null : (timesheet.currentVersion?.versionNumber ?? null),
-      submissionSource: usesDraft ? null : (timesheet.currentVersion?.submissionSource ?? null)
+      dataSource: source.dataSource,
+      versionNumber: source.versionNumber,
+      submissionSource: source.submissionSource
     };
 
     return {
