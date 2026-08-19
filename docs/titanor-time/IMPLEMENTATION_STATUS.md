@@ -1,19 +1,39 @@
 # Titanor Time — Implementation Status
 
-Обновлено: 2026-08-19 Europe/Helsinki (test: verify attendance pilot readiness — T7A.10C.2)
+Обновлено: 2026-08-19 Europe/Helsinki (test: prove orphan event pairing in pilot flow — T7A.10C.2 FOLLOW-UP)
+
+**`[2026-08-19]` T7A.10C.2 FOLLOW-UP — test(time): prove orphan event pairing in pilot flow.**
+Закрывает единственный пробел, оставшийся после T7A.10C.2 (запись ниже): живой, детерминированный
+`PAIR_ORPHAN_EVENTS` через реальный HTTP endpoint. Первая попытка искала пару ВНУТРИ временного
+диапазона уже материализованной смены — структурно невозможно (настоящий `tstzrange`-overlap
+check). Рабочая fixture (`titanor-time-app/scripts/_test-pilot-pair-orphan.ts`, закоммичен
+постоянно, не scratch-файл): один offline `/sync` batch, `deviceSequence` 1/2/3 строго по
+возрастанию, `clientCapturedAt` доставлены НЕ по порядку — `CHECK_OUT`@T2 первым (пока нет
+открытой смены → `CHECKOUT_WITHOUT_OPEN_SHIFT`, orphan A), `CHECK_IN`@T0 вторым (открывает
+реальную `EmployeeOpenShift`, event B), `CHECK_IN`@T1 третьим, пока B ещё открыта →
+`DOUBLE_CHECK_IN` (orphan C). Смена от B никогда не закрывается до PAIR, поэтому пара
+C(T1)→A(T2) не пересекается ни с одной материализованной сменой. `POST .../resolve
+{action: PAIR_ORPHAN_EVENTS, checkInEventId: C, checkOutEventId: A}` на `DOUBLE_CHECK_IN` — живой
+201 дважды подряд на чистом disposable PostgreSQL 16: ровно один новый `ClockShift`
+(`recordedStartAt=T1`, `recordedEndAt=T2`, `materializationState=PENDING`), обе exception →
+`RESOLVED` с `clockShiftId` на новую смену, три исходных `ClockEvent` побайтово неизменны,
+исходная `EmployeeOpenShift` не тронута, ровно один sanitized `AuditEvent` без GPS/device/
+payload/hash, replay → `409 EXCEPTION_ALREADY_RESOLVED` без дубля, materializer → документированный
+`PENDING_SOURCE_ASSIGNMENT` (не partial state, поскольку C's `sourceAssignmentId` — `null`, та же
+ветка `insertAndApplyCheckIn`, что у любого `DOUBLE_CHECK_IN`). **Product code не менялся** — ни
+одного продуктового дефекта не найдено, только фикстура была неверной в первой попытке. **Итог
+матрицы T7A.10C.2 теперь 34 из 34.**
 
 **`[2026-08-19]` T7A.10C.2 — test(time): verify attendance pilot readiness. T7A ЗАВЕРШЁН.**
 Финальная сквозная проверка всего Attendance Clock против production-сборки в изолированном
 disposable Docker Compose окружении (`titanor-time-t7a10c2`, отдельный volume, порт
 `127.0.0.1:3277`). Полная 34-пунктовая E2E-матрица (см. addendum T7A.10C.2 в
-`T7A_1_ATTENDANCE_CLOCK_DESIGN.md`) — 33/34 пункта живьём PASS реальными HTTP/DB/browser
-прогонами; один под-пункт (`PAIR_ORPHAN_EVENTS` внутри item 26 — 5 из 6 resolution actions
-пройдены) честно задокументирован как не выполненный (структурный `PAIRED_SHIFT_OVERLAP`
-конфликт при построении фикстуры, не продуктовый дефект). Ни одного продуктового
-функционального/интеграционного дефекта НЕ найдено — каждая из ~30 итераций отладки в процессе
-проверки оказалась багом тестового фикстура/скрипта (неверный HTTP-метод, неверный путь поля в
-JSON, EXCESSIVE_CLOCK_SKEW clamping для "будущих" online-таймстампов, Helsinki-полночь vs период,
-и т.п.), не продукта — каждый диагностирован через чтение реальной реализации, не догадкой.
+`T7A_1_ATTENDANCE_CLOCK_DESIGN.md`) — 34/34 пункта живьём PASS реальными HTTP/DB/browser
+прогонами (`PAIR_ORPHAN_EVENTS` закрыт отдельным follow-up тем же днём, запись выше). Ни одного
+продуктового функционального/интеграционного дефекта НЕ найдено — каждая из ~30 итераций отладки в
+процессе проверки оказалась багом тестового фикстура/скрипта (неверный HTTP-метод, неверный путь
+поля в JSON, EXCESSIVE_CLOCK_SKEW clamping для "будущих" online-таймстампов, Helsinki-полночь vs
+период, и т.п.), не продукта — каждый диагностирован через чтение реальной реализации, не догадкой.
 
 Restart-семантика (app/scheduler/db, без удаления volume) подтверждена живыми перезапусками:
 нулевые дубли, нулевая потеря данных, scheduler продолжает тикать без пропуска через рестарт БД,

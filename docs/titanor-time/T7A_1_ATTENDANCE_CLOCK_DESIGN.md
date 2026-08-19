@@ -5708,28 +5708,56 @@ acceptance-gate**: ручной чек-лист (тот же список пун
 директорий не коммитится (тот же принцип, что и в T7A.9A/T7A.10C.1 FOLLOW-UP — эфемерная
 верификация, не постоянный regression-suite).
 
-**Итог по матрице §C: 33 из 34 пунктов PASS живыми прогонами, 1 честно не выполнен (не провален).**
+**Итог по матрице §C: 34 из 34 пунктов PASS живыми прогонами.**
 Пункты 1-25, 27-31, 33-34 — PASS (метод/инвариант точно как описано в §C/§D). Пункт 32 — positive
 case (allowed shell кэшируется) PASS живым браузером; negative case (redirect/private/no-store/
 non-HTML/opaque не кэшируется) — код `isSafeToCache()` (`public/sw.js`) не менялся с T7A.10C.1
 FOLLOW-UP (`git diff --stat` пустой для этого файла), где эти сценарии уже были живо проверены
 через `page.route()`-перехват (см. `IMPLEMENTATION_STATUS.md`, запись T7A.10C.1 FOLLOW-UP) — не
 переверено заново живым браузером в этом слайсе, подтверждено статическим ревью неизменного кода.
-Пункт 26 (6 resolution actions) — 5 из 6 PASS живыми HTTP-вызовами (DISMISS, ACKNOWLEDGE_AS_VALID,
-CONFIRM_SOURCE_ASSIGNMENT, FORCE_CLOSE_OPEN_SHIFT, REASON_EDIT, включая item 13's видимый diff);
-`PAIR_ORPHAN_EVENTS` — единственный непройденный под-пункт всей матрицы: orphan CHECK_IN событие
-`DOUBLE_CHECK_IN` структурно всегда попадает во временной диапазон того реального `ClockShift`,
-который в итоге закрывает открытую смену (checkout всегда закрывает ТЕКУЩИЙ `EmployeeOpenShift`,
-привязанный к первому check-in, хронологически позже double-check-in) — поэтому пара с любым более
-поздним orphan CHECK_OUT сталкивается с настоящим `tstzrange`-overlap check
-(`PAIRED_SHIFT_OVERLAP`, `lib/attendance-exception-resolution.ts`) против уже материализованной
-смены; подтверждено живой попыткой (409). Построение сценария без материализации "мешающей" смены
-требует реверс-инжиниринга глубже, чем оправдано оставшимся бюджетом задачи — решено честно
-задокументировать пробел, а не подделать нерепрезентативную фикстуру. Ни одного продуктового
-дефекта эта попытка не выявила — сама конструкция диагностики (три независимых чтения реализации:
-`allowedActionsFor`, `pairOrphanEvents`, overlap-SQL) подтвердила, что текущее поведение
-(`PAIRED_SHIFT_OVERLAP`) корректно для сценария, который был сконструирован; просто не нашлось
-времени сконструировать РАЗНЫЙ, непересекающийся сценарий.
+Пункт 26 (6 resolution actions) — все 6 из 6 PASS живыми HTTP-вызовами: DISMISS,
+ACKNOWLEDGE_AS_VALID, CONFIRM_SOURCE_ASSIGNMENT, FORCE_CLOSE_OPEN_SHIFT, REASON_EDIT (включая item
+13's видимый diff), и `PAIR_ORPHAN_EVENTS` (см. addendum "T7A.10C.2 FOLLOW-UP" §J ниже — закрыто
+отдельным follow-up слайсом 2026-08-19 после первой попытки сконструировать непересекающийся
+orphan-pair upstream от уже материализованной смены).
+
+### J. T7A.10C.2 FOLLOW-UP — PAIR_ORPHAN_EVENTS закрыт (2026-08-19)
+
+Первая попытка (описанная выше) искала пару ВНУТРИ временного диапазона уже существующего реального
+`ClockShift` (`DOUBLE_CHECK_IN`'s orphan `CHECK_IN` неизбежно происходит, пока предыдущая смена ещё
+открыта) — что структурно невозможно без срабатывания настоящего `tstzrange`-overlap check
+(`PAIRED_SHIFT_OVERLAP`); это наблюдение было и остаётся корректным диагнозом, не ошибкой. Рабочая
+fixture строит пару, которая НЕ пересекается ни с одной материализованной сменой, доставляя события
+в порядке T2 → T0 → T1 (не T0 → T1 → T2) через один offline `/sync` batch с монотонно растущим
+`deviceSequence` (1, 2, 3), при произвольном порядке `clientCapturedAt`:
+
+1. `CHECK_OUT` @ T2, `deviceSequence=1`, доставлен ПЕРВЫМ, пока открытой смены ещё нет вовсе →
+   `CHECKOUT_WITHOUT_OPEN_SHIFT` (orphan A), `ClockEvent` без `clockShiftId`.
+2. `CHECK_IN` @ T0, `deviceSequence=2` → открывает настоящую `EmployeeOpenShift` (event B) — без
+   exception.
+3. `CHECK_IN` @ T1, `deviceSequence=3`, пока смена от B ещё открыта → `DOUBLE_CHECK_IN` (orphan C).
+4. Смена от B **никогда не закрывается** до PAIR — единственный реальный `ClockShift` в этом
+   сценарии — тот, что создаёт сам PAIR (T1→T2), поэтому overlap-check находит ноль
+   пересекающихся строк.
+5. `POST .../exceptions/:id/resolve { action: PAIR_ORPHAN_EVENTS, checkInEventId: C,
+   checkOutEventId: A }` на `DOUBLE_CHECK_IN`-исключении — `pairOrphanEvents()` сама находит
+   комплементарное `CHECKOUT_WITHOUT_OPEN_SHIFT` (по `clockEventId === A`) и резолвит обе одним
+   вызовом.
+
+Живой результат (дважды подряд на чистом disposable PostgreSQL 16, `titanor-time-app/scripts/
+_test-pilot-pair-orphan.ts`, прямой вызов реальных route-хендлеров тем же паттерном, что
+`_test-activation.ts`): `201`, ровно один новый `ClockShift` (`checkInEventId=C`,
+`checkOutEventId=A`, `recordedStartAt=T1`, `recordedEndAt=T2`, `materializationState=PENDING`),
+обе exception → `RESOLVED` с `clockShiftId` на новую смену, три исходных `ClockEvent` побайтово
+неизменны, исходная `EmployeeOpenShift` (от B/T0) не тронута/не перепривязана, ровно один
+sanitized `AuditEvent(ATTENDANCE_EXCEPTION_PAIRED)` без GPS/device/payload/hash ни в нём, ни в
+HTTP-ответе, повтор того же запроса → `409 EXCEPTION_ALREADY_RESOLVED` без второй смены/AuditEvent.
+Materializer на новой паре возвращает документированный `PENDING_SOURCE_ASSIGNMENT` (T1's
+`CHECK_IN` пришёл, пока B уже был открыт, поэтому `sourceAssignmentId` для C изначально `null` —
+та же ветка `insertAndApplyCheckIn`, что и для любого другого `DOUBLE_CHECK_IN`) — ноль строк
+`ClockShiftFragment`, без partial state. Ни одного продуктового дефекта не найдено — product code
+не менялся. Тест закоммичен постоянно (`titanor-time-app/scripts/_test-pilot-pair-orphan.ts`), не
+оставлен только в scratch-файле.
 
 **Найденные дефекты: ни одного продуктового.** Все ~30 итераций отладки в процессе построения
 E2E-фикстур оказались багами самого тестового скрипта (не путать с продуктом) — примеры: неверный
@@ -5780,9 +5808,9 @@ read-only `health`/`ready` до и после (идентичны). Production (
 `titanor-time-db-1`) — только read-only `health`/`ready`/`docker inspect` до и после (идентичны,
 `StartedAt` не изменился ни разу за весь слайс).
 
-**Заключение: T7A завершён.** Вся автоматизируемая часть матрицы зелёная (33/34, один честно
-задокументированный пробел внутри одного под-пункта, не blocker/critical — остальные 5 действий
-того же пункта покрыты); backup реально восстановлен и восстановленное приложение продолжило
-работу; ни одного открытого продуктового дефекта уровня blocker/critical (или любого другого
-уровня — их не найдено вовсе); физические устройства явно оформлены внешним acceptance gate, не
+**Заключение: T7A завершён.** Вся автоматизируемая часть матрицы зелёная — 34 из 34, включая все
+шесть resolution actions пункта 26 (`PAIR_ORPHAN_EVENTS` закрыт живым прогоном 2026-08-19, см. §J);
+backup реально восстановлен и восстановленное приложение продолжило работу; ни одного открытого
+продуктового дефекта уровня blocker/critical (или любого другого уровня — их не найдено вовсе);
+физические устройства явно оформлены внешним acceptance gate, не
 выданы за проверенные.
