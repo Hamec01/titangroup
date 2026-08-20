@@ -99,9 +99,13 @@ export interface WorkerClockPanelProps {
    * swapped for this shell (§C "остальные защищённые страницы не подменять worker shell"). */
   periodsHref: string | null;
   historyHref: string | null;
+  /** Same `null`-hides convention as above — docs/titanor-time/T8_PWA_DESIGN.md §C.6. The offline
+   * shell passes `null` for the same reason: /worker/install is not a service-worker-handled
+   * route, so a real offline navigation there would hit a plain browser network error. */
+  installHref: string | null;
 }
 
-export function WorkerClockPanel({ initialClockState, assignments, workerName, todayLabel, periodsHref, historyHref }: WorkerClockPanelProps) {
+export function WorkerClockPanel({ initialClockState, assignments, workerName, todayLabel, periodsHref, historyHref, installHref }: WorkerClockPanelProps) {
   const [bootstrap, setBootstrap] = useState<BootstrapOutcome | null>(null);
   const [clockState, setClockState] = useState<ClockStateWire>(initialClockState);
   const [outboxRecords, setOutboxRecords] = useState<OutboxEventRecord[]>([]);
@@ -604,7 +608,7 @@ export function WorkerClockPanel({ initialClockState, assignments, workerName, t
         </div>
       )}
 
-      {(periodsHref || historyHref) && (
+      {(periodsHref || historyHref || installHref) && (
         <div className="wk-clock-nav">
           {periodsHref && (
             <Link href={periodsHref} className="wk-back-link">
@@ -614,6 +618,11 @@ export function WorkerClockPanel({ initialClockState, assignments, workerName, t
           {historyHref && (
             <Link href={historyHref} className="wk-back-link">
               History →
+            </Link>
+          )}
+          {installHref && (
+            <Link href={installHref} className="wk-back-link">
+              Install app →
             </Link>
           )}
         </div>

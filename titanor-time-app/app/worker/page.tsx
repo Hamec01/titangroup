@@ -54,7 +54,7 @@ export default async function WorkerHomePage() {
 
   return (
     <main className="wk-page">
-      <WorkerClockPanel initialClockState={clockState} assignments={assignments} workerName={workerName} todayLabel={todayLabel} periodsHref={periodsHref} historyHref="/worker/history" />
+      <WorkerClockPanel initialClockState={clockState} assignments={assignments} workerName={workerName} todayLabel={todayLabel} periodsHref={periodsHref} historyHref="/worker/history" installHref="/worker/install" />
     </main>
   );
 }

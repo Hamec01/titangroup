@@ -2086,3 +2086,89 @@ a.ov-summary-card:focus-visible {
   margin: 8px 0 0;
   font-size: 0.78rem;
 }
+
+/* docs/titanor-time/T8_PWA_DESIGN.md §C.7 — T8.7 install page. New, additive namespace only;
+   nothing above this point is edited. Reuses .wk-page/.wk-card/.wk-back-link for the outer shell
+   and existing custom properties (--text-soft, --error, --accent, --accent-light, --white) for
+   color consistency — no new custom properties. */
+
+.pwa-install-card {
+  max-width: 420px;
+}
+
+.pwa-install-lead {
+  margin: 0;
+  color: var(--text-soft);
+}
+
+.pwa-install-benefits {
+  margin: 0;
+  padding-left: 20px;
+  display: grid;
+  gap: 6px;
+  font-size: 0.92rem;
+}
+
+.pwa-install-panel {
+  display: grid;
+  gap: 10px;
+}
+
+.pwa-install-status {
+  display: grid;
+  gap: 10px;
+}
+
+.pwa-install-checking {
+  margin: 0;
+  color: var(--text-soft);
+}
+
+.pwa-install-button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  min-height: 48px;
+  border: none;
+  border-radius: 6px;
+  background: linear-gradient(135deg, var(--accent) 0%, var(--accent-light) 100%);
+  color: var(--white);
+  font-weight: 600;
+  font-size: 1rem;
+  letter-spacing: 0.02em;
+  cursor: pointer;
+}
+
+.pwa-install-button:focus-visible {
+  outline: 3px solid var(--accent-light);
+  outline-offset: 2px;
+}
+
+.pwa-install-button:disabled {
+  opacity: 0.7;
+  cursor: default;
+}
+
+.pwa-install-installed {
+  margin: 0;
+  font-weight: 600;
+}
+
+.pwa-install-note {
+  margin: 0;
+  font-size: 0.88rem;
+  color: var(--text-soft);
+}
+
+.pwa-install-note-error {
+  color: var(--error);
+}
+
+.pwa-install-steps {
+  margin: 8px 0 0;
+  padding-left: 22px;
+  display: grid;
+  gap: 6px;
+  font-size: 0.92rem;
+}

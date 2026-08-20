@@ -1,6 +1,122 @@
 # Titanor Time — Implementation Status
 
-Обновлено: 2026-08-20 Europe/Helsinki (feat: add CSV export admin UI — T8.4C)
+Обновлено: 2026-08-20 Europe/Helsinki (feat: add PWA installation guidance — T8.5-T8.7)
+
+**`[2026-08-20]` T8.5-T8.7 PWA Reconciliation + Installation UX — feat(time): add PWA installation
+guidance.** Не переписывает уже работающую PWA (T7A.10C.1). Design —
+`docs/titanor-time/T8_PWA_DESIGN.md`, написан ДО кода.
+
+**T8.5 (manifest) закрыт доказательствами, файл byte-identical.** `public/manifest.webmanifest`
+реально проверен HTTP-запросами против production standalone build: `200`, MIME содержит
+`manifest`, валидный JSON, все обязательные поля (`name`/`short_name`/`description`/`start_url`/
+`scope`/`display: standalone`/`theme_color`/`background_color`) присутствуют, icon-записи не дают
+`404`, `start_url` (`/worker`) — внутри `scope` (`/worker`), `<link rel="manifest">` есть на
+`/worker`/`/worker/install`, отсутствует на `/admin`/`/foreman`/`/login`. Ничего не переписано —
+файл уже был полностью корректен.
+
+**T8.6 (иконки) закрыт доказательствами, `icon-192`/`icon-512` byte-identical, один новый
+derivative.** Оба существующих PNG реально декодированы (не по имени файла) — реальные размеры
+`192×192`/`512×512` совпадают с заявленными, не пустые/не полностью прозрачные, ссылки в manifest
+не дают `404`, логотип не менялся. Добавлен **один новый файл** —
+`public/icons/apple-touch-icon.png` (`180×180`) — закрывает реальный, ранее не закрытый iOS-gap:
+нигде в коде не было ни `apple-touch-icon`, ни `apple-mobile-web-app-capable` (grep подтвердил
+ноль совпадений до этого коммита) — без них iOS Safari's "Add to Home Screen" использует
+скриншот страницы вместо иконки, а установленный ярлык открывается в Safari-хроме, не standalone.
+Файл получен pixel-averaging downsample существующего `icon-512.png` (`node:zlib`, без новой
+зависимости — тот же принцип, что оригинальные иконки), альфа сведена на непрозрачный чёрный
+(iOS игнорирует прозрачность) — знак не переисчерчен, не редизайн. Maskable-вариант **не
+добавлен** — не доказанный installability gap (`purpose: "any"` уже достаточен для
+Chrome/Android), только косметика Android adaptive icon masking; добавление отложено явно.
+
+**T8.7 (установка) — новая страница `/worker/install`.** Тот же session/role gate, что
+`app/worker/page.tsx` (нет сессии → `/login`; не WORKER → "Access denied" в теле страницы, не
+редирект). Server Component — статический SSR-каркас (объяснение преимуществ установки), ноль
+`window`/`navigator`/user-agent где-либо на сервере. Один Client Component
+(`components/worker-pwa/InstallPrompt.tsx`) — ноль props, не `async`, всё browser-detection только
+в `useEffect` (гарантирует SSR/первый client render byte-identical, hydration mismatch
+структурно невозможен).
+
+**Install state machine — 7 состояний**: `CHECKING` (SSR/первый рендер) → `INSTALLABLE` (реальный
+`beforeinstallprompt`, `prompt()` только по клику, синхронный `useRef`-guard блокирует double-click
+до React re-render — `useState`-based `disabled` недостаточно быстр) → `INSTALLED` (`display-mode:
+standalone` или `navigator.standalone`, плюс `appinstalled`) | `IOS_SAFARI` (пошаговая инструкция
+Share → Add to Home Screen → Add, без фальшивой кнопки) | `IOS_OTHER_BROWSER` (CriOS/FxiOS/EdgiOS —
+предложение открыть Safari, без ложного заявления о вызванном prompt) | `ANDROID_OR_DESKTOP_
+WITHOUT_PROMPT` (ручная инструкция через browser menu, копия зависит от UA только для формулировки
+— не отдельное состояние; отсутствие события — не ошибка) | `UNSUPPORTED_OR_UNKNOWN` (нейтральный
+текст, приложение полностью usable). iPadOS desktop-UA — задокументированный Apple-паттерн
+`navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1`. `dismissed` outcome **не**
+показывается как успех — переводит в `ANDROID_OR_DESKTOP_WITHOUT_PROMPT` с уточняющим aria-live
+текстом; `accepted` — промежуточное "Finishing installation…", авторитетный переход только по
+реальному `appinstalled`.
+
+**SW-registration-outcome — новый, decoupled, однонаправленный модуль**
+(`lib/offline-outbox/sw-registration-outcome.ts`, tiny pub-sub, ноль зависимостей). Только
+`components/worker-pwa/ServiceWorkerRegistration.tsx` пишет в него (регистрация SW не изменена —
+только добавлена запись исхода); только `InstallPrompt` читает. `WorkerClockPanel`/offline outbox
+никогда не импортируют ничего из `InstallPrompt` — удаление `InstallPrompt` целиком не изменило бы
+поведение online-клока ни на строку.
+
+**"Install app →" ссылка с `/worker`** — новый `installHref: string | null` prop на
+`WorkerClockPanel` (тот же `null`-скрывает паттерн, что уже используют `periodsHref`/
+`historyHref`, тот же `wk-back-link` CSS-класс). `/worker` передаёт `/worker/install`;
+`/worker-offline` передаёт `null` (та же причина, что и для `periodsHref`/`historyHref` — реальная
+offline-навигация на не-SW-обслуживаемый route дала бы обычную ошибку браузера). Единственное
+изменение `WorkerClockPanel.tsx` — новый опциональный nullable prop + один условный `<Link>`, ноль
+изменений в Check In/Check Out/Switch Site/offline-outbox логике.
+
+**CSS** — новый, чисто additive `.pwa-install-*` namespace в конце `app/globals.css` (86 строк),
+ни одно существующее правило не тронуто; переиспользует уже существующие custom properties.
+
+**Metadata (Next.js 16 актуальный контракт)** — `app/worker/layout.tsx` получил `icons.apple`,
+`appleWebApp` (`capable: true`, `statusBarStyle: 'black-translucent'`) и отдельный **новый**
+`export const viewport: Viewport = { themeColor: '#05070b' }` (не `metadata.themeColor` —
+deprecated в Next.js 16, подтверждено чтением типов пакета). Всё это по-прежнему scoped только на
+`/worker/**` — root layout не объявляет ни `icons`, ни `appleWebApp`, так что `/admin`/`/foreman`/
+`/login` ничего из этого не наследуют, как и раньше.
+
+**Тесты — `scripts/_test-pwa-install.ts`, 59/59 проверок, сценарии 1-37 задачи** (Chromium,
+production standalone build, disposable PostgreSQL 16, не preview, не `next dev`): access control
+(WORKER/unauthenticated/ADMIN/FOREMAN), manifest-контракт, manifest-link присутствие/отсутствие,
+icon byte-decode размеры (включая apple-touch-icon), реальная SW-регистрация со scope `/worker` и
+отсутствие контроля над `/admin`/`/foreman`/`/login`, mocked `beforeinstallprompt` (реальный
+Chromium ненадёжно вызывает событие под автоматизацией независимо от корректности manifest/SW —
+задокументированное, а не обойдённое ограничение) — install/double-click-guard/accepted/dismissed/
+appinstalled/standalone-display-mode, эмулированные User-Agent для iPhone Safari/iOS
+Chrome/Android/desktop Chromium (WebKit-биндинги недоступны на этом хосте — та же нехватка
+`.so`-зависимостей, что и в T7A.10C.1, честно задокументирована, не выдана за "проверено"),
+hydration-корректность (пре-hydration DOM, JS-disabled, никаких hydration-warning в консоли),
+keyboard/focus/aria-live, mobile 390×844/desktop 1280×800 без overflow, PII-скан DOM+Cache Storage,
+существующие cache-namespace-isolation/unsafe-caching-hardening гарантии не сломаны, ноль
+console errors.
+
+**Регрессия (reduced-scope smoke, не полная историческая матрица — см. явное обоснование ниже)**:
+`_test-warm-cache.ts` — 2/2; `_test-retention-pacing.ts` — 5/5; `_test-activation.ts`,
+`_test-corrections.ts` — без изменений; `/admin`/`/foreman`/`/login` — 200, ноль console errors
+(через собственные проверки `_test-pwa-install.ts` сценариев 7-9/12/37). Offline cold-restart и
+Switch Site offline проверены smoke-уровнем (warm cache → `setOffline(true)` → навигация на
+`/worker` отдаёт закэшированный shell), не полным 15/19-шаговым матрицем T7A.10C.1 — обоснование:
+`git diff` показывает **ноль** изменений в `public/sw.js`, `next.config.mjs`, и во всём
+`lib/offline-outbox/` кроме одного нового файла (`sw-registration-outcome.ts`, ничем не
+импортируемого офлайн-логикой) — риск регрессии в этой конкретной области структурно исключён
+самим diff'ом, полный дорогой повторный прогон не оправдан для нулевого-diff кода.
+
+**Технические проверки**: `git diff --check`, `prisma validate` (schema не менялась), `tsc
+--noEmit` (0 ошибок), `npm run build` в изолированной scratch-копии (production standalone,
+`/worker/install` в выводе), `docker compose config --quiet`, **Docker build только под
+уникальным временным тегом** `titanor-time-app:t8-pwa-install-test` (никогда `:latest`, никогда
+`docker compose build app`) — успех, образ удалён сразу после проверки; `titanor-time-app:latest`
+OCI revision **до и после** — `c63059588b65b728966f9658ef453b97d887f32d` (`c630595`), не изменился.
+`prisma migrate deploy` дважды на заведомо чистом одноразовом PostgreSQL 16 (62 migrations, второй
+— no-op). Preview `127.0.0.1:3244` — `200`/`200` до и после, не трогался, не использовался для
+тестов. Production (`titanor-time-app-1`/`titanor-time-db-1`) — `RestartCount=0`, `StartedAt` не
+менялся, никакого restart/recreate/up/deploy/migrate против production, scheduler не запускался.
+
+**Физические устройства (реальный iPhone, реальный Android) — внешний acceptance gate (T9.7), не
+проверялись этим коммитом; установка НЕ заявлена как проверенная на реальном железе. T8.8 (offline
+для остальных экранов приложения) этим коммитом не начат.**
+
+---
 
 **`[2026-08-20]` T8.4C — feat(time): add CSV export admin UI.** Полный admin UI поверх уже
 реализованного T8.4B backend (`20982e2`/`045c3d2`, ноль diff в этой задаче): `/admin/export`

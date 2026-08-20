@@ -103,6 +103,7 @@ export function OfflineShellClient() {
       todayLabel={todayLabelNow()}
       periodsHref={null}
       historyHref={null}
+      installHref={null}
     />
   );
 }

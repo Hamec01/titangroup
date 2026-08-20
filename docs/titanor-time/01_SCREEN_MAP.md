@@ -912,7 +912,10 @@ touch target ≥ 48px), `/foreman/*` — desktop-first с поддержкой �
 #### `/worker` 🟢 (после ЭТАП 7A — основной экран после логина) — **`[2026-08-15] T7A Worker Online
 Clock UI реализовано; [2026-08-14] T7A.7B добавил offline outbox; [2026-08-18] T7A.10C.1 добавил
 installable PWA (manifest/service worker/`/worker-offline` fallback) — навигация теперь работает и
-после полного закрытия браузера без сети, см. `/worker-offline` ниже.`**
+после полного закрытия браузера без сети, см. `/worker-offline` ниже; [2026-08-20] T8.7 добавил
+заметную ссылку «Install app →» рядом с «My periods»/«History», ведёт на `/worker/install` (см.
+ниже) — новый опциональный `installHref` prop на `WorkerClockPanel`, скрыт (`null`) на offline
+shell.`**
 - Роли: `WORKER`
 - Приоритет: mobile-first, 390×844 проверено (offline-сценарии тоже, Playwright), touch-target
   ≥48px, основное действие доступно одной рукой; responsive до desktop без горизонтального scroll
@@ -999,6 +1002,38 @@ installable PWA (manifest/service worker/`/worker-offline` fallback) — нав�
   запрещено явно (риск потери несинхронизированных событий), финальное решение — за владельцем.
   Payroll history/admin/exception-данные НЕ кэшируются офлайн ни в каком виде — только site/work-area
   список назначений и локальная проекция clock-state текущего работника
+
+#### `/worker/install` 🟢 (T8.7 installation UX, `[2026-08-20]`)
+- Роли: `WORKER` (тот же gate, что `/worker` — нет сессии → `/login`; не `WORKER` → «Access denied»
+  в теле страницы, не редирект; не публичная страница)
+- Приоритет: mobile-first, 390×844 и desktop 1280×800 проверены, touch-target ≥44px
+- Назначение: понятная установка PWA на Android/iPhone/iPad/desktop — статическое объяснение
+  преимуществ (Server Component) + один Client Component (`InstallPrompt`) для browser-capability
+  detection и install state machine
+- Данные: session/role только на сервере (без чтения `window`/`navigator`/user-agent); весь
+  install-статус — client-side, читается в `useEffect` после mount, никогда синхронно во время
+  первого рендера (SSR/первый client render byte-identical — `CHECKING` markup на обоих)
+- Действия: кнопка `Install Titanor Time` (только в состоянии `INSTALLABLE`, реальный
+  `beforeinstallprompt`, `prompt()` только по клику, синхронный `useRef`-guard против
+  double-click); пошаговые текстовые инструкции для iOS Safari / «откройте в Safari» для iOS
+  других браузеров / ручная инструкция через browser menu для Android/desktop без события
+- Состояния (7): `CHECKING` → `INSTALLABLE` | `INSTALLED` | `IOS_SAFARI` | `IOS_OTHER_BROWSER` |
+  `ANDROID_OR_DESKTOP_WITHOUT_PROMPT` | `UNSUPPORTED_OR_UNKNOWN`. `dismissed` outcome не
+  показывается как успех (переход в `ANDROID_OR_DESKTOP_WITHOUT_PROMPT` с уточняющим текстом);
+  `accepted` — промежуточное «Finishing installation…», авторитетный переход только по реальному
+  `appinstalled`; уже-standalone (`display-mode: standalone`/`navigator.standalone`) — сразу
+  `INSTALLED`, кнопка никогда не рендерится. Полный контракт — `docs/titanor-time/
+  T8_PWA_DESIGN.md` §C.
+- Откуда: ссылка «Install app →» с `/worker`
+- Куда: «← Back to clock» на `/worker`
+- API: нет прямых вызовов — ноль server actions/route handlers, вся логика client-side поверх
+  browser PWA API (`beforeinstallprompt`/`appinstalled`/`matchMedia`)
+- DoD: 59/59 browser-проверок (`scripts/_test-pwa-install.ts`) — access control, install
+  state-machine (mocked `beforeinstallprompt`, double-click guard, accepted/dismissed/
+  appinstalled/standalone), эмулированные iPhone Safari/iOS Chrome/Android/desktop UA,
+  hydration-корректность, keyboard/aria-live, mobile/desktop overflow, PII-скан
+- **Физическая установка на реальном iPhone/Android — внешний acceptance gate (T9.7), не
+  проверялась**
 
 #### `/worker/periods` ⚪ (список actionable периодов, точка входа при нескольких)
 - Роли: `WORKER`

@@ -720,22 +720,40 @@ CORRECTION batches, byte-for-byte верифицированное скачив�
 **T8.4 полностью завершён** (T8.4A + T8.4B + T8.4C). PDF и payroll/TES-категории отложены на
 отдельно согласованный этап. Следующий рекомендуемый шаг — T8.5-T8.8 (PWA gap audit).
 
-## T8.5 — PWA manifest
+## T8.5 — PWA manifest 🟢 реализовано `[2026-08-20]` (закрыто доказательствами, не переписано)
 
-- name;
-- short_name;
-- icons;
-- start_url;
-- display standalone;
-- theme/background.
+`public/manifest.webmanifest` (реализован ещё в T7A.10C.1) реально проверен, не только по наличию
+файла: HTTP 200, корректный MIME, валидный JSON, `name`/`short_name`/`description`/`start_url`/
+`scope`/`display: standalone`/`theme_color`/`background_color` — все поля присутствуют, icon-записи
+не дают 404, `start_url` внутри `scope`, manifest link есть на `/worker/**` и отсутствует на
+`/admin`/`/foreman`/`/login`. Файл byte-identical — переписывать было не за что. Design/доказательства
+— `docs/titanor-time/T8_PWA_DESIGN.md` §A.
 
-## T8.6 — Иконки
+## T8.6 — Иконки 🟢 реализовано `[2026-08-20]` (закрыто доказательствами + один новый derivative)
 
-Нужные размеры без изменения логотипа без согласования.
+`icon-192.png`/`icon-512.png` (T7A.10C.1) реально декодируются как PNG, реальные размеры совпадают
+с заявленными, не пустые/прозрачные, ссылки в manifest не дают 404 — byte-identical, логотип не
+менялся. Добавлен один новый файл — `public/icons/apple-touch-icon.png` (180×180), pixel-derived
+downsample существующего icon-512.png (`node:zlib`, без новой зависимости, тот же принцип, что и
+оригинальные иконки) — закрывает реальный, ранее не закрытый iOS-gap (не было ни
+`apple-touch-icon`, ни `apple-mobile-web-app-capable` нигде в коде). Maskable-вариант не добавлен —
+не доказанный installability gap, только косметика Android adaptive icon. Design/доказательства —
+`docs/titanor-time/T8_PWA_DESIGN.md` §B.
 
-## T8.7 — Установка
+## T8.7 — Установка 🟢 реализовано `[2026-08-20]`
 
-Понятная подсказка для Android, iPhone и desktop.
+Новая страница `/worker/install` (тот же session/role gate, что `/worker`), заметная ссылка
+«Install app →» с `/worker` (скрыта на offline shell). 7-состояний install state machine
+(`CHECKING`/`INSTALLABLE`/`INSTALLED`/`IOS_SAFARI`/`IOS_OTHER_BROWSER`/
+`ANDROID_OR_DESKTOP_WITHOUT_PROMPT`/`UNSUPPORTED_OR_UNKNOWN`), Server/Client boundary без
+hydration mismatch, синхронный ref-guard против double-prompt, `appinstalled`/standalone
+display-mode для честного installed-статуса. Ноль новых runtime-зависимостей, `public/sw.js` не
+менялся, offline outbox/FIFO не менялся (подтверждено `git diff` — только один новый файл в
+`lib/offline-outbox/`). 59/59 browser-проверок (`scripts/_test-pwa-install.ts`, Chromium,
+production standalone build). Физические iPhone/Android — внешний gate (T9.7), не проверялись.
+Design — `docs/titanor-time/T8_PWA_DESIGN.md` §C.
+
+**T8.8 (offline для остальных экранов) этим коммитом не начат.**
 
 ## T8.8 — Offline
 

@@ -5516,6 +5516,13 @@ device-emulation через Playwright); legal/privacy approval 90-дневно�
 в самой задаче — удаление pending outbox "ради приватности" запрещено явно, могло бы потерять
 несинхронизированные события).
 
+**`[2026-08-20]` Cross-link — T8.5–T8.7 PWA Reconciliation + Installation UX.** Manifest/иконки
+(§C выше) закрыты реконструктивными доказательствами (не переписаны) в
+`docs/titanor-time/T8_PWA_DESIGN.md` §A/§B; новая страница `/worker/install` (§C того документа)
+добавляет UI для установки поверх ЭТОГО addendum'а — `public/sw.js`, fetch-стратегии, scope
+`/worker`, offline outbox/FIFO не менялись T8.7 ни на строку (подтверждено `git diff`). Physical
+device gap, отмеченный здесь как "только эмуляция", по-прежнему открыт после T8.7 — см. T9.7.
+
 ---
 
 ## Addendum — T7A.10C.2 Full Pilot E2E, Restart and Verified Backup/Restore (2026-08-18)
