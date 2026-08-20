@@ -1,4 +1,7 @@
+import { Prisma } from '@prisma/client';
 import { prisma } from '@/lib/prisma';
+import { resolveCanonicalSource } from '@/lib/reporting/canonical-source';
+import { computeSegmentMs, msToMinutes, sumWorkedTimeMs } from '@/lib/reporting/worked-time';
 
 // docs/titanor-time/04_ADMIN_FIRST_API_CONTRACTS.md §9 (Рабочий кабинет), read-only context
 // endpoints — first sub-task's own `worker.read.own`/`assignment.read.own`/`period.read.own`
@@ -105,6 +108,103 @@ export async function getWorkerCurrentPeriod(employeeId: string, today: Date): P
 export interface ActionablePeriod extends WorkerPeriodSummary {
   timesheetId: string;
   timesheetStatus: string;
+  totalMinutes: number;
+  workedDayCount: number;
+  activityDays: WorkerPeriodActivityDay[];
+}
+
+export interface WorkerPeriodActivityDay {
+  date: string;
+  totalMinutes: number;
+  siteNames: string[];
+}
+
+const workerPeriodSelect = Prisma.validator<Prisma.TimesheetSelect>()({
+  id: true,
+  status: true,
+  currentVersionId: true,
+  period: { select: { id: true, startDate: true, endDate: true, status: true } },
+  draft: {
+    select: {
+      id: true,
+      timesheetDraftSegments: {
+        select: {
+          date: true,
+          siteId: true,
+          startAt: true,
+          endAt: true,
+          site: { select: { name: true } },
+          breaks: { select: { startAt: true, endAt: true, paid: true } }
+        }
+      }
+    }
+  },
+  currentVersion: {
+    select: {
+      versionNumber: true,
+      submissionSource: true,
+      workSegments: {
+        select: {
+          date: true,
+          siteId: true,
+          startAt: true,
+          endAt: true,
+          site: { select: { name: true } },
+          breaks: { select: { startAt: true, endAt: true, paid: true } }
+        }
+      }
+    }
+  }
+});
+
+type WorkerPeriodRow = Prisma.TimesheetGetPayload<{ select: typeof workerPeriodSelect }>;
+
+function mapWorkerPeriod(row: WorkerPeriodRow): ActionablePeriod {
+  const source = resolveCanonicalSource({
+    id: row.id,
+    status: row.status,
+    currentVersionId: row.currentVersionId,
+    draft: row.draft,
+    currentVersion: row.currentVersion
+  });
+  const segments = source.dataSource === 'DRAFT' ? row.draft!.timesheetDraftSegments : row.currentVersion!.workSegments;
+  const buckets = new Map<string, { date: string; siteName: string; segments: typeof segments }>();
+
+  for (const segment of segments) {
+    const date = formatDate(segment.date);
+    const key = `${date}:${segment.siteId}`;
+    const bucket = buckets.get(key);
+    if (bucket) {
+      bucket.segments.push(segment);
+    } else {
+      buckets.set(key, { date, siteName: segment.site.name, segments: [segment] });
+    }
+  }
+
+  const days = new Map<string, { totalMinutes: number; siteNames: Set<string> }>();
+  for (const bucket of buckets.values()) {
+    const worked = sumWorkedTimeMs(bucket.segments.map((segment) => computeSegmentMs(segment)));
+    const day = days.get(bucket.date) ?? { totalMinutes: 0, siteNames: new Set<string>() };
+    day.totalMinutes += msToMinutes(worked.workedMs);
+    day.siteNames.add(bucket.siteName);
+    days.set(bucket.date, day);
+  }
+
+  const activityDays = [...days.entries()]
+    .map(([date, day]) => ({ date, totalMinutes: day.totalMinutes, siteNames: [...day.siteNames].sort((a, b) => a.localeCompare(b)) }))
+    .sort((a, b) => b.date.localeCompare(a.date));
+
+  return {
+    id: row.period.id,
+    startDate: formatDate(row.period.startDate),
+    endDate: formatDate(row.period.endDate),
+    status: row.period.status,
+    timesheetId: row.id,
+    timesheetStatus: row.status,
+    totalMinutes: activityDays.reduce((sum, day) => sum + day.totalMinutes, 0),
+    workedDayCount: activityDays.length,
+    activityDays
+  };
 }
 
 /**
@@ -122,17 +222,10 @@ export async function listActionablePeriods(employeeId: string): Promise<Actiona
       participant: { expected: true }
     },
     orderBy: { period: { startDate: 'asc' } },
-    select: { id: true, status: true, period: { select: { id: true, startDate: true, endDate: true, status: true } } }
+    select: workerPeriodSelect
   });
 
-  return timesheets.map((t) => ({
-    id: t.period.id,
-    startDate: formatDate(t.period.startDate),
-    endDate: formatDate(t.period.endDate),
-    status: t.period.status,
-    timesheetId: t.id,
-    timesheetStatus: t.status
-  }));
+  return timesheets.map(mapWorkerPeriod);
 }
 
 /**
@@ -146,15 +239,8 @@ export async function listWorkerTimesheets(employeeId: string): Promise<Actionab
   const timesheets = await prisma.timesheet.findMany({
     where: { employeeId },
     orderBy: { period: { startDate: 'desc' } },
-    select: { id: true, status: true, period: { select: { id: true, startDate: true, endDate: true, status: true } } }
+    select: workerPeriodSelect
   });
 
-  return timesheets.map((t) => ({
-    id: t.period.id,
-    startDate: formatDate(t.period.startDate),
-    endDate: formatDate(t.period.endDate),
-    status: t.period.status,
-    timesheetId: t.id,
-    timesheetStatus: t.status
-  }));
+  return timesheets.map(mapWorkerPeriod);
 }

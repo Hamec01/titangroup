@@ -4,6 +4,7 @@ import { useEffect, useState, type ReactNode } from 'react';
 import { WorkerLink } from './WorkerLink';
 import { parseWorkerRoute, readAccountBoundSnapshot, type ReadSnapshotOutcome, type PeriodsListPayload, type HistoryListPayload, type PeriodDetailPayload, type HoursListPayload, type DayDetailPayload, type SubmitSummaryPayload, type SnapshotReturnReason } from '@/lib/offline-outbox/read-snapshots';
 import type { WorkerReadSnapshotRecord } from '@/lib/offline-outbox/db';
+import { workerTimesheetStatusLabel } from '@/lib/worker-timesheet-presentation';
 
 // docs/titanor-time/T8_PWA_DESIGN.md §F.6/§F.9 — the shell's read-only renderer, one branch per
 // SnapshotRouteKind. Never renders an editable input, a Save/Submit control, or a mutation-
@@ -86,14 +87,6 @@ function ShellFrame({ capturedAt, children }: { capturedAt: string; children: Re
   );
 }
 
-const STATUS_LABELS: Record<string, string> = {
-  DRAFT: 'Not started',
-  RETURNED: 'Returned — needs your attention',
-  SUBMITTED: 'Submitted — awaiting review',
-  FOREMAN_APPROVED: 'Review complete — awaiting final approval',
-  FINAL_APPROVED: 'Finalized'
-};
-
 function renderPayload(record: WorkerReadSnapshotRecord) {
   switch (record.routeKind) {
     case 'periods-list': {
@@ -111,7 +104,7 @@ function renderPayload(record: WorkerReadSnapshotRecord) {
                     <span className="wk-period-dates">
                       {p.startDate} – {p.endDate}
                     </span>
-                    <span className={`wk-status-badge wk-status-${p.timesheetStatus.toLowerCase()}`}>{STATUS_LABELS[p.timesheetStatus] ?? p.timesheetStatus}</span>
+                    <span className={`wk-status-badge wk-status-${p.timesheetStatus.toLowerCase()}`}>{workerTimesheetStatusLabel(p.timesheetStatus, p.totalMinutes)}</span>
                   </WorkerLink>
                 </li>
               ))}
@@ -135,7 +128,7 @@ function renderPayload(record: WorkerReadSnapshotRecord) {
                     <span className="wk-period-dates">
                       {t.startDate} – {t.endDate}
                     </span>
-                    <span className={`wk-status-badge wk-status-${t.timesheetStatus.toLowerCase()}`}>{STATUS_LABELS[t.timesheetStatus] ?? t.timesheetStatus}</span>
+                    <span className={`wk-status-badge wk-status-${t.timesheetStatus.toLowerCase()}`}>{workerTimesheetStatusLabel(t.timesheetStatus, t.totalMinutes)}</span>
                   </WorkerLink>
                 </li>
               ))}
@@ -151,7 +144,7 @@ function renderPayload(record: WorkerReadSnapshotRecord) {
           <h1>
             {payload.startDate} – {payload.endDate}
           </h1>
-          <span className={`wk-status-badge wk-status-${payload.timesheetStatus.toLowerCase()}`}>{STATUS_LABELS[payload.timesheetStatus] ?? payload.timesheetStatus}</span>
+          <span className={`wk-status-badge wk-status-${payload.timesheetStatus.toLowerCase()}`}>{workerTimesheetStatusLabel(payload.timesheetStatus, payload.totalMinutes)}</span>
           <ReturnReasonsReadOnly reasons={payload.returnReasons} />
           <h2 className="wk-section-title">Your assignments</h2>
           {payload.assignments.length === 0 ? (

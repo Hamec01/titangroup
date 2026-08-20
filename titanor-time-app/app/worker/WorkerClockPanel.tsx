@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import { captureGpsSnapshot, type GpsSnapshot } from '@/lib/worker-gps';
 import { ensureDeviceBootstrapped, retryBootstrap, type BootstrapOutcome } from '@/lib/offline-outbox/device';
 import { enqueueCheckIn, enqueueCheckOut, enqueueSwitchSite, EnqueueError } from '@/lib/offline-outbox/outbox';
@@ -11,6 +12,7 @@ import { projectClockState } from '@/lib/offline-outbox/projection';
 import { subscribeOutboxChanges } from '@/lib/offline-outbox/broadcast';
 import { warmOfflineShellCache } from '@/lib/offline-outbox/pwa-warm-cache';
 import { WorkerLink } from '@/components/worker-pwa/WorkerLink';
+import { formatWorkedDuration } from '@/lib/reporting/report-format';
 
 // docs/titanor-time/T7A_1_ATTENDANCE_CLOCK_DESIGN.md §6/§7/§9.11 (T7A.7B — offline outbox client).
 // Every Check In/Out/Switch Site action now writes to the IndexedDB outbox FIRST (one atomic
@@ -94,6 +96,13 @@ export interface WorkerClockPanelProps {
   assignments: ClockPanelAssignment[];
   workerName: string | null;
   todayLabel: string;
+  recentActivity: {
+    date: string;
+    totalMinutes: number;
+    siteNames: string[];
+    href: string;
+    isToday: boolean;
+  } | null;
   /** `null` hides the corresponding nav link entirely — the offline shell passes `null` for both,
    * since /worker/periods and /worker/history need server data this slice does not cache and a
    * real navigation there while genuinely offline is left to fail the ordinary way, never silently
@@ -106,7 +115,8 @@ export interface WorkerClockPanelProps {
   installHref: string | null;
 }
 
-export function WorkerClockPanel({ initialClockState, assignments, workerName, todayLabel, periodsHref, historyHref, installHref }: WorkerClockPanelProps) {
+export function WorkerClockPanel({ initialClockState, assignments, workerName, todayLabel, recentActivity, periodsHref, historyHref, installHref }: WorkerClockPanelProps) {
+  const router = useRouter();
   const [bootstrap, setBootstrap] = useState<BootstrapOutcome | null>(null);
   const [clockState, setClockState] = useState<ClockStateWire>(initialClockState);
   const [outboxRecords, setOutboxRecords] = useState<OutboxEventRecord[]>([]);
@@ -157,6 +167,7 @@ export function WorkerClockPanel({ initialClockState, assignments, workerName, t
           setStatusMessage({ kind: 'error', text: 'One or more actions need attention — see below.' });
         } else if (outcome.ackedCount > 0) {
           setStatusMessage({ kind: 'info', text: 'Synced.' });
+          router.refresh();
         }
       } else if (outcome.kind === 'AUTH_EXPIRED') {
         setStatusMessage({ kind: 'error', text: describeErrorCode('NOT_AUTHENTICATED'), code: 'NOT_AUTHENTICATED' });
@@ -178,7 +189,7 @@ export function WorkerClockPanel({ initialClockState, assignments, workerName, t
     } finally {
       setSyncing(false);
     }
-  }, [syncing, refreshOutboxSnapshot]);
+  }, [syncing, refreshOutboxSnapshot, router]);
 
   // ---- Bootstrap + initial outbox snapshot ----
   useEffect(() => {
@@ -608,6 +619,22 @@ export function WorkerClockPanel({ initialClockState, assignments, workerName, t
           </ul>
         </div>
       )}
+
+      <section className="wk-recent-activity" aria-labelledby="wk-recent-activity-title">
+        <div className="wk-recent-activity-heading">
+          <h2 id="wk-recent-activity-title">{recentActivity?.isToday ? "Today's time" : 'Recent time'}</h2>
+          {recentActivity && <span>{recentActivity.date}</span>}
+        </div>
+        {recentActivity ? (
+          <WorkerLink href={recentActivity.href} className="wk-recent-activity-link">
+            <strong>{formatWorkedDuration(recentActivity.totalMinutes)}</strong>
+            <span>{recentActivity.siteNames.join(', ')}</span>
+            <span aria-hidden="true">→</span>
+          </WorkerLink>
+        ) : (
+          <p className="wk-empty">No completed time entries yet.</p>
+        )}
+      </section>
 
       {(periodsHref || historyHref || installHref) && (
         <div className="wk-clock-nav">

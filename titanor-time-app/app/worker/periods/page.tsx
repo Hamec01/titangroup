@@ -5,6 +5,7 @@ import { SnapshotWriter } from '@/components/worker-pwa/SnapshotWriter';
 import { ConnectivityBanner } from '@/components/worker-pwa/ConnectivityBanner';
 import { WorkerLink } from '@/components/worker-pwa/WorkerLink';
 import type { PeriodsListPayload } from '@/lib/offline-outbox/read-snapshots';
+import { workerTimesheetStatusLabel } from '@/lib/worker-timesheet-presentation';
 
 export const dynamic = 'force-dynamic';
 
@@ -12,13 +13,6 @@ export const dynamic = 'force-dynamic';
 // worker has more than one actionable period (single-period case redirects
 // straight through from /worker). DoD: two simultaneous actionable periods are
 // shown distinctly, each linking to its own timesheetId via its periodId.
-const STATUS_LABELS: Record<string, string> = {
-  DRAFT: 'Not started',
-  RETURNED: 'Returned — needs your attention',
-  SUBMITTED: 'Submitted — awaiting review',
-  FOREMAN_APPROVED: 'Review complete — awaiting final approval'
-};
-
 export default async function WorkerPeriodsPage() {
   const session = await resolveServerSession();
   if (!session) {
@@ -47,7 +41,7 @@ export default async function WorkerPeriodsPage() {
   const periods = await listActionablePeriods(session.user.employeeId);
 
   const snapshotPayload: PeriodsListPayload = {
-    periods: periods.map((p) => ({ id: p.id, startDate: p.startDate, endDate: p.endDate, timesheetId: p.timesheetId, timesheetStatus: p.timesheetStatus }))
+    periods: periods.map((p) => ({ id: p.id, startDate: p.startDate, endDate: p.endDate, timesheetId: p.timesheetId, timesheetStatus: p.timesheetStatus, totalMinutes: p.totalMinutes, workedDayCount: p.workedDayCount }))
   };
 
   return (
@@ -69,7 +63,7 @@ export default async function WorkerPeriodsPage() {
                     {period.startDate} – {period.endDate}
                   </span>
                   <span className={`wk-status-badge wk-status-${period.timesheetStatus.toLowerCase()}`}>
-                    {STATUS_LABELS[period.timesheetStatus] ?? period.timesheetStatus}
+                    {workerTimesheetStatusLabel(period.timesheetStatus, period.totalMinutes)}
                   </span>
                 </WorkerLink>
               </li>

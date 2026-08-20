@@ -5,6 +5,7 @@ import { SnapshotWriter } from '@/components/worker-pwa/SnapshotWriter';
 import { ConnectivityBanner } from '@/components/worker-pwa/ConnectivityBanner';
 import { WorkerLink } from '@/components/worker-pwa/WorkerLink';
 import type { HistoryListPayload } from '@/lib/offline-outbox/read-snapshots';
+import { workerTimesheetStatusLabel } from '@/lib/worker-timesheet-presentation';
 
 export const dynamic = 'force-dynamic';
 
@@ -12,14 +13,6 @@ export const dynamic = 'force-dynamic';
 // Links straight to the already-built /worker/periods/[periodId] rather than a separate
 // /worker/history/[timesheetId] route — that page already branches editable-vs-read-only by
 // status, which is exactly what a history entry (often FINAL_APPROVED) needs.
-const STATUS_LABELS: Record<string, string> = {
-  DRAFT: 'Not started',
-  RETURNED: 'Returned — needs your attention',
-  SUBMITTED: 'Submitted — awaiting review',
-  FOREMAN_APPROVED: 'Review complete — awaiting final approval',
-  FINAL_APPROVED: 'Finalized'
-};
-
 export default async function WorkerHistoryPage() {
   const session = await resolveServerSession();
   if (!session) {
@@ -47,7 +40,7 @@ export default async function WorkerHistoryPage() {
   const timesheets = await listWorkerTimesheets(session.user.employeeId);
 
   const snapshotPayload: HistoryListPayload = {
-    timesheets: timesheets.map((t) => ({ id: t.id, startDate: t.startDate, endDate: t.endDate, timesheetId: t.timesheetId, timesheetStatus: t.timesheetStatus }))
+    timesheets: timesheets.map((t) => ({ id: t.id, startDate: t.startDate, endDate: t.endDate, timesheetId: t.timesheetId, timesheetStatus: t.timesheetStatus, totalMinutes: t.totalMinutes, workedDayCount: t.workedDayCount }))
   };
 
   return (
@@ -68,7 +61,7 @@ export default async function WorkerHistoryPage() {
                   <span className="wk-period-dates">
                     {t.startDate} – {t.endDate}
                   </span>
-                  <span className={`wk-status-badge wk-status-${t.timesheetStatus.toLowerCase()}`}>{STATUS_LABELS[t.timesheetStatus] ?? t.timesheetStatus}</span>
+                  <span className={`wk-status-badge wk-status-${t.timesheetStatus.toLowerCase()}`}>{workerTimesheetStatusLabel(t.timesheetStatus, t.totalMinutes)}</span>
                 </WorkerLink>
               </li>
             ))}

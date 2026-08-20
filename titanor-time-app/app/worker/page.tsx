@@ -51,10 +51,22 @@ export default async function WorkerHomePage() {
   const periodsHref = periods.length === 1 ? `/worker/periods/${periods[0].id}` : '/worker/periods';
   const todayLabel = new Intl.DateTimeFormat('en-GB', { timeZone: 'Europe/Helsinki', weekday: 'long', day: 'numeric', month: 'long' }).format(today);
   const workerName = context ? `${context.employee.firstName} ${context.employee.lastName}` : null;
+  const todayKey = today.toISOString().slice(0, 10);
+  const activityDays = periods.flatMap((period) => period.activityDays.map((day) => ({ ...day, periodId: period.id })));
+  const recentDay = activityDays.find((day) => day.date === todayKey) ?? activityDays.sort((a, b) => b.date.localeCompare(a.date))[0] ?? null;
+  const recentActivity = recentDay
+    ? {
+        date: recentDay.date,
+        totalMinutes: recentDay.totalMinutes,
+        siteNames: recentDay.siteNames,
+        href: `/worker/periods/${recentDay.periodId}/hours/${recentDay.date}`,
+        isToday: recentDay.date === todayKey
+      }
+    : null;
 
   return (
     <main className="wk-page">
-      <WorkerClockPanel initialClockState={clockState} assignments={assignments} workerName={workerName} todayLabel={todayLabel} periodsHref={periodsHref} historyHref="/worker/history" installHref="/worker/install" />
+      <WorkerClockPanel initialClockState={clockState} assignments={assignments} workerName={workerName} todayLabel={todayLabel} recentActivity={recentActivity} periodsHref={periodsHref} historyHref="/worker/history" installHref="/worker/install" />
     </main>
   );
 }

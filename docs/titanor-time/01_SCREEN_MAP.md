@@ -965,16 +965,18 @@ shell.`**
   (`app/worker/page.tsx`, server-side, `Promise.all`), спроецированные (`projectClockState`) поверх
   ещё неподтверждённого outbox-хвоста, когда он есть. Индикатор online/offline, счётчик pending
   outbox-записей и кнопка «Sync now» — реализованы (`lib/offline-outbox/`). GPS-accuracy badge,
-  `Today`/`This week` интервалы, ближайший cutoff — **не реализованы** (не входили в scope ни
-  одного из слайсов T7A/T7A.7A/T7A.7B)
+  ближайший cutoff — **не реализованы**. `[2026-08-20]`: добавлена canonical `Today's time`/
+  `Recent time` карточка (минуты, объект, дата и переход к дню); после успешного sync ACK Home
+  перечитывает серверный итог, не вычисляет продолжительность по часам телефона
 - Действия (реализовано): доминирующая `Check In` (disabled без назначения/во время запроса);
   `Check Out`; `Switch site` (атомарная пара, явное подтверждение, старый/новый объект показаны) —
   все три сначала атомарно пишутся в IndexedDB outbox, затем синкаются через `POST
   /attendance/sync`, а не напрямую в `check-in`/`check-out`/`switch-site`; ссылки на
   `/worker/periods` (или сразу единственный actionable период) и `/worker/history`. `Add break` —
   не реализовано (вне текущего scope, не clock-функциональность)
-- Меню (`Today`/`My week`/`All hours`/`Corrections`/`Profile`/`Help`/`Logout`) — **не реализовано**;
-  вместо него — два прямых текстовых линка, см. выше
+- Общий worker header/menu (`Home`, `Calendar and hours`, `History`, `Install`, `Sign out`) —
+  реализован на всех online worker routes; расширенные `Corrections`/`Profile`/`Help` ещё не
+  реализованы
 - Состояния (реализовано): `Clocked out` (с empty state, если назначений нет); `Clocked in`
   (таймер, никогда не отрицательный, помечен «waiting for sync», пока запись ещё не ACKed);
   `Getting location…`; «Saved on device — syncing…»/«waiting for sync»; `Syncing…`/aria-live
@@ -1001,7 +1003,8 @@ shell.`**
   check-out→reconnect→sync даёт ровно одну закрытую смену (подтверждено); координаты не попадают в
   DOM/console/`BroadcastChannel` (подтверждено); network-unknown retry повторяет тот же payload/id
   (подтверждено)
-- **Явно НЕ реализовано**: GPS-accuracy badge, `Today`/`This week` сводка, `Add break`, полное меню
+- **Явно НЕ реализовано**: GPS-accuracy badge, недельная сводка на Home, `Add break`, расширенные
+  Profile/Help/Corrections
 
 #### `/worker-offline` 🟢 (data-free offline shell, `[2026-08-18]` T7A.10C.1)
 - Роли: `WORKER` (но сама страница НЕ проверяет сессию — см. ниже)
@@ -1078,7 +1081,9 @@ shell.`**
 - Роли: `WORKER`
 - Приоритет: mobile
 - Назначение: список actionable периодов работника — обычно один, но может быть несколько
-- Данные: `PayrollPeriodParticipant`+`Timesheet.status` каждого actionable периода
+- Данные: `PayrollPeriodParticipant`+`Timesheet.status` каждого actionable периода; canonical
+  total minutes/worked days. Заполненный `DRAFT` подписывается `In progress · X h Y min`, а не
+  ложным `Not started`
 - Действия: → открыть период
 - Состояния: loading; empty («вам ещё не назначили объект»); error
 - Откуда: логин `WORKER` (если периодов больше одного; иначе редирект сразу в единственный)
@@ -1131,6 +1136,8 @@ shell.`**
 - Данные: `TimesheetDraftDay[]` (редактируемо) либо `TimesheetDay[]` текущей версии (read-only); при
   `RETURNED` — те же `returnReasons[]`, что на `/worker/periods/[periodId]` (реализовано, без
   дополнительного клика)
+- Представление: заполненные, non-WORK, confirmed-zero и сегодняшний дни видны сразу (newest
+  first); остальные пустые даты длинного периода находятся под раскрываемым `Choose another date`
 - Действия: → редактировать день (только если редактируемо)
 - Состояния: loading; empty (период открыт, дней ещё нет — показать шаблон как подсказку); error;
   offline (только просмотр последнего кэша)

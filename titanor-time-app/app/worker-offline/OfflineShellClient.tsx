@@ -136,6 +136,7 @@ export function OfflineShellClient() {
       assignments={state.assignments}
       workerName={null}
       todayLabel={todayLabelNow()}
+      recentActivity={null}
       periodsHref={null}
       historyHref={null}
       installHref={null}

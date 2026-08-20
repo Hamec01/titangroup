@@ -22,6 +22,10 @@ export interface SnapshotPeriodSummary {
   endDate: string;
   timesheetId: string;
   timesheetStatus: string;
+  /** Optional for backwards compatibility with snapshots captured before the worker-hours
+   * visibility fix. New snapshots always include both fields. */
+  totalMinutes?: number;
+  workedDayCount?: number;
 }
 
 export interface PeriodsListPayload {
@@ -46,6 +50,7 @@ export interface PeriodDetailPayload {
   endDate: string;
   timesheetStatus: string;
   editable: boolean;
+  totalMinutes?: number;
   assignments: SnapshotAssignment[];
   returnReasons: SnapshotReturnReason[];
 }

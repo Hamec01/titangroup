@@ -2,6 +2,19 @@
 
 Обновлено: 2026-08-20 Europe/Helsinki (T9.7 — первый physical-device UX feedback)
 
+**`[2026-08-20]` T9.7 — закрытая смена была сохранена, но скрыта worker UI.** Реальный iPhone-
+прогон (Check In → 10:56 → Check Out) подтвердил корректные durable `ClockEvent`, `ClockShift`,
+`ClockShiftFragment` и `TimesheetDraftSegment`, однако `/worker/history` и `/worker/periods`
+безусловно подписывали любой `DRAFT` как `Not started`, а Home не показывал ни одного итога.
+Исправление считает минуты из того же canonical source и по той же `(siteId,date)`-bucket формуле,
+что T8 reports: заполненный draft теперь `In progress · 0 h 11 min`; Home показывает Today/Recent
+time с объектом и ссылкой на день; после ACK Check Out выполняется `router.refresh()`, поэтому итог
+появляется без ручной перезагрузки. На странице Hours заполненные/особые/сегодняшний дни вынесены
+вверх, сотни пустых дат закрыты в `Choose another date`. Offline period/history snapshots получили
+optional totals (legacy v2 snapshots продолжают читаться). На сохранённой pilot-записи Михаила
+публичный SSR и мобильный Chromium подтвердили Home=`Today's time`, History/Periods=
+`In progress · 0 h 11 min`, Hours=`0h 11m · Telaka`; production не затронут.
+
 **`[2026-08-20]` T9.7 — первый реальный iPhone-прогон выявил setup/navigation UX gaps.**
 Владелец на отдельном HTTPS pilot создал реального WORKER, активировал его на iPhone и дошёл до
 рабочего `/worker` с доступным Check In. Обнаружено: обещанный контракт `POST /api/admin/cities`

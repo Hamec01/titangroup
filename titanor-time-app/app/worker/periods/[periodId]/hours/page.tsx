@@ -89,6 +89,41 @@ export default async function WorkerHoursListPage({ params }: RouteParams) {
     returnReasons: returnReasons.map((r) => ({ scopeType: r.scopeType, siteName: r.siteName, contextSiteName: r.contextSiteName, reason: r.reason, returnedAt: r.returnedAt }))
   };
 
+  const todayKey = new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Helsinki', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
+  const visibleDays = days
+    .filter((day) => day.segments.length > 0 || day.confirmedZero || day.dayType !== 'WORK' || day.date === todayKey)
+    .sort((a, b) => b.date.localeCompare(a.date));
+  const emptyDays = days.filter((day) => !visibleDays.includes(day));
+
+  function renderDay(day: (typeof days)[number]) {
+    const minutes = workedMinutesFromIsoSegments(day.segments);
+    const content = (
+      <>
+        <span className="wk-day-date">{day.date}</span>
+        <span className="wk-day-summary">
+          {day.dayType !== 'WORK'
+            ? day.dayType.replace('_', ' ').toLowerCase()
+            : day.confirmedZero
+              ? 'Confirmed 0h'
+              : day.segments.length === 0
+                ? '—'
+                : `${formatMinutes(minutes)} · ${[...new Set(day.segments.map((s) => siteNameById.get(s.siteId) ?? s.siteId))].join(', ')}`}
+        </span>
+      </>
+    );
+    return (
+      <li key={day.date}>
+        {editable ? (
+          <WorkerLink href={`/worker/periods/${periodId}/hours/${day.date}`} className="wk-day-item">
+            {content}
+          </WorkerLink>
+        ) : (
+          <div className="wk-day-item wk-day-item-readonly">{content}</div>
+        )}
+      </li>
+    );
+  }
+
   return (
     <main className="wk-page">
       <div className="wk-card">
@@ -103,36 +138,15 @@ export default async function WorkerHoursListPage({ params }: RouteParams) {
         {days.length === 0 ? (
           <p className="wk-empty">No days in this period yet.</p>
         ) : (
-          <ul className="wk-day-list">
-            {days.map((day) => {
-              const minutes = workedMinutesFromIsoSegments(day.segments);
-              const content = (
-                <>
-                  <span className="wk-day-date">{day.date}</span>
-                  <span className="wk-day-summary">
-                    {day.dayType !== 'WORK'
-                      ? day.dayType.replace('_', ' ').toLowerCase()
-                      : day.confirmedZero
-                        ? 'Confirmed 0h'
-                        : day.segments.length === 0
-                          ? '—'
-                          : `${formatMinutes(minutes)} · ${day.segments.map((s) => siteNameById.get(s.siteId) ?? s.siteId).join(', ')}`}
-                  </span>
-                </>
-              );
-              return (
-                <li key={day.date}>
-                  {editable ? (
-                    <WorkerLink href={`/worker/periods/${periodId}/hours/${day.date}`} className="wk-day-item">
-                      {content}
-                    </WorkerLink>
-                  ) : (
-                    <div className="wk-day-item wk-day-item-readonly">{content}</div>
-                  )}
-                </li>
-              );
-            })}
-          </ul>
+          <>
+            <ul className="wk-day-list">{visibleDays.map(renderDay)}</ul>
+            {emptyDays.length > 0 && (
+              <details className="wk-empty-days">
+                <summary>Choose another date ({emptyDays.length})</summary>
+                <ul className="wk-day-list">{emptyDays.map(renderDay)}</ul>
+              </details>
+            )}
+          </>
         )}
 
         {editable && (

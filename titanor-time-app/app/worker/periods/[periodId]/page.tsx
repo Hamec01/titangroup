@@ -7,6 +7,7 @@ import { SnapshotWriter } from '@/components/worker-pwa/SnapshotWriter';
 import { ConnectivityBanner } from '@/components/worker-pwa/ConnectivityBanner';
 import { WorkerLink } from '@/components/worker-pwa/WorkerLink';
 import type { PeriodDetailPayload } from '@/lib/offline-outbox/read-snapshots';
+import { workerTimesheetStatusLabel } from '@/lib/worker-timesheet-presentation';
 
 export const dynamic = 'force-dynamic';
 
@@ -18,14 +19,6 @@ export const dynamic = 'force-dynamic';
 // Assignments are resolved as of the period's own start date, not "today" — a past period's
 // assignments may no longer be current.
 const EDITABLE_STATUSES = new Set(['DRAFT', 'RETURNED']);
-const STATUS_LABELS: Record<string, string> = {
-  DRAFT: 'Not started',
-  RETURNED: 'Returned — needs your attention',
-  SUBMITTED: 'Submitted — awaiting review',
-  FOREMAN_APPROVED: 'Review complete — awaiting final approval',
-  FINAL_APPROVED: 'Finalized'
-};
-
 type RouteParams = { params: Promise<{ periodId: string }> };
 
 export default async function WorkerPeriodDetailPage({ params }: RouteParams) {
@@ -83,6 +76,7 @@ export default async function WorkerPeriodDetailPage({ params }: RouteParams) {
     endDate: period.endDate,
     timesheetStatus: period.timesheetStatus,
     editable,
+    totalMinutes: period.totalMinutes,
     assignments: assignments.map((a) => ({ id: a.id, siteName: a.siteName, workAreaName: a.workAreaName, templateName: a.templateName, isPrimary: a.isPrimary })),
     returnReasons: returnReasons.map((r) => ({ scopeType: r.scopeType, siteName: r.siteName, contextSiteName: r.contextSiteName, reason: r.reason, returnedAt: r.returnedAt }))
   };
@@ -94,7 +88,7 @@ export default async function WorkerPeriodDetailPage({ params }: RouteParams) {
         <h1>
           {period.startDate} – {period.endDate}
         </h1>
-        <span className={`wk-status-badge wk-status-${period.timesheetStatus.toLowerCase()}`}>{STATUS_LABELS[period.timesheetStatus] ?? period.timesheetStatus}</span>
+        <span className={`wk-status-badge wk-status-${period.timesheetStatus.toLowerCase()}`}>{workerTimesheetStatusLabel(period.timesheetStatus, period.totalMinutes)}</span>
 
         <ReturnReasonsNotice status={period.timesheetStatus} reasons={returnReasons} />
 
