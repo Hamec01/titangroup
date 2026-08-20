@@ -13,29 +13,69 @@ export const dynamic = 'force-dynamic';
 interface ChecklistItem {
   key: keyof SetupStatus;
   label: string;
+  description: string;
+  optional?: boolean;
   createHref: string | null;
   doneHref: string | null;
+  createActionLabel?: string;
   doneActionLabel?: string;
 }
 
 const CHECKLIST: ChecklistItem[] = [
-  { key: 'hasCity', label: 'City (optional)', createHref: null, doneHref: null },
-  { key: 'hasSite', label: 'Site', createHref: '/admin/sites/new', doneHref: '/admin/sites' },
-  { key: 'hasWorkArea', label: 'Work area', createHref: '/admin/sites', doneHref: '/admin/sites' },
+  {
+    key: 'hasCity',
+    label: 'City',
+    description: 'Optional reference for grouping sites. It does not block setup.',
+    optional: true,
+    createHref: '/admin/cities/new',
+    doneHref: '/admin/cities/new',
+    doneActionLabel: 'Add another'
+  },
+  {
+    key: 'hasSite',
+    label: 'Site',
+    description: 'The actual workplace a worker can be assigned to and check in at.',
+    createHref: '/admin/sites/new',
+    doneHref: '/admin/sites'
+  },
+  {
+    key: 'hasWorkArea',
+    label: 'Work area',
+    description: 'Optional subdivision inside a site. Skip it when the whole site is one work area.',
+    optional: true,
+    createHref: '/admin/sites',
+    doneHref: '/admin/sites',
+    createActionLabel: 'Manage sites'
+  },
   {
     key: 'hasTemplate',
     label: 'Work schedule template',
+    description: 'Defines the worker\'s usual working week.',
     createHref: '/admin/templates/new',
     doneHref: '/admin/templates'
   },
-  { key: 'hasWorker', label: 'Worker', createHref: '/admin/workers/new', doneHref: '/admin/workers' },
+  {
+    key: 'hasWorker',
+    label: 'Worker',
+    description: 'Employee account that will use Check In/Out and enter hours.',
+    createHref: '/admin/workers/new',
+    doneHref: '/admin/workers'
+  },
   {
     key: 'hasAssignment',
     label: 'Assignment',
+    description: 'Connects a worker to a site and schedule for a date range.',
     createHref: '/admin/assignments/new',
     doneHref: '/admin/assignments'
   },
-  { key: 'hasOpenPeriod', label: 'Open payroll period', createHref: '/admin/periods', doneHref: '/admin/periods' }
+  {
+    key: 'hasOpenPeriod',
+    label: 'Current payroll period',
+    description: 'The date range in which workers enter and submit their hours.',
+    createHref: '/admin/periods/new',
+    doneHref: '/admin/periods',
+    createActionLabel: 'Open period'
+  }
 ];
 
 export default async function AdminSetupPage() {
@@ -68,13 +108,18 @@ export default async function AdminSetupPage() {
           {CHECKLIST.map((item) => {
             const done = status[item.key];
             const actionHref = done ? item.doneHref : item.createHref;
-            const actionLabel = done ? (item.doneActionLabel ?? 'Manage') : 'Create';
+            const actionLabel = done ? (item.doneActionLabel ?? 'Manage') : (item.createActionLabel ?? 'Create');
             return (
               <li key={item.key} className="setup-item">
-                <span className={done ? 'setup-status setup-status-done' : 'setup-status setup-status-pending'}>
-                  {done ? 'Done' : 'Not done'}
+                <span
+                  className={done ? 'setup-status setup-status-done' : item.optional ? 'setup-status setup-status-optional' : 'setup-status setup-status-pending'}
+                >
+                  {done ? 'Done' : item.optional ? 'Optional' : 'Not done'}
                 </span>
-                <span className="setup-label">{item.label}</span>
+                <span className="setup-copy">
+                  <span className="setup-label">{item.label}</span>
+                  <span className="setup-description">{item.description}</span>
+                </span>
                 {actionHref ? (
                   <Link className="setup-action" href={actionHref}>
                     {actionLabel}

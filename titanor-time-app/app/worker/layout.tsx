@@ -1,6 +1,8 @@
 import type { Metadata, Viewport } from 'next';
 import type { ReactNode } from 'react';
 import { ServiceWorkerRegistration } from '@/components/worker-pwa/ServiceWorkerRegistration';
+import { WorkerAppNavigation } from '@/components/worker-pwa/WorkerAppNavigation';
+import { resolveServerSession } from '@/lib/server-session';
 
 // docs/titanor-time/T7A_1_ATTENDANCE_CLOCK_DESIGN.md Addendum "T7A.10C.1" §C — the PWA manifest
 // link and service worker registration are scoped to the /worker* prefix ONLY via this nested
@@ -29,11 +31,21 @@ export const viewport: Viewport = {
   themeColor: '#05070b'
 };
 
-export default function WorkerLayout({ children }: { children: ReactNode }) {
+export default async function WorkerLayout({ children }: { children: ReactNode }) {
+  const session = await resolveServerSession();
+  const workerSession = session?.user.roles.includes('WORKER') ? session : null;
+
   return (
     <>
       <ServiceWorkerRegistration />
-      {children}
+      {workerSession ? (
+        <div className="wk-app-shell">
+          <WorkerAppNavigation username={workerSession.user.username} />
+          <div className="wk-app-content">{children}</div>
+        </div>
+      ) : (
+        children
+      )}
     </>
   );
 }

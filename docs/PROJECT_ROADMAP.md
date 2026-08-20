@@ -888,9 +888,16 @@ ADMIN создаёт отдельного pilot-работника и выдаё
 активируется, устанавливает PWA, проходит online GPS, настоящий offline cold restart, sync,
 редактирование/отправку timetable; затем ADMIN без FOREMAN выполняет review/final approval и
 проверяет отчёт. Автоматические эмуляторные доказательства не засчитываются вместо телефона.
-Перед ручным прогоном требуется отдельный HTTPS pilot URL: текущий loopback preview `:3244`
-нельзя корректно использовать для PWA с внешнего телефона. Чек-лист и форма результата:
+Для ручного прогона поднят отдельный временный HTTPS pilot URL с isolated DB: loopback preview
+`:3244` не используется телефоном. Чек-лист и форма результата:
 `docs/titanor-time/T9_DEVICE_ACCEPTANCE_PLAN_RU.md`.
+
+**`[2026-08-20] Первый iPhone feedback.`** Реальная activation/login/worker clock граница пройдена.
+Зафиксированы и взяты в исправление четыре UX-пробела: создание City отсутствовало вопреки API-
+контракту; optional City/WorkArea выглядели как `NOT DONE`; payroll period не объяснялся; из
+History/Enter hours не было постоянного возврата на worker home. Полный worker-dashboard по
+владельческому эскизу и map-assisted geofence входят в ближайший post-acceptance UX slice. Ограничение
+iOS остаётся платформенным: Safari Share → Add to Home Screen нельзя заменить программным one-click.
 
 # ЭТАП 10. НЕДЕЛЬНАЯ ОБКАТКА
 

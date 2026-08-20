@@ -91,7 +91,7 @@ async function main() {
     await page.waitForURL(/\/admin/, { timeout: 15000 });
 
     await page.goto(`${BASE}/admin/setup`, { waitUntil: 'networkidle' });
-    const workerRow = page.locator('.setup-item', { hasText: 'Worker' });
+    const workerRow = page.locator('.setup-item').filter({ has: page.locator('.setup-label', { hasText: /^Worker$/ }) });
     const workerAction = workerRow.locator('a.setup-action');
     const workerHref = await workerAction.getAttribute('href');
     check('9: fully-set-up Worker checklist item links to /admin/workers (Manage), not /new', workerHref === '/admin/workers', workerHref);
@@ -116,8 +116,42 @@ async function main() {
   const postSecondSite = await jsonFetch(`${BASE}/api/admin/setup-status`, { headers: authHeaders(freshCookie) });
   check('12: creating an additional site does not change hasWorkArea/hasTemplate/hasWorker/hasAssignment/hasOpenPeriod', postSecondSite.body.hasWorkArea === preSecondSite.body.hasWorkArea && postSecondSite.body.hasTemplate === preSecondSite.body.hasTemplate && postSecondSite.body.hasWorker === preSecondSite.body.hasWorker && postSecondSite.body.hasAssignment === preSecondSite.body.hasAssignment && postSecondSite.body.hasOpenPeriod === preSecondSite.body.hasOpenPeriod, postSecondSite.body);
 
+  // T9.7 feedback follow-up: the documented city.create contract is now a real idempotent,
+  // permission-gated and audited endpoint rather than a read-only dropdown source.
+  const cityKey = randomUUID();
+  const cityName = `Checklist City ${randomUUID().slice(0, 6)}`;
+  const cityCreate = await jsonFetch(`${BASE}/api/admin/cities`, {
+    method: 'POST',
+    headers: authHeaders(freshCookie, { 'Idempotency-Key': cityKey }),
+    body: JSON.stringify({ name: cityName })
+  });
+  check('T9.7/C1: ADMIN creates City', cityCreate.status === 201 && cityCreate.body.name === cityName, cityCreate);
+  const cityReplay = await jsonFetch(`${BASE}/api/admin/cities`, {
+    method: 'POST',
+    headers: authHeaders(freshCookie, { 'Idempotency-Key': cityKey }),
+    body: JSON.stringify({ name: cityName })
+  });
+  check('T9.7/C2: exact City replay returns the same id', cityReplay.status === 201 && cityReplay.body.id === cityCreate.body.id, cityReplay);
+  const cityDuplicate = await jsonFetch(`${BASE}/api/admin/cities`, {
+    method: 'POST',
+    headers: authHeaders(freshCookie, { 'Idempotency-Key': randomUUID() }),
+    body: JSON.stringify({ name: cityName })
+  });
+  check('T9.7/C3: duplicate City name is a stable 409', cityDuplicate.status === 409 && cityDuplicate.body.error?.code === 'DUPLICATE_CITY_NAME', cityDuplicate);
+  const cityStatus = await jsonFetch(`${BASE}/api/admin/setup-status`, { headers: authHeaders(freshCookie) });
+  check('T9.7/C4: City creation flips informational hasCity true', cityStatus.status === 200 && cityStatus.body.hasCity === true, cityStatus);
+  const cityAuditCount = await prisma.auditEvent.count({ where: { eventType: 'CITY_CREATED', entityId: cityCreate.body.id } });
+  check('T9.7/C5: replay creates exactly one CITY_CREATED audit', cityAuditCount === 1, cityAuditCount);
+
   // ---- Group B: full fixture + Worker A/B CRUD/lifecycle (23 numbered scenarios) ----
   const fx = await buildFixture(BASE);
+
+  const workerCityCreate = await jsonFetch(`${BASE}/api/admin/cities`, {
+    method: 'POST',
+    headers: authHeaders(fx.workerA.cookie, { 'Idempotency-Key': randomUUID() }),
+    body: JSON.stringify({ name: `Forbidden City ${randomUUID().slice(0, 6)}` })
+  });
+  check('T9.7/C6: WORKER cannot create City', workerCityCreate.status === 403 && workerCityCreate.body.error?.code === 'FORBIDDEN', workerCityCreate);
 
   const browser = await chromium.launch({ headless: true });
   const page = await browser.newPage();

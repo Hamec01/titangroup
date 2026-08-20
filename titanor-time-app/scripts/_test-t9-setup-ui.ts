@@ -57,6 +57,19 @@ async function main() {
     const sitesNewLink = page.locator('a[href="/admin/sites/new"]');
     check('D2 (final confirmation): /admin/sites exposes a real, clickable link to /new', await sitesNewLink.count() === 1);
 
+    // T9.7 owner feedback: City was visible in Setup but had no creation path. It remains optional
+    // for a Site, but the admin can now create it through the promised POST contract and real UI.
+    await page.goto(`${BASE}/admin/setup`, { waitUntil: 'networkidle' });
+    const cityRow = page.locator('.setup-item', { hasText: 'City' });
+    check('T9.7: absent City is labelled Optional, never Not done', (await cityRow.locator('.setup-status-optional').count()) === 1);
+    check('T9.7: Setup exposes the real City creation route', (await cityRow.locator('a[href="/admin/cities/new"]').count()) === 1);
+    await cityRow.locator('a[href="/admin/cities/new"]').click();
+    await page.waitForURL(/\/admin\/cities\/new/, { timeout: 10000 });
+    await page.locator('#city-name').fill(`Browser City ${fx.run}`);
+    await page.locator('button[type="submit"]').click();
+    await page.waitForURL(/\/admin\/setup/, { timeout: 10000 });
+    check('T9.7: City creation returns to Setup and flips the row to Done', (await page.locator('.setup-item', { hasText: 'City' }).locator('.setup-status-done').count()) === 1);
+
     // D3/D4 fix: End action visible and keyboard-reachable on assignments/foreman-assignments.
     await page.goto(`${BASE}/admin/assignments`, { waitUntil: 'networkidle' });
     const endButtons = page.locator('button', { hasText: 'End' });
@@ -84,10 +97,23 @@ async function main() {
     await page.locator('.login-submit').click();
     await page.waitForURL(/\/worker/, { timeout: 15000 });
 
-    for (const path of ['/worker', '/worker/periods', '/worker/history']) {
+    for (const path of ['/worker', '/worker/periods', '/worker/history', `/worker/periods/${fx.periodId}/hours`]) {
       await page.goto(`${BASE}${path}`, { waitUntil: 'networkidle' });
       check(`Mobile 390x844: ${path} has zero page-level horizontal overflow`, await hasNoHorizontalOverflow(page), path);
+      check(`T9.7: ${path} has the persistent worker menu`, (await page.locator('button[aria-label="Open menu"]').count()) === 1, path);
     }
+
+    await page.goto(`${BASE}/worker/history`, { waitUntil: 'networkidle' });
+    await page.locator('button[aria-label="Open menu"]').click();
+    check('T9.7: History menu exposes Home', (await page.locator('#worker-app-menu a[href="/worker"]').count()) === 1);
+    await page.locator('#worker-app-menu a[href="/worker"]').click();
+    await page.waitForURL(`${BASE}/worker`, { timeout: 10000 });
+    check('T9.7: Home navigation returns from History to the clock', (await page.locator('.wk-clock-card').count()) === 1);
+
+    await page.locator('button[aria-label="Open menu"]').click();
+    await page.locator('#worker-app-menu button', { hasText: 'Sign out' }).click();
+    await page.waitForURL(/\/login/, { timeout: 10000 });
+    check('T9.7: worker menu Sign out revokes the session and returns to login', new URL(page.url()).pathname === '/login');
 
     await page.close();
   }

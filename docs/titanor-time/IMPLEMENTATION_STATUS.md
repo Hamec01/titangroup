@@ -1,16 +1,31 @@
 # Titanor Time — Implementation Status
 
-Обновлено: 2026-08-20 Europe/Helsinki (T9.7 — physical-device acceptance prepared)
+Обновлено: 2026-08-20 Europe/Helsinki (T9.7 — первый physical-device UX feedback)
+
+**`[2026-08-20]` T9.7 — первый реальный iPhone-прогон выявил setup/navigation UX gaps.**
+Владелец на отдельном HTTPS pilot создал реального WORKER, активировал его на iPhone и дошёл до
+рабочего `/worker` с доступным Check In. Обнаружено: обещанный контракт `POST /api/admin/cities`
+не был реализован; optional City/WorkArea выглядели как обязательные незавершённые шаги; смысл
+payroll period не объяснялся; вложенные worker-страницы не имели постоянного пути домой/logout.
+Исправление добавляет permission-gated/idempotent/audited создание City и форму, честные
+`Optional` состояния/описания Setup, а также общий `/worker` header/menu (Home, Calendar and hours,
+History, Install, Sign out) для всех online worker routes. `WorkArea` подтверждён как nullable
+подразделение Site: один Site может использоваться без единой WorkArea.
+
+iOS platform constraint зафиксирован явно: браузер не может программно открыть Safari или вызвать
+`Add to Home Screen`; на iPhone установка требует Safari → Share → Add to Home Screen. Android
+Chrome может показать системный `beforeinstallprompt`. Запрошенные address search + map + draggable
+pin/radius и полный redesign worker home по эскизу владельца — отдельный следующий product slice,
+не подмешиваются в acceptance hotfix к уже работающему clock/outbox.
 
 **`[2026-08-20]` T9.7 — physical-device acceptance подготовлен, ручной прогон pending.**
 Зафиксирован постоянный owner-run checklist
 `docs/titanor-time/T9_DEVICE_ACCEPTANCE_PLAN_RU.md`: отдельный pilot WORKER, реальная activation
 link/QR, PWA install, online GPS, offline cold restart+sync, mobile timetable submit и
 ADMIN-led review/final approval без FOREMAN. Результат Android и iPhone учитывается раздельно;
-непроверенная платформа не объявляется PASS. Текущий preview работает из правильного worktree и
-manifest/icons отвечают 200 с корректным контрактом, но слушает только `127.0.0.1:3244`.
-Следующий обязательный gate перед телефоном — отдельный временный HTTPS hostname + isolated pilot
-DB; production нельзя использовать или менять для этой проверки.
+непроверенная платформа не объявляется PASS. После подготовки был поднят отдельный временный HTTPS
+pilot hostname с isolated PostgreSQL; production не используется. На нём владелец уже прошёл
+реальную activation/login границу iPhone; оставшаяся матрица продолжается после feedback fix выше.
 
 **`[2026-08-20]` T9.6 — verified backup/restore.** После T9.5 заполненная disposable DB сохранена
 `pg_dump -F c` (321,618 bytes, mode 0600, SHA-256 зафиксирован, 597 TOC entries), затем

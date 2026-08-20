@@ -137,11 +137,12 @@ touch target ≥ 48px), `/foreman/*` — desktop-first с поддержкой �
 - Данные: статус каждого шага — есть ли хотя бы один `City`/`WorkSite`/`WorkArea`/
   `WorkScheduleTemplate`/`Employee`/`SiteAssignment`/открытый `PayrollPeriod`; `hasCity` —
   информационный, не блокирует
-- Действия: переход к созданию недостающей сущности
-- Состояния: loading; каждый шаг — «сделано»/«не сделано», без вымышленных чисел
+- Действия: переход к созданию недостающей сущности; City → `/admin/cities/new`
+- Состояния: loading; обязательный шаг — «сделано»/«не сделано», City и WorkArea при отсутствии —
+  честное `Optional`, без вымышленных чисел
 - Откуда: первый вход `ADMIN`, когда чек-лист не завершён; далее из nav
 - Куда: `/admin/sites/new`, `/admin/templates/new` (не done) / `/admin/templates` (done),
-  `/admin/workers/new`, `/admin/assignments/new`, `/admin/periods`
+  `/admin/cities/new`, `/admin/workers/new`, `/admin/assignments/new`, `/admin/periods/new`
 - API: `GET /api/admin/setup-status`
 - DoD: точно отражает БД, не кэширует «выполнено» после деактивации сущности
 
@@ -268,6 +269,16 @@ touch target ≥ 48px), `/foreman/*` — desktop-first с поддержкой �
 - **T9.3 fix `[2026-08-20]`**: тот же класс дефекта, что у `/admin/workers` выше (D2) — ссылки
   «create new» не было. Добавлена — `docs/titanor-time/T9_INTERNAL_TEST_PLAN.md` §3/§4.
   Поиск/фильтр/сортировка/пагинация по-прежнему не реализованы.
+
+#### `/admin/cities/new` 🟢 **`[2026-08-20] T9.7 feedback fix`**
+- Роли: `ADMIN`, `SUPER_ADMIN` (`city.create`)
+- Приоритет: desktop
+- Назначение: создать optional справочник City до/после создания Site
+- Действия: idempotent submit; network-unknown retry повторяет тот же key/body
+- Состояния: validation, duplicate name, permission/session loss, network unknown
+- Откуда: `/admin/setup`
+- Куда: `/admin/setup`; созданный City появляется в city dropdown Site
+- API: `POST /api/admin/cities`
 
 #### `/admin/sites/new` 🟢
 - Роли: `ADMIN`, `SUPER_ADMIN`

@@ -377,8 +377,26 @@ button:disabled {
   background: rgba(255, 255, 255, 0.06);
 }
 
-.setup-label {
+.setup-status-optional {
+  color: #93c5fd;
+  background: rgba(147, 197, 253, 0.12);
+}
+
+.setup-copy {
+  min-width: 0;
   flex: 1;
+  display: grid;
+  gap: 3px;
+}
+
+.setup-label {
+  color: var(--text);
+}
+
+.setup-description {
+  color: var(--text-soft);
+  font-size: 0.82rem;
+  line-height: 1.35;
 }
 
 .setup-item-column {
@@ -504,11 +522,148 @@ button:disabled {
 /* docs/titanor-time/01_SCREEN_MAP.md §3 — worker screens are mobile-first,
    "крупные элементы, минимум действий": bigger touch targets and simpler
    stacked layout than the desktop-first setup/worker-table styles above. */
+.wk-app-shell {
+  min-height: 100dvh;
+}
+
+.wk-app-header {
+  position: sticky;
+  top: 0;
+  z-index: 40;
+  height: 64px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(5, 7, 11, 0.96);
+  -webkit-backdrop-filter: blur(16px);
+  backdrop-filter: blur(16px);
+}
+
+.wk-app-header-inner {
+  width: min(100%, 528px);
+  height: 100%;
+  margin: 0 auto;
+  padding: 0 16px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.wk-app-brand {
+  color: var(--white);
+  font-size: 1.08rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  text-decoration: none;
+}
+
+.wk-menu-button {
+  position: relative;
+  z-index: 52;
+  width: 44px;
+  height: 44px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--white);
+  font-size: 1.6rem;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.wk-menu-backdrop {
+  position: fixed;
+  z-index: 49;
+  inset: 64px 0 0;
+  border: 0;
+  background: rgba(0, 0, 0, 0.6);
+}
+
+.wk-app-menu {
+  position: fixed;
+  z-index: 50;
+  top: 64px;
+  right: max(16px, calc((100vw - 528px) / 2 + 16px));
+  width: min(320px, calc(100vw - 32px));
+  padding: 14px;
+  display: grid;
+  gap: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 10px;
+  background: #0b111b;
+  box-shadow: 0 24px 64px rgba(0, 0, 0, 0.48);
+}
+
+.wk-menu-account {
+  margin: 0 0 4px;
+  padding: 6px 8px 12px;
+  color: var(--text-soft);
+  font-size: 0.85rem;
+  overflow-wrap: anywhere;
+}
+
+.wk-menu-account strong {
+  color: var(--text);
+}
+
+.wk-menu-link,
+.wk-menu-logout {
+  min-height: 46px;
+  padding: 0 14px;
+  display: flex;
+  align-items: center;
+  border: 1px solid transparent;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  text-align: left;
+  text-decoration: none;
+}
+
+.wk-menu-link[aria-current='page'] {
+  border-color: rgba(147, 197, 253, 0.35);
+  background: rgba(147, 197, 253, 0.1);
+  color: #bfdbfe;
+}
+
+.wk-menu-logout {
+  width: 100%;
+  margin-top: 4px;
+  border-color: rgba(255, 255, 255, 0.1);
+  cursor: pointer;
+}
+
+.wk-menu-logout:disabled {
+  cursor: wait;
+  opacity: 0.65;
+}
+
+.wk-menu-error {
+  margin: 4px 8px 0;
+  color: var(--error);
+  font-size: 0.82rem;
+}
+
+.wk-app-content .wk-page {
+  min-height: calc(100dvh - 64px);
+}
+
 .wk-page {
   min-height: 100dvh;
   display: flex;
   justify-content: center;
   padding: 24px 16px;
+}
+
+@media (max-width: 560px) {
+  .setup-item {
+    align-items: flex-start;
+    flex-wrap: wrap;
+  }
+
+  .setup-action {
+    margin-left: auto;
+  }
 }
 
 .wk-card {
