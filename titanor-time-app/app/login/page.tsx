@@ -11,6 +11,7 @@ import {
   isLoginLocale,
   type LoginLocale
 } from './i18n';
+import { recordAuthenticatedUser } from '@/lib/offline-outbox/device';
 
 // docs/titanor-time/04_ADMIN_FIRST_API_CONTRACTS.md §0 — required on every
 // mutating request, checked server-side by POST /api/auth/login.
@@ -130,12 +131,21 @@ export default function LoginPage() {
         return;
       }
 
-      const body = (await response.json()) as { user: { roles: string[] } };
+      const body = (await response.json()) as { user: { id: string; roles: string[] } };
       const target = resolveHomeRoute(body.user.roles);
       if (!target) {
         setErrorMessage(t.noRole);
         setLoading(false);
         return;
+      }
+      // docs/titanor-time/T8_PWA_DESIGN.md §F.3 — records "who is now logged in in this browser"
+      // for ANY role, before navigating away. An IndexedDB failure here must never block or slow
+      // down a successful login — swallowed deliberately, offline snapshot display simply fails
+      // closed later if this never completes.
+      try {
+        await recordAuthenticatedUser(body.user.id);
+      } catch {
+        // Intentionally ignored — see comment above.
       }
       router.push(target);
       // Deliberately not resetting `loading` here — the form stays disabled

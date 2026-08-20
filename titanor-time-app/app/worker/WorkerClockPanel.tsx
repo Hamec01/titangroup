@@ -10,6 +10,7 @@ import { getAllOutboxEvents, type OutboxEventRecord, type CachedAssignment } fro
 import { projectClockState } from '@/lib/offline-outbox/projection';
 import { subscribeOutboxChanges } from '@/lib/offline-outbox/broadcast';
 import { warmOfflineShellCache } from '@/lib/offline-outbox/pwa-warm-cache';
+import { WorkerLink } from '@/components/worker-pwa/WorkerLink';
 
 // docs/titanor-time/T7A_1_ATTENDANCE_CLOCK_DESIGN.md §6/§7/§9.11 (T7A.7B — offline outbox client).
 // Every Check In/Out/Switch Site action now writes to the IndexedDB outbox FIRST (one atomic
@@ -611,19 +612,19 @@ export function WorkerClockPanel({ initialClockState, assignments, workerName, t
       {(periodsHref || historyHref || installHref) && (
         <div className="wk-clock-nav">
           {periodsHref && (
-            <Link href={periodsHref} className="wk-back-link">
+            <WorkerLink href={periodsHref} className="wk-back-link">
               My periods →
-            </Link>
+            </WorkerLink>
           )}
           {historyHref && (
-            <Link href={historyHref} className="wk-back-link">
+            <WorkerLink href={historyHref} className="wk-back-link">
               History →
-            </Link>
+            </WorkerLink>
           )}
           {installHref && (
-            <Link href={installHref} className="wk-back-link">
+            <WorkerLink href={installHref} className="wk-back-link">
               Install app →
-            </Link>
+            </WorkerLink>
           )}
         </div>
       )}

@@ -13,8 +13,20 @@
 // falls through untouched — this file makes no `event.respondWith(...)` call for it at all, so the
 // browser performs its own normal network handling; this script itself never calls `fetch()` for
 // those requests.
+//
+// docs/titanor-time/T8_PWA_DESIGN.md §F.10 (T8.8) — the first branch (network-first, cached-shell-
+// on-exception-only) now also covers a fixed set of known /worker/** UI routes (isKnownWorkerUiRoute
+// below), not just /worker itself, so the same single cached /worker-offline document can serve as
+// the offline fallback for periods/history/period-detail/hours/day-detail/submit/install too. Real
+// HTTP responses (including 401/403/404/409/500) are still always returned exactly as received —
+// only a genuine fetch() exception falls back to the cache. No new Cache Storage entry is added by
+// this — still one document, still PII-free, still never authenticated HTML or an API response.
 
-const CACHE_VERSION = 'v1';
+// v2 (T8.8, docs/titanor-time/T8_PWA_DESIGN.md §F.10) — the navigation allowlist grew to cover
+// more known /worker/** UI routes, not just /worker itself, so the SW's own behavior changed.
+// lib/offline-outbox/pwa-warm-cache.ts duplicates this exact literal (it cannot import from this
+// raw, unbundled script) — keep both in sync; scripts/_test-pwa-offline-views.ts asserts they match.
+const CACHE_VERSION = 'v2';
 const CACHE_PREFIX = 'titanor-time-worker-shell-';
 const CACHE_NAME = `${CACHE_PREFIX}${CACHE_VERSION}`;
 const OFFLINE_SHELL_PATH = '/worker-offline';
@@ -24,6 +36,25 @@ const STATIC_CACHE_EXACT = ['/manifest.webmanifest'];
 
 function isStaticCacheable(pathname) {
   return STATIC_CACHE_EXACT.includes(pathname) || STATIC_CACHE_PREFIXES.some((p) => pathname.startsWith(p));
+}
+
+// docs/titanor-time/T8_PWA_DESIGN.md §F.6/§F.10 — known /worker/** UI routes that get the SAME
+// network-first-with-offline-shell-fallback treatment as /worker itself (T8.8). Structural match
+// (periodId/date are arbitrary), not an exact path list. Deliberately mirrors
+// lib/offline-outbox/read-snapshots.ts's ROUTE_PATTERNS one-for-one, but duplicated here for the
+// same reason CACHE_NAME/isSafeToCache already are — this file cannot import that module.
+const WORKER_UI_ROUTE_PATTERNS = [
+  /^\/worker\/periods\/[^/]+\/hours\/[^/]+\/?$/,
+  /^\/worker\/periods\/[^/]+\/hours\/?$/,
+  /^\/worker\/periods\/[^/]+\/submit\/?$/,
+  /^\/worker\/periods\/[^/]+\/?$/,
+  /^\/worker\/periods\/?$/,
+  /^\/worker\/history\/?$/,
+  /^\/worker\/install\/?$/
+];
+
+function isKnownWorkerUiRoute(pathname) {
+  return WORKER_UI_ROUTE_PATTERNS.some((re) => re.test(pathname));
 }
 
 /**
@@ -100,7 +131,7 @@ self.addEventListener('fetch', (event) => {
   }
 
   if (request.mode === 'navigate') {
-    if (url.pathname === '/worker') {
+    if (url.pathname === '/worker' || isKnownWorkerUiRoute(url.pathname)) {
       event.respondWith(networkFirstWithOfflineShellFallback(request));
       return;
     }
@@ -108,9 +139,9 @@ self.addEventListener('fetch', (event) => {
       event.respondWith(networkFirstUpdatingCache(request, OFFLINE_SHELL_PATH));
       return;
     }
-    // Every other navigation (including /worker/periods, /worker/history, /admin/**, /foreman/**,
-    // /login, anything else) is never intercepted — real network request, real browser offline
-    // error on failure, never silently swapped for this shell.
+    // Every other navigation (any /worker/* path not in the known list above, /admin/**,
+    // /foreman/**, /login, anything else) is never intercepted — real network request, real
+    // browser offline error on failure, never silently swapped for this shell.
     return;
   }
 

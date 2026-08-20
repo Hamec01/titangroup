@@ -259,8 +259,9 @@ rules.
 
 ## §D. Explicitly not in this slice
 
-- **T8.8** (offline read-only fallback for `/admin`/`/foreman`/other worker screens) — not started,
-  next separate slice.
+- **T8.8** (offline read-only fallback for the rest of the Worker screens) — not started when this
+  section was written; implemented `[2026-08-20]` in a later addendum to this same document, see
+  §F below. `/admin`/`/foreman` remain out of PWA scope entirely, in T8.8 too.
 - **Physical device verification** (a real iPhone, a real Android phone) — external acceptance
   gate, per T9.7. Everything in this slice is proven via real HTTP requests and Playwright-driven
   Chromium (with emulated viewports/user-agents where a distinct device class needs to be
@@ -294,3 +295,303 @@ rules.
   `navigator.userAgent`/`navigator.platform`/`navigator.maxTouchPoints`, all of which Playwright can
   set precisely), but does **not** exercise real WebKit rendering/PWA-install behavior. Documented
   honestly, not presented as "real iOS verified."
+
+---
+
+## §F. T8.8 — Account-bound Offline Read-only Worker Views (2026-08-20)
+
+Written **before** code. Base: `f84c5a4 feat(time): add PWA installation guidance`. This closes
+T8.8, and with it, all of ЭТАП 8.
+
+Goal: extend the existing real offline Check In/Out/Switch Site (T7A.7B/T7A.10C.1 — **unchanged by
+this addendum**) with a safe, **read-only**, **account-bound** cached view of the rest of the
+Worker screens, without ever caching authenticated HTML or API responses, and without ever letting
+one browser/device show cached data belonging to a different account.
+
+### F.1 Why two separate storage mechanisms, not one
+
+`Cache Storage` (SW-managed) stays exactly what it already was: one generic, personalization-free
+HTML document (`/worker-offline`) plus static assets. It is not, and does not become, a per-route or
+per-user cache — there is still only ever one shell document in it. **Personal data belongs only in
+IndexedDB**, as small allowlisted DTOs, never as HTML, and never in Cache Storage. This split is
+what makes the account-binding check possible at all: Cache Storage has no concept of "whose data is
+this", but an IndexedDB record can carry an explicit `ownerUserId`/`deviceInstallationId` pair that
+application code checks before rendering anything from it.
+
+### F.2 Account-binding invariants (the security boundary)
+
+A cached read-only view is shown **only if all six of these hold simultaneously**:
+
+1. **Last successfully authenticated browser user** (`deviceState.lastAuthenticatedUserId`) — written
+   client-side by the login page immediately after a successful `POST /api/auth/login`, before
+   navigating to the home route. The fastest-updating signal; reflects "who is currently logged in
+   in this browser", independent of whether any offline bootstrap has run yet.
+2. **`ownerUserId` confirmed by a successful attendance-context bootstrap**
+   (`deviceState.ownerUserId`) — written only inside `applyContextResponse` after
+   `GET /api/worker/attendance/context` returns `200`, from the response's own (new, additive)
+   `userId` field. The strongest signal — server-confirmed that *this* `deviceInstallationId`
+   legitimately belongs to *this* user's employee record.
+3. **`snapshot.ownerUserId`** — set at capture time from the rendering page's own session (always
+   accurate for that request — never from IndexedDB, never from a query/body param).
+4. **Current `deviceInstallationId`** (`deviceState.deviceInstallationId`).
+5. **`snapshot.deviceInstallationId`** — set at capture time from whatever `deviceState` currently
+   holds.
+6. **Device is not `paused`** (`DEVICE_NOT_OWNED`/`DEVICE_REVOKED`) — a paused device shows its
+   existing pause banner (`WorkerClockPanel`, unchanged) instead of any cached view.
+
+All of (1)≡(2)≡(3) and (4)≡(5) must hold, plus (6). Any single mismatch → the view is treated as
+**not available for this account**, not as "no data was ever cached" — the UI copy is deliberately
+the same safe message either way (§F.6), so a stale-but-foreign snapshot can never be distinguished
+from "nothing cached" by an unauthorized viewer.
+
+**Write side is deliberately looser than read side.** Capturing a snapshot only requires a current
+`deviceInstallationId` to exist (created eagerly at login, see F.3) — it does **not** require
+`ownerUserId` (2) to already be confirmed. `snapshot.ownerUserId` is always the *server session's*
+user id at render time, which is unconditionally correct regardless of whether this device has ever
+successfully bootstrapped. This means a snapshot is always tagged with the truth at write time; the
+6-invariant check is what gates *display*, which is the actual point of attack (an offline viewer
+reading someone else's leftover cache), not capture.
+
+### F.3 Login-time marker and bootstrap-time owner binding
+
+`app/login/page.tsx`'s `handleSubmit` already parses `{ user: { id, roles } }` from a successful
+login response but previously only used `roles`. It now also calls a new
+`recordAuthenticatedUser(userId)` (`lib/offline-outbox/device.ts`) **before** `router.push(target)`,
+for **every** successful login (WORKER, ADMIN, FOREMAN alike — not conditioned on role), because the
+cross-account rule needs to know when a *non-worker* account logs in too (§F.7). This call is
+wrapped so any IndexedDB failure is swallowed — **login itself never fails or slows down because of
+it** (per the AUTH SECURITY HOTFIX's own pre-hydration gating, this write happens fully inside the
+already-hydrated `handleSubmit` handler, never before hydration, so it cannot reintroduce that
+regression). If `deviceState` doesn't exist yet, `recordAuthenticatedUser` creates it (same default
+shape `ensureDeviceBootstrapped` would), so a device identity exists as soon as anyone logs in —
+`ownerUserId` stays `null` until a real bootstrap confirms it.
+
+`GET /api/worker/attendance/context`'s response gains one additive field, `userId: string` — the
+caller's own `authenticated.user.id`, already resolved from the session (never from a query/body
+param — no new information is disclosed that the session didn't already establish; this is not a
+new permission). `applyContextResponse` (`lib/offline-outbox/device.ts`) sets
+`deviceState.ownerUserId = wire.userId` on every successful `200` response, alongside its existing
+`bootstrapped`/`nextDeviceSequence`/`contextAssignments` updates.
+
+**Legacy v1 `deviceState` rows** (migrated to v2 without ever having `ownerUserId`) read as
+`ownerUserId: undefined` — the account-binding check treats `undefined`/`null` as an automatic
+mismatch, so a legacy row is `unbound` and shows no snapshots until one successful online bootstrap
+sets `ownerUserId` for the first time. No special-case code needed — this falls out of the same
+equality check as every other mismatch.
+
+### F.4 IndexedDB v1 → v2
+
+`DB_NAME`/`STORE_CLOCK_OUTBOX`/`STORE_LOCAL_CLOCK_STATE`/`STORE_DEVICE_STATE` are **not** renamed or
+recreated. `DB_VERSION` becomes `2`. The `onupgradeneeded` handler keeps its existing
+`if (!db.objectStoreNames.contains(...))`-guarded creation of the three v1 stores completely
+unchanged (a fresh v2 install still creates all three, byte-for-byte the same shape as before) and
+adds one new object store:
+
+```text
+STORE_WORKER_READ_SNAPSHOTS = 'workerReadSnapshots', keyPath: 'key'
+  index 'by-capturedAt' on 'capturedAt' (non-unique) — used only by the bounded LRU eviction
+  (getAll() + JS sort would also work at this record count, but the task explicitly permits this
+  index and it is the more idiomatic/efficient way to find "the oldest N" without loading
+  everything into memory).
+```
+
+Two new **optional** fields are added to `DeviceStateRecord` (`ownerUserId: string | null`,
+`lastAuthenticatedUserId: string | null`) — this is a TypeScript-level, not IndexedDB-level, change
+(IndexedDB itself is schemaless per-record; adding an optional field to the interface does not
+require an upgrade step by itself). Existing v1 rows simply read these two fields as `undefined`
+until the write paths above populate them — exactly the "legacy row is unbound" behavior §F.3
+describes, verified by an explicit real-v1-fixture-upgraded-to-v2 test (§F.11 #2/#18).
+
+**What v1→v2 must preserve byte-for-byte** (upgrade only ever *adds* a store; it never touches rows
+in the three existing stores): every `clockOutbox` row regardless of `state`
+(`PENDING`/`SENDING`/`FAILED_TERMINAL`/`ACKED`), `deviceState.deviceInstallationId`/
+`nextDeviceSequence`/`contextAssignments`/`paused`, and `localClockState`. The upgrade handler
+performs **zero** reads/writes against the three existing stores — it only calls
+`db.createObjectStore(STORE_WORKER_READ_SNAPSHOTS, ...)`, which cannot alter existing store contents
+by construction. This is the safest possible upgrade shape and is why it's chosen over any kind of
+data migration/rewrite of the existing rows.
+
+### F.5 Snapshot record shape, allowlist, and bounds
+
+```ts
+interface WorkerReadSnapshotRecord {
+  key: string;              // deterministic — see F.6
+  routeKind: SnapshotRouteKind;
+  payloadVersion: 1;
+  ownerUserId: string;
+  deviceInstallationId: string;
+  capturedAt: string;       // ISO, client clock — UX-only, never authoritative (§F.9)
+  payload: <allowlisted DTO, one shape per routeKind — see F.6>;
+}
+```
+
+**Bounds (documented, enforced in code, not just convention):**
+
+- `MAX_SNAPSHOT_PAYLOAD_BYTES = 16384` (16 KiB) — `JSON.stringify(payload).length` measured before
+  write; over the limit → the write is skipped entirely (fail closed, no partial/truncated record),
+  logged nowhere (no console output that could itself leak anything).
+- `MAX_SNAPSHOT_RECORDS = 40` — a global cap across all owners/routes on this device. Before
+  inserting a record that would push the total over 40, the oldest record by `capturedAt` (via the
+  `by-capturedAt` index, one cursor step) is deleted first, inside the **same** read-write
+  transaction as the insert — the eviction and the write are atomic together, and neither this nor
+  any other snapshot operation ever runs a non-IDB `await` (a network call, a timer, a promise not
+  backed by an IDBRequest) while a transaction is open, which is the classic way to have IndexedDB
+  silently auto-close a transaction mid-operation.
+- Eviction only ever targets `STORE_WORKER_READ_SNAPSHOTS` — the eviction routine's transaction
+  scope is `[STORE_WORKER_READ_SNAPSHOTS]` only, structurally unable to touch the other three
+  stores.
+
+**Forbidden in the payload, enforced by the TypeScript allowlist types themselves (no field a
+snapshot type doesn't declare can ever be spread into it) plus a runtime scan in the permanent test
+suite**: session token/cookie, raw GPS, `latitude`/`longitude`/`accuracy`, `payloadHash`,
+`requestId`, `deviceSequence`, password/email/phone, any server DTO passed through unfiltered, HTML,
+or an unknown nested metadata blob. Every snapshot payload type below is a hand-picked, flat-ish
+subset — never `...spread` of a raw server DTO.
+
+### F.6 Route → snapshot mapping
+
+| Route | `routeKind` | Key | Payload (allowlisted) |
+|---|---|---|---|
+| `/worker/periods` | `periods-list` | `${ownerUserId}:periods-list` | `{ periods: { id, startDate, endDate, timesheetId, timesheetStatus }[] }` |
+| `/worker/history` | `history-list` | `${ownerUserId}:history-list` | `{ timesheets: { id, startDate, endDate, timesheetId, timesheetStatus }[] }` |
+| `/worker/periods/:id` | `period-detail` | `${ownerUserId}:period-detail:${periodId}` | `{ periodId, startDate, endDate, timesheetStatus, editable, assignments: { id, siteName, workAreaName, templateName, isPrimary }[], returnReasons: SnapshotReturnReason[] }` |
+| `/worker/periods/:id/hours` | `hours-list` | `${ownerUserId}:hours-list:${periodId}` | `{ periodId, startDate, endDate, timesheetStatus, editable, days: { date, dayType, confirmedZero, totalMinutes, siteNames: string[] }[], returnReasons }` |
+| `/worker/periods/:id/hours/:date` | `day-detail` | `${ownerUserId}:day-detail:${periodId}:${date}` | `{ periodId, date, dayType, confirmedZero, timesheetStatus, segments: { startAt, endAt, siteName, workAreaName, breaks: { startAt, endAt, paid }[] }[], returnReasons }` |
+| `/worker/periods/:id/submit` | `submit-summary` | `${ownerUserId}:submit-summary:${periodId}` | `{ periodId, startDate, endDate, timesheetStatus, workedDaysCount, totalDaysCount, totalMinutes, returnReasons }` |
+| `/worker/install` | *(none)* | *(none)* | data-free static offline notice — no business snapshot needed or captured, matches this route's existing zero-personalization design (T8.7 §C.1) |
+| `/worker`, `/worker-offline` | *(none — pre-existing)* | *(none)* | unchanged real offline clock (T7A.7B/T7A.10C.1), not a snapshot at all |
+
+`SnapshotReturnReason = { scopeType, siteName, contextSiteName, reason, returnedAt }` — a deliberate,
+explicit subset of `ReturnReasonView` (drops `scopePurpose`/`siteId`/`contextSiteId`, which the
+existing `ReturnReasonsNotice` component doesn't even read).
+
+The read side parses `window.location.pathname` with a small matcher (mirrors the six patterns
+above, one regex each) to recover `{ routeKind, periodId?, date? }`, then builds the same key format
+with the account-binding-confirmed `ownerUserId` — capture and lookup can never disagree on key
+shape because both go through one shared `buildSnapshotKey()` function.
+
+### F.7 Cross-account behavior (each bullet is its own test, §F.11 group B)
+
+- **A → logout → B, A's outbox empty**: device may still pass the *existing* safe rotation
+  (`ensureDeviceBootstrapped`'s `DEVICE_NOT_OWNED` + empty-outbox branch, unchanged). Rotation
+  assigns a **new** `deviceInstallationId`, which alone already makes every one of A's snapshots
+  fail invariant (4)≡(5); `ownerUserId` also becomes `B` on B's subsequent successful bootstrap.
+- **A → logout → B, A has pending/failed outbox events**: nothing is deleted — outbox, device row,
+  and A's snapshots all persist untouched. B's own bootstrap attempt gets `DEVICE_NOT_OWNED` and (
+  since the outbox isn't empty) the device **pauses** instead of rotating — B sees the existing pause
+  banner on `/worker` explaining a device conflict, and any offline view B tries to open shows the
+  same safe "not saved for offline viewing yet" message (§F.9) as a device with nothing cached at
+  all — `lastAuthenticatedUserId` is `B` but `ownerUserId` is still stale `A`, an automatic
+  mismatch. Resolution path (unchanged from T7A.10C.1): log back in as A once, online, to flush the
+  queue.
+- **Worker → ADMIN/FOREMAN login on the same browser**: `recordAuthenticatedUser` still runs (it's
+  role-agnostic) and sets `lastAuthenticatedUserId` to the admin/foreman's own user id — this alone
+  makes every worker snapshot's `ownerUserId` mismatch invariant (1)≡(3), regardless of what
+  `deviceState.ownerUserId` says. Worker snapshots are never reachable through `/admin`/`/foreman`
+  UI anyway (PWA/offline code doesn't exist there at all — §F.10), so this is defense-in-depth for
+  the case where the SAME physical device later has a worker session again without ever revisiting
+  `/worker` to refresh the binding. The pending worker outbox is untouched by an admin/foreman login.
+- **`DEVICE_NOT_OWNED`/`DEVICE_REVOKED`**: outbox preserved, snapshots not shown (invariant 6),
+  never an automatic destructive cleanup of anything.
+- **No network / a `401`**: never deletes outbox or snapshots, never reattributes existing local data
+  to whichever account happens to be current.
+- **No hidden auto-delete of pending outbox is ever introduced under the guise of "logout cleanup"**
+  — there still isn't a logout-cleanup feature at all (T7A.10C.1 §D's own stance, unchanged).
+
+### F.8 Snapshot capture — Server → Client boundary
+
+Each of the six Server Component pages in §F.6 (unchanged in their own authoritative DB reads/output
+— **zero new Prisma queries added for this feature**, every field in every payload above is a subset
+of data the page already fetched for its own rendering) now additionally renders one small new
+Client Component, `<SnapshotWriter kind="..." payload={...} />`
+(`components/worker-pwa/SnapshotWriter.tsx`), as a sibling to the existing page content. `payload` is
+the exact allowlisted object from §F.6, built inline in the Server Component right before return —
+plain object literals of strings/numbers/booleans/nulls (every source field was already a string by
+the time these pages read it — `formatDate()`/`SegmentView`/`ReturnReasonView` are already
+string-typed, so no `Date`-to-string conversion was even needed here, unlike a hypothetical page that
+still worked with raw `Date` objects). `SnapshotWriter` takes no other props, is not `async` (it's a
+plain synchronous function component, same rule as `InstallPrompt`), does no HTTP fetch of any kind,
+and its `useEffect` write is wrapped so a failure (IndexedDB unavailable, quota, anything) never
+throws into the page — the online page's own rendering and content are completely unaffected either
+way; this is a pure "while you're here, remember this for later" side effect.
+
+### F.9 Stale-data / read-only semantics
+
+Every offline read view (rendered by the shell's client code once it determines
+`window.location.pathname` matches one of the six known routes and the account-binding check
+passes) shows, verbatim: **`Offline — read-only`**, **`Last updated: <capturedAt, localized>`**, and
+a **`Reload when online`**/`Try again` action plus a link back to `/worker`. It never recomputes
+totals from the cached data as if fresh, never labels the cached status "current" without the
+`Offline — read-only` qualifier, and renders **zero** editable inputs, **zero** Save/Submit controls,
+and **zero** mutation-confirmation text — the day-detail view in particular reuses none of
+`DayEditor.tsx` (that component's whole purpose is editing; the offline view is a distinct, simpler,
+read-only renderer over the same segment shape). The **only** exception, as before, is the real
+attendance clock (`/worker`, `/worker-offline`) — its actions are durably queued in the outbox and
+this addendum does not touch that code path.
+
+If no snapshot exists for the resolved key (never visited online yet, evicted by the bounded LRU, or
+the account-binding check failed) the view shows exactly: *"This page has not been saved for offline
+viewing yet. Connect and open it once."* plus the link to `/worker` — never a fabricated empty list,
+never the browser's own network-error page.
+
+### F.10 Service worker navigation algorithm
+
+```text
+navigate to "/worker" or "/worker-offline":
+  unchanged from T7A.10C.1/its FOLLOW-UP — network-first, cached-shell-on-exception-only.
+
+navigate to a KNOWN /worker/** UI route (periods, periods/:id, periods/:id/hours,
+periods/:id/hours/:date, periods/:id/submit, history, install — matched structurally, not by an
+exact path list, since :id/:date are arbitrary):
+  network-first — the real response (including a genuine 401/403/404/409/500) is always returned
+  exactly as received, NEVER replaced.
+  ONLY on an actual fetch() exception (offline, DNS failure, connection reset — no HTTP response was
+  received at all) → caches.match('/worker-offline') (the same single cached shell as before).
+
+any other navigation (/admin/**, /foreman/**, /login, any /worker/* path not in the known list,
+anything else): unchanged — never intercepted, real network request, real browser error on failure.
+
+non-GET, /api/**, RSC/data requests: unchanged — never touched, structurally not reachable by any
+branch above.
+```
+
+The browser preserves the **original requested URL** in `window.location`/the address bar when a
+service worker serves a cached response for a navigation — only the response *body* comes from the
+cache, not the URL. This (standard, spec-defined SW behavior, not a trick) is exactly what lets the
+shell's client code read `window.location.pathname` and know it was asked for
+`/worker/periods/abc123` even though the HTML it's hydrating is the generic cached shell document.
+
+**Cache version bump.** `CACHE_VERSION` moves `v1` → `v2` (SW behavior changed — the navigation
+allowlist grew), so `CACHE_NAME` becomes `titanor-time-worker-shell-v2`. The existing
+namespace-isolation `activate` handler (T7A.10C.1 FOLLOW-UP — delete only keys starting with
+`CACHE_PREFIX` that aren't the current `CACHE_NAME`) needs no code change at all to correctly evict
+the old `v1` entry while leaving any foreign, non-prefixed cache untouched — the prefix-based
+deletion logic was already version-agnostic. `lib/offline-outbox/pwa-warm-cache.ts`'s own duplicated
+`CACHE_NAME` literal (it cannot import from `public/sw.js`, a raw unbundled script — same reason the
+two files already duplicate `isSafeToCache`) is bumped to the identical `'titanor-time-worker-shell-v2'`
+string in the same commit. A permanent test (§F.11 #59) extracts both literals via source-text regex
+and asserts equality, specifically to catch any future edit that updates one file and not the other.
+
+### F.11 Testing, documentation, and everything else
+
+Full scenario list, test counts, regression results, and technical-check evidence are in this
+session's own final report (not duplicated here) — this section only records the *design* decisions
+a future reader needs, per this addendum's own header goal.
+
+### F.12 Explicitly not in this sub-slice
+
+- `/admin`/`/foreman` remain completely outside PWA/offline scope — no manifest, no SW control, no
+  snapshot capture, no read-only views. Structurally impossible, not just unimplemented (SW `scope`
+  is still `/worker`, unchanged).
+- No change to `ClockEvent`/`ClockShift`/materializer, FIFO/`deviceSequence`/idempotency, geofence
+  evaluation, or the scheduler — the real offline clock mutation path is untouched end to end.
+- No Prisma schema/migration/permission change. The one API surface change
+  (`GET /api/worker/attendance/context` gaining `userId`) is additive, reuses the existing
+  `attendance.clock.read.own` permission, and discloses nothing the session didn't already establish.
+- No logout/shared-device cleanup policy change — still intentionally unimplemented (T7A.10C.1 §D).
+- No redesign — all new CSS lives in two new, additive namespaces (`.wk-snap-*` for the read-only
+  views, `.wk-connectivity-*` for the shared banner), no existing rule edited.
+- Physical device installation/offline testing remains the external T9.7 acceptance gate.
+
+**With this addendum, ЭТАП 8 (T8.1–T8.8) is fully complete.** Next recommended step: ЭТАП 9
+(internal functional test/audit), per `docs/PROJECT_ROADMAP.md`.

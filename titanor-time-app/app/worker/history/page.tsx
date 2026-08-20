@@ -1,7 +1,10 @@
 import { redirect } from 'next/navigation';
-import Link from 'next/link';
 import { resolveServerSession } from '@/lib/server-session';
 import { listWorkerTimesheets } from '@/lib/worker-context';
+import { SnapshotWriter } from '@/components/worker-pwa/SnapshotWriter';
+import { ConnectivityBanner } from '@/components/worker-pwa/ConnectivityBanner';
+import { WorkerLink } from '@/components/worker-pwa/WorkerLink';
+import type { HistoryListPayload } from '@/lib/offline-outbox/read-snapshots';
 
 export const dynamic = 'force-dynamic';
 
@@ -43,12 +46,17 @@ export default async function WorkerHistoryPage() {
 
   const timesheets = await listWorkerTimesheets(session.user.employeeId);
 
+  const snapshotPayload: HistoryListPayload = {
+    timesheets: timesheets.map((t) => ({ id: t.id, startDate: t.startDate, endDate: t.endDate, timesheetId: t.timesheetId, timesheetStatus: t.timesheetStatus }))
+  };
+
   return (
     <main className="wk-page">
       <div className="wk-card">
-        <Link href="/worker/periods" className="wk-back-link">
+        <ConnectivityBanner />
+        <WorkerLink href="/worker/periods" className="wk-back-link">
           ← Current periods
-        </Link>
+        </WorkerLink>
         <h1>History</h1>
         {timesheets.length === 0 ? (
           <p className="wk-empty">No periods yet.</p>
@@ -56,17 +64,18 @@ export default async function WorkerHistoryPage() {
           <ul className="wk-period-list">
             {timesheets.map((t) => (
               <li key={t.timesheetId}>
-                <Link href={`/worker/periods/${t.id}`} className="wk-period-item">
+                <WorkerLink href={`/worker/periods/${t.id}`} className="wk-period-item">
                   <span className="wk-period-dates">
                     {t.startDate} – {t.endDate}
                   </span>
                   <span className={`wk-status-badge wk-status-${t.timesheetStatus.toLowerCase()}`}>{STATUS_LABELS[t.timesheetStatus] ?? t.timesheetStatus}</span>
-                </Link>
+                </WorkerLink>
               </li>
             ))}
           </ul>
         )}
       </div>
+      <SnapshotWriter routeKind="history-list" ownerUserId={session.user.id} payload={snapshotPayload} />
     </main>
   );
 }

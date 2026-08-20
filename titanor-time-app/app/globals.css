@@ -2172,3 +2172,55 @@ a.ov-summary-card:focus-visible {
   gap: 6px;
   font-size: 0.92rem;
 }
+
+/* docs/titanor-time/T8_PWA_DESIGN.md §F (T8.8) — offline read-only views + shared connectivity
+   banner. New, additive namespaces only; nothing above this point is edited. Reuses existing
+   .wk-card/.wk-period-list/.wk-status-badge/etc. and existing custom properties. */
+
+.wk-snap-card {
+  display: grid;
+  gap: 14px;
+}
+
+.wk-snap-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+}
+
+.wk-snap-badge {
+  /* No text-transform — the literal "Offline — read-only" text must render exactly as written
+     (task requirement), not a CSS-stylized variant. */
+  flex-shrink: 0;
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: rgba(251, 191, 36, 0.15);
+  color: #fbbf24;
+}
+
+.wk-snap-updated {
+  font-size: 0.82rem;
+  color: var(--text-soft);
+}
+
+.wk-snap-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px 16px;
+  margin-top: 4px;
+}
+
+.wk-connectivity-banner {
+  border: 1px solid rgba(251, 191, 36, 0.35);
+  background: rgba(251, 191, 36, 0.1);
+  border-radius: 6px;
+  padding: 10px 14px;
+  font-size: 0.88rem;
+  color: #fde68a;
+  margin: 0 0 12px;
+}

@@ -66,6 +66,6 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       break;
   }
 
-  const context = await buildAttendanceContext(authenticated.user.employeeId, helsinkiToday(), bootstrap.installation.id, bootstrap.installation.lastProcessedSequence);
+  const context = await buildAttendanceContext(authenticated.user.employeeId, helsinkiToday(), bootstrap.installation.id, bootstrap.installation.lastProcessedSequence, authenticated.user.id);
   return NextResponse.json(context, { status: 200, headers: successHeaders(requestId) });
 }

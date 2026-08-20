@@ -753,13 +753,30 @@ display-mode для честного installed-статуса. Ноль новы
 production standalone build). Физические iPhone/Android — внешний gate (T9.7), не проверялись.
 Design — `docs/titanor-time/T8_PWA_DESIGN.md` §C.
 
-**T8.8 (offline для остальных экранов) этим коммитом не начат.**
+## T8.8 — Offline 🟢 реализовано `[2026-08-20]`
 
-## T8.8 — Offline
+Account-bound read-only offline просмотр для 6 экранов `/worker/**` (periods list, history,
+period detail, hours list, day detail, submit summary) поверх существующего полного offline
+Check In/Check Out/Switch Site (ЭТАП 7A, не изменён). IndexedDB `titanor-time-outbox` v1→v2
+(аддитивно — новый store `workerReadSnapshots`, три существующих store не тронуты). Личные
+снапшоты только в IndexedDB как allowlisted DTO (без PII-полей: без токена/куки, без сырых
+GPS-координат, без payloadHash/requestId/deviceSequence); Cache Storage остаётся PII-free (только
+`/worker-offline` shell + статика), как и раньше. Показ снапшота требует одновременного совпадения
+6 сигналов account-binding (последний авторизованный пользователь браузера, подтверждённый
+bootstrap'ом ownerUserId, ownerUserId самого снапшота, текущий deviceInstallationId,
+deviceInstallationId снапшота, устройство не paused/revoked) — при смене аккаунта на одном
+устройстве чужие данные никогда не показываются, pending outbox не удаляется автоматически.
+`public/sw.js` расширен under network-first fallback на известные `/worker/**` UI-маршруты
+(scope остаётся `/worker`, `/admin`/`/foreman`/`/login`/`/api/**` не перехватываются), cache
+version v1→v2. Новый `WorkerLink` — offline-aware client navigation (forced document navigation
+только когда `navigator.onLine === false`, обычный `next/link` иначе). 72 сценария из
+99 browser/Node-проверок (`scripts/_test-offline-idb-invariants.ts` 23/23,
+`scripts/_test-offline-cold-restart.ts` 5/5, `scripts/_test-offline-views.ts` 71/71), плюс
+регрессия PWA install 59/59 и warm-cache/cold-restart/offline-outbox без изменений в
+FIFO/deviceSequence/materializer. Физическая установка на телефон — внешний gate T9.7, не
+проверялась. Design — `docs/titanor-time/T8_PWA_DESIGN.md` §F.
 
-Для остальных экранов первого релиза — корректное сообщение об отсутствии сети и кешированный
-read-only просмотр. Offline-синхронизация Check In/Check Out реализуется только отдельным проектом
-ЭТАП 7A; это не разрешение превращать все мутации приложения в offline-first без нового решения.
+**Этим коммитом ЭТАП 8 (T8.1–T8.8) полностью завершён.**
 
 # ЭТАП 9. ВНУТРЕННИЙ ТЕСТ
 

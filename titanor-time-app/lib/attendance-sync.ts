@@ -1301,10 +1301,15 @@ export interface AttendanceContextView {
   deviceInstallationId: string;
   lastProcessedSequence: string;
   assignments: AttendanceContextAssignment[];
+  /** docs/titanor-time/T8_PWA_DESIGN.md §F.3 (T8.8) — additive field. The caller's own User.id,
+   * always resolved from the session server-side (never from a query/body param) — lets the
+   * client confirm/record deviceState.ownerUserId. Not a new permission, discloses nothing the
+   * session didn't already establish. */
+  userId: string;
 }
 
 /** Only the site's CURRENT geofence snapshot — never historical versions (§2 task requirement). */
-export async function buildAttendanceContext(employeeId: string, today: Date, deviceInstallationId: string, lastProcessedSequence: bigint): Promise<AttendanceContextView> {
+export async function buildAttendanceContext(employeeId: string, today: Date, deviceInstallationId: string, lastProcessedSequence: bigint, userId: string): Promise<AttendanceContextView> {
   const assignments = await prisma.siteAssignment.findMany({
     where: { employeeId, validFrom: { lte: today }, OR: [{ validTo: null }, { validTo: { gte: today } }] },
     orderBy: [{ isPrimary: 'desc' }, { validFrom: 'asc' }],
@@ -1322,6 +1327,7 @@ export async function buildAttendanceContext(employeeId: string, today: Date, de
     serverNow: new Date().toISOString(),
     deviceInstallationId,
     lastProcessedSequence: lastProcessedSequence.toString(),
+    userId,
     assignments: assignments.map((a) => ({
       id: a.id,
       siteId: a.siteId,

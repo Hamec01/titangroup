@@ -95,7 +95,7 @@ async function scenarioFailThenSucceed() {
   const mod = await import(modulePath);
 
   await mod.warmOfflineShellCache();
-  const cache1 = await fakeCacheStorage.open('titanor-time-worker-shell-v1');
+  const cache1 = await fakeCacheStorage.open('titanor-time-worker-shell-v2');
   assert(!(await cache1.match('/worker-offline')), 'first warm (503) must NOT cache the shell');
   assert(calls.length === 1, `first warm should make exactly 1 fetch call (the failed shell fetch), got ${calls.length}`);
 
@@ -132,7 +132,7 @@ async function scenarioConcurrentDedup() {
   // shell fetch (1) + 2 assets (2) = 3 total network calls, not 6.
   assert(calls.length === 3, `two concurrent warm() calls must perform exactly one full fetch set (3 calls), got ${calls.length}`);
 
-  const cache = await fakeCacheStorage.open('titanor-time-worker-shell-v1');
+  const cache = await fakeCacheStorage.open('titanor-time-worker-shell-v2');
   assert(!!(await cache.match('/worker-offline')), 'concurrent warm must still cache the shell');
 
   console.log('PASS: scenario B — two concurrent warm() calls perform exactly one network fetch set.');

@@ -2,8 +2,11 @@
 // called from the ONLINE /worker page only, once per successful bootstrap. Browser-only. Must stay
 // in sync with the cache name literal in public/sw.js (that file cannot import this module — it
 // runs as a raw, unbundled service worker script, not through webpack).
+//
+// docs/titanor-time/T8_PWA_DESIGN.md §F.10 (T8.8) — bumped to v2 alongside public/sw.js's own
+// CACHE_VERSION in the same commit. scripts/_test-pwa-offline-views.ts asserts both literals match.
 
-const CACHE_NAME = 'titanor-time-worker-shell-v1';
+const CACHE_NAME = 'titanor-time-worker-shell-v2';
 const OFFLINE_SHELL_PATH = '/worker-offline';
 
 const ASSET_ATTR_PATTERN = /<(?:script|link)\b[^>]*\b(?:src|href)="([^"]+)"[^>]*>/gi;

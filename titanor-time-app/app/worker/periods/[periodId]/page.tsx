@@ -1,9 +1,12 @@
-import Link from 'next/link';
 import { redirect } from 'next/navigation';
 import { resolveServerSession } from '@/lib/server-session';
 import { listWorkerTimesheets, listWorkerCurrentAssignments } from '@/lib/worker-context';
 import { getWorkerTimesheetSummary } from '@/lib/worker-timesheets';
 import { ReturnReasonsNotice } from './ReturnReasonsNotice';
+import { SnapshotWriter } from '@/components/worker-pwa/SnapshotWriter';
+import { ConnectivityBanner } from '@/components/worker-pwa/ConnectivityBanner';
+import { WorkerLink } from '@/components/worker-pwa/WorkerLink';
+import type { PeriodDetailPayload } from '@/lib/offline-outbox/read-snapshots';
 
 export const dynamic = 'force-dynamic';
 
@@ -61,9 +64,9 @@ export default async function WorkerPeriodDetailPage({ params }: RouteParams) {
       <main className="wk-page">
         <div className="wk-card">
           <p>This period is not available to you.</p>
-          <Link href="/worker/periods" className="wk-back-link">
+          <WorkerLink href="/worker/periods" className="wk-back-link">
             Back to your periods
-          </Link>
+          </WorkerLink>
         </div>
       </main>
     );
@@ -72,10 +75,22 @@ export default async function WorkerPeriodDetailPage({ params }: RouteParams) {
   const assignments = await listWorkerCurrentAssignments(employeeId, new Date(`${period.startDate}T00:00:00.000Z`));
   const summary = await getWorkerTimesheetSummary(employeeId, period.timesheetId);
   const returnReasons = 'code' in summary ? [] : summary.returnReasons;
+  const editable = EDITABLE_STATUSES.has(period.timesheetStatus);
+
+  const snapshotPayload: PeriodDetailPayload = {
+    periodId: period.id,
+    startDate: period.startDate,
+    endDate: period.endDate,
+    timesheetStatus: period.timesheetStatus,
+    editable,
+    assignments: assignments.map((a) => ({ id: a.id, siteName: a.siteName, workAreaName: a.workAreaName, templateName: a.templateName, isPrimary: a.isPrimary })),
+    returnReasons: returnReasons.map((r) => ({ scopeType: r.scopeType, siteName: r.siteName, contextSiteName: r.contextSiteName, reason: r.reason, returnedAt: r.returnedAt }))
+  };
 
   return (
     <main className="wk-page">
       <div className="wk-card">
+        <ConnectivityBanner />
         <h1>
           {period.startDate} – {period.endDate}
         </h1>
@@ -101,16 +116,17 @@ export default async function WorkerPeriodDetailPage({ params }: RouteParams) {
           </ul>
         )}
 
-        {EDITABLE_STATUSES.has(period.timesheetStatus) ? (
-          <Link href={`/worker/periods/${period.id}/hours`} className="wk-action-button">
+        {editable ? (
+          <WorkerLink href={`/worker/periods/${period.id}/hours`} className="wk-action-button">
             Enter hours
-          </Link>
+          </WorkerLink>
         ) : (
-          <Link href={`/worker/periods/${period.id}/hours`} className="wk-back-link">
+          <WorkerLink href={`/worker/periods/${period.id}/hours`} className="wk-back-link">
             View hours
-          </Link>
+          </WorkerLink>
         )}
       </div>
+      <SnapshotWriter routeKind="period-detail" ownerUserId={session.user.id} periodId={period.id} payload={snapshotPayload} />
     </main>
   );
 }

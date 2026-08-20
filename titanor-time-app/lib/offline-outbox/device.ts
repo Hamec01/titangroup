@@ -21,6 +21,9 @@ interface ContextResponseWire {
   deviceInstallationId: string;
   lastProcessedSequence: string;
   assignments: ContextAssignmentWire[];
+  /** docs/titanor-time/T8_PWA_DESIGN.md §F.3 (T8.8) — additive field, the caller's own session
+   * user id (never from a query/body param server-side). Confirms deviceState.ownerUserId. */
+  userId: string;
 }
 
 export type BootstrapOutcome =
@@ -198,7 +201,10 @@ async function applyContextResponse(deviceState: DeviceStateRecord, wire: Contex
     nextDeviceSequence,
     contextAssignments: mapAssignments(wire.assignments),
     contextFetchedAt: new Date().toISOString(),
-    paused: null
+    paused: null,
+    // docs/titanor-time/T8_PWA_DESIGN.md §F.2/§F.3 — server-confirmed owner binding, set only on a
+    // genuine 200 from /attendance/context. Never derived from anything the client already had.
+    ownerUserId: wire.userId
   };
   await persistDeviceState(updated);
   return { kind: 'READY', deviceState: updated };
@@ -212,4 +218,31 @@ export async function retryBootstrap(): Promise<BootstrapOutcome> {
     await persistDeviceState({ ...deviceState, paused: null });
   }
   return ensureDeviceBootstrapped();
+}
+
+/**
+ * docs/titanor-time/T8_PWA_DESIGN.md §F.3 (T8.8) — called by app/login/page.tsx immediately after
+ * ANY successful login (every role, not just WORKER), before navigating away. Records "who is
+ * currently logged in in this browser" as fast as possible — independent of whether a device
+ * bootstrap has ever run. If no deviceState row exists yet, creates one with the same default
+ * shape ensureDeviceBootstrapped would (ownerUserId stays null/unconfirmed until a real bootstrap
+ * succeeds) so a device identity exists as soon as anyone logs in. Never throws — the caller wraps
+ * this so a failure here can never affect the login flow itself.
+ */
+export async function recordAuthenticatedUser(userId: string): Promise<void> {
+  const deviceState = await getDeviceState();
+  const next: DeviceStateRecord = deviceState
+    ? { ...deviceState, lastAuthenticatedUserId: userId }
+    : {
+        singleton: SINGLETON_KEY,
+        deviceInstallationId: crypto.randomUUID(),
+        bootstrapped: false,
+        nextDeviceSequence: 0,
+        contextAssignments: null,
+        contextFetchedAt: null,
+        paused: null,
+        ownerUserId: null,
+        lastAuthenticatedUserId: userId
+      };
+  await persistDeviceState(next);
 }

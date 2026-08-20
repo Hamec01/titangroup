@@ -1,10 +1,13 @@
-import Link from 'next/link';
 import { redirect } from 'next/navigation';
 import { resolveServerSession } from '@/lib/server-session';
 import { listWorkerTimesheets } from '@/lib/worker-context';
 import { getWorkerTimesheetDraft, getWorkerTimesheetCurrentVersion, getWorkerTimesheetSummary, type SegmentView } from '@/lib/worker-timesheets';
 import { prisma } from '@/lib/prisma';
 import { ReturnReasonsNotice } from '../ReturnReasonsNotice';
+import { SnapshotWriter } from '@/components/worker-pwa/SnapshotWriter';
+import { ConnectivityBanner } from '@/components/worker-pwa/ConnectivityBanner';
+import { WorkerLink } from '@/components/worker-pwa/WorkerLink';
+import type { HoursListPayload } from '@/lib/offline-outbox/read-snapshots';
 
 export const dynamic = 'force-dynamic';
 
@@ -47,9 +50,9 @@ export default async function WorkerHoursListPage({ params }: RouteParams) {
       <main className="wk-page">
         <div className="wk-card">
           <p>This period is not available to you.</p>
-          <Link href="/worker/periods" className="wk-back-link">
+          <WorkerLink href="/worker/periods" className="wk-back-link">
             Back to your periods
-          </Link>
+          </WorkerLink>
         </div>
       </main>
     );
@@ -73,12 +76,29 @@ export default async function WorkerHoursListPage({ params }: RouteParams) {
   const summary = await getWorkerTimesheetSummary(employeeId, period.timesheetId);
   const returnReasons = 'code' in summary ? [] : summary.returnReasons;
 
+  const snapshotPayload: HoursListPayload = {
+    periodId,
+    startDate: period.startDate,
+    endDate: period.endDate,
+    timesheetStatus: period.timesheetStatus,
+    editable,
+    days: days.map((day) => ({
+      date: day.date,
+      dayType: day.dayType,
+      confirmedZero: day.confirmedZero,
+      totalMinutes: segmentMinutes(day.segments),
+      siteNames: [...new Set(day.segments.map((s) => siteNameById.get(s.siteId) ?? s.siteId))]
+    })),
+    returnReasons: returnReasons.map((r) => ({ scopeType: r.scopeType, siteName: r.siteName, contextSiteName: r.contextSiteName, reason: r.reason, returnedAt: r.returnedAt }))
+  };
+
   return (
     <main className="wk-page">
       <div className="wk-card">
-        <Link href={`/worker/periods/${periodId}`} className="wk-back-link">
+        <ConnectivityBanner />
+        <WorkerLink href={`/worker/periods/${periodId}`} className="wk-back-link">
           ← {period.startDate} – {period.endDate}
-        </Link>
+        </WorkerLink>
         <h1>Hours</h1>
         <ReturnReasonsNotice status={period.timesheetStatus} reasons={returnReasons} />
         {!editable && <p className="wk-readonly-note">Read-only — this timesheet is being reviewed.</p>}
@@ -106,9 +126,9 @@ export default async function WorkerHoursListPage({ params }: RouteParams) {
               return (
                 <li key={day.date}>
                   {editable ? (
-                    <Link href={`/worker/periods/${periodId}/hours/${day.date}`} className="wk-day-item">
+                    <WorkerLink href={`/worker/periods/${periodId}/hours/${day.date}`} className="wk-day-item">
                       {content}
-                    </Link>
+                    </WorkerLink>
                   ) : (
                     <div className="wk-day-item wk-day-item-readonly">{content}</div>
                   )}
@@ -119,11 +139,12 @@ export default async function WorkerHoursListPage({ params }: RouteParams) {
         )}
 
         {editable && (
-          <Link href={`/worker/periods/${periodId}/submit`} className="wk-action-button">
+          <WorkerLink href={`/worker/periods/${periodId}/submit`} className="wk-action-button">
             Review and submit
-          </Link>
+          </WorkerLink>
         )}
       </div>
+      <SnapshotWriter routeKind="hours-list" ownerUserId={session.user.id} periodId={periodId} payload={snapshotPayload} />
     </main>
   );
 }

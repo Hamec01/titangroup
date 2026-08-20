@@ -5523,6 +5523,16 @@ device-emulation через Playwright); legal/privacy approval 90-дневно�
 `/worker`, offline outbox/FIFO не менялись T8.7 ни на строку (подтверждено `git diff`). Physical
 device gap, отмеченный здесь как "только эмуляция", по-прежнему открыт после T8.7 — см. T9.7.
 
+**`[2026-08-20]` Cross-link — T8.8 Account-bound Offline Read-only Worker Views.** Расширяет `GET
+/api/worker/attendance/context` (§7 выше) одним additive полем `userId` (server-resolved из
+сессии, тот же `attendance.clock.read.own`) — используется исключительно для account-binding
+нового read-only offline слоя, ноль изменений в bootstrap/upsert/device-ownership семантике этого
+раздела. IndexedDB `titanor-time-outbox` bump v1→v2 строго аддитивен — `clockOutbox`/
+`localClockState`/`deviceState` (весь offline clock/outbox/FIFO из этого документа) не
+переименованы, не пересозданы, их содержимое сохраняется byte-for-byte через апгрейд (доказано
+`scripts/_test-offline-idb-invariants.ts`). Полный контракт нового слоя —
+`docs/titanor-time/T8_PWA_DESIGN.md` §F.
+
 ---
 
 ## Addendum — T7A.10C.2 Full Pilot E2E, Restart and Verified Backup/Restore (2026-08-18)

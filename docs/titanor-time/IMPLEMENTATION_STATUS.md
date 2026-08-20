@@ -1,6 +1,122 @@
 # Titanor Time — Implementation Status
 
-Обновлено: 2026-08-20 Europe/Helsinki (feat: add PWA installation guidance — T8.5-T8.7)
+Обновлено: 2026-08-20 Europe/Helsinki (feat: add account-bound offline worker views — T8.8, ЭТАП 8 завершён)
+
+**`[2026-08-20]` T8.8 — feat(time): add account-bound offline worker views.** Account-bound
+read-only offline просмотр для 6 read-only экранов `/worker/**` поверх уже существующего полного
+offline Check In/Check Out/Switch Site (ЭТАП 7A/T7A.7B/T7A.10C.1 — не переписан, не изменена ни
+одна строка `sync-runner.ts`/`outbox.ts`/`projection.ts`/`pwa-warm-cache.ts`'s cache-warming логики,
+подтверждено `git diff --stat`). Design написан ДО кода —
+`docs/titanor-time/T8_PWA_DESIGN.md` §F.
+
+**IndexedDB v1→v2** — `titanor-time-outbox` DB version bump, строго аддитивный. Три существующих
+store (`clockOutbox`/`localClockState`/`deviceState`) не переименованы, не пересозданы; их создающие
+блоки в `onupgradeneeded` не тронуты ни на строку. Один новый store — `workerReadSnapshots`
+(`keyPath: 'key'`, index `by-capturedAt`). Two новых optional поля на `DeviceStateRecord`:
+`ownerUserId`/`lastAuthenticatedUserId` — legacy v1-строки читают их как `undefined` (unbound,
+снапшоты не показываются, пока не пройдёт один успешный online bootstrap). Доказано
+`scripts/_test-offline-idb-invariants.ts` (23/23): чистая v2-инсталляция отдельно от v1→v2
+апгрейда реального ранее сохранённого v1 fixture (изоляция через `child_process.spawnSync`
+per-phase — `fake-indexeddb`'s process-global registry и `db.ts`'s module-level cached
+`dbPromise` иначе не позволяют проверить оба сценария в одном процессе), включая byte-for-byte
+сохранение pending/sending/failed outbox-событий, `deviceInstallationId`, `nextDeviceSequence`,
+закэшированных assignments/geofences, local clock state.
+
+**Снапшот — только allowlisted DTO, никогда HTML/сырой server response.** Bounds:
+`MAX_SNAPSHOT_PAYLOAD_BYTES=16384` (fail-closed — запись пропускается, если превышен),
+`MAX_SNAPSHOT_RECORDS=40` (global cap, atomic oldest-by-`capturedAt` eviction через cursor в той же
+read-write транзакции, что и вставка). Запрещённые в снапшоте поля (проверено сканом): session
+token/cookie, сырые GPS/latitude/longitude/accuracy, `payloadHash`, `requestId`,
+`deviceSequence`, password/email/phone, неотфильтрованный server DTO. Захват — существующие Server
+Component-страницы остаются authoritative (без изменений в их DB-запросах); после успешного render
+передают только allowlisted plain-object payload новому маленькому Client Component
+(`SnapshotWriter.tsx`, не `async`, ноль дополнительных HTTP self-fetch, ошибка записи никогда не
+ломает online-страницу).
+
+**Account-binding — 6 сигналов, все обязаны совпасть одновременно для показа**: последний
+успешно авторизованный пользователь браузера (`lastAuthenticatedUserId`, записан мгновенно при
+логине, до какого-либо network round-trip) + подтверждённый успешным bootstrap'ом owner
+(`ownerUserId`, из нового additive `userId` поля `GET /api/worker/attendance/context` —
+server-resolved из сессии, не новое право, переиспользует `attendance.clock.read.own`) + оба
+должны совпадать со `snapshot.ownerUserId` + текущий `deviceInstallationId` должен совпадать со
+`snapshot.deviceInstallationId` + устройство не paused/revoked. Write-сторона (захват) намеренно
+слабее read-стороны (нужна только device identity) — подтверждение владельца это
+display-time gate, не capture-time. Смена аккаунта на одном устройстве (A→logout→B, включая с
+непустым pending outbox у A) никогда не показывает B данные A; pending outbox не удаляется
+автоматически ни при какой из проверенных ситуаций (foreign-account login, DEVICE_NOT_OWNED,
+DEVICE_REVOKED, отсутствие сети/401) — только явная синхронизация под тем же аккаунтом. Login на
+ADMIN/FOREMAN не показывает worker-снапшоты через UI, но и не удаляет worker-outbox.
+
+**Маршруты (6 read-only + 1 без снапшота)**: `/worker/periods`, `/worker/history`,
+`/worker/periods/:id`, `/worker/periods/:id/hours`, `/worker/periods/:id/hours/:date` (ноль
+editable input/Save/PATCH), `/worker/periods/:id/submit` (ноль Submit-кнопки) — каждый через новый
+`<WorkerSnapshotView>` (отдельный компонент от `DayEditor`/submit-формы, структурно не может
+отрендерить мутацию). Отсутствующий снапшот → точный безопасный текст «This page has not been
+saved for offline viewing yet. Connect and open it once.» + ссылка на `/worker`, никогда не
+браузерная сетевая ошибка. `/worker/install` — data-free offline notice (снапшот не нужен, install
+state зависит от live browser API). `/worker` сам (существующий real clock) — не изменён.
+
+**Service Worker** (`public/sw.js`) — navigation allowlist расширен с одного `/worker` на
+`/worker` + известные `/worker/**` UI-маршруты через `isKnownWorkerUiRoute()` (network-first,
+fallback на `/worker-offline` только по реальному `fetch()` exception; настоящие
+`401/403/404/409/500` никогда не подменяются shell'ом). Scope остаётся `/worker`;
+`/admin`/`/foreman`/`/login`/`/api/**`/non-GET по-прежнему структурно не перехватываются. Cache
+version `v1`→`v2` (поведение SW реально изменилось) в `sw.js` и `pwa-warm-cache.ts` синхронно —
+новый тест (сценарий 59) regex-извлекает оба литерала и падает при рассинхроне. Cache Storage
+остаётся PII-free (только `/worker-offline` shell + статика) — личные данные по-прежнему НИКОГДА
+не попадают в Cache Storage, только в IndexedDB.
+
+**`WorkerLink`** — offline-aware обёртка над `next/link`: online или неизвестен статус сети =
+обычная client-навигация; `navigator.onLine === false` = принудительная `window.location.assign`
+(document navigation через SW fallback, т.к. App Router's client-side RSC-запросы не могут быть
+подменены HTML shell'ом). Модификаторы клавиш/middle-click/target/download проходят нетронутыми;
+`/login`-ссылка в `WorkerClockPanel` намеренно оставлена обычным `next/link`. `navigator.onLine`
+используется только как UX-hint — реальный источник истины остаётся SW's real fetch()-exception.
+
+**Connectivity banner** — новый `ConnectivityBanner.tsx`, hydration-safe (тот же паттерн, что
+`WorkerClockPanel`), `role="status" aria-live="polite"`, не занимает места online.
+
+**Тесты — 99 проверок по всем 72 пронумерованным сценариям задачи**:
+`scripts/_test-offline-idb-invariants.ts` (Group A, 23/23, чистый Node + `fake-indexeddb`),
+`scripts/_test-offline-cold-restart.ts` (сценарий 29, 5/5, реальный Chromium
+`launchPersistentContext`, реальный process close+relaunch, реальный `context.setOffline`),
+`scripts/_test-offline-views.ts` (Groups B-E, 71/71 — account isolation, offline views,
+navigation/SW/cache, regression/security/UX). Найденные и исправленные test-only баги (не
+продуктовый код): `page.route()` не перехватывает SW-инициированные `fetch()` (нужен
+`context.route()`) — влияло на 5 сценариев реальных HTTP-кодов ошибок; `innerText()` учитывает CSS
+`text-transform` (в отличие от `textContent()`) — снята `text-transform: uppercase` с
+`.wk-snap-badge` (совпадает с уже существующим `.wk-status-badge`, у которого её никогда не было);
+PII-скан Cache Storage изначально ложно матчил имена TS-полей в скомпилированных `/_next/static/**`
+JS-бандлах (та же известная категория, что и в T7A.10C.1) — исправлен сужением скана только до
+HTML shell/manifest.
+
+**Регрессия**: `_test-pwa-install.ts` — 59/59 без изменений; `_test-warm-cache.ts` — 2/2 (два
+хардкод-литерала `-v1`→`-v2` обновлены вслед за намеренным cache-name bump'ом, единственное
+изменение в существующем регрессионном скрипте); `_test-retention-pacing.ts`,
+`_test-activation.ts`, `_test-corrections.ts` — без изменений.
+
+**Технические проверки**: `git diff --check`, `prisma validate` (schema не менялась), `tsc
+--noEmit` — 0 ошибок; `npm run build` в изолированной scratch-копии (production standalone, все 7
+изменённых/новых `/worker/**` route в выводе); `docker compose config --quiet`; Docker build
+только под уникальным временным тегом `titanor-time-app:t8-offline-views-test` (никогда
+`docker compose build app`, никогда `:latest`) — успех, образ удалён сразу после проверки;
+`titanor-time-app:latest` OCI revision **до и после** — `c63059588b65b728966f9658ef453b97d887f32d`
+(`c630595`), не изменился, backup-тег `production-recovery-c630595` не тронут.
+`prisma migrate deploy` дважды на заведомо чистом одноразовом PostgreSQL 16 (62 migrations, второй
+— no-op). Preview `127.0.0.1:3244` — `200`/`200` до и после, не перезапускался. Production
+(`titanor-time-app-1`/`titanor-time-db-1`) — `RestartCount=0`, `StartedAt` не менялся, никакого
+restart/recreate/up/deploy/migrate, scheduler не запускался. Все одноразовые
+контейнеры/scratch-копии удалены.
+
+**Не менялись**: Prisma schema/миграции, права/RolePermission, timesheet business logic,
+report/export logic, `ClockEvent`/`ClockShift`/materializer, FIFO/`deviceSequence`/idempotency,
+geofence evaluation, scheduler, admin/foreman UI, локализация, Setup CRUD, production deployment.
+
+**Этим коммитом ЭТАП 8 (T8.1–T8.8) полностью завершён.** Физическая установка на реальный
+телефон остаётся внешним acceptance gate (T9.7), не проверялась этим коммитом. Следующий
+рекомендуемый шаг — ЭТАП 9 (внутренний функциональный аудит), см. `PROJECT_ROADMAP.md`.
+
+---
 
 **`[2026-08-20]` T8.5-T8.7 PWA Reconciliation + Installation UX — feat(time): add PWA installation
 guidance.** Не переписывает уже работающую PWA (T7A.10C.1). Design —

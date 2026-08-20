@@ -1,13 +1,16 @@
 // docs/titanor-time/T7A_1_ATTENDANCE_CLOCK_DESIGN.md §6 — the exact three-store IndexedDB schema.
-// Browser-only: never imported by any server-only module, never imports Prisma/node:crypto/next
-// server code itself. A small native IndexedDB layer, no new runtime dependency.
+// docs/titanor-time/T8_PWA_DESIGN.md §F.4 (T8.8) — v1 -> v2 adds a fourth store, workerReadSnapshots,
+// without touching the three v1 stores at all. Browser-only: never imported by any server-only
+// module, never imports Prisma/node:crypto/next server code itself. A small native IndexedDB layer,
+// no new runtime dependency.
 
 export const DB_NAME = 'titanor-time-outbox';
-export const DB_VERSION = 1;
+export const DB_VERSION = 2;
 
 export const STORE_CLOCK_OUTBOX = 'clockOutbox';
 export const STORE_LOCAL_CLOCK_STATE = 'localClockState';
 export const STORE_DEVICE_STATE = 'deviceState';
+export const STORE_WORKER_READ_SNAPSHOTS = 'workerReadSnapshots';
 
 export type ClientGpsUnavailableReason = 'PERMISSION_DENIED' | 'TIMEOUT' | 'POSITION_UNAVAILABLE';
 export type OutboxGpsUnavailableReason = ClientGpsUnavailableReason | 'LOW_ACCURACY';
@@ -69,6 +72,15 @@ export interface DeviceStateRecord {
   contextAssignments: CachedAssignment[] | null;
   contextFetchedAt: string | null;
   paused: { reason: DevicePausedReason; since: string } | null;
+  /** docs/titanor-time/T8_PWA_DESIGN.md §F.2/§F.3 — set ONLY after a successful GET /attendance/
+   * context (server-confirmed this deviceInstallationId belongs to this user). Optional so a
+   * migrated v1 row reads as `undefined` (= unbound) until its first v2-era successful bootstrap. */
+  ownerUserId?: string | null;
+  /** §F.3 — set by the login page immediately after a successful login, for ANY role, before
+   * navigating away. Faster-updating than ownerUserId (doesn't require a bootstrap round-trip) —
+   * the two together close the "B logs in on A's device before B's first bootstrap" race. Optional
+   * for the same legacy-row reason as ownerUserId. */
+  lastAuthenticatedUserId?: string | null;
 }
 
 // Single row, keyPath "singleton" — UX-only projection of "where am I right now", NEVER read as
@@ -82,6 +94,21 @@ export interface LocalClockStateRecord {
   workAreaName: string | null;
   openedAt: string | null;
   updatedAt: string;
+}
+
+// docs/titanor-time/T8_PWA_DESIGN.md §F.5/§F.6 — one row per (owner, route, param) combination.
+// `payload` is always one of the hand-picked allowlisted shapes in lib/offline-outbox/read-
+// snapshots.ts — never a raw server DTO, never HTML, never GPS/session/device-sequence data.
+export type SnapshotRouteKind = 'periods-list' | 'history-list' | 'period-detail' | 'hours-list' | 'day-detail' | 'submit-summary';
+
+export interface WorkerReadSnapshotRecord {
+  key: string;
+  routeKind: SnapshotRouteKind;
+  payloadVersion: 1;
+  ownerUserId: string;
+  deviceInstallationId: string;
+  capturedAt: string;
+  payload: unknown;
 }
 
 const SINGLETON_KEY = 'singleton' as const;
@@ -112,6 +139,13 @@ export function getDb(): Promise<IDBDatabase> {
         }
         if (!db.objectStoreNames.contains(STORE_DEVICE_STATE)) {
           db.createObjectStore(STORE_DEVICE_STATE, { keyPath: 'singleton' });
+        }
+        // v1 -> v2 (T8.8, docs/titanor-time/T8_PWA_DESIGN.md §F.4) — additive only. The three
+        // blocks above are unchanged and never touch existing rows; this block only ever creates
+        // a new, empty store.
+        if (!db.objectStoreNames.contains(STORE_WORKER_READ_SNAPSHOTS)) {
+          const snapshotStore = db.createObjectStore(STORE_WORKER_READ_SNAPSHOTS, { keyPath: 'key' });
+          snapshotStore.createIndex('by-capturedAt', 'capturedAt');
         }
       };
       request.onsuccess = () => resolve(request.result);

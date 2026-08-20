@@ -1034,6 +1034,8 @@ shell.`**
   hydration-корректность, keyboard/aria-live, mobile/desktop overflow, PII-скан
 - **Физическая установка на реальном iPhone/Android — внешний acceptance gate (T9.7), не
   проверялась**
+- Offline (T8.8, `[2026-08-20]`): data-free offline notice (снапшот не нужен — install-статус
+  зависит от live browser API, который offline недоступен в принципе)
 
 #### `/worker/periods` ⚪ (список actionable периодов, точка входа при нескольких)
 - Роли: `WORKER`
@@ -1046,6 +1048,10 @@ shell.`**
 - Куда: `/worker/periods/[periodId]`
 - API: `GET /api/worker/periods/actionable`
 - DoD: два одновременных actionable периода видны и различимы, каждый ведёт на свой `timesheetId`
+- Offline (T8.8, `[2026-08-20]`): account-bound read-only снапшот в IndexedDB (`routeKind:
+  "periods-list"`), захватывается после online-рендера, без дополнительного запроса. Без сети и без
+  снапшота — «This page has not been saved for offline viewing yet. Connect and open it once.»
+  вместо ошибки браузера. Полный контракт — `docs/titanor-time/T8_PWA_DESIGN.md` §F.
 
 #### `/worker/periods/[periodId]` 🟢
 - Роли: `WORKER`
@@ -1075,6 +1081,8 @@ shell.`**
   почти одновременно — обе причины видны рядом (`03_...`, §4.7); после переотправки причины
   предыдущей версии не показываются как актуальные (новая версия — новые, в основном `PENDING`
   scope), но исходные строки не удаляются
+- Offline (T8.8, `[2026-08-20]`): account-bound read-only снапшот (`routeKind: "period-detail"`) —
+  назначения/статус/return reasons. Полный контракт — `docs/titanor-time/T8_PWA_DESIGN.md` §F.
 
 #### `/worker/periods/[periodId]/hours` ⚪ (ввод часов — фаза 3 роадмапа)
 - Роли: `WORKER`
@@ -1096,6 +1104,9 @@ shell.`**
 - DoD: попытка изменить immutable `SUBMITTED`-версию на месте отклоняется; UI вместо тупика
   предлагает разрешённый lifecycle-action: `Withdraw` до начала review, обработать `RETURNED`, либо
   correction request после final approval. Любое исправление создаёт новую версию, старую не меняет
+- Offline (T8.8, `[2026-08-20]`): account-bound read-only снапшот (`routeKind: "hours-list"`) —
+  список дней с типом/итогом минут/объектами. Полный контракт —
+  `docs/titanor-time/T8_PWA_DESIGN.md` §F.
 
 #### `/worker/periods/[periodId]/hours/[date]` ⚪
 - Роли: `WORKER`
@@ -1138,6 +1149,9 @@ shell.`**
   — отклонено; сохранение интервала без конца — отклонено на уровне формы (обязательное поле) и на
   сервере (`400 VALIDATION_ERROR`); ручное редактирование дня с ни разу не тронутым `OPEN`-
   предложением выводит его из `OPEN` без отдельного вызова «принять предложение»
+- Offline (T8.8, `[2026-08-20]`): account-bound read-only снапшот (`routeKind: "day-detail"`) —
+  интервалы дня без единого editable input/Save. Полный контракт —
+  `docs/titanor-time/T8_PWA_DESIGN.md` §F.
 
 #### `/worker/periods/[periodId]/submit` ⚪
 - Роли: `WORKER`
@@ -1154,6 +1168,9 @@ shell.`**
 - API: `POST /api/worker/timesheets/:timesheetId/submit`
 - DoD: попытка отправить с необработанным предложением — явный список, не общая ошибка; повторный
   ручной submit или scheduler для уже отправленной версии не создаёт дубль
+- Offline (T8.8, `[2026-08-20]`): account-bound read-only снапшот (`routeKind: "submit-summary"`) —
+  сводка перед отправкой, ноль кнопки Submit (только «Connect to submit»). Полный контракт —
+  `docs/titanor-time/T8_PWA_DESIGN.md` §F.
 
 #### `/worker/history` ⚪
 - Роли: `WORKER`
@@ -1166,6 +1183,8 @@ shell.`**
 - Откуда: `/worker/periods/[periodId]`, nav
 - Куда: `/worker/history/[timesheetId]`
 - API: `GET /api/worker/timesheets`
+- Offline (T8.8, `[2026-08-20]`): account-bound read-only снапшот (`routeKind: "history-list"`) —
+  список табелей со статусом. Полный контракт — `docs/titanor-time/T8_PWA_DESIGN.md` §F.
 
 #### `/worker/history/[timesheetId]` ⚪ (используется и как «возвращённый табель»)
 - Роли: `WORKER`

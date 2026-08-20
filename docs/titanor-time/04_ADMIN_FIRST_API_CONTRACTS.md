@@ -924,7 +924,7 @@ Check In/Out/Switch Site пишут в outbox и синкаются через `
 - Response `200`:
 ```json
 {
-  "serverNow": "ISO", "deviceInstallationId": "uuid",
+  "serverNow": "ISO", "deviceInstallationId": "uuid", "userId": "uuid",
   "lastProcessedSequence": "0",
   "assignments": [
     { "id": "uuid", "siteId": "uuid", "siteName": "...", "workAreaId": "uuid|null",
@@ -938,6 +938,13 @@ Check In/Out/Switch Site пишут в outbox и синкаются через `
 текущая версия сайта (`WorkSite.currentGeofenceVersionId`), исторические версии никогда не
 отдаются. Ответ никогда не содержит raw GPS сотрудника (этот endpoint вообще не читает
 `ClockEventLocation`).
+
+**`userId` (T8.8, `[2026-08-20]`, additive)** — `authenticated.user.id`, server-resolved из сессии,
+никогда из query/body. Не новое право (переиспользует тот же `attendance.clock.read.own`) и не
+раскрытие новых данных — employee/user id клиента и так всегда был известен серверу через сессию.
+Используется исключительно client-side для account-binding offline read-only снапшотов
+(`docs/titanor-time/T8_PWA_DESIGN.md` §F.2/§F.3) — записывается в `deviceState.ownerUserId` после
+успешного bootstrap'а и сверяется перед показом любого кэшированного снапшота.
 - Ошибки: `401 NOT_AUTHENTICATED`, `403 FORBIDDEN`/`NO_EMPLOYEE_PROFILE`/`DEVICE_NOT_OWNED`/
   `DEVICE_REVOKED`, `400 VALIDATION_ERROR` (malformed `deviceInstallationId`/`platform`)
 

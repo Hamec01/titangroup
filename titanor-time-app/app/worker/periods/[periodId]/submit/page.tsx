@@ -1,10 +1,13 @@
-import Link from 'next/link';
 import { redirect } from 'next/navigation';
 import { resolveServerSession } from '@/lib/server-session';
 import { listWorkerTimesheets } from '@/lib/worker-context';
 import { getWorkerTimesheetDraft, getWorkerTimesheetSummary } from '@/lib/worker-timesheets';
 import { ReturnReasonsNotice } from '../ReturnReasonsNotice';
 import SubmitButton from './SubmitButton';
+import { SnapshotWriter } from '@/components/worker-pwa/SnapshotWriter';
+import { ConnectivityBanner } from '@/components/worker-pwa/ConnectivityBanner';
+import { WorkerLink } from '@/components/worker-pwa/WorkerLink';
+import type { SubmitSummaryPayload } from '@/lib/offline-outbox/read-snapshots';
 
 export const dynamic = 'force-dynamic';
 
@@ -45,12 +48,24 @@ export default async function WorkerSubmitPage({ params }: RouteParams) {
   const summary = await getWorkerTimesheetSummary(employeeId, period.timesheetId);
   const returnReasons = 'code' in summary ? [] : summary.returnReasons;
 
+  const snapshotPayload: SubmitSummaryPayload = {
+    periodId,
+    startDate: period.startDate,
+    endDate: period.endDate,
+    timesheetStatus: period.timesheetStatus,
+    workedDaysCount: workedDays.length,
+    totalDaysCount: days.length,
+    totalMinutes,
+    returnReasons: returnReasons.map((r) => ({ scopeType: r.scopeType, siteName: r.siteName, contextSiteName: r.contextSiteName, reason: r.reason, returnedAt: r.returnedAt }))
+  };
+
   return (
     <main className="wk-page">
       <div className="wk-card">
-        <Link href={`/worker/periods/${periodId}/hours`} className="wk-back-link">
+        <ConnectivityBanner />
+        <WorkerLink href={`/worker/periods/${periodId}/hours`} className="wk-back-link">
           ← Back to hours
-        </Link>
+        </WorkerLink>
         <h1>Submit timesheet</h1>
         <ReturnReasonsNotice status={period.timesheetStatus} reasons={returnReasons} />
         <p>
@@ -62,6 +77,7 @@ export default async function WorkerSubmitPage({ params }: RouteParams) {
         <p className="wk-empty">Once submitted, you won&apos;t be able to edit your hours unless it&apos;s returned to you.</p>
         <SubmitButton periodId={periodId} timesheetId={period.timesheetId} />
       </div>
+      <SnapshotWriter routeKind="submit-summary" ownerUserId={session.user.id} periodId={periodId} payload={snapshotPayload} />
     </main>
   );
 }
