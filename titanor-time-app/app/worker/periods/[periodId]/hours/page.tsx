@@ -8,6 +8,7 @@ import { SnapshotWriter } from '@/components/worker-pwa/SnapshotWriter';
 import { ConnectivityBanner } from '@/components/worker-pwa/ConnectivityBanner';
 import { WorkerLink } from '@/components/worker-pwa/WorkerLink';
 import type { HoursListPayload } from '@/lib/offline-outbox/read-snapshots';
+import { workedMinutesFromIsoSegments } from '@/lib/reporting/report-format';
 
 export const dynamic = 'force-dynamic';
 
@@ -18,10 +19,6 @@ export const dynamic = 'force-dynamic';
 // what exists instead). DoD: no edit affordance is rendered at all once the timesheet isn't
 // editable, matching PATCH .../days/:date's own 409 DRAFT_NOT_EDITABLE guard.
 const EDITABLE_STATUSES = new Set(['DRAFT', 'RETURNED']);
-
-function segmentMinutes(segments: { startAt: string; endAt: string }[]): number {
-  return segments.reduce((sum, s) => sum + (new Date(s.endAt).getTime() - new Date(s.startAt).getTime()) / 60000, 0);
-}
 
 function formatMinutes(minutes: number): string {
   const h = Math.floor(minutes / 60);
@@ -86,7 +83,7 @@ export default async function WorkerHoursListPage({ params }: RouteParams) {
       date: day.date,
       dayType: day.dayType,
       confirmedZero: day.confirmedZero,
-      totalMinutes: segmentMinutes(day.segments),
+      totalMinutes: workedMinutesFromIsoSegments(day.segments),
       siteNames: [...new Set(day.segments.map((s) => siteNameById.get(s.siteId) ?? s.siteId))]
     })),
     returnReasons: returnReasons.map((r) => ({ scopeType: r.scopeType, siteName: r.siteName, contextSiteName: r.contextSiteName, reason: r.reason, returnedAt: r.returnedAt }))
@@ -108,7 +105,7 @@ export default async function WorkerHoursListPage({ params }: RouteParams) {
         ) : (
           <ul className="wk-day-list">
             {days.map((day) => {
-              const minutes = segmentMinutes(day.segments);
+              const minutes = workedMinutesFromIsoSegments(day.segments);
               const content = (
                 <>
                   <span className="wk-day-date">{day.date}</span>

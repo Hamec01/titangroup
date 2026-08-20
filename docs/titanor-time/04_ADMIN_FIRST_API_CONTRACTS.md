@@ -497,10 +497,14 @@ relevant query + canonical body)`.
   выбирается тот, чьи даты в `Europe/Helsinki` включают сегодня
 - Response `200`: `PayrollPeriod` либо `404 NO_OPEN_PERIOD`
 
-## 8. Административный fallback проверки табелей
+## 8. Административная проверка табелей (основной гарантированный путь)
 
-Решает случай, когда единственный прораб объекта сам держит роль `WORKER` и не может проверить
-собственные часы, и обслуживает `NON_SITE`-scope, недоступный `FOREMAN`.
+ADMIN/SUPER_ADMIN может проверить любой `TimesheetReviewScope` независимо от того, создан ли или
+назначен ли на объект пользователь с ролью `FOREMAN`. Это основной гарантированный путь продукта,
+а не только аварийный fallback. `FOREMAN` — необязательный уполномоченный проверяющий объекта:
+если заказчик использует эту роль, ему можно делегировать `SITE`-scope; `NON_SITE` по-прежнему
+проверяет только ADMIN/SUPER_ADMIN. Будущий доступ внешнего проверяющего по одноразовой ссылке без
+аккаунта в этот контракт не входит.
 
 #### `GET /api/admin/review-scopes`
 - Permission: `timesheet.scope_review.all`
@@ -537,9 +541,11 @@ relevant query + canonical body)`.
 - Response `200`: `{ "reviewScopeId", "status": "APPROVED" }`
 - Ошибки: `409 STALE_REVIEW_SCOPE` (устаревшая версия **либо** `Timesheet.status != SUBMITTED`),
   `403 SELF_APPROVAL_FORBIDDEN`
-- Audit: `FOREMAN_APPROVED` (реально выполнено `ADMIN`, `reviewerUserId` фиксирует это)
+- Audit: `FOREMAN_APPROVED` (legacy-имя события; реально выполнено `ADMIN`, `reviewerUserId`
+  фиксирует это)
 - DoD: подтверждение последнего `PENDING`-scope версии переводит `Timesheet.status` в
-  `FOREMAN_APPROVED` — единственный путь для табеля единственного `FOREMAN`+`WORKER`
+  `FOREMAN_APPROVED`; бизнес-смысл статуса — «review завершён / готов к final approval», а не
+  доказательство участия FOREMAN
 
 #### `POST /api/admin/review-scopes/:reviewScopeId/return`
 - Permission: `timesheet.scope_review.all`

@@ -1529,16 +1529,17 @@ flowchart TD
     W11 -->|все scope approved| W13["READY FOR ADMIN → FINAL_APPROVED"]
 ```
 
-### 5.4 Проверка → финальное утверждение (включая административный fallback)
+### 5.4 Проверка → финальное утверждение (ADMIN гарантирован, FOREMAN опционален)
 
 ```mermaid
 flowchart TD
-    R1["SUBMITTED — TimesheetReviewScope(SITE/NON_SITE) созданы"] --> R2{У объекта есть свой FOREMAN, отличный от WORKER табеля?}
-    R2 -->|да| R3["/foreman/review/... → approve/return"]
-    R2 -->|нет — единственный FOREMAN=WORKER| R4["/admin/review-fallback/... → approve/return"]
-    R1 --> R5["NON_SITE — только /admin/review-fallback"]
-    R3 --> R6{Все scope APPROVED?}
-    R4 --> R6
+    R1["SUBMITTED — TimesheetReviewScope(SITE/NON_SITE) созданы"] --> R2["/admin/review-scopes/... → approve/return — доступно всегда"]
+    R1 --> R3{"SITE-scope делегирован назначенному FOREMAN?"}
+    R3 -->|да, необязательно| R4["/foreman/review/... → approve/return"]
+    R3 -->|нет| R2
+    R4 --> R6{Все scope APPROVED?}
+    R2 --> R6
+    R1 --> R5["NON_SITE — только /admin/review-scopes"]
     R5 --> R6
     R6 -->|да| R7["FOREMAN_APPROVED"]
     R6 -->|нет| R1
@@ -1546,3 +1547,8 @@ flowchart TD
     R8 --> R9["FINAL_APPROVED"]
     R9 --> R10["period.lock → LOCKED"]
 ```
+
+`FOREMAN` здесь означает уполномоченного проверяющего конкретных объектов, а не обязательную
+должность или обязательное звено процесса. Даже если ни один FOREMAN не создан/не назначен,
+ADMIN/SUPER_ADMIN видит все scope и самостоятельно проводит возврат/подтверждение. Состояние
+`FOREMAN_APPROVED` — legacy-имя enum со смыслом «review завершён».

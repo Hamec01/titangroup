@@ -4,12 +4,9 @@ import { resolveServerSession } from '@/lib/server-session';
 import { getReviewScopeDetail } from '@/lib/review-scopes';
 import { prisma } from '@/lib/prisma';
 import { ReviewActions } from './ReviewActions';
+import { workedMinutesFromIsoSegments } from '@/lib/reporting/report-format';
 
 export const dynamic = 'force-dynamic';
-
-function segmentMinutes(segments: { startAt: string; endAt: string }[]): number {
-  return segments.reduce((sum, s) => sum + (new Date(s.endAt).getTime() - new Date(s.startAt).getTime()) / 60000, 0);
-}
 
 function formatMinutes(minutes: number): string {
   const h = Math.floor(minutes / 60);
@@ -72,7 +69,7 @@ export default async function AdminReviewScopeDetailPage({ params }: RouteParams
             {scope.days.map((day) => (
               <li key={day.date} className="setup-item">
                 <span className="setup-label">
-                  {day.date} — {day.dayType !== 'WORK' ? day.dayType.replace('_', ' ').toLowerCase() : day.segments.length === 0 ? (day.confirmedZero ? 'Confirmed 0h' : '—') : formatMinutes(segmentMinutes(day.segments))}
+                  {day.date} — {day.dayType !== 'WORK' ? day.dayType.replace('_', ' ').toLowerCase() : day.segments.length === 0 ? (day.confirmedZero ? 'Confirmed 0h' : '—') : formatMinutes(workedMinutesFromIsoSegments(day.segments))}
                 </span>
               </li>
             ))}

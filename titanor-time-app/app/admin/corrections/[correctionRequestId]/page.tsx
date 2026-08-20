@@ -3,12 +3,9 @@ import Link from 'next/link';
 import { resolveServerSession } from '@/lib/server-session';
 import { getCorrectionDetail } from '@/lib/corrections';
 import { CorrectionActions } from './CorrectionActions';
+import { workedMinutesFromIsoSegments } from '@/lib/reporting/report-format';
 
 export const dynamic = 'force-dynamic';
-
-function segmentMinutes(segments: { startAt: string; endAt: string }[]): number {
-  return segments.reduce((sum, s) => sum + (new Date(s.endAt).getTime() - new Date(s.startAt).getTime()) / 60000, 0);
-}
 
 function formatMinutes(minutes: number): string {
   const h = Math.floor(minutes / 60);
@@ -82,7 +79,7 @@ export default async function AdminCorrectionDetailPage({ params }: RouteParams)
                         ? day.confirmedZero
                           ? 'Confirmed 0h'
                           : '—'
-                        : `${formatMinutes(segmentMinutes(day.segments))} · ${[...new Set(day.segments.map((s) => s.siteId))].length} site(s)`}
+                        : `${formatMinutes(workedMinutesFromIsoSegments(day.segments))} · ${[...new Set(day.segments.map((s) => s.siteId))].length} site(s)`}
                   </td>
                   {correction.status === 'DRAFT_OPEN' ? (
                     <td>

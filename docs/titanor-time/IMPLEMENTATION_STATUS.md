@@ -1,6 +1,43 @@
 # Titanor Time — Implementation Status
 
-Обновлено: 2026-08-20 Europe/Helsinki (fix: harden setup lifecycle flows — T9.1-T9.3)
+Обновлено: 2026-08-20 Europe/Helsinki (T9.4 — admin-led full flow)
+
+**`[2026-08-20]` T9.4 — admin-led full attendance flow, 84/84.** После уточнения владельца
+канонический процесс зафиксирован так: FOREMAN — необязательный уполномоченный проверяющий
+объекта, а не обязательное звено; ADMIN/SUPER_ADMIN всегда видит все `TimesheetReviewScope` и
+может вернуть/подтвердить их до собственного final approval. Полный production-standalone сценарий
+прошёл на чистой disposable PostgreSQL 16 с **нулём `ForemanAssignment`** основного объекта:
+ADMIN setup → WORKER Check In/Out с GPS → materialize → правка дня и V1 (450 min) → ADMIN return →
+WORKER correction и V2 (420 min) → ADMIN scope approve (`reviewedByUserId` = ADMIN) → ADMIN final
+approve → worker/site/period reports и overview = 420 min. Не назначенный FOREMAN не увидел scope.
+Legacy enum `FOREMAN_APPROVED` означает «review завершён / готово к final approval» и не доказывает
+участие FOREMAN. Внешняя review-ссылка без аккаунта — отдельный будущий backlog.
+
+**Исправлен product defect редактирования clock-origin времени.** Backend уже требовал
+`clockAdjustmentReasons[fragmentId]`, но worker DTO не возвращал `originClockShiftFragmentId`, а
+`DayEditor` не сохранял provenance и не имел поля причины. После реального Check In/Out сохранение
+изменённого дня поэтому было невозможно. DTO теперь отдаёт существующий origin id, UI эхо-передаёт
+его, требует причину только при изменении/удалении recorded-интервала и использует существующий
+PATCH-контракт. Сквозной тест отдельно доказал no-op без причины и ровно один immutable
+`ClockShiftAdjustment(REMOVED)` после сохранения с причиной.
+
+**Исправлен display-only defect worked time.** Шесть worker/foreman/admin страниц имели локальную
+gross-формулу и не вычитали unpaid breaks. Общий `workedMinutesFromIsoSegments()` адаптирует их ISO
+DTO к canonical `lib/reporting/worked-time.ts`; экранные значения теперь совпадают с T8.1–T8.3 и
+overview (450 min до correction, 420 min после). `FOREMAN_APPROVED` в пользовательских подписях
+заменён на нейтральное `Review approved`/`Review complete — awaiting final approval`; enum/DB/API не
+переименовывались.
+
+Постоянный тест: `scripts/_test-t9-full-flow.ts` — **84/84**. Регрессии: T9 setup lifecycle
+50/50, role matrix 32/32, setup UI 15/15, report rounding 105/105, period report 110/110,
+activation/corrections/overview — green. План, переходы и доказательства:
+`docs/titanor-time/T9_FULL_FLOW_TEST_PLAN.md`.
+
+Технические проверки: `git diff --check`, `prisma validate`, app-level `tsc --noEmit`, production
+`next build`, `docker compose config --quiet`, Docker build под изолированным тегом, `prisma migrate
+deploy` дважды (62 migrations, второй — no-op) — green. `titanor-time-app:latest` не изменён;
+preview и production health/ready — 200/200 до и после, production app/db `RestartCount=0` и
+`StartedAt` неизменны. Все T9.4 scratch-процессы, две disposable БД и временный образ удалены.
 
 **`[2026-08-20]` T9.1-T9.3 — fix(time): harden setup lifecycle flows.** Внутренний тестовый фундамент
 (SUPER_ADMIN/ADMIN/FOREMAN/WORKER A/WORKER B/dual-role, Site Alpha/Beta/Gamma) + role/permission
@@ -97,8 +134,9 @@ build только под уникальным временным тегом `ti
 **Не менялись**: Prisma schema/миграции, права/`RolePermission`-семена, offline outbox/PWA
 (ЭТАП 7A/T8.8), timesheet/review/correction/report/export бизнес-логика, локализация.
 
-**T9.1–T9.3 завершены.** T9.4 (полный сквозной сценарий admin→worker→foreman→admin) ещё не начат —
-следующий рекомендуемый шаг, см. `PROJECT_ROADMAP.md`.
+**Историческая граница этого слайса:** на момент коммита T9.1–T9.3 следующий T9.4 ещё не был
+начат. Он выполнен последующей записью T9.4 в начале этого файла; актуальный канонический путь —
+ADMIN-led, без обязательного FOREMAN.
 
 ---
 

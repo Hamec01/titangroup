@@ -8,6 +8,7 @@ import { SnapshotWriter } from '@/components/worker-pwa/SnapshotWriter';
 import { ConnectivityBanner } from '@/components/worker-pwa/ConnectivityBanner';
 import { WorkerLink } from '@/components/worker-pwa/WorkerLink';
 import type { SubmitSummaryPayload } from '@/lib/offline-outbox/read-snapshots';
+import { workedMinutesFromIsoSegments } from '@/lib/reporting/report-format';
 
 export const dynamic = 'force-dynamic';
 
@@ -16,10 +17,6 @@ export const dynamic = 'force-dynamic';
 // built — ЭТАП 7 sub-task 5's own note), but SubmitButton still surfaces that error code correctly
 // if the contract ever starts returning it.
 const EDITABLE_STATUSES = new Set(['DRAFT', 'RETURNED']);
-
-function segmentMinutes(segments: { startAt: string; endAt: string }[]): number {
-  return segments.reduce((sum, s) => sum + (new Date(s.endAt).getTime() - new Date(s.startAt).getTime()) / 60000, 0);
-}
 
 type RouteParams = { params: Promise<{ periodId: string }> };
 
@@ -44,7 +41,7 @@ export default async function WorkerSubmitPage({ params }: RouteParams) {
   const draft = await getWorkerTimesheetDraft(employeeId, period.timesheetId);
   const days = 'code' in draft ? [] : draft.days;
   const workedDays = days.filter((d) => d.segments.length > 0 || d.confirmedZero || d.dayType !== 'WORK');
-  const totalMinutes = days.reduce((sum, d) => sum + segmentMinutes(d.segments), 0);
+  const totalMinutes = days.reduce((sum, d) => sum + workedMinutesFromIsoSegments(d.segments), 0);
   const summary = await getWorkerTimesheetSummary(employeeId, period.timesheetId);
   const returnReasons = 'code' in summary ? [] : summary.returnReasons;
 

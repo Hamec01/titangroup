@@ -162,8 +162,9 @@ script's own stdout beyond a redacted confirmation.
 ## 7. Explicitly out of scope for this task
 
 Redesign of any screen, full localization pass, performance work, building `user.deactivate`/
-`role.assign`/City lifecycle from scratch, T9.4's full end-to-end scenario (admin→worker→foreman→
-admin), T9.5 (restart), T9.6 (backup/restore), T9.7 (physical devices).
+`role.assign`/City lifecycle from scratch, the then-separate T9.4 full end-to-end scenario
+(subsequently completed as ADMIN-led without mandatory FOREMAN), T9.5 (restart), T9.6
+(backup/restore), T9.7 (physical devices).
 
 ## 8. Results (2026-08-20, after implementation)
 

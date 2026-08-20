@@ -31,6 +31,7 @@ interface InitialSegment {
   endAt: string;
   siteId: string;
   workAreaId: string | null;
+  originClockShiftFragmentId: string | null;
   breaks: InitialBreak[];
 }
 
@@ -57,6 +58,7 @@ interface EditableSegment {
   assignmentKey: string;
   startAt: string;
   endAt: string;
+  originClockShiftFragmentId: string | null;
   breaks: EditableBreak[];
 }
 
@@ -105,10 +107,12 @@ export default function DayEditor({
       assignmentKey: assignmentKeyOf(s.siteId, s.workAreaId),
       startAt: isoToHelsinkiTime(s.startAt),
       endAt: isoToHelsinkiTime(s.endAt),
+      originClockShiftFragmentId: s.originClockShiftFragmentId,
       breaks: s.breaks.map((b) => ({ startAt: isoToHelsinkiTime(b.startAt), endAt: isoToHelsinkiTime(b.endAt), paid: b.paid }))
     }))
   );
   const [confirmedZero, setConfirmedZero] = useState(initialConfirmedZero);
+  const [clockAdjustmentReason, setClockAdjustmentReason] = useState('');
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -120,7 +124,7 @@ export default function DayEditor({
     }
     setSegments((prev) => [
       ...prev,
-      { key: nextKey++, assignmentKey: assignmentKeyOf(assignmentOptions[0].siteId, assignmentOptions[0].workAreaId), startAt: '08:00', endAt: '16:00', breaks: [] }
+      { key: nextKey++, assignmentKey: assignmentKeyOf(assignmentOptions[0].siteId, assignmentOptions[0].workAreaId), startAt: '08:00', endAt: '16:00', originClockShiftFragmentId: null, breaks: [] }
     ]);
     setConfirmedZero(false);
   }
@@ -148,6 +152,24 @@ export default function DayEditor({
   async function handleSave() {
     setSaving(true);
     setError(null);
+
+    const clockOriginSegments = initialSegments.filter((segment) => segment.originClockShiftFragmentId !== null);
+    const clockOriginChanged = clockOriginSegments.some((initial) => {
+      const current = segments.find((segment) => segment.originClockShiftFragmentId === initial.originClockShiftFragmentId);
+      return (
+        !current ||
+        current.assignmentKey !== assignmentKeyOf(initial.siteId, initial.workAreaId) ||
+        current.startAt !== isoToHelsinkiTime(initial.startAt) ||
+        current.endAt !== isoToHelsinkiTime(initial.endAt)
+      );
+    });
+    const normalizedReason = clockAdjustmentReason.trim();
+    if (clockOriginChanged && normalizedReason.length === 0) {
+      setError('A reason is required when changing or removing recorded Check In/Out time.');
+      setSaving(false);
+      return;
+    }
+
     try {
       const body = {
         confirmedZero: segments.length === 0 ? confirmedZero : false,
@@ -158,9 +180,17 @@ export default function DayEditor({
             endAt: helsinkiTimeToIso(date, s.endAt),
             siteId,
             workAreaId: workAreaId || null,
+            originClockShiftFragmentId: s.originClockShiftFragmentId,
             breaks: s.breaks.map((b) => ({ startAt: helsinkiTimeToIso(date, b.startAt), endAt: helsinkiTimeToIso(date, b.endAt), paid: b.paid }))
           };
-        })
+        }),
+        ...(normalizedReason.length > 0
+          ? {
+              clockAdjustmentReasons: Object.fromEntries(
+                clockOriginSegments.map((segment) => [segment.originClockShiftFragmentId as string, normalizedReason])
+              )
+            }
+          : {})
       };
       const res = await fetch(`/api/worker/timesheets/${timesheetId}/days/${date}`, {
         method: 'PATCH',
@@ -249,6 +279,24 @@ export default function DayEditor({
             <button type="button" className="wk-secondary-button" onClick={addSegment} disabled={saving || assignmentOptions.length === 0}>
               + Add interval
             </button>
+
+            {initialSegments.some((segment) => segment.originClockShiftFragmentId !== null) ? (
+              <div className="wk-field">
+                <label htmlFor="clock-adjustment-reason">Reason for changing recorded Check In/Out time</label>
+                <textarea
+                  id="clock-adjustment-reason"
+                  rows={3}
+                  maxLength={2000}
+                  value={clockAdjustmentReason}
+                  onChange={(event) => setClockAdjustmentReason(event.target.value)}
+                  disabled={saving}
+                  aria-describedby="clock-adjustment-help"
+                />
+                <p id="clock-adjustment-help" className="wk-readonly-note">
+                  Required only when a recorded interval is changed or removed. The reason is kept in the audit history.
+                </p>
+              </div>
+            ) : null}
           </>
         )}
 

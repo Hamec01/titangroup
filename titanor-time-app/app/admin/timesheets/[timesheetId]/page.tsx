@@ -4,12 +4,9 @@ import { resolveServerSession } from '@/lib/server-session';
 import { getTimesheetCard } from '@/lib/admin-timesheets';
 import { FinalApprovalActions } from './FinalApprovalActions';
 import { RequestCorrectionForm } from './RequestCorrectionForm';
+import { workedMinutesFromIsoSegments } from '@/lib/reporting/report-format';
 
 export const dynamic = 'force-dynamic';
-
-function segmentMinutes(segments: { startAt: string; endAt: string }[]): number {
-  return segments.reduce((sum, s) => sum + (new Date(s.endAt).getTime() - new Date(s.startAt).getTime()) / 60000, 0);
-}
 
 function formatMinutes(minutes: number): string {
   const h = Math.floor(minutes / 60);
@@ -83,7 +80,7 @@ export default async function AdminTimesheetCardPage({ params }: RouteParams) {
                         ? day.confirmedZero
                           ? 'Confirmed 0h'
                           : '—'
-                        : `${formatMinutes(segmentMinutes(day.segments))} · ${day.segments.map((s) => s.siteName).join(', ')}`}
+                        : `${formatMinutes(workedMinutesFromIsoSegments(day.segments))} · ${day.segments.map((s) => s.siteName).join(', ')}`}
                   </td>
                 </tr>
               ))}

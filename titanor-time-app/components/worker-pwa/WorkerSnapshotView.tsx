@@ -90,7 +90,7 @@ const STATUS_LABELS: Record<string, string> = {
   DRAFT: 'Not started',
   RETURNED: 'Returned — needs your attention',
   SUBMITTED: 'Submitted — awaiting review',
-  FOREMAN_APPROVED: 'Approved by foreman',
+  FOREMAN_APPROVED: 'Review complete — awaiting final approval',
   FINAL_APPROVED: 'Finalized'
 };
 

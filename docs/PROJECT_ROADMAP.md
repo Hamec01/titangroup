@@ -829,13 +829,27 @@ build, disposable PostgreSQL 16.
 
 ```text
 admin создаёт объект
-→ назначает worker и foreman
+→ назначает worker (FOREMAN необязателен)
 → worker отправляет часы
-→ foreman возвращает
+→ admin возвращает табель на исправление
 → worker исправляет
-→ foreman подтверждает
-→ admin видит отчёт
+→ admin подтверждает review-scope
+→ admin финально утверждает
+→ admin видит согласованные отчёты
 ```
+
+**`[2026-08-20] 🟢 завершено.`** Сквозной production-standalone сценарий прошёл **84/84** на
+чистой disposable PostgreSQL 16. На основном объекте намеренно не было ни одного
+`ForemanAssignment`: один ADMIN вернул V1, подтвердил исправленную V2 и финально утвердил табель;
+не назначенный FOREMAN не увидел табель. Технический enum `FOREMAN_APPROVED` сохраняется ради
+совместимости схемы и означает «все review-scope подтверждены / готово к финальному утверждению»,
+а не обязательное действие FOREMAN. Роль FOREMAN в продукте — необязательный уполномоченный
+проверяющий объекта; будущая проверка по внешней ссылке без аккаунта остаётся отдельным backlog.
+
+По ходу сценария найдены и исправлены два product defect: worker UI не передавал
+`originClockShiftFragmentId` и не позволял указать обязательную причину изменения GPS-origin
+интервала; шесть экранов табеля считали gross time вместо canonical worked time с вычетом unpaid
+break. Полный протокол: `docs/titanor-time/T9_FULL_FLOW_TEST_PLAN.md`.
 
 ## T9.5 — Restart
 

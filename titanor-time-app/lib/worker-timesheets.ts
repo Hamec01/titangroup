@@ -151,6 +151,7 @@ export interface SegmentView {
   siteId: string;
   workAreaId: string | null;
   sourceAssignmentId: string;
+  originClockShiftFragmentId: string | null;
   breaks: BreakView[];
 }
 
@@ -205,6 +206,7 @@ export async function getWorkerTimesheetDraft(employeeId: string, timesheetId: s
               siteId: true,
               workAreaId: true,
               sourceAssignmentId: true,
+              originClockShiftFragmentId: true,
               breaks: { orderBy: { startAt: 'asc' }, select: { id: true, startAt: true, endAt: true, paid: true } }
             }
           }
@@ -234,6 +236,7 @@ export async function getWorkerTimesheetDraft(employeeId: string, timesheetId: s
         siteId: s.siteId,
         workAreaId: s.workAreaId,
         sourceAssignmentId: s.sourceAssignmentId,
+        originClockShiftFragmentId: s.originClockShiftFragmentId,
         breaks: s.breaks.map((b) => ({ id: b.id, startAt: b.startAt.toISOString(), endAt: b.endAt.toISOString(), paid: b.paid }))
       }))
     })),
@@ -303,6 +306,7 @@ export async function getWorkerTimesheetCurrentVersion(employeeId: string, times
               siteId: true,
               workAreaId: true,
               sourceAssignmentId: true,
+              originClockShiftFragmentId: true,
               breaks: { orderBy: { startAt: 'asc' }, select: { id: true, startAt: true, endAt: true, paid: true } }
             }
           }
@@ -337,6 +341,7 @@ export async function getWorkerTimesheetCurrentVersion(employeeId: string, times
         siteId: s.siteId,
         workAreaId: s.workAreaId,
         sourceAssignmentId: s.sourceAssignmentId,
+        originClockShiftFragmentId: s.originClockShiftFragmentId,
         breaks: s.breaks.map((b) => ({ id: b.id, startAt: b.startAt.toISOString(), endAt: b.endAt.toISOString(), paid: b.paid }))
       }))
     })),
@@ -768,6 +773,7 @@ export async function patchWorkerTimesheetDay(
               siteId: true,
               workAreaId: true,
               sourceAssignmentId: true,
+              originClockShiftFragmentId: true,
               breaks: { orderBy: { startAt: 'asc' }, select: { id: true, startAt: true, endAt: true, paid: true } }
             }
           }
@@ -785,6 +791,7 @@ export async function patchWorkerTimesheetDay(
           siteId: s.siteId,
           workAreaId: s.workAreaId,
           sourceAssignmentId: s.sourceAssignmentId,
+          originClockShiftFragmentId: s.originClockShiftFragmentId,
           breaks: s.breaks.map((b) => ({ id: b.id, startAt: b.startAt.toISOString(), endAt: b.endAt.toISOString(), paid: b.paid }))
         })),
         resolvedProposals: []
