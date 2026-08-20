@@ -976,7 +976,8 @@ shell.`**
   не реализовано (вне текущего scope, не clock-функциональность)
 - Общий worker header/menu (`Home`, `Calendar and hours`, `History`, `Install`, `Sign out`) —
   реализован на всех online worker routes; расширенные `Corrections`/`Profile`/`Help` ещё не
-  реализованы
+  реализованы. На каждом вложенном `/worker/**` route в header также постоянно видна отдельная
+  touch-кнопка `⌂ Home`, возвращающая прямо к Check In/Out без прохода назад через всю иерархию
 - Состояния (реализовано): `Clocked out` (с empty state, если назначений нет); `Clocked in`
   (таймер, никогда не отрицательный, помечен «waiting for sync», пока запись ещё не ACKed);
   `Getting location…`; «Saved on device — syncing…»/«waiting for sync»; `Syncing…`/aria-live

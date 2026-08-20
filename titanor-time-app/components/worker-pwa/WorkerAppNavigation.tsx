@@ -53,16 +53,24 @@ export function WorkerAppNavigation({ username }: { username: string }) {
         <WorkerLink href="/worker" className="wk-app-brand" aria-label="Titanor Time home">
           Titanor Time
         </WorkerLink>
-        <button
-          type="button"
-          className="wk-menu-button"
-          aria-expanded={open}
-          aria-controls="worker-app-menu"
-          aria-label={open ? 'Close menu' : 'Open menu'}
-          onClick={() => setOpen((value) => !value)}
-        >
-          <span aria-hidden="true">{open ? '×' : '☰'}</span>
-        </button>
+        <div className="wk-app-header-actions">
+          {pathname !== '/worker' ? (
+            <WorkerLink href="/worker" className="wk-home-button" aria-label="Back to Check In and Check Out">
+              <span aria-hidden="true">⌂</span>
+              <span>Home</span>
+            </WorkerLink>
+          ) : null}
+          <button
+            type="button"
+            className="wk-menu-button"
+            aria-expanded={open}
+            aria-controls="worker-app-menu"
+            aria-label={open ? 'Close menu' : 'Open menu'}
+            onClick={() => setOpen((value) => !value)}
+          >
+            <span aria-hidden="true">{open ? '×' : '☰'}</span>
+          </button>
+        </div>
       </div>
 
       {open ? (

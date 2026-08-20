@@ -2,6 +2,13 @@
 
 Обновлено: 2026-08-20 Europe/Helsinki (T9.7 — первый physical-device UX feedback)
 
+**`[2026-08-20]` T9.7 — прямой возврат из worker timetable к clock Home.** Реальный iPhone-
+прогон показал, что локальные Back-ссылки корректно идут `day → hours → period`, но после этого
+пользователь вынужден догадаться, что логотип или пункт внутри `☰` ведёт к Check In/Out. Общий
+`WorkerAppNavigation` теперь показывает отдельную touch-кнопку `⌂ Home` на каждом вложенном
+`/worker/**` route; на самом `/worker` она скрыта как избыточная. Таким образом, любой уровень
+табеля возвращается к clock одним нажатием, не ломая существующие локальные Back-ссылки.
+
 **`[2026-08-20]` T9.7 — закрытая смена была сохранена, но скрыта worker UI.** Реальный iPhone-
 прогон (Check In → 10:56 → Check Out) подтвердил корректные durable `ClockEvent`, `ClockShift`,
 `ClockShiftFragment` и `TimesheetDraftSegment`, однако `/worker/history` и `/worker/periods`

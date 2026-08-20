@@ -575,6 +575,30 @@ button:disabled {
   text-decoration: none;
 }
 
+.wk-app-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.wk-home-button {
+  min-height: 44px;
+  padding: 0 11px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 8px;
+  color: var(--text);
+  font-size: 0.84rem;
+  text-decoration: none;
+}
+
+.wk-home-button span[aria-hidden='true'] {
+  font-size: 1.15rem;
+  line-height: 1;
+}
+
 .wk-menu-button {
   position: relative;
   z-index: 52;
@@ -682,6 +706,12 @@ button:disabled {
 
   .setup-action {
     margin-left: auto;
+  }
+}
+
+@media (max-width: 350px) {
+  .wk-home-button span:last-child {
+    display: none;
   }
 }
 
