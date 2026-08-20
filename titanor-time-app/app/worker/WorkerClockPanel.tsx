@@ -502,7 +502,7 @@ export function WorkerClockPanel({ initialClockState, assignments, workerName, t
               <p className="wk-clock-status-label wk-clock-status-out">Clocked out</p>
 
               {assignments.length === 0 ? (
-                <p className="wk-empty">You haven&apos;t been assigned to a site yet. Contact your foreman or admin.</p>
+                <p className="wk-empty">Your manager has not assigned a site to you yet. You can use the app, but Check In will become available after a site is assigned.</p>
               ) : (
                 <div role="radiogroup" aria-label="Select site to check in" className="wk-assignment-options">
                   {assignments.map((a) => (

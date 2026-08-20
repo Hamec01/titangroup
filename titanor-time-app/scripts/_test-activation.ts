@@ -19,7 +19,7 @@ function assert(condition: unknown, message: string): asserts condition {
   }
 }
 
-async function createReadyWorker(tag: string, actorUserId: string, siteId: string, periodId: string) {
+async function createReadyWorker(tag: string, actorUserId: string, siteId: string, periodId: string, withOperationalSetup = true) {
   const employee = await prisma.employee.create({
     data: { employeeNumber: `ACT-${tag}-${randomUUID().slice(0, 8)}`, firstName: tag, lastName: 'Worker' }
   });
@@ -27,16 +27,18 @@ async function createReadyWorker(tag: string, actorUserId: string, siteId: strin
     data: { username: employee.employeeNumber, status: 'PENDING_ACTIVATION', locale: 'FI', employeeId: employee.id }
   });
   await prisma.employment.create({ data: { employeeId: employee.id, active: true, startDate: new Date('2026-01-01T00:00:00Z') } });
-  await prisma.siteAssignment.create({
-    data: {
-      employeeId: employee.id,
-      siteId,
-      isPrimary: true,
-      validFrom: new Date('2026-01-01T00:00:00Z'),
-      assignedByUserId: actorUserId
-    }
-  });
-  await prisma.payrollPeriodParticipant.create({ data: { periodId, employeeId: employee.id, expected: true } });
+  if (withOperationalSetup) {
+    await prisma.siteAssignment.create({
+      data: {
+        employeeId: employee.id,
+        siteId,
+        isPrimary: true,
+        validFrom: new Date('2026-01-01T00:00:00Z'),
+        assignedByUserId: actorUserId
+      }
+    });
+    await prisma.payrollPeriodParticipant.create({ data: { periodId, employeeId: employee.id, expected: true } });
+  }
   return { employee, user };
 }
 
@@ -63,6 +65,15 @@ async function main() {
       openedByUserId: actor.id
     }
   });
+
+  const unassigned = await createReadyWorker('Unassigned', actor.id, site.id, period.id, false);
+  const unassignedIssue = await issueActivationToken(unassigned.employee.id, actor.id, randomUUID());
+  assert(!('code' in unassignedIssue), 'active new worker must receive activation without assignment/period participation');
+  assert(
+    (await prisma.siteAssignment.count({ where: { employeeId: unassigned.employee.id } })) === 0 &&
+      (await prisma.payrollPeriodParticipant.count({ where: { employeeId: unassigned.employee.id } })) === 0,
+    'activation must not fabricate operational setup rows'
+  );
 
   const primary = await createReadyWorker('Primary', actor.id, site.id, period.id);
   const first = await issueActivationToken(primary.employee.id, actor.id, randomUUID());

@@ -2,7 +2,6 @@ import { randomInt, createHmac } from 'node:crypto';
 import { prisma } from '@/lib/prisma';
 import { createAuditEvent } from '@/lib/audit';
 import { activationTokenHmacKey } from '@/lib/activation-secret';
-import { helsinkiToday } from '@/lib/workers';
 import { SESSION_DURATION_MS, generateSessionToken, hashSessionToken } from '@/lib/session';
 
 // docs/titanor-time/03_DATA_MODEL_ERD.md §4.1 "ActivationToken" +
@@ -42,13 +41,6 @@ export function hashActivationCode(normalizedCode: string): string {
   return createHmac('sha256', activationTokenHmacKey()).update(normalizedCode).digest('hex');
 }
 
-function currentAssignmentWhere(today: Date) {
-  return {
-    validFrom: { lte: today },
-    OR: [{ validTo: null }, { validTo: { gte: today } }]
-  };
-}
-
 export type IssueActivationTokenError = { code: 'WORKER_NOT_FOUND' } | { code: 'WORKER_ALREADY_ACTIVE' } | { code: 'SETUP_INCOMPLETE' };
 
 export interface IssueActivationTokenResult {
@@ -58,17 +50,15 @@ export interface IssueActivationTokenResult {
 
 /**
  * 02_ROLE_PERMISSION_MATRIX.md §2.2 `worker.activation.generate` + owner-confirmed issuance
- * transaction: lock Employee FOR UPDATE, re-check User.status + setup readiness under that lock
- * (same condition as lib/workers.ts's computeActivationStatus, re-verified here rather than
- * shared, since this copy must run inside this specific transaction/lock), expire any past-due
+ * transaction: lock Employee FOR UPDATE and re-check User.status + active employment under that
+ * lock. Site assignment/payroll setup is deliberately not an activation prerequisite: account
+ * ownership may be established before the owner finishes operational setup. Then expire past-due
  * PENDING, revoke any remaining live PENDING, create the new PENDING row, write
  * ACTIVATION_TOKEN_ISSUED — all one transaction, so two concurrent issuance requests for the same
  * employee serialize on the Employee row lock and never both reach the partial-unique-index
  * insert unresolved.
  */
 export async function issueActivationToken(employeeId: string, actorUserId: string, requestId: string): Promise<IssueActivationTokenResult | IssueActivationTokenError> {
-  const today = helsinkiToday();
-
   const outcome = await prisma.$transaction(async (tx) => {
     const lockedRows = await tx.$queryRaw<{ id: string }[]>`SELECT id FROM "Employee" WHERE id = ${employeeId}::uuid FOR UPDATE`;
     if (lockedRows.length === 0) {
@@ -79,8 +69,7 @@ export async function issueActivationToken(employeeId: string, actorUserId: stri
       where: { id: employeeId },
       select: {
         user: { select: { status: true } },
-        employments: { orderBy: { createdAt: 'desc' }, take: 1, select: { active: true } },
-        siteAssignments: { where: currentAssignmentWhere(today), select: { id: true }, take: 1 }
+        employments: { orderBy: { createdAt: 'desc' }, take: 1, select: { active: true } }
       }
     });
 
@@ -89,16 +78,7 @@ export async function issueActivationToken(employeeId: string, actorUserId: stri
     }
 
     const employmentActive = employee.employments[0]?.active ?? false;
-    const hasCurrentAssignment = employee.siteAssignments.length > 0;
-    if (employee.user?.status !== 'PENDING_ACTIVATION' || !employmentActive || !hasCurrentAssignment) {
-      return { code: 'SETUP_INCOMPLETE' as const };
-    }
-
-    const openParticipant = await tx.payrollPeriodParticipant.findFirst({
-      where: { employeeId, expected: true, period: { status: 'OPEN' } },
-      select: { id: true }
-    });
-    if (!openParticipant) {
+    if (employee.user?.status !== 'PENDING_ACTIVATION' || !employmentActive) {
       return { code: 'SETUP_INCOMPLETE' as const };
     }
 

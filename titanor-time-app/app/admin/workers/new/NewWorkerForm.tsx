@@ -1,14 +1,12 @@
 'use client';
 
 import { useRef, useState, type FormEvent } from 'react';
-import { useRouter } from 'next/navigation';
 
 // docs/titanor-time/04_ADMIN_FIRST_API_CONTRACTS.md §0 — required on every
 // mutating request, same as /login and the sites/templates forms.
 const CSRF_HEADER_VALUE = 'titanor-time';
 
 export function NewWorkerForm() {
-  const router = useRouter();
   const [firstName, setFirstName] = useState('');
   const [lastName, setLastName] = useState('');
   const [phone, setPhone] = useState('');
@@ -84,7 +82,8 @@ export function NewWorkerForm() {
         return;
       }
 
-      router.push('/admin/setup');
+      const body = (await response.json()) as { employee: { id: string } };
+      window.location.assign(`/admin/workers/${body.employee.id}`);
       // Deliberately not resetting `loading` here, same as the sites/templates forms.
     } catch {
       setErrorMessage('Network error. Please try again.');

@@ -18,6 +18,23 @@ Chrome может показать системный `beforeinstallprompt`. З�
 pin/radius и полный redesign worker home по эскизу владельца — отдельный следующий product slice,
 не подмешиваются в acceptance hotfix к уже работающему clock/outbox.
 
+**`[2026-08-20]` T9.7 — worker onboarding follow-up по реальному DIMA-сценарию.** Канонический
+owner-flow уточнён владельцем: новый WORKER немедленно получает activation link/QR, а Site,
+необязательный WorkArea, шаблон и дата назначаются ниже на той же worker card. Активация теперь
+проверяет только pending account + active employment и не зависит от assignment/period; активный
+worker без Site входит в приложение, видит понятное empty state и не может нажать Check In до
+назначения. Inline assignment фиксирует worker, предзаполняет Helsinki today/primary, автоматически
+выбирает единственный Site и после сохранения перечитывает ту же карточку. Существующий OPEN period
+подхватывает нового участника той же assignment-транзакцией — второй period не создаётся. Period
+list/detail объясняют цикл; Lock недоступен, пока есть pending timesheets. Свободный ввод
+неподтверждённого объекта самим WORKER оставлен отдельным workflow с последующим ADMIN mapping:
+его нельзя смешивать с официальным Site/GPS/reporting без явного provenance.
+Проверено на чистом disposable PostgreSQL 16: T9 setup/lifecycle **66/66**, activation vertical
+slice (включая issuance без единой SiteAssignment/PayrollPeriodParticipant и отсутствие
+автоматически созданных operational rows) — green, `tsc --noEmit`/production build/Docker build —
+green. Публичный HTTPS pilot проверен реальным Chromium на карточке DIMA: immediate activation,
+inline locked-worker setup и сохранность pilot DB; production и общий `:latest` не менялись.
+
 **`[2026-08-20]` T9.7 — physical-device acceptance подготовлен, ручной прогон pending.**
 Зафиксирован постоянный owner-run checklist
 `docs/titanor-time/T9_DEVICE_ACCEPTANCE_PLAN_RU.md`: отдельный pilot WORKER, реальная activation

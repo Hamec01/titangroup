@@ -238,9 +238,9 @@ MFA_VERIFIED)`, `mfaVerifiedAt`, `expiresAt`, `lastSeenAt`, `ipAddress`, `userAg
 Base32 без I/L/O/U, отображение `XXXX-XXXX-XX`; пробелы/дефисы/регистр нормализуются до HMAC.
 Partial unique: один `PENDING` на `employeeId`; повторный выпуск атомарно переводит прежний PENDING
 в REVOKED. `USED` требует `usedAt BETWEEN createdAt AND expiresAt`, остальные статусы требуют
-`usedAt IS NULL`; `expiresAt > createdAt`. Выпуск требует `User.status=PENDING_ACTIVATION`, активные
-Employment/SiteAssignment и `PayrollPeriodParticipant(expected=true)` в открытом периоде, иначе
-`403 SETUP_INCOMPLETE`.
+`usedAt IS NULL`; `expiresAt > createdAt`. Выпуск требует `User.status=PENDING_ACTIVATION` и
+активный Employment. SiteAssignment/PayrollPeriodParticipant не являются условиями установления
+владения аккаунтом; их отсутствие после входа отображается как operational empty state.
 
 **UserActivationToken** (mutable) — owner-confirmed schema checkpoint для первого пароля
 системного пользователя (`FOREMAN`, создаваемого напрямую через будущий `/admin/users`, без

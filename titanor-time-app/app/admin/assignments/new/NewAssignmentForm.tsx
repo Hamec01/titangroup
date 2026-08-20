@@ -1,7 +1,6 @@
 'use client';
 
 import { useEffect, useRef, useState, type FormEvent } from 'react';
-import { useRouter } from 'next/navigation';
 
 const CSRF_HEADER_VALUE = 'titanor-time';
 
@@ -29,20 +28,33 @@ interface TemplateOption {
   currentVersionNumber: number | null;
 }
 
-export function NewAssignmentForm() {
-  const router = useRouter();
+interface NewAssignmentFormProps {
+  initialEmployeeId?: string;
+  initialValidFrom?: string;
+  initialIsPrimary?: boolean;
+  returnEmployeeId?: string | null;
+  lockEmployee?: boolean;
+}
+
+export function NewAssignmentForm({
+  initialEmployeeId = '',
+  initialValidFrom = '',
+  initialIsPrimary = false,
+  returnEmployeeId = null,
+  lockEmployee = false
+}: NewAssignmentFormProps) {
   const [workers, setWorkers] = useState<WorkerOption[]>([]);
   const [sites, setSites] = useState<SiteOption[]>([]);
   const [workAreas, setWorkAreas] = useState<WorkAreaOption[]>([]);
   const [templates, setTemplates] = useState<TemplateOption[]>([]);
 
-  const [employeeId, setEmployeeId] = useState('');
+  const [employeeId, setEmployeeId] = useState(initialEmployeeId);
   const [siteId, setSiteId] = useState('');
   const [workAreaId, setWorkAreaId] = useState('');
   const [templateId, setTemplateId] = useState('');
-  const [validFrom, setValidFrom] = useState('');
+  const [validFrom, setValidFrom] = useState(initialValidFrom);
   const [validTo, setValidTo] = useState('');
-  const [isPrimary, setIsPrimary] = useState(false);
+  const [isPrimary, setIsPrimary] = useState(initialIsPrimary);
   const [loading, setLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
@@ -64,7 +76,11 @@ export function NewAssignmentForm() {
       .then((response) => (response.ok ? response.json() : { items: [] }))
       .then((body: { items?: SiteOption[] }) => {
         if (!cancelled) {
-          setSites(body.items ?? []);
+          const nextSites = body.items ?? [];
+          setSites(nextSites);
+          if (nextSites.length === 1) {
+            setSiteId(nextSites[0].id);
+          }
         }
       })
       .catch(() => {
@@ -215,7 +231,10 @@ export function NewAssignmentForm() {
         return;
       }
 
-      router.push('/admin/setup');
+      // This guided flow starts on the worker detail page, so that RSC may already be present in
+      // the App Router cache. A document navigation deliberately forces readiness to be recomputed
+      // from the newly-created assignment/period participant before the profile is shown again.
+      window.location.assign(returnEmployeeId ? `/admin/workers/${returnEmployeeId}` : '/admin/setup');
     } catch {
       setErrorMessage('Network error. Please try again.');
       setLoading(false);
@@ -229,7 +248,7 @@ export function NewAssignmentForm() {
         <select
           id="assignment-employee"
           required
-          disabled={loading}
+          disabled={loading || lockEmployee}
           value={employeeId}
           onChange={(event) => setEmployeeId(event.target.value)}
         >
@@ -240,6 +259,7 @@ export function NewAssignmentForm() {
             </option>
           ))}
         </select>
+        {lockEmployee ? <p className="setup-subtitle">This work setup belongs to the worker shown above.</p> : null}
       </div>
 
       <div className="login-field">
@@ -258,6 +278,7 @@ export function NewAssignmentForm() {
             </option>
           ))}
         </select>
+        {sites.length === 1 ? <p className="setup-subtitle">The only active site was selected automatically.</p> : null}
       </div>
 
       <div className="login-field">

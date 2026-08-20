@@ -142,34 +142,21 @@ export async function listWorkers(page: number, pageSize: number): Promise<Worke
 /**
  * activationStatus is computed, not stored — pending ActivationToken rows intentionally do not
  * change readiness because issuing a replacement revokes the previous live code.
- * Mirrors the exact readiness condition 03_DATA_MODEL_ERD.md §4.1 documents
- * for issuing one: an active SiteAssignment + a PayrollPeriodParticipant
- * (expected=true) in an OPEN period — the same condition whose absence that
- * future endpoint reports as 403 SETUP_INCOMPLETE, reused here as a label.
+ * Activation establishes account ownership and is intentionally independent of operational
+ * setup. A newly-hired worker may install/sign in before an owner assigns a site or opens a
+ * payroll period; the worker home renders that missing-setup state explicitly.
  */
 async function computeActivationStatus(
-  employeeId: string,
   userStatus: string | undefined,
-  employmentActive: boolean,
-  hasCurrentAssignment: boolean
+  employmentActive: boolean
 ): Promise<ActivationStatus> {
   if (userStatus === 'ACTIVE') {
     return 'ALREADY_ACTIVE';
   }
-  // A worker whose employment already ended can't be "ready for activation"
-  // even if an old SiteAssignment's validTo is still null — deactivation
-  // doesn't retract existing assignments (03_DATA_MODEL_ERD.md §4.2 only
-  // blocks *new* ones), so hasCurrentAssignment alone isn't a safe signal
-  // once employment is over. Found via manual testing, not spec'd
-  // explicitly — SETUP_INCOMPLETE is the closest existing label, not a new one.
-  if (userStatus !== 'PENDING_ACTIVATION' || !employmentActive || !hasCurrentAssignment) {
+  if (userStatus !== 'PENDING_ACTIVATION' || !employmentActive) {
     return 'SETUP_INCOMPLETE';
   }
-  const openParticipant = await prisma.payrollPeriodParticipant.findFirst({
-    where: { employeeId, expected: true, period: { status: 'OPEN' } },
-    select: { id: true }
-  });
-  return openParticipant ? 'READY_FOR_ACTIVATION' : 'SETUP_INCOMPLETE';
+  return 'READY_FOR_ACTIVATION';
 }
 
 /** Returns null if no Employee with this id exists — callers map that to 404 WORKER_NOT_FOUND. */
@@ -211,10 +198,8 @@ export async function getWorkerDetail(employeeId: string): Promise<WorkerDetail 
   const employment = employee.employments[0] ?? null;
 
   const activationStatus = await computeActivationStatus(
-    employee.id,
     employee.user?.status,
-    employment?.active ?? false,
-    currentAssignments.length > 0
+    employment?.active ?? false
   );
 
   return {

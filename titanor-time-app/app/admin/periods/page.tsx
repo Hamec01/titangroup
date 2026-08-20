@@ -33,6 +33,12 @@ export default async function AdminPeriodsPage() {
         <p className="setup-subtitle">
           {periods.length} period{periods.length === 1 ? '' : 's'} · <Link href="/admin/periods/new">open new period</Link>
         </p>
+        <div className="worker-setup-callout">
+          <p>
+            A payroll period is one timesheet cycle (usually a week, two weeks, or a month). Keep it <strong>OPEN</strong> while workers enter hours.
+          </p>
+          <p>When a new assignment overlaps an open period, that worker is added automatically. Do not open another overlapping period.</p>
+        </div>
         {periods.length === 0 ? (
           <p>No periods yet.</p>
         ) : (

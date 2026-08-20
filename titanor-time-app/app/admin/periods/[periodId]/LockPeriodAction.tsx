@@ -12,7 +12,7 @@ interface Blocker {
   status: string | null;
 }
 
-export function LockPeriodAction({ periodId }: { periodId: string }) {
+export function LockPeriodAction({ periodId, canLock }: { periodId: string; canLock: boolean }) {
   const router = useRouter();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -47,9 +47,14 @@ export function LockPeriodAction({ periodId }: { periodId: string }) {
 
   return (
     <div className="setup-card form">
-      <button className="login-submit" type="button" disabled={loading} onClick={handleLock}>
+      <p className="setup-subtitle">
+        Locking closes this period for normal work. It becomes available only after every participant is final approved.
+      </p>
+      <button className="login-submit" type="button" disabled={loading || !canLock} onClick={handleLock}>
         {loading ? 'Locking…' : 'Lock period'}
       </button>
+
+      {!canLock ? <p>Nothing to press yet — finish reviewing and final approving all worker timesheets first.</p> : null}
 
       {error ? (
         <p className="login-error" role="alert">

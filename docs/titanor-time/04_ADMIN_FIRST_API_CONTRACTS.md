@@ -403,10 +403,11 @@ relevant query + canonical body)`.
 
 #### `POST /api/admin/workers/:employeeId/activation`
 - Permission: `worker.activation.generate`
-- Ограничение: активный `SiteAssignment` + `PayrollPeriodParticipant` в `OPEN`-периоде, иначе `403
-  SETUP_INCOMPLETE`
+- Ограничение: `User.status=PENDING_ACTIVATION` + активный Employment. Assignment и payroll period
+  не требуются: worker может активировать/установить приложение до operational setup; без Site UI
+  показывает empty state и блокирует Check In
 - Response `201`: `{ "activationCode", "activationExpiresAt" }` (72ч, только здесь)
-- Ошибки: `404`, `409 WORKER_ALREADY_ACTIVE`, `403 SETUP_INCOMPLETE`
+- Ошибки: `404`, `409 WORKER_ALREADY_ACTIVE`, `403 SETUP_INCOMPLETE` (нет активного Employment)
 - Idempotency: обязателен
 - Audit: `ACTIVATION_TOKEN_ISSUED`
 

@@ -69,6 +69,12 @@ async function main() {
   const workerBRes = await jsonFetch(`${BASE}/api/admin/workers`, { method: 'POST', headers: authHeaders(freshCookie, { 'Idempotency-Key': randomUUID() }), body: JSON.stringify({ firstName: 'Checklist', lastName: `WorkerB${randomUUID().slice(0, 6)}` }) });
   check('6: creating Worker B succeeds while Worker A already exists (no singleton block)', workerBRes.status === 201 && workerBRes.body.employee.id !== workerARes.body.employee.id, workerBRes.body);
 
+  const workerBEarlyActivation = await jsonFetch(`${BASE}/api/admin/workers/${workerBRes.body.employee.id}/activation`, {
+    method: 'POST',
+    headers: authHeaders(freshCookie, { 'Idempotency-Key': randomUUID() })
+  });
+  check('6b: a new worker can receive activation immediately without an assignment or payroll period', workerBEarlyActivation.status === 201 && typeof workerBEarlyActivation.body.activationCode === 'string');
+
   await jsonFetch(`${BASE}/api/admin/assignments`, { method: 'POST', headers: authHeaders(freshCookie, { 'Idempotency-Key': randomUUID() }), body: JSON.stringify({ employeeId: workerARes.body.employee.id, siteId: checklistSiteId, templateId: checklistTemplateId, validFrom: '2020-01-01', isPrimary: true }) });
   const status7 = await jsonFetch(`${BASE}/api/admin/setup-status`, { headers: authHeaders(freshCookie) });
   check('7: after assignment — hasAssignment flips true, hasOpenPeriod still false', status7.body.hasAssignment === true && !status7.body.hasOpenPeriod, status7.body);
@@ -106,6 +112,28 @@ async function main() {
     check('10b: back navigation to /admin/setup still shows correct (non-stale) 6 Done items', doneCountAfterBack === 6, doneCountAfterBack);
 
     check('11: checklist is a force-dynamic Server Component with zero client-side state (structural — verified by 10/10b matching DB truth after navigation)', doneCountAfterReload === 6 && doneCountAfterBack === 6);
+
+    // T9.7 real-owner finding: activation belongs to account ownership, not operational setup.
+    // The owner can issue QR immediately and attaches site/schedule inline on the worker profile.
+    await page.goto(`${BASE}/admin/workers/${workerBRes.body.employee.id}`, { waitUntil: 'networkidle' });
+    await page.waitForFunction(() => {
+      const employee = document.querySelector('#assignment-employee') as HTMLSelectElement | null;
+      const site = document.querySelector('#assignment-site') as HTMLSelectElement | null;
+      return Boolean(employee?.value && site?.value);
+    });
+    check('T9.7/G1: unassigned worker profile can issue activation immediately', (await page.locator('button', { hasText: 'Issue activation code' }).count()) === 1);
+    check('T9.7/G2: site/work-schedule form is embedded in the worker profile', (await page.locator('.worker-work-setup').count()) === 1);
+    check('T9.7/G3: inline form locks the intended worker', await page.locator('#assignment-employee').inputValue() === workerBRes.body.employee.id && await page.locator('#assignment-employee').isDisabled());
+    check('T9.7/G4: guided form defaults start date to Helsinki today', await page.locator('#assignment-valid-from').inputValue() === helsinkiToday);
+    check('T9.7/G5: guided first assignment defaults to primary', await page.locator('#assignment-is-primary').isChecked());
+    await page.locator('button[type="submit"]', { hasText: 'Create assignment' }).click();
+    await page.waitForURL(`${BASE}/admin/workers/${workerBRes.body.employee.id}`, { timeout: 15000 });
+    check('T9.7/G6: save remains on the same worker profile', new URL(page.url()).pathname === `/admin/workers/${workerBRes.body.employee.id}`);
+    check('T9.7/G7: assignment auto-enrols worker in the existing period without changing activation readiness', (await page.locator('button', { hasText: 'Issue activation code' }).count()) === 1);
+
+    await page.goto(`${BASE}/admin/periods/${(await jsonFetch(`${BASE}/api/admin/periods/current`, { headers: authHeaders(freshCookie) })).body.id}`, { waitUntil: 'networkidle' });
+    check('T9.7/G8: period page tells owner to leave OPEN while workers enter hours', (await page.locator('.worker-setup-callout').innerText()).includes('leave this period open'));
+    check('T9.7/G9: Lock period is disabled while timesheets remain pending', await page.locator('button', { hasText: 'Lock period' }).isDisabled());
 
     await browser.close();
   }
@@ -173,8 +201,8 @@ async function main() {
   await page.locator('#worker-first-name').fill('Clicked');
   await page.locator('#worker-last-name').fill(uniqueLast);
   await page.locator('.login-submit').click();
-  await page.waitForURL(/\/admin\/setup/, { timeout: 10000 });
-  check('3: creating a worker via the discovered "create new" link (not a typed URL) succeeds and redirects to /admin/setup', page.url().includes('/admin/setup'));
+  await page.waitForURL(/\/admin\/workers\/[0-9a-f-]+$/, { timeout: 10000 });
+  check('3: creating a worker opens that worker profile with immediate activation and inline work setup', (await page.locator('button', { hasText: 'Issue activation code' }).count()) === 1 && (await page.locator('.worker-work-setup').count()) === 1);
 
   // 4: both workers (A and the newly clicked one) appear separately in the list.
   await page.goto(`${BASE}/admin/workers`, { waitUntil: 'networkidle' });
@@ -193,7 +221,7 @@ async function main() {
   await page.locator('#worker-last-name').fill(doubleClickLast);
   const submitBtn = page.locator('.login-submit');
   await Promise.all([submitBtn.click({ force: true }), submitBtn.click({ force: true }).catch(() => {})]);
-  await page.waitForURL(/\/admin\/setup/, { timeout: 10000 });
+  await page.waitForURL(/\/admin\/workers\/[0-9a-f-]+$/, { timeout: 10000 });
   const doubleClickCount = await prisma.employee.count({ where: { lastName: doubleClickLast } });
   check('7: rapid double-click on Create worker produces exactly one Employee row', doubleClickCount === 1, doubleClickCount);
 

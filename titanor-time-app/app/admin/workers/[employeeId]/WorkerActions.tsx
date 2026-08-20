@@ -66,7 +66,7 @@ export function WorkerActions({ worker }: { worker: WorkerDetail }) {
         const code = await parseErrorCode(response);
         switch (code) {
           case 'SETUP_INCOMPLETE':
-            setActivationError('This worker needs a current site assignment and an open payroll period first.');
+            setActivationError('This worker does not have an active employment eligible for activation.');
             break;
           case 'WORKER_ALREADY_ACTIVE':
             setActivationError('This worker has already activated their account.');
@@ -407,11 +407,8 @@ export function WorkerActions({ worker }: { worker: WorkerDetail }) {
           ) : null}
         </section>
       ) : worker.activationStatus === 'SETUP_INCOMPLETE' ? (
-        <div>
-          <button type="button" className="login-submit" disabled title="Assign the worker to a site and open a payroll period first.">
-            Issue activation code
-          </button>
-          <p>Assign the worker to a site and open a payroll period first.</p>
+        <div className="worker-setup-callout">
+          <p>This account cannot be activated because its employment is not active. Reactivate the worker first.</p>
         </div>
       ) : (
         <p>This worker has already activated their account.</p>

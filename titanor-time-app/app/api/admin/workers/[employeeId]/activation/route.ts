@@ -95,7 +95,7 @@ export async function POST(request: NextRequest, { params }: RouteParams): Promi
       case 'SETUP_INCOMPLETE':
         return respond(
           403,
-          errorBody({ code: 'SETUP_INCOMPLETE', message: 'Assign this worker to a site and open a payroll period first.' }, requestId)
+          errorBody({ code: 'SETUP_INCOMPLETE', message: 'This worker does not have an active employment eligible for activation.' }, requestId)
         );
     }
   }

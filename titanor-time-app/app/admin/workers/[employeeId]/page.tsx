@@ -1,7 +1,8 @@
 import { redirect } from 'next/navigation';
 import Link from 'next/link';
 import { resolveServerSession } from '@/lib/server-session';
-import { getWorkerDetail } from '@/lib/workers';
+import { getWorkerDetail, helsinkiToday } from '@/lib/workers';
+import { NewAssignmentForm } from '@/app/admin/assignments/new/NewAssignmentForm';
 import { WorkerActions } from './WorkerActions';
 
 export const dynamic = 'force-dynamic';
@@ -9,7 +10,7 @@ export const dynamic = 'force-dynamic';
 const ACTIVATION_STATUS_LABEL: Record<string, string> = {
   ALREADY_ACTIVE: 'Already active',
   READY_FOR_ACTIVATION: 'Ready — activation code can be issued',
-  SETUP_INCOMPLETE: 'Setup incomplete (needs a current assignment + open payroll period)'
+  SETUP_INCOMPLETE: 'Setup incomplete — follow the steps below'
 };
 
 // docs/titanor-time/01_SCREEN_MAP.md §2 (/admin/workers/[employeeId]).
@@ -66,7 +67,9 @@ export default async function WorkerDetailPage({ params }: { params: Promise<{ e
 
         <h2>Current assignments</h2>
         {worker.currentAssignments.length === 0 ? (
-          <p>None.</p>
+          <div className="worker-setup-callout">
+            <p>None yet. The worker may activate and install the app now; the app will explain that no site has been assigned.</p>
+          </div>
         ) : (
           <ul className="setup-list">
             {worker.currentAssignments.map((assignment) => (
@@ -79,6 +82,20 @@ export default async function WorkerDetailPage({ params }: { params: Promise<{ e
             ))}
           </ul>
         )}
+
+        <section className="worker-work-setup">
+          <h2>Add a site and work schedule</h2>
+          <p className="setup-subtitle">
+            Choose the worker&apos;s site, optional work area, schedule template and start date here. You do not need to leave this worker page.
+          </p>
+          <NewAssignmentForm
+            initialEmployeeId={worker.id}
+            initialValidFrom={helsinkiToday().toISOString().slice(0, 10)}
+            initialIsPrimary={worker.currentAssignments.length === 0}
+            returnEmployeeId={worker.id}
+            lockEmployee
+          />
+        </section>
 
         {worker.employment && !worker.employment.active ? (
           <p className="setup-subtitle">

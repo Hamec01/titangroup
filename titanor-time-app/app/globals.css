@@ -260,6 +260,25 @@ button:disabled {
   background: #ffffff;
 }
 
+.worker-setup-callout {
+  display: grid;
+  gap: 12px;
+  padding: 16px;
+  border: 1px solid rgba(147, 197, 253, 0.28);
+  border-radius: 6px;
+  background: rgba(147, 197, 253, 0.07);
+}
+
+.worker-setup-callout p {
+  margin: 0;
+}
+
+.worker-setup-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
 .activation-actions {
   display: flex;
   flex-wrap: wrap;

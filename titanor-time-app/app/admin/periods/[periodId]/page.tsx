@@ -49,6 +49,15 @@ export default async function AdminPeriodDetailPage({ params }: RouteParams) {
           Status: {period.status} · version {period.version}
         </p>
 
+        {period.status === 'OPEN' ? (
+          <div className="worker-setup-callout">
+            <p>
+              <strong>What to do now:</strong> leave this period open while workers enter and submit hours.
+            </p>
+            <p>New workers are added automatically when their assignment dates overlap this period.</p>
+          </div>
+        ) : null}
+
         <ul className="setup-list">
           <li className="setup-item">
             <span className="setup-label">Participants</span>
@@ -67,7 +76,9 @@ export default async function AdminPeriodDetailPage({ params }: RouteParams) {
         {period.lockedAt && <p className="setup-subtitle">Locked at {period.lockedAt}</p>}
         {period.exportedAt && <p className="setup-subtitle">Exported at {period.exportedAt}</p>}
 
-        {period.status === 'OPEN' ? <LockPeriodAction periodId={period.id} /> : null}
+        {period.status === 'OPEN' ? (
+          <LockPeriodAction periodId={period.id} canLock={period.participantsTotal > 0 && period.timesheetsPending === 0} />
+        ) : null}
 
         <p>
           <Link href={`/admin/reports?periodId=${period.id}`}>View a worker's time report for this period</Link>
