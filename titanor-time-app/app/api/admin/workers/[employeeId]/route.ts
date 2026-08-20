@@ -18,6 +18,10 @@ const REQUIRED_CSRF_HEADER_VALUE = 'titanor-time';
 // contract, kept consistent with the fields' original validation.
 const MAX_NAME_LENGTH = 128;
 const MAX_PHONE_LENGTH = 32;
+// Same pattern as the sibling activation/regenerate-username/deactivate routes for this entity — a
+// malformed id must never reach Prisma (which throws P2023 and surfaces as a 500), and must be
+// indistinguishable from a genuinely nonexistent one (no oracle).
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 function errorBody(body: ApiErrorBody, requestId: string): { error: ApiErrorBody & { requestId: string } } {
   return { error: { ...body, requestId } };
@@ -38,6 +42,9 @@ export async function GET(request: NextRequest, { params }: RouteParams): Promis
   }
 
   const { employeeId } = await params;
+  if (!UUID_PATTERN.test(employeeId)) {
+    return jsonError(404, { code: 'WORKER_NOT_FOUND', message: 'No worker with this id.' }, requestId);
+  }
   const detail = await getWorkerDetail(employeeId);
   if (!detail) {
     return jsonError(404, { code: 'WORKER_NOT_FOUND', message: 'No worker with this id.' }, requestId);
@@ -63,6 +70,9 @@ export async function PATCH(request: NextRequest, { params }: RouteParams): Prom
   }
 
   const { employeeId } = await params;
+  if (!UUID_PATTERN.test(employeeId)) {
+    return jsonError(404, { code: 'WORKER_NOT_FOUND', message: 'No worker with this id.' }, requestId);
+  }
 
   let rawBody: unknown;
   try {

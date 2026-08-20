@@ -44,6 +44,9 @@ export async function POST(request: NextRequest, { params }: RouteParams): Promi
   }
 
   const { assignmentId } = await params;
+  if (!UUID_PATTERN.test(assignmentId)) {
+    return jsonError(404, { code: 'ASSIGNMENT_NOT_FOUND', message: 'No assignment with this id.' }, requestId);
+  }
 
   const existing = await prisma.siteAssignment.findUnique({ where: { id: assignmentId } });
   if (!existing) {

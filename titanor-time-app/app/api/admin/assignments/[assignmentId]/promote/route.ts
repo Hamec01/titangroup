@@ -22,6 +22,10 @@ const REQUIRED_CSRF_HEADER_VALUE = 'titanor-time';
 function advisoryLockKeyName(employeeId: string): string {
   return `titanor_time:assignment_promote:${employeeId}`;
 }
+// A malformed id must never reach Prisma (throws P2023, surfaces as a 500) and must be
+// indistinguishable from a genuinely nonexistent one (no oracle) — same pattern already used by
+// this route family's own POST /api/admin/assignments/validate-overlap and .../split.
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 type RouteParams = { params: Promise<{ assignmentId: string }> };
 
@@ -42,6 +46,9 @@ export async function POST(request: NextRequest, { params }: RouteParams): Promi
   }
 
   const { assignmentId } = await params;
+  if (!UUID_PATTERN.test(assignmentId)) {
+    return jsonError(404, { code: 'ASSIGNMENT_NOT_FOUND', message: 'No assignment with this id.' }, requestId);
+  }
 
   const existing = await prisma.siteAssignment.findUnique({ where: { id: assignmentId } });
   if (!existing) {

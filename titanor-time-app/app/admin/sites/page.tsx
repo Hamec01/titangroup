@@ -35,7 +35,7 @@ export default async function AdminSitesPage() {
       <div className="setup-card worker-card">
         <h1>Sites</h1>
         <p className="setup-subtitle">
-          {totalItems} site{totalItems === 1 ? '' : 's'}
+          {totalItems} site{totalItems === 1 ? '' : 's'} · <Link href="/admin/sites/new">create new</Link>
         </p>
         {items.length === 0 ? (
           <p>No sites yet.</p>

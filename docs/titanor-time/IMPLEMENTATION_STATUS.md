@@ -1,6 +1,106 @@
 # Titanor Time — Implementation Status
 
-Обновлено: 2026-08-20 Europe/Helsinki (feat: add account-bound offline worker views — T8.8, ЭТАП 8 завершён)
+Обновлено: 2026-08-20 Europe/Helsinki (fix: harden setup lifecycle flows — T9.1-T9.3)
+
+**`[2026-08-20]` T9.1-T9.3 — fix(time): harden setup lifecycle flows.** Внутренний тестовый фундамент
+(SUPER_ADMIN/ADMIN/FOREMAN/WORKER A/WORKER B/dual-role, Site Alpha/Beta/Gamma) + role/permission
+checklist + Setup/lifecycle аудит всех разделов `/admin/setup` (Workers/Users/Sites/WorkAreas/
+Templates/SiteAssignments/ForemanAssignments/PayrollPeriods/GeofenceVersions). Design написан ДО
+кода — `docs/titanor-time/T9_INTERNAL_TEST_PLAN.md` (lifecycle matrix §1, критическое решение о
+DELETE §2, найденные дефекты §3, fix-решение §4).
+
+**Найденные и исправленные дефекты — все воспроизведены живым Chromium ДО фикса, повторно
+проверены ПОСЛЕ.**
+
+**D1/D2 — отсутствующая навигационная ссылка (владелец: «после создания одного работника
+невозможно создать второго»).** `app/admin/workers/page.tsx` и `app/admin/sites/page.tsx` не
+содержали ссылки на `.../new` — Setup-checklist свой «Create» тоже скрывает после первой созданной
+записи (переходит в «Manage» → список), и у списка не было пути дальше. Соседние списки
+(`/admin/templates`, `/admin/users`, `/admin/periods`) такую ссылку уже имели — рассинхрон именно
+этих двух. Backend (`POST /api/admin/workers`/`POST /api/admin/sites`, включая
+`reserveWorkerUsername`'s `pg_advisory_xact_lock`) не содержал никакого singleton-предположения —
+подтверждено чтением всей транзакции ДО вывода, что это UI, а не data-layer баг. **Исправление**:
+одна ссылка `create new` рядом со счётчиком, тот же паттерн, что у соседних списков — 2 строки на
+файл.
+
+**D3/D4 — полностью реализованный backend без единой точки входа в UI (владелец: «старого
+работника невозможно убрать из активной работы»).** `POST /api/admin/assignments/:id/end`
+(`assignment.end`) и `POST /api/admin/foreman-assignments/:id/end` (`foreman_assignment.end`) —
+оба валидированы, аудированы, покрыты тестами с момента своей реализации — но ни один UI-файл их не
+вызывал; `AssignmentPrimaryToggle.tsx`'s собственный комментарий признавал пробел («endedReason
+editing needs a real assignment detail page (not built yet)»). `worker.deactivate` намеренно НЕ
+завершает `SiteAssignment` (задокументированное поведение, `03_DATA_MODEL_ERD.md` §4.2 — блокирует
+только НОВЫЕ назначения) — значит единственный реальный способ убрать работника из активного списка
+объекта это завершить именно назначение, а этого действия не существовало вообще. **Исправление**:
+новый `EndAssignmentAction.tsx` (список `/admin/assignments`) и inline-действие в
+`ForemanAssignmentSection.tsx` (`/admin/sites/[siteId]`) — оба вызывают уже существующий,
+неизменённый endpoint; ноль нового backend-кода.
+
+**Побочно найденный и исправленный класс дефектов — malformed UUID → `500` вместо `404`.**
+Обнаружен тестом (`scripts/_test-t9-setup-lifecycle.ts` сценарий 21) при проверке `GET
+/api/admin/workers/:employeeId` с нечисловым id — Prisma бросает
+`PrismaClientKnownRequestError(P2023)` на попытке скастовать невалидную строку в `uuid`-колонку,
+необработанное исключение всплывает как `500`. Проверка по всей кодовой базе показала: у части
+route этого же семейства (`.../workers/[employeeId]/activation`,
+`.../workers/[employeeId]/regenerate-username`, `.../assignments/[assignmentId]/split`) guard уже
+был; у части — не было. **Исправлено единообразно в 9 файлах** (тот же `UUID_PATTERN`-regex,
+проверка сразу после `await params`, до любого DB-запроса, возвращает тот же `404`-код, что и
+"не найдено", — no oracle): `workers/[employeeId]/route.ts` (GET+PATCH),
+`workers/[employeeId]/deactivate/route.ts`, `assignments/[assignmentId]/route.ts` (PATCH),
+`assignments/[assignmentId]/end/route.ts`, `assignments/[assignmentId]/promote/route.ts`,
+`assignments/[assignmentId]/split/route.ts` (путь не был защищён, хотя своё же `UUID_PATTERN` уже
+существовало для поля `siteId` в теле), `sites/[siteId]/work-areas/route.ts` (GET+POST),
+`sites/[siteId]/work-areas/[workAreaId]/route.ts`, `periods/[periodId]/route.ts`,
+`periods/[periodId]/lock/route.ts`, `foreman-assignments/[foremanAssignmentId]/end/route.ts`. Не
+новый контракт — уже документированное поведение (`04_ADMIN_FIRST_API_CONTRACTS.md`), просто
+неполное покрытие им.
+
+**Намеренно не реализовано** (уже задокументированный, не новый gap, не блокер этой задачи):
+деактивация/`role.assign` системных пользователей (ADMIN/SUPER_ADMIN/standalone FOREMAN) — ни
+backend, ни UI не существуют, `04_ADMIN_FIRST_API_CONTRACTS.md` §14 сам говорит «не входят,
+зарезервированы»; City не имеет lifecycle-действия вовсе (нет активного держателя проблемы). Оба —
+не добавлены без доказанного blocker, per задание.
+
+**Тесты — 97/97 проверок, 3 новых постоянных скрипта + 1 shared fixture module** (реальный
+Chromium, production standalone build, disposable PostgreSQL 16, ноль mocks бизнес-операций):
+`scripts/_test-t9-fixtures.ts` (не тест сам по себе — `buildFixture()`, переиспользуется всеми
+тремя); `scripts/_test-t9-setup-lifecycle.ts` (50/50 — 12 сценариев Setup checklist + 23 сценария
+Worker A/B CRUD/lifecycle + create-second/edit-isolation/duplicate-submit/lifecycle/audit-content
+для Sites/WorkAreas/Templates/PayrollPeriods/SiteAssignments/ForemanAssignments/GeofenceVersions);
+`scripts/_test-t9-role-matrix.ts` (32/32 — SUPER_ADMIN/ADMIN/FOREMAN/WORKER/dual-role + 401/403/
+CSRF/permission-revocation-on-next-request/malformed-UUID-no-oracle/GET-no-AuditEvent/deny-before-
+body-validation); `scripts/_test-t9-setup-ui.ts` (15/15 — desktop 1280×800 admin, mobile 390×844
+worker/foreman, zero horizontal overflow, keyboard reachability, final live confirmation of all 4
+fixes).
+
+**Регрессия**: `_test-activation.ts`, `_test-corrections.ts`, `_test-overview.ts`,
+`_test-period-time-report.ts` (110/110), `_test-csv-export.ts` (201/201),
+`_test-pilot-pair-orphan.ts`, `_test-warm-cache.ts` (2/2) — все зелёные без изменений. Полный `git
+diff --stat` подтверждает, что это исчерпывающий список областей, реально затронутых этой задачей
+(Setup/Workers/Sites/Assignments/ForemanAssignments/Periods/WorkAreas admin CRUD) — offline
+outbox/clock, timesheet edit/submit, foreman review, attendance exceptions read/resolve, reports,
+CSV export generation, PWA install/offline snapshot логика не тронуты ни строкой, полный дорогой
+повторный прогон их собственных больших наборов (`_test-offline-views.ts` 71/71,
+`_test-pwa-install.ts` 59/59 и т.д.) не оправдан для нулевого-diff кода — тот же принцип, что уже
+применялся в T8.7/T8.4C этой сессии.
+
+**Технические проверки**: `git diff --check`, `prisma validate`, `tsc --noEmit` — 0 ошибок; `npm run
+build` в scratch-копии (все изменённые route в выводе); `docker compose config --quiet`; Docker
+build только под уникальным временным тегом `titanor-time-app:t9-setup-audit-test` (никогда
+`docker compose build app`) — успех, образ удалён; `titanor-time-app:latest` OCI revision **до и
+после** — `c63059588b65b728966f9658ef453b97d887f32d` (`c630595`), не изменился, backup-тег не
+тронут. `prisma migrate deploy` дважды на заведомо чистом одноразовом PostgreSQL 16 (62 migrations,
+второй — no-op, schema этой задачей не менялась). Preview `127.0.0.1:3244` — `200`/`200` до и
+после. Production (`titanor-time-app-1`/`titanor-time-db-1`) — `RestartCount=0`, `StartedAt` не
+менялся, никакого restart/recreate/up/deploy/migrate.
+
+**Не менялись**: Prisma schema/миграции, права/`RolePermission`-семена, offline outbox/PWA
+(ЭТАП 7A/T8.8), timesheet/review/correction/report/export бизнес-логика, локализация.
+
+**T9.1–T9.3 завершены.** T9.4 (полный сквозной сценарий admin→worker→foreman→admin) ещё не начат —
+следующий рекомендуемый шаг, см. `PROJECT_ROADMAP.md`.
+
+---
 
 **`[2026-08-20]` T8.8 — feat(time): add account-bound offline worker views.** Account-bound
 read-only offline просмотр для 6 read-only экранов `/worker/**` поверх уже существующего полного

@@ -477,6 +477,30 @@ button:disabled {
   text-decoration: none;
 }
 
+/* T9_INTERNAL_TEST_PLAN.md §4 (D3/D4) — inline "End" action forms on the assignments/foreman
+   assignment lists. Additive-only, reuses .setup-action for its own buttons. */
+.assignment-end-form {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 6px;
+}
+
+.assignment-end-form label {
+  font-size: 0.8rem;
+  color: var(--text-soft);
+}
+
+.assignment-end-form input {
+  height: 32px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 4px;
+  background: rgba(7, 11, 17, 0.88);
+  color: var(--text);
+  padding: 0 8px;
+}
+
 /* docs/titanor-time/01_SCREEN_MAP.md §3 — worker screens are mobile-first,
    "крупные элементы, минимум действий": bigger touch targets and simpler
    stacked layout than the desktop-first setup/worker-table styles above. */

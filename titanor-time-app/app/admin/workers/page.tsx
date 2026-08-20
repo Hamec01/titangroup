@@ -35,7 +35,7 @@ export default async function AdminWorkersPage() {
       <div className="setup-card worker-card">
         <h1>Workers</h1>
         <p className="setup-subtitle">
-          {totalItems} worker{totalItems === 1 ? '' : 's'}
+          {totalItems} worker{totalItems === 1 ? '' : 's'} · <Link href="/admin/workers/new">create new</Link>
         </p>
         {items.length === 0 ? (
           <p>No workers yet.</p>

@@ -21,6 +21,9 @@ export const revalidate = 0;
 // no DB-conflict risk this endpoint needs to guard against.
 const REQUIRED_CSRF_HEADER_VALUE = 'titanor-time';
 const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
+// A malformed id must never reach Prisma (throws P2023, surfaces as a 500) and must be
+// indistinguishable from a genuinely nonexistent one (no oracle).
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 function errorBody(body: ApiErrorBody, requestId: string): { error: ApiErrorBody & { requestId: string } } {
   return { error: { ...body, requestId } };
@@ -49,6 +52,9 @@ export async function POST(request: NextRequest, { params }: RouteParams): Promi
   }
 
   const { foremanAssignmentId } = await params;
+  if (!UUID_PATTERN.test(foremanAssignmentId)) {
+    return jsonError(404, { code: 'FOREMAN_ASSIGNMENT_NOT_FOUND', message: 'No foreman assignment with this id.' }, requestId);
+  }
 
   const existing = await prisma.foremanAssignment.findUnique({ where: { id: foremanAssignmentId } });
   if (!existing) {

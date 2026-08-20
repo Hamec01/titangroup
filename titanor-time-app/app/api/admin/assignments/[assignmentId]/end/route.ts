@@ -14,6 +14,10 @@ export const revalidate = 0;
 const REQUIRED_CSRF_HEADER_VALUE = 'titanor-time';
 const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
 const MAX_REASON_LENGTH = 2000;
+// A malformed id must never reach Prisma (throws P2023, surfaces as a 500) and must be
+// indistinguishable from a genuinely nonexistent one (no oracle) — same pattern already used by
+// this route family's own POST /api/admin/assignments/validate-overlap and .../split.
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 function errorBody(body: ApiErrorBody, requestId: string): { error: ApiErrorBody & { requestId: string } } {
   return { error: { ...body, requestId } };
@@ -42,6 +46,9 @@ export async function POST(request: NextRequest, { params }: RouteParams): Promi
   }
 
   const { assignmentId } = await params;
+  if (!UUID_PATTERN.test(assignmentId)) {
+    return jsonError(404, { code: 'ASSIGNMENT_NOT_FOUND', message: 'No assignment with this id.' }, requestId);
+  }
 
   const existing = await prisma.siteAssignment.findUnique({ where: { id: assignmentId } });
   if (!existing) {

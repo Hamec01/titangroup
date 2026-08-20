@@ -187,6 +187,16 @@ touch target ≥ 48px), `/foreman/*` — desktop-first с поддержкой �
 - Куда: `/admin/workers/new`, `/admin/workers/[employeeId]`
 - API: `GET /api/admin/workers`
 - DoD: работник с двумя активными назначениями показывает оба
+- **T9.3 fix `[2026-08-20]`**: до этого коммита список не содержал ни одной ссылки на
+  `/admin/workers/new` — после создания первого работника Setup-checklist свой «Create» тоже
+  скрывает (переходит в «Manage» → сюда же), в реальном коде страница не имела ссылки «create
+  new» (в отличие от `/admin/templates`/`/admin/users`/`/admin/periods`, у которых она уже была).
+  Владельцем зафиксировано как «после создания одного работника невозможно создать второго» —
+  реальная причина: отсутствующая навигационная ссылка, не бэкенд (`POST /api/admin/workers` не
+  имел ограничения-singleton). Добавлена одна ссылка «create new» рядом со счётчиком, тем же
+  паттерном, что у соседних списков — `docs/titanor-time/T9_INTERNAL_TEST_PLAN.md` §3/§4 (D1).
+  Поиск/фильтр/сортировка/пагинация по-прежнему не реализованы (доменная задача не входила в этот
+  T9-слайс).
 
 #### `/admin/workers/new` 🟢
 - Роли: `ADMIN`, `SUPER_ADMIN`
@@ -255,6 +265,9 @@ touch target ≥ 48px), `/foreman/*` — desktop-first с поддержкой �
 - Куда: `/admin/sites/new`, `/admin/sites/[siteId]`
 - API: `GET /api/admin/sites`
 - DoD: список работает и без единого созданного города (`cityId` nullable)
+- **T9.3 fix `[2026-08-20]`**: тот же класс дефекта, что у `/admin/workers` выше (D2) — ссылки
+  «create new» не было. Добавлена — `docs/titanor-time/T9_INTERNAL_TEST_PLAN.md` §3/§4.
+  Поиск/фильтр/сортировка/пагинация по-прежнему не реализованы.
 
 #### `/admin/sites/new` 🟢
 - Роли: `ADMIN`, `SUPER_ADMIN`
@@ -296,6 +309,9 @@ touch target ≥ 48px), `/foreman/*` — desktop-first с поддержкой �
   (`409 FOREMAN_NOT_ELIGIBLE` для `OFFBOARDING`/`DEACTIVATED`, `409 USER_NOT_FOREMAN` для
   отсутствующей/будущей/завершённой роли); новая версия геозоны никогда не переписывает старую,
   `WorkSite.currentGeofenceVersionId` переключается атомарно вместе с созданием версии
+- **T9.3 fix `[2026-08-20]`** (D4, `docs/titanor-time/T9_INTERNAL_TEST_PLAN.md` §3/§4): секция
+  «Foremen» получила кнопку `End` на каждую строку — `POST /api/admin/foreman-assignments/:id/end`
+  (`foreman_assignment.end`) уже был полностью реализован, но не вызывался нигде в UI.
 
 #### `/admin/sites/[siteId]/work-areas` 🟢
 - Роли: `ADMIN`, `SUPER_ADMIN`
@@ -319,6 +335,16 @@ touch target ≥ 48px), `/foreman/*` — desktop-first с поддержкой �
 - Куда: `/admin/assignments/new`
 - API: `GET /api/admin/assignments`
 - DoD: неактивные назначения видны в фильтре «история», не смешаны с активными
+- **T9.3 fix `[2026-08-20]`**: до этого коммита в списке была только кнопка `Set primary`/`Unset
+  primary` — `POST /api/admin/assignments/:assignmentId/end` (`assignment.end`, уже полностью
+  реализован и покрыт валидацией/аудитом) не вызывался нигде в UI. Владельцем зафиксировано как
+  «старого работника невозможно убрать из активной работы»: `worker.deactivate` намеренно не
+  завершает `SiteAssignment` (см. `/admin/workers/[employeeId]` DoD), поэтому единственный
+  реальный путь убрать работника из активного списка объекта — завершить именно назначение, а
+  этого действия не было в UI. Добавлена кнопка `End` с полями `validTo`/`reason` в каждой строке
+  — `docs/titanor-time/T9_INTERNAL_TEST_PLAN.md` §3/§4 (D3). Тот же класс дефекта и то же
+  исправление — для `ForemanAssignment` на `/admin/sites/[siteId]` (D4).
+  Фильтр по объекту/работнику/активности по-прежнему не реализован.
 
 #### `/admin/assignments/new` 🟢
 - Роли: `ADMIN`, `SUPER_ADMIN`

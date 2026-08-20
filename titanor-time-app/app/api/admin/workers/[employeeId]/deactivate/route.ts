@@ -19,6 +19,10 @@ export const revalidate = 0;
 // against an already-deactivated worker just gets 409 ALREADY_DEACTIVATED.
 const REQUIRED_CSRF_HEADER_VALUE = 'titanor-time';
 const MAX_REASON_LENGTH = 2000;
+// Same pattern as the sibling activation/regenerate-username routes for this entity — a malformed
+// id must never reach Prisma (which throws P2023 and surfaces as a 500), and must be
+// indistinguishable from a genuinely nonexistent one (no oracle).
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 function errorBody(body: ApiErrorBody, requestId: string): { error: ApiErrorBody & { requestId: string } } {
   return { error: { ...body, requestId } };
@@ -43,6 +47,9 @@ export async function POST(request: NextRequest, { params }: RouteParams): Promi
   }
 
   const { employeeId } = await params;
+  if (!UUID_PATTERN.test(employeeId)) {
+    return jsonError(404, { code: 'WORKER_NOT_FOUND', message: 'No worker with this id.' }, requestId);
+  }
 
   let rawBody: unknown;
   try {

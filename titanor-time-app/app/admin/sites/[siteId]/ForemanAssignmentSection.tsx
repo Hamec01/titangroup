@@ -33,6 +33,88 @@ function labelFor(foreman: AssignableForeman): string {
   return `${foreman.username} — ${foreman.status}`;
 }
 
+// docs/titanor-time/T9_INTERNAL_TEST_PLAN.md §4 (defect D4) — POST
+// /api/admin/foreman-assignments/:id/end was already fully implemented but had no UI anywhere
+// calling it. Minimal UI for the existing contract, same shape as EndAssignmentAction.tsx.
+function EndForemanAssignmentAction({ assignmentId }: { assignmentId: string }) {
+  const router = useRouter();
+  const [open, setOpen] = useState(false);
+  const [validTo, setValidTo] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+
+  async function handleSubmit(event: FormEvent<HTMLFormElement>): Promise<void> {
+    event.preventDefault();
+    if (loading) {
+      return;
+    }
+    setErrorMessage(null);
+    setLoading(true);
+
+    try {
+      const response = await fetch(`/api/admin/foreman-assignments/${assignmentId}/end`, {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json', 'X-Requested-With': CSRF_HEADER_VALUE },
+        body: JSON.stringify({ validTo })
+      });
+
+      if (!response.ok) {
+        let code: string | undefined;
+        try {
+          const body = (await response.json()) as { error?: { code?: string } };
+          code = body.error?.code;
+        } catch {
+          // Non-JSON error body — fall through to the generic message.
+        }
+        setErrorMessage(code === 'FORBIDDEN' ? 'You no longer have permission to end foreman assignments.' : 'Please check the end date.');
+        setLoading(false);
+        return;
+      }
+
+      router.refresh();
+      setLoading(false);
+      setOpen(false);
+    } catch {
+      setErrorMessage('Network error. Please try again.');
+      setLoading(false);
+    }
+  }
+
+  if (!open) {
+    return (
+      <button type="button" className="setup-action" onClick={() => setOpen(true)}>
+        End
+      </button>
+    );
+  }
+
+  return (
+    <form onSubmit={handleSubmit} aria-busy={loading} className="assignment-end-form">
+      <label htmlFor={`foreman-end-valid-to-${assignmentId}`}>End date</label>
+      <input
+        id={`foreman-end-valid-to-${assignmentId}`}
+        type="date"
+        required
+        disabled={loading}
+        value={validTo}
+        onChange={(event) => setValidTo(event.target.value)}
+      />
+      {errorMessage ? (
+        <p className="login-error" role="alert">
+          {errorMessage}
+        </p>
+      ) : null}
+      <button type="submit" className="setup-action" disabled={loading}>
+        {loading ? 'Ending…' : 'Confirm end'}
+      </button>
+      <button type="button" className="setup-action" disabled={loading} onClick={() => setOpen(false)}>
+        Cancel
+      </button>
+    </form>
+  );
+}
+
 export function ForemanAssignmentSection({
   siteId,
   foremanAssignments,
@@ -107,6 +189,7 @@ export function ForemanAssignmentSection({
                 {assignment.foremanUsername}
                 {assignment.isSubstitute ? ' (substitute)' : ''}
               </span>
+              <EndForemanAssignmentAction assignmentId={assignment.id} />
             </li>
           ))}
         </ul>

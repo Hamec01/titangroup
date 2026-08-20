@@ -27,6 +27,9 @@ const MAX_PAGE_SIZE = 100;
 // Not specified by the contract (it only says "name") — same bounds style as
 // MAX_NAME_LENGTH elsewhere in this codebase.
 const MAX_NAME_LENGTH = 128;
+// A malformed id must never reach Prisma (throws P2023, surfaces as a 500) and must be
+// indistinguishable from a genuinely nonexistent one (no oracle).
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 function errorBody(body: ApiErrorBody, requestId: string): { error: ApiErrorBody & { requestId: string } } {
   return { error: { ...body, requestId } };
@@ -47,6 +50,9 @@ export async function GET(request: NextRequest, { params }: RouteParams): Promis
   }
 
   const { siteId } = await params;
+  if (!UUID_PATTERN.test(siteId)) {
+    return jsonError(404, { code: 'SITE_NOT_FOUND', message: 'No site with this id.' }, requestId);
+  }
   const site = await prisma.workSite.findUnique({ where: { id: siteId }, select: { id: true } });
   if (!site) {
     return jsonError(404, { code: 'SITE_NOT_FOUND', message: 'No site with this id.' }, requestId);
@@ -84,6 +90,9 @@ export async function POST(request: NextRequest, { params }: RouteParams): Promi
   }
 
   const { siteId } = await params;
+  if (!UUID_PATTERN.test(siteId)) {
+    return jsonError(404, { code: 'SITE_NOT_FOUND', message: 'No site with this id.' }, requestId);
+  }
 
   let rawBody: unknown;
   try {

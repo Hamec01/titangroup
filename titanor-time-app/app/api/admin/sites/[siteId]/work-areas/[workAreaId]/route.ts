@@ -14,6 +14,9 @@ export const revalidate = 0;
 // docs/titanor-time/04_ADMIN_FIRST_API_CONTRACTS.md §3 — exact contract for this endpoint.
 const REQUIRED_CSRF_HEADER_VALUE = 'titanor-time';
 const MAX_NAME_LENGTH = 128;
+// A malformed id must never reach Prisma (throws P2023, surfaces as a 500) and must be
+// indistinguishable from a genuinely nonexistent one (no oracle).
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 function errorBody(body: ApiErrorBody, requestId: string): { error: ApiErrorBody & { requestId: string } } {
   return { error: { ...body, requestId } };
@@ -38,6 +41,9 @@ export async function PATCH(request: NextRequest, { params }: RouteParams): Prom
   }
 
   const { siteId, workAreaId } = await params;
+  if (!UUID_PATTERN.test(siteId) || !UUID_PATTERN.test(workAreaId)) {
+    return jsonError(404, { code: 'WORK_AREA_NOT_FOUND', message: 'No work area with this id on this site.' }, requestId);
+  }
 
   let rawBody: unknown;
   try {

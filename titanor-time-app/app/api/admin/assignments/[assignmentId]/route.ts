@@ -21,6 +21,11 @@ const MAX_ENDED_REASON_LENGTH = 2000;
 // field edit. Detected here as an explicit reject rather than silently
 // ignored, so a client attempting it gets a clear, actionable error.
 const IMMUTABLE_AFTER_START_FIELDS = ['siteId', 'workAreaId', 'templateId', 'templateVersionId'] as const;
+// A malformed id must never reach Prisma (throws P2023, surfaces as a 500) and must be
+// indistinguishable from a genuinely nonexistent one (no oracle) — same pattern already used by
+// this route family's own POST /api/admin/assignments/validate-overlap and .../split (for its
+// siteId body field).
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 function errorBody(body: ApiErrorBody, requestId: string): { error: ApiErrorBody & { requestId: string } } {
   return { error: { ...body, requestId } };
@@ -45,6 +50,9 @@ export async function PATCH(request: NextRequest, { params }: RouteParams): Prom
   }
 
   const { assignmentId } = await params;
+  if (!UUID_PATTERN.test(assignmentId)) {
+    return jsonError(404, { code: 'ASSIGNMENT_NOT_FOUND', message: 'No assignment with this id.' }, requestId);
+  }
 
   let rawBody: unknown;
   try {

@@ -5,6 +5,15 @@ permission-строк, route-доступа и endpoint-доступа для `0
 `04_ADMIN_FIRST_API_CONTRACTS.md`. Документ самодостаточен — все permission перечислены полными
 таблицами.
 
+**`[2026-08-20]` T9.3 reconciliation.** Сверено с реальной реализацией живыми HTTP/UI-проверками
+(`scripts/_test-t9-role-matrix.ts`, 32/32) — SUPER_ADMIN/ADMIN операционный паритет,
+FOREMAN/WORKER-scope изоляция (включая чужой, не назначенный сайт), dual-role
+self-review-exclusion, 401/403/CSRF/permission-revocation-на-следующем-запросе/malformed-UUID-без-
+oracle/GET-без-AuditEvent/deny-до-body-validation. Расхождений между этим документом и реальным
+кодом не найдено — таблицы ниже подтверждены, не изменены. `user.create.admin`/`role.assign`
+(§2.12) по-прежнему не имеют ни одного route в реализации — не новый пробел, зафиксировано также в
+`04_ADMIN_FIRST_API_CONTRACTS.md` §14. Детали — `docs/titanor-time/T9_INTERNAL_TEST_PLAN.md` §6.
+
 ## 1. Роли
 
 | Роль | Кто это | Область действия |

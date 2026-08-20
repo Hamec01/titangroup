@@ -780,17 +780,50 @@ FIFO/deviceSequence/materializer. Физическая установка на �
 
 # ЭТАП 9. ВНУТРЕННИЙ ТЕСТ
 
-## T9.1 — Тестовые пользователи
+## T9.1 — Тестовые пользователи 🟢 реализовано `[2026-08-20]`
 
-Worker, foreman, admin.
+SUPER_ADMIN (bootstrap, единственный принятый способ на сегодня — тот же, что и для самого первого
+владельца), ADMIN, standalone FOREMAN, WORKER A, WORKER B, dual-role FOREMAN+WORKER — все через
+реальные API/UI (создание+активация), не прямой INSERT. Design/fixture-контракт —
+`docs/titanor-time/T9_INTERNAL_TEST_PLAN.md` §5.
 
-## T9.2 — Тестовые объекты
+## T9.2 — Тестовые объекты 🟢 реализовано `[2026-08-20]`
 
-Минимум два объекта.
+Site Alpha, Site Beta, Site Gamma (третий — намеренно НЕ назначен прорабу, для isolation-проверки),
+по одной work area на Alpha/Beta, геозона на обоих, один schedule template, один OPEN payroll
+period, Worker A → Alpha (primary), Worker B → Beta (primary), foreman → Alpha+Beta.
 
-## T9.3 — Проверка прав
+## T9.3 — Проверка прав 🟢 реализовано `[2026-08-20]`
 
-Отдельный checklist по каждой роли.
+Постоянный role/permission checklist (`scripts/_test-t9-role-matrix.ts`, 32/32) — SUPER_ADMIN/ADMIN
+операционный паритет, FOREMAN/WORKER scope-изоляция (в т.ч. чужой Site Gamma), dual-role
+self-review-exclusion без неявного расширения прав, 401/403/CSRF/permission-revocation-на-следующем-
+запросе/malformed-UUID-без-oracle/GET-без-AuditEvent/deny-до-body-validation — все подтверждены
+живыми HTTP-запросами против реального Chromium + production standalone build.
+
+**Найдены и исправлены 4 функциональных дефекта Setup/lifecycle** (владелец сообщил о трёх, четвёртый
+— тот же класс, найден проактивно): у `/admin/workers` и `/admin/sites` не было ссылки на `.../new`
+(после первого работника/объекта создать второй можно было только вручную набрав URL); у
+`SiteAssignment`/`ForemanAssignment` полностью реализованный backend `.../end` не вызывался нигде в
+UI (единственный реальный способ убрать работника из активного списка объекта, раз
+`worker.deactivate` намеренно не трогает назначения). Попутно найдены и исправлены 9 route'ов
+(`workers`, `assignments`×4, `sites/work-areas`×2, `periods`×2, `foreman-assignments`), где
+malformed UUID в пути падал в Prisma и возвращал `500` вместо документированного `404` — тот же
+паттерн уже был у соседних route этих же семейств, просто не везде применён последовательно.
+Полный список, root cause и фикс каждого — `docs/titanor-time/T9_INTERNAL_TEST_PLAN.md` §3/§4,
+`docs/titanor-time/IMPLEMENTATION_STATUS.md`.
+
+**Не реализовано намеренно** (уже задокументированный, не новый gap): деактивация/role.assign
+системных пользователей (`User.status`/`role.assign` для ADMIN/SUPER_ADMIN/standalone FOREMAN) — ни
+backend, ни UI не существуют в текущем срезе (`04_ADMIN_FIRST_API_CONTRACTS.md` §14 сам говорит
+«не входят, зарезервированы»); City не имеет lifecycle-действия вовсе. Оба — не блокеры для этой
+задачи, не реализовывались без доказанного blocker.
+
+Тесты — `scripts/_test-t9-fixtures.ts` (shared fixture), `scripts/_test-t9-setup-lifecycle.ts`
+(50/50 — Setup checklist + Worker A/B CRUD/lifecycle + остальные Setup-разделы),
+`scripts/_test-t9-role-matrix.ts` (32/32), `scripts/_test-t9-setup-ui.ts` (15/15 — mobile 390×844
+worker/foreman, desktop 1280×800 admin). 97/97 проверок, реальный Chromium, production standalone
+build, disposable PostgreSQL 16.
 
 ## T9.4 — Полный сценарий
 

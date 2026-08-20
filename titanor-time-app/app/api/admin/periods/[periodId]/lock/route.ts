@@ -16,6 +16,9 @@ export const revalidate = 0;
 // sibling timesheet.final_approve/return endpoints (pure state transition, no request body).
 const REQUIRED_CSRF_HEADER_VALUE = 'titanor-time';
 type RouteParams = { params: Promise<{ periodId: string }> };
+// A malformed id must never reach Prisma (throws P2023, surfaces as a 500) and must be
+// indistinguishable from a genuinely nonexistent one (no oracle).
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 export async function POST(request: NextRequest, { params }: RouteParams): Promise<NextResponse> {
   const requestId = randomUUID();
@@ -34,6 +37,9 @@ export async function POST(request: NextRequest, { params }: RouteParams): Promi
   }
 
   const { periodId } = await params;
+  if (!UUID_PATTERN.test(periodId)) {
+    return jsonError(404, { code: 'PERIOD_NOT_FOUND', message: 'No period with this id.' }, requestId);
+  }
   const result = await lockPeriod(periodId, authenticated.user.id, requestId);
 
   if ('code' in result) {
