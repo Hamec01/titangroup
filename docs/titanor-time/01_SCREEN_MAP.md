@@ -556,6 +556,70 @@ touch target ≥ 48px), `/foreman/*` — desktop-first с поддержкой �
   `aria-current` на активной, FOREMAN-страницы — ноль этих tabs/admin-ссылок; 40/40 browser-сценария
   зелёные (89/89 проверок, Chromium, production standalone build, `workers=1`)
 
+#### `/admin/export` 🟢 (T8.4C, `[2026-08-20]`)
+- Роли: `ADMIN`, `SUPER_ADMIN` (доступ к странице); `export.read` (история/детали); `period.export`
+  **и** `export.create` вместе (панель создания — иначе форма отсутствует в DOM целиком, не
+  disabled-кнопка)
+- Приоритет: desktop, 390×844 без page-level horizontal overflow
+- Назначение: история CSV-экспортов ЭТАПа 8 (FULL/CORRECTION) + панель создания нового экспорта.
+  Только рабочие часы, ноль зарплаты/payroll. UI поверх уже полностью реализованного и
+  не изменяемого T8.4B backend (`lib/csv-export.ts`, 4 API endpoint'а), contract не менялся
+- Данные: `listExportBatches()`/`listPeriodOptions()`/`getPeriodDetail()` (`lib/csv-export.ts`,
+  `lib/attendance-overview-lookups.ts`, `lib/periods.ts`, все не менялись) — batch {id, kind
+  FULL/CORRECTION, periodId, createdAt, rowCount, fileSizeBytes, fileHash, correctsBatchId,
+  downloadUrl}, pagination
+- Фильтры: `<form method="GET">`, `periodId`/`pageSize` в URL; `page` — только в pagination-ссылках;
+  смена period/pageSize сбрасывает страницу на 1 без JS; "All periods" — валиден только для истории,
+  не для создания (создание требует конкретный period)
+- Действия: создание FULL (period `LOCKED`) / CORRECTION (period `EXPORTED`) экспорта —
+  `components/exports/ExportCreateControl.tsx`, frozen idempotency attempt (тот же паттерн, что
+  `PolicyForm.tsx`, T7A.10B): один клик = одна неизменяемая попытка, синхронный `pendingRef`
+  блокирует double-click до re-render, сетевая ошибка → Retry с тем же `Idempotency-Key`+body,
+  успех sticky (никогда не создаёт второй export автоматически); `POST
+  /api/admin/periods/:periodId/export` с `X-Requested-With`+`Idempotency-Key`
+- Состояния: malformed periodId/page/pageSize → inline validation banner, не 500; пустая история;
+  OPEN period → "Lock the period before exporting", ноль кнопки в DOM; EXPORTED без pending
+  correction → человеко-читаемый `NOTHING_TO_EXPORT` (точный текст, не raw server message);
+  мокированные `FORBIDDEN`/`NOT_AUTHENTICATED`/`CSRF_REJECTED`/malformed-JSON/5xx — все с
+  человеко-читаемым текстом
+- Откуда: nav (`Exports`); `/admin/periods/[periodId]` («View CSV exports for this period»,
+  предзаполненный `periodId`); `/admin/reports/periods` (тот же линк, когда period выбран); 4-я
+  вкладка `AdminReportTabs` ("CSV exports")
+- Куда: `/admin/export/:batchId` (детали конкретного batch'а)
+- API: `GET/POST /api/admin/periods/:periodId/export`, `GET /api/admin/export-batches` (не менялись,
+  T8.4B)
+- DoD: ровно один POST на нормальный/delayed-response double-click (подтверждено прямым запросом к
+  БД, не только UI-наблюдением); скачанные байты — byte-for-byte идентичны хранимым (`X-Content-
+  SHA256` == recomputed hash); ноль `ExportBatch.content`/CSV bytes/phone/email/GPS/device
+  identifiers/payloadHash/requestId/correction reason/audit payload в HTML и React props; ноль
+  console errors; 46/46 сценария зелёные (87/87 проверок, Chromium, production standalone build)
+
+#### `/admin/export/:batchId` 🟢 (T8.4C, `[2026-08-20]`)
+- Роли: `ADMIN`, `SUPER_ADMIN`; `export.read`
+- Приоритет: desktop, 390×844 без page-level horizontal overflow
+- Назначение: метаданные одного immutable export batch'а (kind, period, createdAt, rowCount,
+  fileSizeBytes, полный SHA-256, correctsBatchId со ссылкой на предшественника,
+  coveredCorrectionCount + ссылки на covered correction requests) + paginated список `ExportItem`
+  строк + скачивание. CORRECTION batches визуально помечены "Full replacement snapshot"
+- Данные: `getExportBatchDetail()`/`getPeriodDetail()` (не менялись, T8.4B/T8.3A). `ExportItem` —
+  employeeNameSnapshot/employeeNumberSnapshot, siteNameSnapshot, date, gross/paid break/unpaid
+  break/worked (через `lib/reporting/report-format.ts`'s `formatWorkedDuration`, не пересчитан),
+  segmentCount, timesheetVersionId (muted secondary/audit text)
+- Действия: скачивание — обычный `<a href={batch.downloadUrl}>` (browser-authenticated GET,
+  та же origin-сессия), никогда client-side `fetch()`+`Blob()`+`URL.createObjectURL`, никогда
+  data:/публичный URL
+- Состояния: malformed/несуществующий `batchId` → одинаковый безопасный not-found (ноль stack
+  trace, ноль различающего oracle-поведения); zero-row export ("This export has no rows"); item
+  pagination
+- Откуда: `/admin/export` (history card "View details"); `/admin/export/:batchId` (предшественник ↔
+  CORRECTION взаимные ссылки); `/admin/corrections/:id` (covered correction requests)
+- Куда: `/admin/export` ("Back to exports"); предшественник/covered corrections
+- API: `GET /api/admin/export-batches/:batchId`, `GET /api/admin/export-batches/:batchId/download`
+  (не менялись, T8.4B)
+- DoD: старый FULL batch скачивается byte-identically даже после более позднего CORRECTION того же
+  period (immutability); ноль forbidden fields в HTML/props; Unicode (финский+русский) без
+  mojibake; входит в общий 46/46 сценарный набор `/admin/export`'а (см. выше)
+
 #### `/admin/review-fallback` ⚪
 
 Административный аналог `/foreman/review` — реальный экран, обслуживает два случая: единственный

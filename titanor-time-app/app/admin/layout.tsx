@@ -16,6 +16,7 @@ const ADMIN_NAVIGATION = [
   { href: '/admin/reports', label: 'Reports' },
   { href: '/admin/review-scopes', label: 'Review' },
   { href: '/admin/corrections', label: 'Corrections' },
+  { href: '/admin/export', label: 'Exports' },
   { href: '/admin/attendance/exceptions', label: 'Attendance exceptions' },
   { href: '/admin/attendance/policy', label: 'Attendance policy' }
 ] as const;

@@ -129,6 +129,9 @@ function ReportBody({ basePath, rawFilters, outcome }: { basePath: string; rawFi
         {report.period.startDate} – {report.period.endDate} <span className="setup-subtitle">({report.period.status})</span>
       </h2>
       <p className="ov-muted">As of {report.asOf}</p>
+      <p>
+        <Link href={`/admin/export?periodId=${report.period.id}`}>View CSV exports for this period</Link>
+      </p>
 
       <SummaryPanel summary={report.summary} />
 

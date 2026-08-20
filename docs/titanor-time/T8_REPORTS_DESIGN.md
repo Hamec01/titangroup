@@ -1442,3 +1442,252 @@ activity` distinct backend PID) и dump/restore round trip на отдельно
 T8.1-T8.3/rounding-consistency/activation/corrections — без изменений (каждый скрипт на своей
 изолированной disposable БД). T8.4C (admin UI) и PDF/payroll/TES-категории этим коммитом по-прежнему
 не начаты.
+
+## Addendum — T8.4C CSV Export Admin UI (2026-08-19)
+
+Написано **до** реализации. UI поверх уже полностью реализованного и **не изменяемого** T8.4B
+backend (`lib/csv-export.ts`, все четыре endpoint'а — §BK выше). Ни один запрос/DTO/permission/CSV
+byte contract этим addendum'ом не меняется — только presentation, navigation, client-side
+idempotency UX и CSS.
+
+### BR. Routes и Server Component wiring — тот же паттерн, что T8.1-T8.3
+
+`app/admin/export/page.tsx` (история + create panel) и `app/admin/export/[batchId]/page.tsx`
+(detail) — тонкие Server Component обёртки, буквально тот же split, что `app/admin/reports/
+periods/page.tsx` уже устанавливает: резолвят сессию, проверяют permission через `hasPermission`
+(не `roles.includes` — тот же принцип, что T8.1-T8.3), парсят `searchParams`/`params`, вызывают
+`listExportBatches()`/`getExportBatchDetail()` **напрямую** (никакого HTTP self-fetch), передают
+результат presentation-компоненту как props. `export const dynamic = 'force-dynamic'` на обеих
+страницах (тот же паттерн, что все остальные admin-страницы).
+
+- `/admin/export?periodId=&page=&pageSize=` — все три в query. `periodId` **отсутствует** →
+  история всех batches (`listExportBatches({}, ...)`). `periodId` present, malformed (не UUID) →
+  `outcome: 'invalid'`, inline banner, не 500 — та же `parsePageQuery()`
+  (`lib/csv-export.ts`, уже существует) переиспользуется для `page`/`pageSize`, periodId-формат
+  проверяется тем же `UUID_PATTERN` (`lib/attendance-exceptions.ts`), что весь остальной admin API
+  уже использует. `periodId` present, валидный UUID, но период не существует (или существует, но
+  batches нет) → `listExportBatches` просто не находит совпадений — **пустая история**, не ошибка
+  (тот же принцип, что T8.1-T8.3: несуществующий, но синтаксически валидный id никогда не течёт
+  внутреннюю ошибку наружу отдельным кодом, если сама операция не требует существования сущности —
+  здесь это чистый WHERE-фильтр, не FK-lookup).
+- `page` не является полем формы фильтра — только в pagination-ссылках, несущих текущие
+  `periodId`+`pageSize` (тот же structural-reset-to-1 приём, что T8.2B/T8.3B уже устанавливают —
+  §K/§AB design doc выше). Смена `periodId`/`pageSize` через саму форму естественно уходит на URL
+  без `page`.
+- `/admin/export/:batchId?page=&pageSize=` — `batchId` path param, `page`/`pageSize` query для
+  paginated `ExportItem`. Malformed `batchId` (не UUID) и несуществующий `batchId` (валидный UUID,
+  `getExportBatchDetail` вернул `null`) — **один и тот же** inline "not found" state, без различия в
+  тексте (то же "no oracle"-рассуждение, что `04_ADMIN_FIRST_API_CONTRACTS.md` §22 уже устанавливает
+  для download-эндпоинта — malformed и missing неотличимы для читателя).
+
+### BS. Permissions
+
+`/admin/export` и `/admin/export/:batchId` (чтение/просмотр) — обе требуют `export.read`
+(`hasPermission`, проверяется явно в page.tsx, **не** полагается только на `app/admin/layout.tsx`'s
+literal-role-name гейт — тот же дефицит, что T8.3B уже задокументировал как архитектурное
+наблюдение: layout блокирует по имени роли ADMIN/SUPER_ADMIN раньше любой page-level permission-
+проверки, так что отзыв гранта у самой роли ADMIN — единственный способ протестировать revocation
+здесь, тот же приём, что T8.2B/T8.3B тестов уже используют). Create panel (кнопка "Create... export")
+требует **обе** `period.export` **и** `export.create` одновременно — то же требование, что сам POST
+endpoint уже enforced на сервере (§BK); UI-проверка — вторая линия обороны, не единственная. Если у
+пользователя есть `export.read`, но нет одной/обеих create-permissions — история и detail полностью
+доступны, но create panel **вообще не рендерится** (не disabled-кнопка в DOM — задача явно требует
+"никакой скрытой активной кнопки", поэтому серверная страница даже не выводит `<ExportCreateControl>`,
+а вместо него — статичный `<p>` "You do not have permission to create exports."). WORKER/FOREMAN —
+блокируются `app/admin/layout.tsx` раньше, чем достигают этих страниц вообще (тот же гейт, что весь
+остальной `/admin/*`).
+
+### BT. Navigation
+
+`components/reports/AdminReportTabs.tsx` расширен четвёртой вкладкой `'export'` → `/admin/export`
+("CSV exports"), рядом с "By worker"/"By site"/"By period" — тот же компонент, та же `aria-current`
+семантика, никакого нового inline `<nav>`. `SiteTimeReportView`'s FOREMAN-ветка (`role="foreman"`)
+по-прежнему рендерит `null` вместо этого компонента — ноль admin-ссылок для FOREMAN, без изменений.
+`app/admin/layout.tsx`'s `ADMIN_NAVIGATION` получает один новый пункт `{ href: '/admin/export', label:
+'Exports' }`. Contextual links — `app/admin/periods/[periodId]/page.tsx` получает пятую ссылку "View
+CSV exports for this period" → `/admin/export?periodId=<id>` (рядом с уже существующими T8.1/T8.2B/
+T8.3B ссылками, ни одна не убирается); `PeriodTimeReportView.tsx`'s `'ok'`-ветка (когда конкретный
+period выбран) получает ту же ссылку рядом с существующим период-заголовком. Ни один из двух не
+дублирует вкладки вручную — оба линкуют В `/admin/export`, которое само уже показывает
+`AdminReportTabs`.
+
+### BU. Period selector — одна форма, два потребителя (история-фильтр и create-target)
+
+`/admin/export`'s единственный `<select name="periodId">` (GET-форма, тот же `.ov-filters`
+структурный паттерн, что T8.1-T8.3) одновременно: (1) фильтрует историю (пустое значение = "All
+periods", только для истории — create panel не может таргетировать "все периоды" сразу) и (2)
+определяет, какой period create panel таргетирует. Опции — `listPeriodOptions()`
+(`lib/attendance-overview-lookups.ts`, уже существует, `label` уже содержит даты+status — переиспользуется
+как есть, без копии). Когда `periodId` в URL пуст/отсутствует — create panel показывает placeholder
+"Select a specific period above to create an export." (без кнопки в DOM). Когда `periodId` present и
+валиден — страница читает актуальный `PayrollPeriod.status` через `getPeriodDetail(periodId)`
+(`lib/periods.ts`, уже существует, read-only) и рендерит:
+
+- `OPEN` → explanation "Lock the period before exporting.", без кнопки в DOM;
+- `LOCKED` → `<ExportCreateControl periodId=... />`, кнопка "Create full CSV export";
+- `EXPORTED` → тот же `<ExportCreateControl>`, кнопка "Create correction CSV export" + заметка
+  "EXPORTED does not guarantee a pending correction — the server remains authoritative and may
+  return 'Nothing to export'." — сервер (`createExportBatch`) остаётся единственным источником
+  истины про `FULL`/`CORRECTION`/`NOTHING_TO_EXPORT`; UI-label — подсказка, не обещание конкретного
+  исхода.
+- период не найден (`getPeriodDetail` вернул `null`, хотя UUID валиден) — та же безопасная
+  not-found-подобная заметка, без кнопки.
+
+### BV. `components/exports/ExportCreateControl.tsx` — frozen idempotency attempt
+
+Buквально тот же паттерн, что `components/attendance-policy/PolicyForm.tsx` уже устанавливает
+(T7A.10B §7) — единственный существующий "frozen attempt" UI в кодовой базе, переиспользуется
+архитектурно (не копипастой файла целиком — форма другая, но structure/state-machine та же):
+
+```ts
+interface Attempt { key: string; periodId: string }
+type CreateStatus = 'idle' | 'creating' | 'success' | 'error' | 'network-unknown';
+```
+
+- Один клик по "Create..." → один новый `Attempt` (`crypto.randomUUID()` как `Idempotency-Key`,
+  `periodId` — неизменяемый prop, никогда не читается заново из какого-либо state внутри контрола).
+  `pendingRef` (synchronous `useRef<boolean>`) блокирует двойной клик до React re-render — тот же
+  механизм, что `PolicyForm`.
+- Запрос: `POST /api/admin/periods/:periodId/export`, `headers: { 'Content-Type': 'application/json',
+  'X-Requested-With': 'titanor-time', 'Idempotency-Key': attempt.key }`, `body: '{}'` — тело всегда
+  ровно `{}` (детерминированно, никогда не варьируется), Content-Type присутствует именно потому что
+  тело реально отправляется.
+- Definitive HTTP response (`res.ok` или любой не-network HTTP статус, включая malformed/non-JSON
+  body с реальным status code) **завершает** attempt — `attempt` сбрасывается в `null` независимо от
+  исхода. Network/timeout (`fetch` бросает исключение) → `status: 'network-unknown'`, **тот же**
+  `attempt` (тот же key, тот же periodId) остаётся живым для Retry — Retry вызывает `runAttempt` с
+  тем же объектом, байт-идентичный повторный запрос.
+- `success` — **sticky**: показывает `batch.kind`/`batch.id`, ссылки "View details"
+  (`/admin/export/:id`) и "Download CSV" (`batch.downloadUrl`, обычный `<a>`), затем `router.
+  refresh()` (обновляет history/period-status у родительского Server Component). Кнопка Create
+  **не** появляется снова в этом же экземпляре компонента — заметка "To create another export,
+  reload this page." вместо неё. Компонент замонтирован с `key={periodId}` на родительской
+  странице — навигация на **другой** period (реальная смена URL) естественно демонтирует/
+  перемонтирует его (`attempt=null`, `status='idle'`), навигация на **тот же** period (`router.
+  refresh()`) — нет, состояние сохраняется намеренно (React не ремонтирует по `key`, если он не
+  изменился) — это и есть "не создавать второй export автоматически" (rule 6) и "следующий отдельный
+  create attempt получает новый key" (rule 31, тривиально верно для НОВОГО mount).
+- Период "нельзя менять, пока pending/unknown" (rule 8) — достигается структурно: единственный
+  способ сменить целевой period — submit'нуть отдельную GET-форму фильтра на родительской странице
+  (полная навигация браузера), что естественно демонтирует текущий `ExportCreateControl` целиком —
+  контрол сам никогда не предоставляет собственного UI для смены `periodId` (`periodId` — read-only
+  prop). Отдельная client-side блокировка родительской `<select>`-формы во время pending/unknown НЕ
+  реализована — намеренное, задокументированное решение: submit фильтра во время pending-запроса —
+  обычная браузерная навигация, которая либо отменяет ещё не отправленный fetch, либо просто
+  демонтирует компонент, ожидающий уже отправленного (сервер всё равно останется authoritative и
+  idempotent — сама эта фильтр-навигация не создаёт новый POST).
+- `aria-live="polite"` announcement region (progress/result текстом, тот же `role="status"`
+  паттерн, что `PolicyForm`'s `.policy-sr-announce`), `aria-busy` на кнопке/форме во время `creating`,
+  `disabled` на кнопке во время `creating`/`network-unknown` (Retry — отдельная кнопка, не тот же
+  disabled-элемент).
+
+### BW. Human error mapping — `describeExportErrorCode()`
+
+Тот же `describeErrorCode()`-паттерн, что `PolicyForm.tsx` уже устанавливает, отдельная функция для
+export-контекста (разные коды, разные сообщения):
+
+| `error.code` | Сообщение |
+|---|---|
+| `PERIOD_NOT_FOUND` | "This payroll period no longer exists." |
+| `PERIOD_NOT_EXPORTABLE` | "This period is still open — lock it before exporting." |
+| `NOTHING_TO_EXPORT` | "No approved corrections are waiting for export. The latest CSV remains current." (дословно, задача требует точный текст) |
+| `VALIDATION_ERROR` | "Please reload the page and try again." (не должно происходить при корректном UI — тело всегда `{}` — но обрабатывается, не крашит) |
+| `NOT_AUTHENTICATED` | "Your session has expired — please log in again." |
+| `FORBIDDEN` | "You no longer have permission to create exports." |
+| `CSRF_REJECTED` | "Your session needs a refresh — please reload the page and try again." |
+| `IDEMPOTENCY_KEY_REUSED` | "This export could not be completed as a new request. Please reload and try again." |
+| `IDEMPOTENCY_KEY_IN_PROGRESS` | "This export is still being processed. Please wait a moment and try again." |
+| malformed/non-JSON body, любой статус | "Something went wrong. Please try again." (generic — не парсим未known shape) |
+| 5xx (любой код без известного `error.code`) | тот же generic fallback |
+| network failure (`fetch` throw) | `network-unknown` — отдельная ветка, не часть этой таблицы (§BV) |
+
+Никогда — raw `error.message`/stack/response text напрямую в UI.
+
+### BX. Detail presentation — `ExportItem`, mobile-first
+
+`components/exports/ExportBatchDetailView.tsx` рендерит каждый `ExportItem` тем же `dl`-based
+card-паттерном, что `SiteTimeReportView`/`PeriodTimeReportView` уже устанавливают (`.ov-worker-card`/
+`.ov-worker-grid`, переиспользуются как есть, не копируются) — естественно reflow'ится на 390px без
+отдельного mobile/desktop JS-переключения (задача **допускает**, не требует, отдельную desktop-таблицу
+— переиспользование уже проверенного на 390×844 в T8.2B/T8.3B паттерна безопаснее, чем добавлять
+новый). Поля: `employeeNumberSnapshot`/`employeeNameSnapshot`, `siteNameSnapshot`, `date`,
+`grossMinutes`/`paidBreakMinutes`/`unpaidBreakMinutes`/`workedMinutes` через **тот же**
+`formatWorkedDuration()` (`lib/reporting/report-format.ts`, переиспользуется, не пересчитывается),
+`segmentCount`, `timesheetVersionId` — последним, меньшим/приглушённым текстом (`.ov-muted`),
+подписанным "Version" — audit-only, не кликабельно (нет UI route на голую `TimesheetVersion` вне
+контекста конкретного worker report).
+
+### BY. Security — DTO уже redaction-safe, UI ничего нового не добавляет
+
+`lib/csv-export.ts`'s DTOs (`ExportBatchSummaryDto`/`ExportItemDto`/`ExportBatchDetail`) уже
+структурно не содержат `content`/`phone`/`email`/GPS/device identifiers/`payloadHash`/`requestId`/
+correction reason/`AuditEvent` payload (T8.4B §BL/BN) — presentation-слой не может утечь то, чего
+нет в типе. `fileHash` (SHA-256) и уже задокументированные id (`batch.id`, `periodId`,
+`employeeId`, `siteId`, `timesheetVersionId`, `correctionRequestId`) — разрешены явно, не PII.
+Download — всегда `<a href={batch.downloadUrl}>` (обычная browser-authenticated GET через
+существующую session-cookie, тот же origin) — **никогда** `fetch()`+`Blob()`+`URL.createObjectURL`
+на клиенте (задача явно запрещает пересборку/повторную загрузку CSV на клиенте) и никогда data:
+URL/публичный URL. Ни один React prop/HTML attribute во всех новых компонентах не несёт CSV bytes —
+blanket-scan тест (пункт 44 списка задачи) — дополнительное доказательство, не единственная защита.
+
+### BZ. Loading/error states
+
+`app/admin/export/loading.tsx`, `app/admin/export/error.tsx`, `app/admin/export/[batchId]/
+loading.tsx`, `app/admin/export/[batchId]/error.tsx` — тот же паттерн, что `app/admin/reports/
+periods/loading.tsx` (`role="status" aria-live="polite"`) и `app/admin/error.tsx` (генерический
+App Router `error.tsx`: `'use client'`, `{ error, reset }` props, "Try again" вызывает `reset()`,
+ссылка назад — здесь на `/admin/export`) уже устанавливают. Никогда `error.message`/`error.stack` в
+рендере.
+
+### CA. CSS — additive only, `.exp-*` prefix
+
+Новый блок в конце `app/globals.css`, тот же "additive-only, собственный comment header со ссылкой
+на design doc" паттерн, что `.policy-*` (T7A.10B) уже устанавливает. Переиспользуются без изменения:
+`.setup-page`/`.setup-card`, `.ov-filters`/`.ov-filter-field`/`.ov-filter-actions`,
+`.exc-apply-button`/`.exc-reset-link`/`.exc-pagination`, `.ov-worker-list`/`.ov-worker-card`/
+`.ov-worker-grid`, `.ov-muted`/`.ov-badge*`, `.login-error`, `.policy-network-unknown`/`.policy-
+sr-announce`/`.policy-error-banner` (переименованы под `.exp-*` для семантической ясности create-
+контрола, но идентичны по стилю — не копия дизайна, тот же visual language). Новые классы —
+только для того, чего не существует: `.exp-create-panel`, `.exp-history-card`, `.exp-hash` (`font-
+family: monospace`, для сокращённого hash), `.exp-replacement-badge` (визуальная метка "Full
+replacement snapshot" на CORRECTION batches). Ни одно существующее правило не редактируется.
+
+### CB. Browser test plan
+
+Постоянный `scripts/_test-export-ui.ts` (Playwright, тот же паттерн, что T8.2B/T8.3B уже
+устанавливают — реальный Chromium, production standalone build, disposable PostgreSQL 16, `TEST_
+BASE_URL`, не `next dev`, не preview). Покрывает все 46 пунктов задачи — permissions/roles (1-5),
+history/filter/pagination/URL (6-11), create flow OPEN/LOCKED/EXPORTED (12-14), success/history/
+links (15-18), NOTHING_TO_EXPORT/CORRECTION semantics (19-23), detail pagination/exact download
+(24-25), idempotency/retry/double-click/network-unknown (26-31), error mapping (32-35),
+accessibility (36-38), responsive (39-40), edge/security (41-46).
+
+### CC. Не входит в этот слайс
+
+Новые export API/endpoints, изменение CSV bytes/формата/FULL-CORRECTION semantics (backend —
+абсолютно read-only потребитель для этого addendum'а), PDF, payroll/TES/деньги, production
+deployment, глобальный redesign/localization (i18n остаётся английским, тот же язык, что весь
+остальной admin UI на сегодня).
+
+### CD. Статус реализации — `[2026-08-20]` завершено
+
+Реализовано ровно то, что описано в §BR-CC, без отклонений от спецификации задачи. Одна находка,
+исправленная до коммита — в собственном коде этого addendum'а, не в T8.4B backend: `CreatePanel`
+держал `<ExportCreateControl key={periodId}>` в двух раздельных conditional JSX-ветках
+(`kind === 'locked'` / `kind === 'exported'`); `router.refresh()` после успешного FULL-экспорта
+немедленно переводит `kind` `'locked'` → `'exported'`, что React трактует как unmount+remount
+(тот же `key`, другая позиция в дереве) — sticky success-панель (§BV rule 6) молча заменялась
+свежей кнопкой через ~300-500ms после появления (найдено покадровым 100ms-polling реального
+Chromium, не догадкой). Исправлено вынесением `ExportCreateControl` в единый стабильный JSX-слот —
+меняется только `buttonLabel` prop, компонент больше не размонтируется при смене `kind`.
+
+`scripts/_test-export-ui.ts` — 87/87 проверок на всех 46 сценариях задачи, 100% pass на disposable
+PostgreSQL 16 + production standalone build (никогда `next dev`, никогда preview), включая точную
+byte-for-byte верификацию скачивания, double-click/delayed-response/network-unknown/retry
+concurrency-доказательства (прямые запросы к БД, не только UI-наблюдение) и forbidden-field DOM-scan.
+Полная регрессия T8.4A/T8.4B/T8.1-T8.3/rounding-consistency/corrections — без изменений (каждый
+скрипт на своей изолированной disposable БД). Один инфраструктурный (не продуктовый) фикс:
+`tsconfig.build.json` + `next.config.mjs`'s `typescript.tsconfigPath`, чтобы `docker compose build
+app`'s typecheck не требовал Playwright как production-зависимость (см. `IMPLEMENTATION_STATUS.md`
+`[2026-08-20]` записи за подробностями). **T8.4 полностью завершён** (T8.4A schema + T8.4B backend +
+T8.4C admin UI). PDF export и payroll/TES-категории этим коммитом по-прежнему не начаты.

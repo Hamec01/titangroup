@@ -1978,3 +1978,111 @@ a.ov-summary-card:focus-visible {
     max-width: 100%;
   }
 }
+
+/* docs/titanor-time/T8_REPORTS_DESIGN.md Addendum "T8.4C" — /admin/export, /admin/export/:batchId.
+   Additive only, own `.exp-*` prefix — no existing rule above is edited. Reuses .setup-page/
+   .setup-card, .ov-filters/.ov-filter-field/.ov-filter-actions, .exc-apply-button/.exc-reset-link/
+   .exc-pagination, .ov-worker-list/.ov-worker-card/.ov-worker-grid, .login-error as-is. */
+
+.exp-explainer {
+  margin: 0 0 20px;
+  padding-left: 20px;
+  color: var(--text-soft);
+  font-size: 0.85rem;
+  display: grid;
+  gap: 4px;
+}
+
+.exp-create-section {
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 6px;
+  padding: 16px;
+  margin: 16px 0 24px;
+  background: rgba(7, 11, 17, 0.5);
+}
+
+.exp-create-section h2 {
+  margin: 0 0 10px;
+  font-size: 1rem;
+}
+
+.exp-create-note {
+  margin: 0;
+  color: var(--text-soft);
+  font-size: 0.88rem;
+}
+
+.exp-create-panel {
+  display: grid;
+  gap: 10px;
+}
+
+.exp-create-success {
+  color: #86efac;
+}
+
+.exp-create-links {
+  margin: 0;
+}
+
+.exp-error-banner {
+  border: 1px solid rgba(253, 164, 175, 0.4);
+  border-radius: 4px;
+  padding: 10px 12px;
+  background: rgba(253, 164, 175, 0.1);
+  color: var(--error);
+  margin: 0;
+}
+
+.exp-network-unknown {
+  border: 1px solid rgba(252, 211, 77, 0.4);
+  border-radius: 6px;
+  padding: 12px 14px;
+  background: rgba(252, 211, 77, 0.1);
+  color: #fcd34d;
+  display: grid;
+  gap: 10px;
+}
+
+.exp-sr-announce {
+  margin: 0;
+  color: var(--text-soft);
+  font-size: 0.82rem;
+  min-height: 1.2em;
+}
+
+.exp-replacement-badge {
+  margin-left: 8px;
+  padding: 2px 8px;
+  border-radius: 3px;
+  font-size: 0.72rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  background: rgba(252, 211, 77, 0.15);
+  color: #fcd34d;
+  vertical-align: middle;
+}
+
+.exp-history-card {
+  overflow-x: auto;
+}
+
+.exp-history-actions {
+  margin: 10px 0 0;
+}
+
+.exp-hash {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.82rem;
+  word-break: break-all;
+}
+
+.exp-item-list {
+  overflow-x: auto;
+}
+
+.exp-item-version {
+  margin: 8px 0 0;
+  font-size: 0.78rem;
+}

@@ -2208,3 +2208,15 @@ ExportItem/correction reason/GPS/device/payload/request data.
 Полная эталонная реализация и тесты — `lib/csv-export.ts`, `scripts/_test-csv-export.ts` (171/171),
 `scripts/_test-csv-export-querycount.ts` (bounded query count 1/50/200 workers, EXPLAIN ANALYZE).
 CSV_V1 exact byte contract — `docs/titanor-time/T8_REPORTS_DESIGN.md` Addendum "T8.4B" §BG-BJ.
+
+## 23. T8.4C — ноль новых HTTP-контрактов (2026-08-20)
+
+Admin UI (`/admin/export`, `/admin/export/:batchId`) поверх уже полностью реализованного T8.4B —
+Server Components вызывают `lib/csv-export.ts`'s функции (`listExportBatches`,
+`getExportBatchDetail`, `parsePageQuery`, `isValidExportBatchId`) **напрямую**, без HTTP self-fetch;
+`components/exports/ExportCreateControl.tsx` — единственный клиентский потребитель `POST
+/api/admin/periods/:periodId/export` (§22 выше, ноль изменений в request/response shape).
+`GET /api/admin/export-batches/:batchId/download` потребляется исключительно как обычный
+`<a href>` браузером — никогда через `fetch()` на клиенте. Ни один route, DTO, error code,
+permission requirement или CSV byte contract этим коммитом не менялся; `lib/csv-export.ts` и все
+четыре route.ts файла — ноль diff (подтверждено `git diff --stat`). T8.4 полностью завершён.

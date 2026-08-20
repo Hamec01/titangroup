@@ -1,6 +1,101 @@
 # Titanor Time — Implementation Status
 
-Обновлено: 2026-08-19 Europe/Helsinki (fix: align correction export eligibility — T8.4B FOLLOW-UP)
+Обновлено: 2026-08-20 Europe/Helsinki (feat: add CSV export admin UI — T8.4C)
+
+**`[2026-08-20]` T8.4C — feat(time): add CSV export admin UI.** Полный admin UI поверх уже
+реализованного T8.4B backend (`20982e2`/`045c3d2`, ноль diff в этой задаче): `/admin/export`
+(история + панель создания) и `/admin/export/:batchId` (детали) как Server Components, вызывающие
+`listExportBatches`/`getExportBatchDetail`/`listPeriodOptions`/`getPeriodDetail` напрямую (без
+HTTP self-fetch). Design — `docs/titanor-time/T8_REPORTS_DESIGN.md` Addendum "T8.4C" (§BR-CC),
+написан ДО кода per STOP-GATE.
+
+**Права**: история/детали требуют `export.read` через `hasPermission` (не `roles.includes`);
+панель создания требует ОБА `period.export` И `export.create` — при отсутствии create-прав форма
+создания отсутствует в DOM целиком (не disabled-кнопка), проверено сканом DOM на 0 `<button>`.
+`app/admin/layout.tsx`'s pre-existing литеральный role-name gate (`ADMIN`/`SUPER_ADMIN`) остаётся
+первым barrier, как и для всех admin-страниц (T8.3B).
+
+**Создание/idempotency UX** (`components/exports/ExportCreateControl.tsx`) — тот же "frozen
+idempotency attempt" паттерн, что и `PolicyForm.tsx` (T7A.10B): один клик = одна неизменяемая
+попытка (`{periodId, idempotencyKey: crypto.randomUUID(), body: '{}'}`), синхронный `pendingRef`
+блокирует двойной клик до React re-render, сетевая ошибка/timeout оставляет ту же попытку живой для
+Retry (тот же `Idempotency-Key`, тот же body), любой определённый HTTP-ответ завершает попытку,
+успех — sticky (никогда не создаёт второй export автоматически), `aria-live` на всех статусах.
+Человеко-читаемые сообщения покрывают все ошибки эндпоинта, включая точный требуемый текст для
+`NOTHING_TO_EXPORT`: «No approved corrections are waiting for export. The latest CSV remains
+current.» — raw server message никогда не рендерится.
+
+**Найденный и исправленный баг** (в собственном коде этой задачи, не T8.4B): `CreatePanel`
+(`ExportHistoryView.tsx`) держал `<ExportCreateControl key={periodId}>` в ДВУХ раздельных
+conditional JSX-ветках (`info.kind === 'locked' && ...` / `info.kind === 'exported' && ...`).
+`router.refresh()` после успешного FULL-экспорта немедленно переводит `info.kind` `'locked'` →
+`'exported'` — React трактует это как unmount+remount (тот же `key`, другая позиция в дереве),
+из-за чего sticky success-панель молча заменялась свежей "Create correction CSV export" кнопкой
+через ~300-500ms после появления (подтверждено покадровым polling каждые 100ms реального Chromium).
+Нарушало собственное задокументированное правило компонента (rule 6 — "never auto-create a second
+export after success"). **Исправлено**: `ExportCreateControl` вынесен в единый стабильный JSX-слот
+(`{(info.kind === 'locked' || info.kind === 'exported') && <ExportCreateControl .../>}`), меняется
+только `buttonLabel` prop — состояние переживает refresh, как и задумано. Подтверждено тем же
+покадровым polling (стабильно до t+2900ms и далее).
+
+**Presentation**: CORRECTION-батчи визуально помечены "Full replacement snapshot" (история +
+детали), ссылка на предшественника (`correctsBatchId` → `/admin/export/:id`), `coveredCorrectionCount`
++ ссылки на исходные correction-детали. `ExportItem` через переиспользуемый `formatWorkedDuration`
+(не пересчитан), `timesheetVersionId` как muted secondary text. Ничего из
+`ExportBatch.content`/CSV-байтов/`deviceInstallationId`/`deviceSequence`/`payloadHash`/GPS/
+correction reason не попадает в HTML/React props — подтверждено сканом `page.content()`.
+
+**Тесты**: новый постоянный `scripts/_test-export-ui.ts` — реальный Chromium (Playwright),
+production standalone build + одноразовый PostgreSQL 16 (никогда `next dev`, никогда preview),
+**46 пронумерованных сценариев, 87/87 проверок**, включая: permissions/revocation (temporary
+revoke/restore на реальной `ADMIN`-роли — custom role не доходит до `page.tsx`, T8.3B-техника),
+историю/фильтры/пагинацию, полный create-flow (OPEN/LOCKED/EXPORTED, FULL/CORRECTION), точную
+byte-for-byte верификацию скачивания (`X-Content-SHA256` == recomputed hash == hash на странице
+деталей), double-click/delayed-response concurrency (ровно один POST/batch, подтверждено прямым
+запросом к БД), сетевой сбой → Retry с тем же `Idempotency-Key`+body, мокированные `FORBIDDEN`/
+`NOT_AUTHENTICATED`/`CSRF_REJECTED`/malformed-JSON/5xx, keyboard/focus/aria-live, desktop/mobile
+390×844 без page-level horizontal overflow, malformed/missing batchId, zero-row export,
+Unicode (финский+русский) без mojibake, forbidden-field/CSV-content DOM-scan, 0 console errors.
+Технический побочный найденный факт (не баг, задокументирован как test-harness quirk, не
+приложения): Chromium иногда кэширует ответ для идентичного URL в рамках одного browser process
+несмотря на `Cache-Control: no-store` — обходится cache-busting query-параметром в тестовом
+helper'е (`gotoFresh`), не изменением приложения.
+
+**Регрессия** (каждый скрипт — свой изолированный одноразовый PostgreSQL 16):
+`_test-csv-export.ts` — 201/201; `_test-export-batch-schema.ts` — 68/68;
+`_test-report-rounding-consistency.ts` — 105/105; `_test-period-time-report.ts` — 110/110;
+`_test-csv-export-querycount.ts` — без изменений (15 SQL statements, 1/50/200 workers);
+`_test-overview-querycount.ts` — без изменений (bounded 24 statements); `_test-corrections.ts`/
+`_test-overview.ts` (fixture/smoke-скрипты без собственных assertions) — оба завершились без
+исключений.
+
+**Технические проверки**: `git diff --check` — чисто; `prisma validate` — валиден; `tsc --noEmit` —
+0 ошибок; `npm run build` — успех; `docker compose -f compose.titanor-time.yaml config --quiet` —
+валиден; `docker compose build app` — успех; `prisma migrate deploy` дважды на заведомо чистом
+одноразовом PostgreSQL 16 (62 migrations, второй — no-op). Все одноразовые контейнеры/сервер-процессы
+удалены. Preview `127.0.0.1:3244` — не трогался (не перезапускался, не использовался для тестов, его
+БД не удалялась). Production (`titanor-time-app-1`/`titanor-time-db-1`) — не трогался (только
+read-only inspect).
+
+**Инфраструктурный фикс** (не продуктовый код): `scripts/_test-export-ui.ts` — первый скрипт в
+проекте, использующий Playwright напрямую (`import ... from 'playwright'`), который не является
+реальной npm-зависимостью (намеренно — иначе Chromium-бинарник попал бы в production-образ через
+`Dockerfile`'s `runner`-stage, копирующий полный `node_modules`). Это ломало `next build`'s
+typecheck внутри `docker compose build app` (чистый `npm install` без Playwright). Исправлено новым
+`tsconfig.build.json` (extends базовый `tsconfig.json`, исключает `scripts/`) + `next.config.mjs`'s
+`typescript.tsconfigPath` — production build теперь typecheck'ает только код, который реально
+отгружается; `scripts/`'s собственный typecheck (`npx tsc --noEmit` с базовым `tsconfig.json`)
+не изменился и по-прежнему покрывает все `_test-*.ts`, если Playwright доступен локально
+(документированная техника symlink'а — см. `T8_REPORTS_DESIGN.md`).
+
+**Не менялись**: `lib/csv-export.ts` и все 4 T8.4B API route (ноль diff, подтверждено `git diff
+--stat`), export population/CSV generation, permissions/RolePermission-семена, все старые миграции.
+PDF export, payroll/TES-категории, деплой в production — не реализованы (вне скоупа задачи).
+
+**T8.4 полностью завершён** (T8.4A schema + T8.4B backend + T8.4C admin UI). Следующий рекомендуемый
+шаг — T8.5-T8.8 (reconciliation/PWA gap audit), см. `PROJECT_ROADMAP.md`.
+
+---
 
 **`[2026-08-19]` T8.4B FOLLOW-UP — fix(time): align correction export eligibility.** Устранён
 невозможный вечный state: `CorrectionRequest.pendingExport=true` при

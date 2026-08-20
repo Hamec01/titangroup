@@ -5,6 +5,16 @@ const nextConfig = {
   turbopack: {
     root: import.meta.dirname
   },
+  typescript: {
+    // scripts/ holds standalone dev/CI regression tools (run via `tsx`, never bundled into the
+    // app) with their own separate typecheck workflow (`npx tsc --noEmit` against the default
+    // tsconfig.json) and their own dependency needs — e.g. scripts/_test-export-ui.ts's Playwright
+    // import, which must never be a real npm dependency here (it would drag Chromium's browser
+    // binary into the production image via this Dockerfile's runner stage, which copies the full
+    // node_modules). tsconfig.build.json excludes scripts/ so the production build's typecheck gate
+    // only covers code that actually ships.
+    tsconfigPath: './tsconfig.build.json'
+  },
   // Next.js's standalone output-file tracing does not always follow Prisma's
   // dynamically-loaded native query engine binary. Force it in explicitly so
   // .next/standalone actually contains it at runtime.

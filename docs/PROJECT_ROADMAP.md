@@ -709,9 +709,16 @@ generation, FULL export для `LOCKED` period, CORRECTION export (full replacem
 payroll/TES. Полный контракт — `docs/titanor-time/T8_REPORTS_DESIGN.md` Addendum "T8.4B",
 `05_RAW_SQL_REGISTER.md` §13.
 
-**T8.4C (admin UI) 🔴 не начато.**
+**T8.4C (admin UI) 🟢 реализовано `[2026-08-20]`** — `/admin/export` (история + панель создания)
+и `/admin/export/:batchId` (детали), поверх уже полностью реализованного и не изменённого T8.4B
+backend (ноль diff в `lib/csv-export.ts` и всех 4 route.ts). FULL/CORRECTION создание через UI с
+frozen-idempotency-attempt UX (тот же паттерн, что T7A.10B), replacement-snapshot presentation для
+CORRECTION batches, byte-for-byte верифицированное скачивание. 46/46 browser-сценария (87/87
+проверок, Chromium, production standalone build). Полный контракт —
+`docs/titanor-time/T8_REPORTS_DESIGN.md` Addendum "T8.4C".
 
-PDF и payroll/TES-категории отложены на отдельно согласованный этап.
+**T8.4 полностью завершён** (T8.4A + T8.4B + T8.4C). PDF и payroll/TES-категории отложены на
+отдельно согласованный этап. Следующий рекомендуемый шаг — T8.5-T8.8 (PWA gap audit).
 
 ## T8.5 — PWA manifest
 
