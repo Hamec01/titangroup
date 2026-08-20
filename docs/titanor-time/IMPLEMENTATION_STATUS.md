@@ -1,6 +1,35 @@
 # Titanor Time — Implementation Status
 
-Обновлено: 2026-08-20 Europe/Helsinki (T9.4 — admin-led full flow)
+Обновлено: 2026-08-20 Europe/Helsinki (T9.6 — verified backup/restore)
+
+**`[2026-08-20]` T9.6 — verified backup/restore.** После T9.5 заполненная disposable DB сохранена
+`pg_dump -F c` (321,618 bytes, mode 0600, SHA-256 зафиксирован, 597 TOC entries), затем
+восстановлена в отдельный PostgreSQL 16 container+volume без migrate поверх. Source/target точно
+совпали: 62 migrations, 56 public tables, 219 functions, 37 triggers, 150 FK, checksum-history
+миграций, row count каждого table и sorted all-data hash. Fresh app+scheduler против restored DB:
+successful tick, Chromium/API/data verifier **20/20**. Restored DB приняла отдельный ADMIN POST;
+после app restart verifier снова **20/20**, новая запись сохранилась, immutable versions=2,
+auto-submit attempts=0. Product defect не найден. Design/results:
+`docs/titanor-time/T9_BACKUP_RESTORE_TEST_PLAN.md`.
+
+Оба disposable stack, volumes/networks, backup/temp-файлы и уникальные test-image tags удалены по
+точным именам после фиксации evidence. Preview и production остались 200/200; production container
+id/image/StartedAt/RestartCount=0 и общий `titanor-time-app:latest` не изменились.
+
+**`[2026-08-20]` T9.5 — restart persistence verified.** На текущем 62-migration schema и отдельном
+production image выполнен полный T9.4 seed 84/84, затем независимо перезапущены disposable app,
+scheduler и PostgreSQL 16 (с сохранённым named volume). Для каждого: тот же container ID, новый
+PID/StartedAt; normalized business-data hash идентичен. При DB restart app/scheduler не
+перезапускались и автоматически восстановили соединение. Реальные ADMIN/WORKER sessions, объект,
+часовые данные, immutable V1/V2, `FINAL_APPROVED` и 420-minute reports проверены Chromium+API после
+restart. После DB recovery сделан реальный ADMIN POST, запись пережила дополнительный app restart.
+
+Постоянный verifier `scripts/_test-t9-restart-persistence.ts`: prepare 5/5 + app 18/18 + scheduler
+18/18 + DB/write 19/19 + post-write app 19/19 = **79/79**. Scheduler после restart дал immediate
+successful tick, ноль duplicate attempts/versions/audits. Найдена только ошибка методики теста:
+PostgreSQL 16.14 рандомизирует `\\restrict` nonce текстового dump; hash стабилизирован удалением
+ровно двух wrapper-строк. Product code/schema/migrations не менялись. Design/results:
+`docs/titanor-time/T9_RESTART_TEST_PLAN.md`.
 
 **`[2026-08-20]` T9.4 — admin-led full attendance flow, 84/84.** После уточнения владельца
 канонический процесс зафиксирован так: FOREMAN — необязательный уполномоченный проверяющий

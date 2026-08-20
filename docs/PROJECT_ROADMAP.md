@@ -855,9 +855,29 @@ break. Полный протокол: `docs/titanor-time/T9_FULL_FLOW_TEST_PLAN.
 
 Проверить сохранность пользователей, объектов, часов и контента.
 
+**`[2026-08-20] 🟢 завершено.`** На текущем commit/schema (62 migrations) подняты отдельные
+production image + PostgreSQL volume + app + scheduler. Полный T9.4 seed прошёл 84/84, затем app,
+scheduler и db независимо перезапущены через `docker restart`. Для каждого доказаны новый
+PID/StartedAt при том же container ID; DB сохранила тот же volume; app и scheduler не
+перезапускались вместе с DB и самостоятельно переподключились. Детерминированный hash всех
+business-данных совпал до/после каждого restart; исключены только намеренно изменяемые liveness
+строки `UserSession`/`WorkerDeviceInstallation`. Реальный Chromium и API после каждого рубежа
+подтвердили ADMIN/WORKER sessions, объект, часы, immutable V1/V2, final approval и отчёт 420 min.
+После DB restart выполнена реальная ADMIN-запись, пережившая ещё один app restart. Подробности:
+`docs/titanor-time/T9_RESTART_TEST_PLAN.md`.
+
 ## T9.6 — Backup и restore
 
 Не только создать backup, но и восстановить в тестовое место.
+
+**`[2026-08-20] 🟢 завершено.`** Заполненная после T9.5 база сохранена через `pg_dump -F c`
+(archive mode `0600`, SHA-256, 597 TOC entries) и восстановлена в совершенно отдельный PostgreSQL
+16 container/volume без запуска миграций поверх. Source↔target parity: 62 migrations, 56 tables,
+219 functions, 37 triggers, 150 FK, migration checksum history, row count каждого table и
+order-independent hash всех данных — точное совпадение. Свежие app+scheduler запущены только
+против restored DB; restored sessions, объект, часы, immutable V1/V2, FINAL_APPROVED и 420-minute
+reports подтверждены Chromium/API 20/20. Restored DB приняла новую ADMIN-запись, пережившую app
+restart; повторный verifier 20/20. Подробности: `docs/titanor-time/T9_BACKUP_RESTORE_TEST_PLAN.md`.
 
 ## T9.7 — Устройства
 
