@@ -1,6 +1,16 @@
 # Titanor Time — Implementation Status
 
-Обновлено: 2026-08-20 Europe/Helsinki (T9.6 — verified backup/restore)
+Обновлено: 2026-08-20 Europe/Helsinki (T9.7 — physical-device acceptance prepared)
+
+**`[2026-08-20]` T9.7 — physical-device acceptance подготовлен, ручной прогон pending.**
+Зафиксирован постоянный owner-run checklist
+`docs/titanor-time/T9_DEVICE_ACCEPTANCE_PLAN_RU.md`: отдельный pilot WORKER, реальная activation
+link/QR, PWA install, online GPS, offline cold restart+sync, mobile timetable submit и
+ADMIN-led review/final approval без FOREMAN. Результат Android и iPhone учитывается раздельно;
+непроверенная платформа не объявляется PASS. Текущий preview работает из правильного worktree и
+manifest/icons отвечают 200 с корректным контрактом, но слушает только `127.0.0.1:3244`.
+Следующий обязательный gate перед телефоном — отдельный временный HTTPS hostname + isolated pilot
+DB; production нельзя использовать или менять для этой проверки.
 
 **`[2026-08-20]` T9.6 — verified backup/restore.** После T9.5 заполненная disposable DB сохранена
 `pg_dump -F c` (321,618 bytes, mode 0600, SHA-256 зафиксирован, 597 TOC entries), затем

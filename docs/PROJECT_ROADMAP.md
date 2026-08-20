@@ -883,6 +883,15 @@ restart; повторный verifier 20/20. Подробности: `docs/titano
 
 Android, iPhone/Safari, desktop, PWA install.
 
+**`[2026-08-20] 🟡 начато.`** Подготовлен владелец-ориентированный physical-device acceptance:
+ADMIN создаёт отдельного pilot-работника и выдаёт activation link; WORKER на реальном телефоне
+активируется, устанавливает PWA, проходит online GPS, настоящий offline cold restart, sync,
+редактирование/отправку timetable; затем ADMIN без FOREMAN выполняет review/final approval и
+проверяет отчёт. Автоматические эмуляторные доказательства не засчитываются вместо телефона.
+Перед ручным прогоном требуется отдельный HTTPS pilot URL: текущий loopback preview `:3244`
+нельзя корректно использовать для PWA с внешнего телефона. Чек-лист и форма результата:
+`docs/titanor-time/T9_DEVICE_ACCEPTANCE_PLAN_RU.md`.
+
 # ЭТАП 10. НЕДЕЛЬНАЯ ОБКАТКА
 
 ## T10.1 — Ограниченный запуск
