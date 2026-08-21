@@ -3,11 +3,16 @@
 import { useState, type FormEvent } from 'react';
 import { useRouter } from 'next/navigation';
 import type { WorkerDetail } from '@/lib/workers';
+import { useAppLocale } from '@/components/i18n/AppLocaleProvider';
+import { adminDailyStrings } from '@/lib/i18n/admin-daily';
+import { localeText } from '@/lib/i18n/locale';
 
 const CSRF_HEADER_VALUE = 'titanor-time';
 
 export function WorkerActions({ worker }: { worker: WorkerDetail }) {
   const router = useRouter();
+  const locale = useAppLocale();
+  const s = adminDailyStrings(locale);
 
   const [firstName, setFirstName] = useState(worker.firstName);
   const [lastName, setLastName] = useState(worker.lastName);
@@ -66,16 +71,16 @@ export function WorkerActions({ worker }: { worker: WorkerDetail }) {
         const code = await parseErrorCode(response);
         switch (code) {
           case 'SETUP_INCOMPLETE':
-            setActivationError('This worker does not have an active employment eligible for activation.');
+            setActivationError(localeText(locale, 'This worker does not have an active employment eligible for activation.', 'У работника нет активного трудоустройства, подходящего для активации.'));
             break;
           case 'WORKER_ALREADY_ACTIVE':
-            setActivationError('This worker has already activated their account.');
+            setActivationError(localeText(locale, 'This worker has already activated their account.', 'Работник уже активировал учётную запись.'));
             break;
           case 'FORBIDDEN':
-            setActivationError('You no longer have permission to issue activation codes.');
+            setActivationError(localeText(locale, 'You no longer have permission to issue activation codes.', 'У вас больше нет права выдавать коды активации.'));
             break;
           default:
-            setActivationError('Something went wrong. Please try again.');
+            setActivationError(localeText(locale, 'Something went wrong. Please try again.', 'Произошла ошибка. Попробуйте ещё раз.'));
         }
         setActivationLoading(false);
         return;
@@ -94,7 +99,7 @@ export function WorkerActions({ worker }: { worker: WorkerDetail }) {
       }
       setActivationLoading(false);
     } catch {
-      setActivationError('Network error. Please try again.');
+      setActivationError(localeText(locale, 'Network error. Please try again.', 'Ошибка сети. Попробуйте ещё раз.'));
       setActivationLoading(false);
     }
   }
@@ -150,13 +155,13 @@ export function WorkerActions({ worker }: { worker: WorkerDetail }) {
         const code = await parseErrorCode(response);
         switch (code) {
           case 'WORKER_NOT_FOUND':
-            setRegenerateError('This worker no longer exists.');
+            setRegenerateError(localeText(locale, 'This worker no longer exists.', 'Этого работника больше нет.'));
             break;
           case 'FORBIDDEN':
-            setRegenerateError('You no longer have permission to change worker logins.');
+            setRegenerateError(localeText(locale, 'You no longer have permission to change worker logins.', 'У вас больше нет права менять логины работников.'));
             break;
           default:
-            setRegenerateError('Something went wrong. Please try again.');
+            setRegenerateError(localeText(locale, 'Something went wrong. Please try again.', 'Произошла ошибка. Попробуйте ещё раз.'));
         }
         setRegenerateLoading(false);
         return;
@@ -169,7 +174,7 @@ export function WorkerActions({ worker }: { worker: WorkerDetail }) {
       setRegenerateLoading(false);
       router.refresh();
     } catch {
-      setRegenerateError('Network error. Please try again.');
+      setRegenerateError(localeText(locale, 'Network error. Please try again.', 'Ошибка сети. Попробуйте ещё раз.'));
       setRegenerateLoading(false);
     }
   }
@@ -203,17 +208,17 @@ export function WorkerActions({ worker }: { worker: WorkerDetail }) {
         const code = await parseErrorCode(response);
         switch (code) {
           case 'VALIDATION_ERROR':
-            setEditError('Please check the fields above.');
+            setEditError(localeText(locale, 'Please check the fields above.', 'Проверьте заполненные поля.'));
             break;
           case 'VERSION_CONFLICT':
-            setEditError('This worker was changed elsewhere — reloading.');
+            setEditError(localeText(locale, 'This worker was changed elsewhere — reloading.', 'Работник изменён в другом окне — обновляем страницу.'));
             router.refresh();
             break;
           case 'FORBIDDEN':
-            setEditError('You no longer have permission to edit workers.');
+            setEditError(localeText(locale, 'You no longer have permission to edit workers.', 'У вас больше нет права изменять работников.'));
             break;
           default:
-            setEditError('Something went wrong. Please try again.');
+            setEditError(localeText(locale, 'Something went wrong. Please try again.', 'Произошла ошибка. Попробуйте ещё раз.'));
         }
         setEditLoading(false);
         return;
@@ -222,7 +227,7 @@ export function WorkerActions({ worker }: { worker: WorkerDetail }) {
       router.refresh();
       setEditLoading(false);
     } catch {
-      setEditError('Network error. Please try again.');
+      setEditError(localeText(locale, 'Network error. Please try again.', 'Ошибка сети. Попробуйте ещё раз.'));
       setEditLoading(false);
     }
   }
@@ -247,16 +252,16 @@ export function WorkerActions({ worker }: { worker: WorkerDetail }) {
         const code = await parseErrorCode(response);
         switch (code) {
           case 'VALIDATION_ERROR':
-            setDeactivateError('A reason is required.');
+            setDeactivateError(localeText(locale, 'A reason is required.', 'Необходимо указать причину.'));
             break;
           case 'ALREADY_DEACTIVATED':
-            setDeactivateError('This worker is already deactivated.');
+            setDeactivateError(localeText(locale, 'This worker is already deactivated.', 'Работник уже деактивирован.'));
             break;
           case 'FORBIDDEN':
-            setDeactivateError('You no longer have permission to deactivate workers.');
+            setDeactivateError(localeText(locale, 'You no longer have permission to deactivate workers.', 'У вас больше нет права деактивировать работников.'));
             break;
           default:
-            setDeactivateError('Something went wrong. Please try again.');
+            setDeactivateError(localeText(locale, 'Something went wrong. Please try again.', 'Произошла ошибка. Попробуйте ещё раз.'));
         }
         setDeactivateLoading(false);
         return;
@@ -266,17 +271,17 @@ export function WorkerActions({ worker }: { worker: WorkerDetail }) {
       setDeactivateLoading(false);
       setShowDeactivate(false);
     } catch {
-      setDeactivateError('Network error. Please try again.');
+      setDeactivateError(localeText(locale, 'Network error. Please try again.', 'Ошибка сети. Попробуйте ещё раз.'));
       setDeactivateLoading(false);
     }
   }
 
   return (
     <>
-      <h2>Edit</h2>
+      <h2>{localeText(locale, 'Edit', 'Редактирование')}</h2>
       <form onSubmit={handleEdit} aria-busy={editLoading}>
         <div className="login-field">
-          <label htmlFor="edit-first-name">First name</label>
+          <label htmlFor="edit-first-name">{s.workers.firstName}</label>
           <input
             id="edit-first-name"
             type="text"
@@ -287,7 +292,7 @@ export function WorkerActions({ worker }: { worker: WorkerDetail }) {
           />
         </div>
         <div className="login-field">
-          <label htmlFor="edit-last-name">Last name</label>
+          <label htmlFor="edit-last-name">{s.workers.lastName}</label>
           <input
             id="edit-last-name"
             type="text"
@@ -298,7 +303,7 @@ export function WorkerActions({ worker }: { worker: WorkerDetail }) {
           />
         </div>
         <div className="login-field">
-          <label htmlFor="edit-phone">Phone</label>
+          <label htmlFor="edit-phone">{localeText(locale, 'Phone', 'Телефон')}</label>
           <input
             id="edit-phone"
             type="tel"
@@ -313,37 +318,36 @@ export function WorkerActions({ worker }: { worker: WorkerDetail }) {
           </p>
         ) : null}
         <button className="login-submit" type="submit" disabled={editLoading}>
-          {editLoading ? 'Saving…' : 'Save changes'}
+          {editLoading ? s.common.saving : localeText(locale, 'Save changes', 'Сохранить изменения')}
         </button>
       </form>
 
-      <h2>Login</h2>
+      <h2>{localeText(locale, 'Login', 'Вход')}</h2>
       <p>
-        Login username: <strong>{currentUsername}</strong>{' '}
+        {s.workers.login}: <strong>{currentUsername}</strong>{' '}
         <button type="button" className="login-submit" onClick={copyUsername}>
-          {usernameCopied ? 'Copied' : 'Copy'}
+          {usernameCopied ? localeText(locale, 'Copied', 'Скопировано') : localeText(locale, 'Copy', 'Копировать')}
         </button>
       </p>
       {regenerateResult ? (
         <p role="status">
           {regenerateResult.changed
-            ? "The login username was updated. The worker's password and current sessions remain valid."
-            : 'This worker already has the current friendly login — nothing changed.'}
+            ? localeText(locale, "The login username was updated. The worker's password and current sessions remain valid.", 'Логин обновлён. Пароль работника и текущие сеансы продолжают действовать.')
+            : localeText(locale, 'This worker already has the current friendly login — nothing changed.', 'У работника уже удобный логин — ничего не изменилось.')}
         </p>
       ) : null}
       {needsFriendlyLogin ? (
         !showRegenerateConfirm ? (
           <button type="button" className="login-submit" onClick={() => setShowRegenerateConfirm(true)}>
-            Generate friendly login
+            {localeText(locale, 'Generate friendly login', 'Создать удобный логин')}
           </button>
         ) : (
           <div>
             <p role="alert">
-              The worker must use the new username for future logins. Their password and current sessions will
-              remain valid.
+              {localeText(locale, 'The worker must use the new username for future logins. Their password and current sessions remain valid.', 'Для следующих входов работник должен использовать новый логин. Пароль и текущие сеансы продолжат действовать.')}
             </p>
             <button type="button" className="login-submit" disabled={regenerateLoading} onClick={handleRegenerateUsername}>
-              {regenerateLoading ? 'Generating…' : 'Confirm'}
+              {regenerateLoading ? localeText(locale, 'Generating…', 'Создание…') : localeText(locale, 'Confirm', 'Подтвердить')}
             </button>
             <button
               type="button"
@@ -351,7 +355,7 @@ export function WorkerActions({ worker }: { worker: WorkerDetail }) {
               disabled={regenerateLoading}
               onClick={() => setShowRegenerateConfirm(false)}
             >
-              Cancel
+              {localeText(locale, 'Cancel', 'Отмена')}
             </button>
           </div>
         )
@@ -362,42 +366,42 @@ export function WorkerActions({ worker }: { worker: WorkerDetail }) {
         </p>
       ) : null}
 
-      <h2>Activation</h2>
+      <h2>{localeText(locale, 'Activation', 'Активация')}</h2>
       {worker.activationStatus === 'READY_FOR_ACTIVATION' ? (
         <section className={issuedCode ? 'activation-print-card' : undefined}>
           {issuedCode ? (
             <div>
               <p className="login-error" role="alert">
-                This code is shown only once — write it down or copy it now. It will not be shown again.
+                {localeText(locale, 'This code is shown only once — save or copy it now. It will not be shown again.', 'Этот код показывается только один раз — сохраните или скопируйте его сейчас. Повторно он не появится.')}
               </p>
               <p>
-                Login username: <strong>{worker.username}</strong>
+                {s.workers.login}: <strong>{worker.username}</strong>
               </p>
               <p>
                 <strong>{formatCodeForDisplay(issuedCode.code)}</strong>{' '}
                 <button type="button" className="login-submit" onClick={copyIssuedCode}>
-                  {codeCopied ? 'Copied' : 'Copy'}
+                  {codeCopied ? localeText(locale, 'Copied', 'Скопировано') : localeText(locale, 'Copy', 'Копировать')}
                 </button>
               </p>
-              <p>Expires: {new Date(issuedCode.expiresAt).toLocaleString()}</p>
+              <p>{localeText(locale, 'Expires', 'Действует до')}: {new Date(issuedCode.expiresAt).toLocaleString(locale === 'RU' ? 'ru-RU' : 'en-GB')}</p>
               {qrDataUrl ? (
                 // The QR is generated locally in this browser; the raw activation code is never
                 // sent to a third-party image service.
                 // eslint-disable-next-line @next/next/no-img-element
-                <img className="activation-qr" src={qrDataUrl} alt="Worker activation QR code" />
+                <img className="activation-qr" src={qrDataUrl} alt={localeText(locale, 'Worker activation QR code', 'QR-код активации работника')} />
               ) : null}
               <div className="activation-actions">
                 <button type="button" className="login-submit" onClick={copyActivationLink}>
-                  {linkCopied ? 'Link copied' : 'Copy activation link'}
+                  {linkCopied ? localeText(locale, 'Link copied', 'Ссылка скопирована') : localeText(locale, 'Copy activation link', 'Копировать ссылку активации')}
                 </button>
                 <button type="button" className="login-submit" onClick={() => window.print()}>
-                  Print code and QR
+                  {localeText(locale, 'Print code and QR', 'Печать кода и QR')}
                 </button>
               </div>
             </div>
           ) : (
             <button type="button" className="login-submit" disabled={activationLoading} onClick={handleIssueActivation}>
-              {activationLoading ? 'Issuing…' : 'Issue activation code'}
+              {activationLoading ? localeText(locale, 'Issuing…', 'Выдача…') : localeText(locale, 'Issue activation code', 'Выдать код активации')}
             </button>
           )}
           {activationError ? (
@@ -408,23 +412,23 @@ export function WorkerActions({ worker }: { worker: WorkerDetail }) {
         </section>
       ) : worker.activationStatus === 'SETUP_INCOMPLETE' ? (
         <div className="worker-setup-callout">
-          <p>This account cannot be activated because its employment is not active. Reactivate the worker first.</p>
+          <p>{localeText(locale, 'This account cannot be activated because its employment is not active. Reactivate the worker first.', 'Учётную запись нельзя активировать, потому что трудоустройство неактивно. Сначала восстановите работника.')}</p>
         </div>
       ) : (
-        <p>This worker has already activated their account.</p>
+        <p>{localeText(locale, 'This worker has already activated their account.', 'Работник уже активировал учётную запись.')}</p>
       )}
 
       {worker.employment?.active ? (
         <>
-          <h2>Deactivate</h2>
+          <h2>{localeText(locale, 'Deactivate', 'Деактивация')}</h2>
           {!showDeactivate ? (
             <button type="button" className="login-submit" onClick={() => setShowDeactivate(true)}>
-              Deactivate worker
+              {localeText(locale, 'Deactivate worker', 'Деактивировать работника')}
             </button>
           ) : (
             <form onSubmit={handleDeactivate} aria-busy={deactivateLoading}>
               <div className="login-field">
-                <label htmlFor="deactivate-reason">Reason</label>
+                <label htmlFor="deactivate-reason">{localeText(locale, 'Reason', 'Причина')}</label>
                 <textarea
                   id="deactivate-reason"
                   required
@@ -435,7 +439,7 @@ export function WorkerActions({ worker }: { worker: WorkerDetail }) {
                 />
               </div>
               <div className="login-field">
-                <label htmlFor="deactivate-end-date">End date (optional — defaults to today)</label>
+                <label htmlFor="deactivate-end-date">{localeText(locale, 'End date (optional — defaults to today)', 'Дата окончания (необязательно — по умолчанию сегодня)')}</label>
                 <input
                   id="deactivate-end-date"
                   type="date"
@@ -450,7 +454,7 @@ export function WorkerActions({ worker }: { worker: WorkerDetail }) {
                 </p>
               ) : null}
               <button className="login-submit" type="submit" disabled={deactivateLoading}>
-                {deactivateLoading ? 'Deactivating…' : 'Confirm deactivation'}
+                {deactivateLoading ? localeText(locale, 'Deactivating…', 'Деактивация…') : localeText(locale, 'Confirm deactivation', 'Подтвердить деактивацию')}
               </button>
             </form>
           )}

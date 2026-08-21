@@ -2,6 +2,8 @@ import { redirect } from 'next/navigation';
 import { resolveServerSession } from '@/lib/server-session';
 import { helsinkiToday } from '@/lib/workers';
 import { NewAssignmentForm } from './NewAssignmentForm';
+import { resolveAppLocale } from '@/lib/i18n/server';
+import { adminDailyStrings } from '@/lib/i18n/admin-daily';
 
 export const dynamic = 'force-dynamic';
 
@@ -19,13 +21,14 @@ export default async function NewAssignmentPage({
   if (!session) {
     redirect('/login');
   }
+  const s = adminDailyStrings(await resolveAppLocale());
 
   const isAdmin = session.user.roles.includes('ADMIN') || session.user.roles.includes('SUPER_ADMIN');
   if (!isAdmin) {
     return (
       <main className="setup-page">
         <p className="login-error" role="alert">
-          Access denied — this page requires the ADMIN or SUPER_ADMIN role.
+          {s.accessDenied}
         </p>
       </main>
     );
@@ -38,8 +41,8 @@ export default async function NewAssignmentPage({
   return (
     <main className="setup-page">
       <div className="setup-card">
-        <h1>New assignment</h1>
-        <p className="setup-subtitle">Assigns a worker to a site (and optionally a work area).</p>
+        <h1>{s.assignments.newTitle}</h1>
+        <p className="setup-subtitle">{s.assignments.newHelp}</p>
         <NewAssignmentForm
           initialEmployeeId={initialEmployeeId}
           initialValidFrom={initialValidFrom}

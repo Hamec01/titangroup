@@ -2,9 +2,12 @@
 
 import { useRef, useState, type FormEvent } from 'react';
 import { useRouter } from 'next/navigation';
+import { useAppLocale } from '@/components/i18n/AppLocaleProvider';
+import { localeText } from '@/lib/i18n/locale';
 
 export function LegacyPeriodEditForm({ period }: { period: { id: string; startDate: string; endDate: string; version: number } }) {
   const router = useRouter();
+  const locale = useAppLocale();
   const [startDate, setStartDate] = useState(period.startDate);
   const [endDate, setEndDate] = useState(period.endDate);
   const [pending, setPending] = useState(false);
@@ -25,21 +28,21 @@ export function LegacyPeriodEditForm({ period }: { period: { id: string; startDa
         body: JSON.stringify({ startDate, endDate, version: period.version })
       });
       if (response.ok) {
-        setMessage('Period dates saved. You can now assign weekly or two-week cycles to workers.');
+        setMessage(localeText(locale, 'Period dates saved. You can now assign weekly or two-week cycles to workers.', 'Даты периода сохранены. Теперь работникам можно назначить недельный или двухнедельный цикл.'));
         router.refresh();
       } else {
         const body = await response.json().catch(() => null) as { error?: { code?: string } } | null;
         const code = body?.error?.code;
         setMessage(code === 'DATA_OUTSIDE_RANGE'
-          ? 'Cannot shorten this far: recorded or submitted time exists outside the new dates.'
+          ? localeText(locale, 'Cannot shorten this far: recorded or submitted time exists outside the new dates.', 'Нельзя сократить период: за новыми датами уже есть записанные или отправленные часы.')
           : code === 'PERIOD_OVERLAP'
-            ? 'These dates overlap another period for one of the workers.'
+            ? localeText(locale, 'These dates overlap another period for one of the workers.', 'Эти даты пересекаются с другим периодом одного из работников.')
             : code === 'VERSION_CONFLICT'
-              ? 'The period changed elsewhere. Reload and try again.'
-              : 'The period could not be changed.');
+              ? localeText(locale, 'The period changed elsewhere. Reload and try again.', 'Период был изменён в другом окне. Обновите страницу и повторите.')
+              : localeText(locale, 'The period could not be changed.', 'Не удалось изменить период.'));
       }
     } catch {
-      setMessage('Network error. Reload before trying again so the result is not repeated accidentally.');
+      setMessage(localeText(locale, 'Network error. Reload before trying again so the result is not repeated accidentally.', 'Ошибка сети. Перед повтором обновите страницу, чтобы случайно не повторить операцию.'));
     } finally {
       pendingRef.current = false;
       setPending(false);
@@ -48,11 +51,11 @@ export function LegacyPeriodEditForm({ period }: { period: { id: string; startDa
 
   return (
     <form onSubmit={submit} className="worker-cycle-form" aria-busy={pending}>
-      <h2>Correct old manual period</h2>
-      <p className="setup-subtitle">Only an OPEN legacy period with no submitted versions can be changed. Existing recorded time is never deleted.</p>
-      <div className="login-field"><label htmlFor="legacy-period-start">Start date</label><input id="legacy-period-start" type="date" required value={startDate} disabled={pending} onChange={(e) => setStartDate(e.target.value)} /></div>
-      <div className="login-field"><label htmlFor="legacy-period-end">End date</label><input id="legacy-period-end" type="date" required value={endDate} disabled={pending} min={startDate} onChange={(e) => setEndDate(e.target.value)} /></div>
-      <button type="submit" className="login-button" disabled={pending}>{pending ? 'Saving…' : 'Save period dates'}</button>
+      <h2>{localeText(locale, 'Correct old manual period', 'Исправить старый ручной период')}</h2>
+      <p className="setup-subtitle">{localeText(locale, 'Only an OPEN legacy period with no submitted versions can be changed. Existing recorded time is never deleted.', 'Можно изменить только открытый старый период без отправленных версий. Уже записанное время никогда не удаляется.')}</p>
+      <div className="login-field"><label htmlFor="legacy-period-start">{localeText(locale, 'Start date', 'Дата начала')}</label><input id="legacy-period-start" type="date" required value={startDate} disabled={pending} onChange={(e) => setStartDate(e.target.value)} /></div>
+      <div className="login-field"><label htmlFor="legacy-period-end">{localeText(locale, 'End date', 'Дата окончания')}</label><input id="legacy-period-end" type="date" required value={endDate} disabled={pending} min={startDate} onChange={(e) => setEndDate(e.target.value)} /></div>
+      <button type="submit" className="login-button" disabled={pending}>{pending ? localeText(locale, 'Saving…', 'Сохранение…') : localeText(locale, 'Save period dates', 'Сохранить даты периода')}</button>
       {message ? <p role="status" aria-live="polite" className="form-status">{message}</p> : null}
     </form>
   );

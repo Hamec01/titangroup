@@ -2,6 +2,8 @@ import { redirect } from 'next/navigation';
 import Link from 'next/link';
 import { resolveServerSession } from '@/lib/server-session';
 import { listPeriods } from '@/lib/periods';
+import { resolveAppLocale } from '@/lib/i18n/server';
+import { adminDailyStrings } from '@/lib/i18n/admin-daily';
 
 export const dynamic = 'force-dynamic';
 
@@ -12,13 +14,14 @@ export default async function AdminPeriodsPage() {
   if (!session) {
     redirect('/login');
   }
+  const s = adminDailyStrings(await resolveAppLocale());
 
   const isAdmin = session.user.roles.includes('ADMIN') || session.user.roles.includes('SUPER_ADMIN');
   if (!isAdmin) {
     return (
       <main className="setup-page">
         <p className="login-error" role="alert">
-          Access denied — this page requires the ADMIN or SUPER_ADMIN role.
+          {s.accessDenied}
         </p>
       </main>
     );
@@ -29,27 +32,27 @@ export default async function AdminPeriodsPage() {
   return (
     <main className="setup-page">
       <div className="setup-card worker-card">
-        <h1>Payroll periods</h1>
+        <h1>{s.periods.title}</h1>
         <p className="setup-subtitle">
-          {periods.length} period{periods.length === 1 ? '' : 's'}
+          {periods.length} {periods.length === 1 ? s.periods.singular : s.periods.plural}
         </p>
         <div className="worker-setup-callout">
           <p>
-            A payroll period is generated from each worker&apos;s Weekly or Every two weeks setting. Keep it <strong>OPEN</strong> while workers enter hours.
+            {s.periods.help1}
           </p>
-          <p>Configure the cycle on the worker page. Manual period creation is retained only for legacy recovery.</p>
+          <p>{s.periods.help2}</p>
         </div>
         {periods.length === 0 ? (
-          <p>No periods yet.</p>
+          <p>{s.periods.empty}</p>
         ) : (
           <table className="worker-table">
             <thead>
               <tr>
-                <th>Start</th>
-                <th>End</th>
-                <th>Status</th>
-                <th>Cycle</th>
-                <th>Workers</th>
+                <th>{s.common.start}</th>
+                <th>{s.common.end}</th>
+                <th>{s.common.status}</th>
+                <th>{s.periods.cycle}</th>
+                <th>{s.periods.workers}</th>
               </tr>
             </thead>
             <tbody>
@@ -60,7 +63,7 @@ export default async function AdminPeriodsPage() {
                   </td>
                   <td>{period.endDate}</td>
                   <td>{period.status}</td>
-                  <td>{period.submissionSchedule?.name ?? 'Legacy manual'}</td>
+                  <td>{period.submissionSchedule?.name ?? s.periods.legacy}</td>
                   <td>{period.participantsCount}</td>
                 </tr>
               ))}

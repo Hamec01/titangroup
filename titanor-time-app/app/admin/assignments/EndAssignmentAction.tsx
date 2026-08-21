@@ -3,6 +3,8 @@
 import { useState, type FormEvent } from 'react';
 import { useRouter } from 'next/navigation';
 import type { AssignmentListItem } from '@/lib/assignments';
+import { useAppLocale } from '@/components/i18n/AppLocaleProvider';
+import { localeText } from '@/lib/i18n/locale';
 
 const CSRF_HEADER_VALUE = 'titanor-time';
 
@@ -12,6 +14,7 @@ const CSRF_HEADER_VALUE = 'titanor-time';
 // existing contract — no new backend behavior.
 export function EndAssignmentAction({ assignment }: { assignment: AssignmentListItem }) {
   const router = useRouter();
+  const locale = useAppLocale();
   const [open, setOpen] = useState(false);
   const [validTo, setValidTo] = useState('');
   const [reason, setReason] = useState('');
@@ -45,13 +48,13 @@ export function EndAssignmentAction({ assignment }: { assignment: AssignmentList
           // Non-JSON error body — fall through to the generic message.
         }
         if (code === 'VALIDATION_ERROR' && fieldErrors?.reason) {
-          setErrorMessage('A reason is required when ending earlier than planned.');
+          setErrorMessage(localeText(locale, 'A reason is required when ending earlier than planned.', 'При досрочном завершении необходимо указать причину.'));
         } else if (code === 'VALIDATION_ERROR') {
-          setErrorMessage('Please check the end date.');
+          setErrorMessage(localeText(locale, 'Please check the end date.', 'Проверьте дату окончания.'));
         } else if (code === 'FORBIDDEN') {
-          setErrorMessage('You no longer have permission to end assignments.');
+          setErrorMessage(localeText(locale, 'You no longer have permission to end assignments.', 'У вас больше нет права завершать назначения.'));
         } else {
-          setErrorMessage('Something went wrong. Please try again.');
+          setErrorMessage(localeText(locale, 'Something went wrong. Please try again.', 'Произошла ошибка. Попробуйте ещё раз.'));
         }
         setLoading(false);
         return;
@@ -61,7 +64,7 @@ export function EndAssignmentAction({ assignment }: { assignment: AssignmentList
       setLoading(false);
       setOpen(false);
     } catch {
-      setErrorMessage('Network error. Please try again.');
+      setErrorMessage(localeText(locale, 'Network error. Please try again.', 'Ошибка сети. Попробуйте ещё раз.'));
       setLoading(false);
     }
   }
@@ -69,14 +72,14 @@ export function EndAssignmentAction({ assignment }: { assignment: AssignmentList
   if (!open) {
     return (
       <button type="button" className="setup-action" onClick={() => setOpen(true)}>
-        End
+        {localeText(locale, 'End', 'Завершить')}
       </button>
     );
   }
 
   return (
     <form onSubmit={handleSubmit} aria-busy={loading} className="assignment-end-form">
-      <label htmlFor={`end-valid-to-${assignment.id}`}>End date</label>
+      <label htmlFor={`end-valid-to-${assignment.id}`}>{localeText(locale, 'End date', 'Дата окончания')}</label>
       <input
         id={`end-valid-to-${assignment.id}`}
         type="date"
@@ -85,7 +88,7 @@ export function EndAssignmentAction({ assignment }: { assignment: AssignmentList
         value={validTo}
         onChange={(event) => setValidTo(event.target.value)}
       />
-      <label htmlFor={`end-reason-${assignment.id}`}>Reason (required if ending earlier than planned)</label>
+      <label htmlFor={`end-reason-${assignment.id}`}>{localeText(locale, 'Reason (required if ending earlier than planned)', 'Причина (обязательна при досрочном завершении)')}</label>
       <input
         id={`end-reason-${assignment.id}`}
         type="text"
@@ -99,10 +102,10 @@ export function EndAssignmentAction({ assignment }: { assignment: AssignmentList
         </p>
       ) : null}
       <button type="submit" className="setup-action" disabled={loading}>
-        {loading ? 'Ending…' : 'Confirm end'}
+        {loading ? localeText(locale, 'Ending…', 'Завершение…') : localeText(locale, 'Confirm end', 'Подтвердить завершение')}
       </button>
       <button type="button" className="setup-action" disabled={loading} onClick={() => setOpen(false)}>
-        Cancel
+        {localeText(locale, 'Cancel', 'Отмена')}
       </button>
     </form>
   );

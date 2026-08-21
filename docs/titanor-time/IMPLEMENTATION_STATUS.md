@@ -1,6 +1,19 @@
 # Titanor Time — Implementation Status
 
-Обновлено: 2026-08-21 Europe/Helsinki (T9.7 — live ADMIN attendance clarity)
+Обновлено: 2026-08-21 Europe/Helsinki (RU/EN — ежедневный ADMIN workflow)
+
+**`[2026-08-21]` RU/EN — ежедневная цепочка начальника локализована.** Второй i18n-слайс
+перевёл списки, карточки, формы, ошибки и действия для Workers, Sites/Work areas, бесплатной
+OpenFreeMap/OpenStreetMap geofence-карты, Templates, Assignments и Payroll periods. Карточка
+работника теперь на выбранном языке объясняет назначение объекта, недельный/двухнедельный цикл,
+activation link/QR, редактирование и деактивацию; термин FOREMAN в owner-facing Site UI уточнён
+как «уполномоченный по объекту». Локаль по-прежнему разрешается в Server Components из свежей
+сессии, а интерактивные формы используют общий React context — API/CSRF/idempotency и бизнес-
+инварианты не изменялись. Production build и `tsc --noEmit` зелёные; реальный Chromium на
+disposable PostgreSQL 16 подтвердил девять ключевых RU-маршрутов, RU→EN, mobile 390×844 без
+overflow и ноль console errors. Второстепенные Users/Timesheets/Reports/Review/Corrections/
+Exports/Attendance screens остаются следующими i18n-слайсами; полный перевод сайта ещё не
+объявляется завершённым.
 
 **`[2026-08-21]` Worker-specific submission cycle schema foundation (product wiring pending).**
 Added weekly/biweekly `TimesheetSubmissionSchedule`, effective-dated

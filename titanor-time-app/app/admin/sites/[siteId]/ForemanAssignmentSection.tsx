@@ -5,23 +5,25 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import type { SiteForemanAssignment } from '@/lib/sites';
 import type { AssignableForeman } from '@/lib/foreman-assignments';
+import { useAppLocale } from '@/components/i18n/AppLocaleProvider';
+import { localeText, type AppLocale } from '@/lib/i18n/locale';
 
 const CSRF_HEADER_VALUE = 'titanor-time';
 
-function errorMessageFor(code: string | undefined): string {
+function errorMessageFor(locale: AppLocale, code: string | undefined): string {
   switch (code) {
     case 'VALIDATION_ERROR':
-      return 'Please check the fields above.';
+      return localeText(locale, 'Please check the fields above.', 'Проверьте заполненные поля.');
     case 'FOREMAN_NOT_FOUND':
-      return 'That foreman account no longer exists.';
+      return localeText(locale, 'That authorized manager account no longer exists.', 'Этой учётной записи уполномоченного больше нет.');
     case 'USER_NOT_FOREMAN':
-      return 'That user does not currently hold an active FOREMAN role.';
+      return localeText(locale, 'That user does not currently hold an active authorized site manager role.', 'У пользователя сейчас нет активной роли уполномоченного по объектам.');
     case 'FOREMAN_NOT_ELIGIBLE':
-      return "That user's account status does not allow a foreman assignment (offboarded or deactivated).";
+      return localeText(locale, "That user's account status does not allow this assignment (offboarded or deactivated).", 'Состояние учётной записи не позволяет назначить пользователя (уволен или деактивирован).');
     case 'FORBIDDEN':
-      return 'You no longer have permission to assign foremen.';
+      return localeText(locale, 'You no longer have permission to assign authorized site managers.', 'У вас больше нет права назначать уполномоченных по объектам.');
     default:
-      return 'Something went wrong. Please try again.';
+      return localeText(locale, 'Something went wrong. Please try again.', 'Произошла ошибка. Попробуйте ещё раз.');
   }
 }
 
@@ -38,6 +40,7 @@ function labelFor(foreman: AssignableForeman): string {
 // calling it. Minimal UI for the existing contract, same shape as EndAssignmentAction.tsx.
 function EndForemanAssignmentAction({ assignmentId }: { assignmentId: string }) {
   const router = useRouter();
+  const locale = useAppLocale();
   const [open, setOpen] = useState(false);
   const [validTo, setValidTo] = useState('');
   const [loading, setLoading] = useState(false);
@@ -67,7 +70,9 @@ function EndForemanAssignmentAction({ assignmentId }: { assignmentId: string }) 
         } catch {
           // Non-JSON error body — fall through to the generic message.
         }
-        setErrorMessage(code === 'FORBIDDEN' ? 'You no longer have permission to end foreman assignments.' : 'Please check the end date.');
+        setErrorMessage(code === 'FORBIDDEN'
+          ? localeText(locale, 'You no longer have permission to end these assignments.', 'У вас больше нет права завершать такие назначения.')
+          : localeText(locale, 'Please check the end date.', 'Проверьте дату окончания.'));
         setLoading(false);
         return;
       }
@@ -76,7 +81,7 @@ function EndForemanAssignmentAction({ assignmentId }: { assignmentId: string }) 
       setLoading(false);
       setOpen(false);
     } catch {
-      setErrorMessage('Network error. Please try again.');
+      setErrorMessage(localeText(locale, 'Network error. Please try again.', 'Ошибка сети. Попробуйте ещё раз.'));
       setLoading(false);
     }
   }
@@ -84,14 +89,14 @@ function EndForemanAssignmentAction({ assignmentId }: { assignmentId: string }) 
   if (!open) {
     return (
       <button type="button" className="setup-action" onClick={() => setOpen(true)}>
-        End
+        {localeText(locale, 'End', 'Завершить')}
       </button>
     );
   }
 
   return (
     <form onSubmit={handleSubmit} aria-busy={loading} className="assignment-end-form">
-      <label htmlFor={`foreman-end-valid-to-${assignmentId}`}>End date</label>
+      <label htmlFor={`foreman-end-valid-to-${assignmentId}`}>{localeText(locale, 'End date', 'Дата окончания')}</label>
       <input
         id={`foreman-end-valid-to-${assignmentId}`}
         type="date"
@@ -106,10 +111,10 @@ function EndForemanAssignmentAction({ assignmentId }: { assignmentId: string }) 
         </p>
       ) : null}
       <button type="submit" className="setup-action" disabled={loading}>
-        {loading ? 'Ending…' : 'Confirm end'}
+        {loading ? localeText(locale, 'Ending…', 'Завершение…') : localeText(locale, 'Confirm end', 'Подтвердить завершение')}
       </button>
       <button type="button" className="setup-action" disabled={loading} onClick={() => setOpen(false)}>
-        Cancel
+        {localeText(locale, 'Cancel', 'Отмена')}
       </button>
     </form>
   );
@@ -125,6 +130,7 @@ export function ForemanAssignmentSection({
   assignableForemen: AssignableForeman[];
 }) {
   const router = useRouter();
+  const locale = useAppLocale();
   const [foremanUserId, setForemanUserId] = useState('');
   const [isSubstitute, setIsSubstitute] = useState(false);
   const [validFrom, setValidFrom] = useState('');
@@ -159,7 +165,7 @@ export function ForemanAssignmentSection({
         } catch {
           // Non-JSON error body — fall through to the generic message.
         }
-        setErrorMessage(errorMessageFor(code));
+        setErrorMessage(errorMessageFor(locale, code));
         setLoading(false);
         return;
       }
@@ -171,23 +177,23 @@ export function ForemanAssignmentSection({
       router.refresh();
       setLoading(false);
     } catch {
-      setErrorMessage('Network error. Please try again.');
+      setErrorMessage(localeText(locale, 'Network error. Please try again.', 'Ошибка сети. Попробуйте ещё раз.'));
       setLoading(false);
     }
   }
 
   return (
     <>
-      <h2>Foremen</h2>
+      <h2>{localeText(locale, 'Authorized site managers', 'Уполномоченные по объекту')}</h2>
       {foremanAssignments.length === 0 ? (
-        <p>None currently assigned.</p>
+        <p>{localeText(locale, 'None currently assigned.', 'Сейчас никто не назначен.')}</p>
       ) : (
         <ul className="setup-list">
           {foremanAssignments.map((assignment) => (
             <li key={assignment.id} className="setup-item">
               <span className="setup-label">
                 {assignment.foremanUsername}
-                {assignment.isSubstitute ? ' (substitute)' : ''}
+                {assignment.isSubstitute ? localeText(locale, ' (substitute)', ' (замещающий)') : ''}
               </span>
               <EndForemanAssignmentAction assignmentId={assignment.id} />
             </li>
@@ -197,7 +203,7 @@ export function ForemanAssignmentSection({
 
       <form onSubmit={handleCreate} aria-busy={loading}>
         <div className="login-field">
-          <label htmlFor="foreman-select">Foreman</label>
+          <label htmlFor="foreman-select">{localeText(locale, 'Authorized site manager', 'Уполномоченный по объекту')}</label>
           {hasCandidates ? (
             <select
               id="foreman-select"
@@ -207,7 +213,7 @@ export function ForemanAssignmentSection({
               onChange={(event) => setForemanUserId(event.target.value)}
             >
               <option value="" disabled>
-                Select a foreman…
+                {localeText(locale, 'Select a person…', 'Выберите человека…')}
               </option>
               {assignableForemen.map((foreman) => (
                 <option key={foreman.id} value={foreman.id}>
@@ -217,18 +223,18 @@ export function ForemanAssignmentSection({
             </select>
           ) : (
             <p>
-              No eligible foremen yet.{' '}
-              <Link href="/admin/users/new">Create or activate a foreman account first.</Link>
+              {localeText(locale, 'No eligible accounts yet.', 'Подходящих учётных записей пока нет.')} {' '}
+              <Link href="/admin/users/new">{localeText(locale, 'Create or activate an authorized manager account first.', 'Сначала создайте или активируйте учётную запись уполномоченного.')}</Link>
             </p>
           )}
         </div>
         {selectedForeman?.status === 'PENDING_ACTIVATION' ? (
           <p className="setup-subtitle">
-            This assignment will be saved now, but this foreman can only log in once their account is activated.
+            {localeText(locale, 'The assignment will be saved now, but this person can sign in only after account activation.', 'Назначение сохранится сейчас, но человек сможет войти только после активации учётной записи.')}
           </p>
         ) : null}
         <div className="login-field">
-          <label htmlFor="foreman-valid-from">Start date</label>
+          <label htmlFor="foreman-valid-from">{localeText(locale, 'Start date', 'Дата начала')}</label>
           <input
             id="foreman-valid-from"
             type="date"
@@ -239,7 +245,7 @@ export function ForemanAssignmentSection({
           />
         </div>
         <div className="login-field">
-          <label htmlFor="foreman-valid-to">End date (optional — leave blank for indefinite)</label>
+          <label htmlFor="foreman-valid-to">{localeText(locale, 'End date (optional — leave blank for indefinite)', 'Дата окончания (необязательно — оставьте пустой для бессрочного назначения)')}</label>
           <input
             id="foreman-valid-to"
             type="date"
@@ -257,7 +263,7 @@ export function ForemanAssignmentSection({
               checked={isSubstitute}
               onChange={(event) => setIsSubstitute(event.target.checked)}
             />{' '}
-            Substitute (not the primary foreman)
+            {localeText(locale, 'Substitute (not the primary authorized manager)', 'Замещающий (не основной уполномоченный)')}
           </label>
         </div>
         {errorMessage ? (
@@ -266,7 +272,7 @@ export function ForemanAssignmentSection({
           </p>
         ) : null}
         <button className="login-submit" type="submit" disabled={loading || !hasCandidates}>
-          {loading ? 'Assigning…' : 'Assign foreman'}
+          {loading ? localeText(locale, 'Assigning…', 'Назначение…') : localeText(locale, 'Assign authorized manager', 'Назначить уполномоченного')}
         </button>
       </form>
     </>

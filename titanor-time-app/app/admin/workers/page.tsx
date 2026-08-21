@@ -2,6 +2,8 @@ import { redirect } from 'next/navigation';
 import Link from 'next/link';
 import { resolveServerSession } from '@/lib/server-session';
 import { listWorkers } from '@/lib/workers';
+import { resolveAppLocale } from '@/lib/i18n/server';
+import { adminDailyStrings } from '@/lib/i18n/admin-daily';
 
 export const dynamic = 'force-dynamic';
 
@@ -17,12 +19,13 @@ export default async function AdminWorkersPage() {
     redirect('/login');
   }
 
+  const s = adminDailyStrings(await resolveAppLocale());
   const isAdmin = session.user.roles.includes('ADMIN') || session.user.roles.includes('SUPER_ADMIN');
   if (!isAdmin) {
     return (
       <main className="setup-page">
         <p className="login-error" role="alert">
-          Access denied — this page requires the ADMIN or SUPER_ADMIN role.
+          {s.accessDenied}
         </p>
       </main>
     );
@@ -33,21 +36,21 @@ export default async function AdminWorkersPage() {
   return (
     <main className="setup-page">
       <div className="setup-card worker-card">
-        <h1>Workers</h1>
+        <h1>{s.workers.title}</h1>
         <p className="setup-subtitle">
-          {totalItems} worker{totalItems === 1 ? '' : 's'} · <Link href="/admin/workers/new">create new</Link>
+          {totalItems} {totalItems === 1 ? s.workers.singular : s.workers.plural} · <Link href="/admin/workers/new">{s.common.createNew}</Link>
         </p>
         {items.length === 0 ? (
-          <p>No workers yet.</p>
+          <p>{s.workers.empty}</p>
         ) : (
           <table className="worker-table">
             <thead>
               <tr>
                 <th>#</th>
-                <th>Name</th>
-                <th>Login username</th>
-                <th>Status</th>
-                <th>Current assignment</th>
+                <th>{s.common.name}</th>
+                <th>{s.workers.login}</th>
+                <th>{s.common.status}</th>
+                <th>{s.workers.assignment}</th>
               </tr>
             </thead>
             <tbody>
@@ -60,12 +63,12 @@ export default async function AdminWorkersPage() {
                     </Link>
                   </td>
                   <td>{worker.username}</td>
-                  <td>{worker.active ? 'Active' : 'Inactive'}</td>
+                  <td>{worker.active ? s.common.active : s.common.inactive}</td>
                   <td>
                     {worker.currentAssignments.length === 0
                       ? '—'
                       : worker.currentAssignments
-                          .map((assignment) => assignment.siteName + (assignment.isPrimary ? ' (primary)' : ''))
+                          .map((assignment) => assignment.siteName + (assignment.isPrimary ? ` (${s.common.primary})` : ''))
                           .join(', ')}
                   </td>
                 </tr>

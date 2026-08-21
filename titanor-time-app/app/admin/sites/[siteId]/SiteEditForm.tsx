@@ -3,6 +3,9 @@
 import { useEffect, useState, type FormEvent } from 'react';
 import { useRouter } from 'next/navigation';
 import type { SiteDetail } from '@/lib/sites';
+import { useAppLocale } from '@/components/i18n/AppLocaleProvider';
+import { adminDailyStrings } from '@/lib/i18n/admin-daily';
+import { localeText } from '@/lib/i18n/locale';
 
 const CSRF_HEADER_VALUE = 'titanor-time';
 
@@ -13,6 +16,8 @@ interface CityOption {
 
 export function SiteEditForm({ site }: { site: SiteDetail }) {
   const router = useRouter();
+  const locale = useAppLocale();
+  const s = adminDailyStrings(locale);
   const [cities, setCities] = useState<CityOption[]>([]);
   const [name, setName] = useState(site.name);
   const [cityId, setCityId] = useState(site.cityId ?? '');
@@ -72,17 +77,17 @@ export function SiteEditForm({ site }: { site: SiteDetail }) {
         }
         switch (code) {
           case 'VALIDATION_ERROR':
-            setErrorMessage('Please check the fields above.');
+            setErrorMessage(localeText(locale, 'Please check the fields above.', 'Проверьте заполненные поля.'));
             break;
           case 'VERSION_CONFLICT':
-            setErrorMessage('This site was changed elsewhere — reloading.');
+            setErrorMessage(localeText(locale, 'This site was changed elsewhere — reloading.', 'Объект изменён в другом окне — обновляем страницу.'));
             router.refresh();
             break;
           case 'FORBIDDEN':
-            setErrorMessage('You no longer have permission to edit sites.');
+            setErrorMessage(localeText(locale, 'You no longer have permission to edit sites.', 'У вас больше нет права изменять объекты.'));
             break;
           default:
-            setErrorMessage('Something went wrong. Please try again.');
+            setErrorMessage(localeText(locale, 'Something went wrong. Please try again.', 'Произошла ошибка. Попробуйте ещё раз.'));
         }
         setLoading(false);
         return;
@@ -91,17 +96,17 @@ export function SiteEditForm({ site }: { site: SiteDetail }) {
       router.refresh();
       setLoading(false);
     } catch {
-      setErrorMessage('Network error. Please try again.');
+      setErrorMessage(localeText(locale, 'Network error. Please try again.', 'Ошибка сети. Попробуйте ещё раз.'));
       setLoading(false);
     }
   }
 
   return (
     <>
-      <h2>Edit</h2>
+      <h2>{localeText(locale, 'Edit', 'Редактирование')}</h2>
       <form onSubmit={handleSubmit} aria-busy={loading}>
         <div className="login-field">
-          <label htmlFor="site-edit-name">Name</label>
+          <label htmlFor="site-edit-name">{s.common.name}</label>
           <input
             id="site-edit-name"
             type="text"
@@ -112,9 +117,9 @@ export function SiteEditForm({ site }: { site: SiteDetail }) {
           />
         </div>
         <div className="login-field">
-          <label htmlFor="site-edit-city">City</label>
+          <label htmlFor="site-edit-city">{localeText(locale, 'City', 'Город')}</label>
           <select id="site-edit-city" disabled={loading} value={cityId} onChange={(event) => setCityId(event.target.value)}>
-            <option value="">No city</option>
+            <option value="">{s.sites.noCity}</option>
             {cities.map((city) => (
               <option key={city.id} value={city.id}>
                 {city.name}
@@ -123,7 +128,7 @@ export function SiteEditForm({ site }: { site: SiteDetail }) {
           </select>
         </div>
         <div className="login-field">
-          <label htmlFor="site-edit-address">Address</label>
+          <label htmlFor="site-edit-address">{localeText(locale, 'Address', 'Адрес')}</label>
           <input
             id="site-edit-address"
             type="text"
@@ -133,7 +138,7 @@ export function SiteEditForm({ site }: { site: SiteDetail }) {
           />
         </div>
         <div className="login-field">
-          <label htmlFor="site-edit-description">Description</label>
+          <label htmlFor="site-edit-description">{localeText(locale, 'Description', 'Описание')}</label>
           <textarea
             id="site-edit-description"
             rows={3}
@@ -151,7 +156,7 @@ export function SiteEditForm({ site }: { site: SiteDetail }) {
               checked={active}
               onChange={(event) => setActive(event.target.checked)}
             />{' '}
-            Active (uncheck to close this site)
+            {localeText(locale, 'Active (uncheck to close this site)', 'Активен (снимите флажок, чтобы закрыть объект)')}
           </label>
         </div>
         {errorMessage ? (
@@ -160,7 +165,7 @@ export function SiteEditForm({ site }: { site: SiteDetail }) {
           </p>
         ) : null}
         <button className="login-submit" type="submit" disabled={loading}>
-          {loading ? 'Saving…' : 'Save changes'}
+          {loading ? s.common.saving : localeText(locale, 'Save changes', 'Сохранить изменения')}
         </button>
       </form>
     </>

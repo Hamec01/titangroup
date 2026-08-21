@@ -3,8 +3,11 @@
 import { useEffect, useRef } from 'react';
 import type { Map as MapLibreMap, Marker as MapLibreMarker } from 'maplibre-gl';
 import type { AdminGpsEvent } from '@/lib/attendance-gps-admin';
+import { useAppLocale } from '@/components/i18n/AppLocaleProvider';
+import { localeText } from '@/lib/i18n/locale';
 
 export function WorkerLocationMap({ items }: { items: AdminGpsEvent[] }) {
+  const locale = useAppLocale();
   const container = useRef<HTMLDivElement>(null);
   const mapRef = useRef<MapLibreMap | null>(null);
   const markers = useRef<MapLibreMarker[]>([]);
@@ -25,7 +28,7 @@ export function WorkerLocationMap({ items }: { items: AdminGpsEvent[] }) {
       for (const item of items) {
         const marker = new maplibregl.Marker({ color: item.operationType === 'CHECK_IN' ? '#18a558' : '#d05a47' })
           .setLngLat([Number(item.longitude), Number(item.latitude)])
-          .setPopup(new maplibregl.Popup({ offset: 18 }).setText(`${item.operationType === 'CHECK_IN' ? 'Check In' : 'Check Out'} · ${item.siteName} · ${new Date(item.effectiveAt).toLocaleString()}`))
+          .setPopup(new maplibregl.Popup({ offset: 18 }).setText(`${item.operationType === 'CHECK_IN' ? 'Check In' : 'Check Out'} · ${item.siteName} · ${new Date(item.effectiveAt).toLocaleString(locale === 'RU' ? 'ru-RU' : 'en-GB')}`))
           .addTo(map);
         markers.current.push(marker);
       }
@@ -38,6 +41,6 @@ export function WorkerLocationMap({ items }: { items: AdminGpsEvent[] }) {
       mapRef.current?.remove();
       mapRef.current = null;
     };
-  }, [items]);
-  return <div ref={container} className="geofence-map" aria-label="Map of retained worker Check In and Check Out locations" />;
+  }, [items, locale]);
+  return <div ref={container} className="geofence-map" aria-label={localeText(locale, 'Map of retained worker Check In and Check Out locations', 'Карта сохранённых мест Check In и Check Out работника')} />;
 }

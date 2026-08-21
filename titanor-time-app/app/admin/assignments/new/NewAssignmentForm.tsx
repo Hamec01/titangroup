@@ -1,6 +1,9 @@
 'use client';
 
 import { useEffect, useRef, useState, type FormEvent } from 'react';
+import { useAppLocale } from '@/components/i18n/AppLocaleProvider';
+import { adminDailyStrings } from '@/lib/i18n/admin-daily';
+import { localeText } from '@/lib/i18n/locale';
 
 const CSRF_HEADER_VALUE = 'titanor-time';
 
@@ -43,6 +46,8 @@ export function NewAssignmentForm({
   returnEmployeeId = null,
   lockEmployee = false
 }: NewAssignmentFormProps) {
+  const locale = useAppLocale();
+  const s = adminDailyStrings(locale);
   const [workers, setWorkers] = useState<WorkerOption[]>([]);
   const [sites, setSites] = useState<SiteOption[]>([]);
   const [workAreas, setWorkAreas] = useState<WorkAreaOption[]>([]);
@@ -168,7 +173,7 @@ export function NewAssignmentForm({
       if (overlapResponse.ok) {
         const overlapBody = (await overlapResponse.json()) as { hasOverlap: boolean };
         if (overlapBody.hasOverlap) {
-          setErrorMessage('This worker already has an overlapping assignment for this site and work area.');
+          setErrorMessage(localeText(locale, 'This worker already has an overlapping assignment for this site and work area.', 'У работника уже есть пересекающееся назначение на этот объект и рабочую зону.'));
           setLoading(false);
           return;
         }
@@ -198,34 +203,34 @@ export function NewAssignmentForm({
 
         switch (code) {
           case 'VALIDATION_ERROR':
-            setErrorMessage('Please check the fields above.');
+            setErrorMessage(localeText(locale, 'Please check the fields above.', 'Проверьте заполненные поля.'));
             break;
           case 'EMPLOYEE_NOT_FOUND':
-            setErrorMessage('Selected worker no longer exists.');
+            setErrorMessage(localeText(locale, 'Selected worker no longer exists.', 'Выбранного работника больше нет.'));
             break;
           case 'SITE_NOT_FOUND':
-            setErrorMessage('Selected site no longer exists.');
+            setErrorMessage(localeText(locale, 'Selected site no longer exists.', 'Выбранного объекта больше нет.'));
             break;
           case 'WORK_AREA_NOT_FOUND':
-            setErrorMessage('Selected work area no longer exists on this site.');
+            setErrorMessage(localeText(locale, 'Selected work area no longer exists on this site.', 'Выбранной рабочей зоны больше нет на этом объекте.'));
             break;
           case 'TEMPLATE_NOT_FOUND':
-            setErrorMessage('Selected work schedule template no longer exists.');
+            setErrorMessage(localeText(locale, 'Selected work schedule template no longer exists.', 'Выбранного шаблона графика больше нет.'));
             break;
           case 'EMPLOYEE_NOT_ACTIVE':
-            setErrorMessage('This worker is not active — reactivate them first.');
+            setErrorMessage(localeText(locale, 'This worker is not active — reactivate them first.', 'Работник неактивен — сначала восстановите его.'));
             break;
           case 'ASSIGNMENT_OVERLAP':
-            setErrorMessage('This worker already has an overlapping assignment for this site and work area.');
+            setErrorMessage(localeText(locale, 'This worker already has an overlapping assignment for this site and work area.', 'У работника уже есть пересекающееся назначение на этот объект и рабочую зону.'));
             break;
           case 'NOT_AUTHENTICATED':
-            setErrorMessage('Your session expired — please sign in again.');
+            setErrorMessage(localeText(locale, 'Your session expired — please sign in again.', 'Сессия завершилась — войдите снова.'));
             break;
           case 'FORBIDDEN':
-            setErrorMessage('You no longer have permission to create assignments.');
+            setErrorMessage(localeText(locale, 'You no longer have permission to create assignments.', 'У вас больше нет права создавать назначения.'));
             break;
           default:
-            setErrorMessage('Something went wrong. Please try again.');
+            setErrorMessage(localeText(locale, 'Something went wrong. Please try again.', 'Произошла ошибка. Попробуйте ещё раз.'));
         }
         setLoading(false);
         return;
@@ -236,7 +241,7 @@ export function NewAssignmentForm({
       // from the newly-created assignment/period participant before the profile is shown again.
       window.location.assign(returnEmployeeId ? `/admin/workers/${returnEmployeeId}` : '/admin/setup');
     } catch {
-      setErrorMessage('Network error. Please try again.');
+      setErrorMessage(localeText(locale, 'Network error. Please try again.', 'Ошибка сети. Попробуйте ещё раз.'));
       setLoading(false);
     }
   }
@@ -244,7 +249,7 @@ export function NewAssignmentForm({
   return (
     <form onSubmit={handleSubmit} aria-busy={loading}>
       <div className="login-field">
-        <label htmlFor="assignment-employee">Worker</label>
+        <label htmlFor="assignment-employee">{s.assignments.worker}</label>
         <select
           id="assignment-employee"
           required
@@ -252,18 +257,18 @@ export function NewAssignmentForm({
           value={employeeId}
           onChange={(event) => setEmployeeId(event.target.value)}
         >
-          <option value="">Select a worker</option>
+          <option value="">{localeText(locale, 'Select a worker', 'Выберите работника')}</option>
           {workers.map((worker) => (
             <option key={worker.id} value={worker.id}>
               #{worker.employeeNumber} {worker.firstName} {worker.lastName}
             </option>
           ))}
         </select>
-        {lockEmployee ? <p className="setup-subtitle">This work setup belongs to the worker shown above.</p> : null}
+        {lockEmployee ? <p className="setup-subtitle">{localeText(locale, 'This work setup belongs to the worker shown above.', 'Эта настройка относится к работнику, указанному выше.')}</p> : null}
       </div>
 
       <div className="login-field">
-        <label htmlFor="assignment-site">Site</label>
+        <label htmlFor="assignment-site">{s.assignments.site}</label>
         <select
           id="assignment-site"
           required
@@ -271,25 +276,25 @@ export function NewAssignmentForm({
           value={siteId}
           onChange={(event) => setSiteId(event.target.value)}
         >
-          <option value="">Select a site</option>
+          <option value="">{localeText(locale, 'Select a site', 'Выберите объект')}</option>
           {sites.map((site) => (
             <option key={site.id} value={site.id}>
               {site.name}
             </option>
           ))}
         </select>
-        {sites.length === 1 ? <p className="setup-subtitle">The only active site was selected automatically.</p> : null}
+        {sites.length === 1 ? <p className="setup-subtitle">{localeText(locale, 'The only active site was selected automatically.', 'Единственный активный объект выбран автоматически.')}</p> : null}
       </div>
 
       <div className="login-field">
-        <label htmlFor="assignment-work-area">Work area (optional)</label>
+        <label htmlFor="assignment-work-area">{localeText(locale, 'Work area (optional)', 'Рабочая зона (необязательно)')}</label>
         <select
           id="assignment-work-area"
           disabled={loading || !siteId}
           value={workAreaId}
           onChange={(event) => setWorkAreaId(event.target.value)}
         >
-          <option value="">No specific work area</option>
+          <option value="">{localeText(locale, 'No specific work area', 'Без конкретной рабочей зоны')}</option>
           {workAreas.map((area) => (
             <option key={area.id} value={area.id}>
               {area.name}
@@ -299,25 +304,25 @@ export function NewAssignmentForm({
       </div>
 
       <div className="login-field">
-        <label htmlFor="assignment-template">Work schedule template</label>
+        <label htmlFor="assignment-template">{localeText(locale, 'Work schedule template', 'Шаблон рабочего графика')}</label>
         <select
           id="assignment-template"
           disabled={loading}
           value={templateId}
           onChange={(event) => setTemplateId(event.target.value)}
         >
-          <option value="">No schedule template</option>
+          <option value="">{localeText(locale, 'No schedule template', 'Без шаблона графика')}</option>
           {templates.map((template) => (
             <option key={template.id} value={template.id}>
               {template.name} (v{template.currentVersionNumber ?? '—'})
             </option>
           ))}
         </select>
-        <p className="setup-subtitle">Without a template, this assignment&apos;s worked hours will be treated as a schedule exception during foreman review.</p>
+        <p className="setup-subtitle">{localeText(locale, "Without a template, this assignment's worked hours will be treated as a schedule exception during review.", 'Без шаблона отработанные часы будут отмечены как отклонение от графика при проверке.')}</p>
       </div>
 
       <div className="login-field">
-        <label htmlFor="assignment-valid-from">Start date</label>
+        <label htmlFor="assignment-valid-from">{localeText(locale, 'Start date', 'Дата начала')}</label>
         <input
           id="assignment-valid-from"
           type="date"
@@ -329,7 +334,7 @@ export function NewAssignmentForm({
       </div>
 
       <div className="login-field">
-        <label htmlFor="assignment-valid-to">End date (optional — leave blank for indefinite)</label>
+        <label htmlFor="assignment-valid-to">{localeText(locale, 'End date (optional — leave blank for indefinite)', 'Дата окончания (необязательно — оставьте пустой для бессрочного назначения)')}</label>
         <input
           id="assignment-valid-to"
           type="date"
@@ -348,7 +353,7 @@ export function NewAssignmentForm({
             checked={isPrimary}
             onChange={(event) => setIsPrimary(event.target.checked)}
           />{' '}
-          Primary assignment
+          {localeText(locale, 'Primary assignment', 'Основное назначение')}
         </label>
       </div>
 
@@ -359,7 +364,7 @@ export function NewAssignmentForm({
       ) : null}
 
       <button className="login-submit" type="submit" disabled={loading}>
-        {loading ? 'Creating…' : 'Create assignment'}
+        {loading ? s.common.creating : localeText(locale, 'Create assignment', 'Создать назначение')}
       </button>
     </form>
   );

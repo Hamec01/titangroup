@@ -11,22 +11,25 @@ import {
   templateDaysToRequestPayload,
   type TemplateDayState
 } from '../TemplateDaysEditor';
+import { useAppLocale } from '@/components/i18n/AppLocaleProvider';
+import { adminDailyStrings } from '@/lib/i18n/admin-daily';
+import { localeText, type AppLocale } from '@/lib/i18n/locale';
 
 // docs/titanor-time/04_ADMIN_FIRST_API_CONTRACTS.md §0 — required on every mutating request.
 const CSRF_HEADER_VALUE = 'titanor-time';
 
-function describeError(code: string | undefined, fieldErrors: Record<string, string[]> | undefined): string | null {
+function describeError(locale: AppLocale, code: string | undefined, fieldErrors: Record<string, string[]> | undefined): string {
   switch (code) {
     case 'VALIDATION_ERROR':
-      return fieldErrors?.days?.[0] ?? fieldErrors?.name?.[0] ?? fieldErrors?.description?.[0] ?? fieldErrors?.fields?.[0] ?? 'Invalid form data.';
+      return fieldErrors?.days?.[0] ?? fieldErrors?.name?.[0] ?? fieldErrors?.description?.[0] ?? fieldErrors?.fields?.[0] ?? localeText(locale, 'Invalid form data.', 'Форма заполнена неверно.');
     case 'TEMPLATE_NOT_FOUND':
-      return 'This template no longer exists.';
+      return localeText(locale, 'This template no longer exists.', 'Этого шаблона больше нет.');
     case 'NOT_AUTHENTICATED':
-      return 'Your session expired — please sign in again.';
+      return localeText(locale, 'Your session expired — please sign in again.', 'Сессия завершилась — войдите снова.');
     case 'FORBIDDEN':
-      return 'You no longer have permission to edit templates.';
+      return localeText(locale, 'You no longer have permission to edit templates.', 'У вас больше нет права изменять шаблоны.');
     default:
-      return 'Something went wrong. Please try again.';
+      return localeText(locale, 'Something went wrong. Please try again.', 'Произошла ошибка. Попробуйте ещё раз.');
   }
 }
 
@@ -37,6 +40,8 @@ function describeError(code: string | undefined, fieldErrors: Record<string, str
 // this form never touches SiteAssignment at all.
 export function EditTemplateForm({ template }: { template: TemplateDetail }) {
   const router = useRouter();
+  const locale = useAppLocale();
+  const s = adminDailyStrings(locale);
   const [editing, setEditing] = useState(false);
   const [name, setName] = useState(template.name);
   const [description, setDescription] = useState(template.description ?? '');
@@ -90,7 +95,7 @@ export function EditTemplateForm({ template }: { template: TemplateDetail }) {
         if (code === 'VERSION_CONFLICT') {
           setConflict(true);
         }
-        setErrorMessage(describeError(code, fieldErrors));
+        setErrorMessage(describeError(locale, code, fieldErrors));
         setLoading(false);
         return;
       }
@@ -101,7 +106,7 @@ export function EditTemplateForm({ template }: { template: TemplateDetail }) {
       setLoading(false);
       router.refresh();
     } catch {
-      setErrorMessage('Network error. Please try again.');
+      setErrorMessage(localeText(locale, 'Network error. Please try again.', 'Ошибка сети. Попробуйте ещё раз.'));
       setLoading(false);
     }
   }
@@ -113,9 +118,9 @@ export function EditTemplateForm({ template }: { template: TemplateDetail }) {
   if (!editing) {
     return (
       <div>
-        {savedVersionNumber !== null ? <p className="setup-subtitle">Saved — now on version {savedVersionNumber}.</p> : null}
+        {savedVersionNumber !== null ? <p className="setup-subtitle">{localeText(locale, 'Saved — now on version', 'Сохранено — текущая версия')} {savedVersionNumber}.</p> : null}
         <button type="button" className="login-submit" onClick={() => setEditing(true)}>
-          Edit schedule
+          {localeText(locale, 'Edit schedule', 'Изменить график')}
         </button>
       </div>
     );
@@ -123,13 +128,13 @@ export function EditTemplateForm({ template }: { template: TemplateDetail }) {
 
   return (
     <form onSubmit={handleSubmit} aria-busy={loading}>
-      <h2>Edit schedule</h2>
+      <h2>{localeText(locale, 'Edit schedule', 'Изменить график')}</h2>
       <p className="setup-subtitle">
-        Saving creates a new version. Existing assignments remain on their recorded version until changed or split.
+        {localeText(locale, 'Saving creates a new version. Existing assignments remain on their recorded version until changed or split.', 'При сохранении создаётся новая версия. Существующие назначения сохраняют прежнюю версию, пока их не изменить или разделить.')}
       </p>
 
       <div className="login-field">
-        <label htmlFor="template-edit-name">Name</label>
+        <label htmlFor="template-edit-name">{s.common.name}</label>
         <input
           id="template-edit-name"
           type="text"
@@ -141,7 +146,7 @@ export function EditTemplateForm({ template }: { template: TemplateDetail }) {
       </div>
 
       <div className="login-field">
-        <label htmlFor="template-edit-description">Description (optional)</label>
+        <label htmlFor="template-edit-description">{s.sites.description}</label>
         <textarea
           id="template-edit-description"
           rows={2}
@@ -161,15 +166,15 @@ export function EditTemplateForm({ template }: { template: TemplateDetail }) {
 
       {conflict ? (
         <button type="button" className="login-submit" onClick={handleReload}>
-          Reload
+          {localeText(locale, 'Reload', 'Обновить')}
         </button>
       ) : (
         <>
           <button className="login-submit" type="submit" disabled={loading}>
-            {loading ? 'Saving…' : 'Save changes'}
+            {loading ? s.common.saving : localeText(locale, 'Save changes', 'Сохранить изменения')}
           </button>
           <button type="button" className="login-submit" disabled={loading} onClick={() => setEditing(false)}>
-            Cancel
+            {localeText(locale, 'Cancel', 'Отмена')}
           </button>
         </>
       )}

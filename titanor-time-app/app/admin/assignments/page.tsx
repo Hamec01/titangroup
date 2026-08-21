@@ -4,6 +4,8 @@ import { resolveServerSession } from '@/lib/server-session';
 import { listAssignments } from '@/lib/assignments';
 import { AssignmentPrimaryToggle } from './AssignmentPrimaryToggle';
 import { EndAssignmentAction } from './EndAssignmentAction';
+import { resolveAppLocale } from '@/lib/i18n/server';
+import { adminDailyStrings } from '@/lib/i18n/admin-daily';
 
 export const dynamic = 'force-dynamic';
 
@@ -19,13 +21,14 @@ export default async function AdminAssignmentsPage() {
   if (!session) {
     redirect('/login');
   }
+  const s = adminDailyStrings(await resolveAppLocale());
 
   const isAdmin = session.user.roles.includes('ADMIN') || session.user.roles.includes('SUPER_ADMIN');
   if (!isAdmin) {
     return (
       <main className="setup-page">
         <p className="login-error" role="alert">
-          Access denied — this page requires the ADMIN or SUPER_ADMIN role.
+          {s.accessDenied}
         </p>
       </main>
     );
@@ -36,23 +39,23 @@ export default async function AdminAssignmentsPage() {
   return (
     <main className="setup-page">
       <div className="setup-card worker-card">
-        <h1>Assignments</h1>
+        <h1>{s.assignments.title}</h1>
         <p className="setup-subtitle">
-          {totalItems} assignment{totalItems === 1 ? '' : 's'} ·{' '}
-          <Link href="/admin/assignments/new">create new</Link>
+          {totalItems} {totalItems === 1 ? s.assignments.singular : s.assignments.plural} ·{' '}
+          <Link href="/admin/assignments/new">{s.common.createNew}</Link>
         </p>
         {items.length === 0 ? (
-          <p>No assignments yet.</p>
+          <p>{s.assignments.empty}</p>
         ) : (
           <table className="worker-table">
             <thead>
               <tr>
-                <th>Worker</th>
-                <th>Site</th>
-                <th>Work area</th>
-                <th>Template</th>
-                <th>Valid from</th>
-                <th>Valid to</th>
+                <th>{s.assignments.worker}</th>
+                <th>{s.assignments.site}</th>
+                <th>{s.assignments.workArea}</th>
+                <th>{s.assignments.template}</th>
+                <th>{s.assignments.validFrom}</th>
+                <th>{s.assignments.validTo}</th>
                 <th></th>
               </tr>
             </thead>
@@ -61,7 +64,7 @@ export default async function AdminAssignmentsPage() {
                 <tr key={assignment.id}>
                   <td>
                     <Link href={`/admin/workers/${assignment.employeeId}`}>{assignment.employeeName}</Link>
-                    {assignment.isPrimary ? ' (primary)' : ''}
+                    {assignment.isPrimary ? ` (${s.common.primary})` : ''}
                   </td>
                   <td>
                     <Link href={`/admin/sites/${assignment.siteId}`}>{assignment.siteName}</Link>
@@ -69,7 +72,7 @@ export default async function AdminAssignmentsPage() {
                   <td>{assignment.workAreaName ?? '—'}</td>
                   <td>{assignment.templateName ?? '—'}</td>
                   <td>{assignment.validFrom}</td>
-                  <td>{assignment.validTo ?? 'Indefinite'}</td>
+                  <td>{assignment.validTo ?? s.common.indefinite}</td>
                   <td>
                     <AssignmentPrimaryToggle assignment={assignment} />
                     <EndAssignmentAction assignment={assignment} />

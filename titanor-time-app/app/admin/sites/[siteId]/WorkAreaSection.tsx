@@ -3,6 +3,8 @@
 import { useState, type FormEvent } from 'react';
 import { useRouter } from 'next/navigation';
 import type { SiteWorkArea } from '@/lib/sites';
+import { useAppLocale } from '@/components/i18n/AppLocaleProvider';
+import { localeText, type AppLocale } from '@/lib/i18n/locale';
 
 const CSRF_HEADER_VALUE = 'titanor-time';
 
@@ -15,23 +17,24 @@ async function parseErrorCode(response: Response): Promise<string | undefined> {
   }
 }
 
-function errorMessageFor(code: string | undefined): string {
+function errorMessageFor(locale: AppLocale, code: string | undefined): string {
   switch (code) {
     case 'VALIDATION_ERROR':
-      return 'Please check the name.';
+      return localeText(locale, 'Please check the name.', 'Проверьте название.');
     case 'DUPLICATE_WORK_AREA_NAME':
-      return 'A work area with this name already exists on this site.';
+      return localeText(locale, 'A work area with this name already exists on this site.', 'Рабочая зона с таким названием уже есть на объекте.');
     case 'VERSION_CONFLICT':
-      return 'This work area was changed elsewhere — reloading.';
+      return localeText(locale, 'This work area was changed elsewhere — reloading.', 'Рабочая зона изменена в другом окне — обновляем страницу.');
     case 'FORBIDDEN':
-      return 'You no longer have permission to manage work areas.';
+      return localeText(locale, 'You no longer have permission to manage work areas.', 'У вас больше нет права управлять рабочими зонами.');
     default:
-      return 'Something went wrong. Please try again.';
+      return localeText(locale, 'Something went wrong. Please try again.', 'Произошла ошибка. Попробуйте ещё раз.');
   }
 }
 
 function ToggleActiveButton({ siteId, area, disabled }: { siteId: string; area: SiteWorkArea; disabled: boolean }) {
   const router = useRouter();
+  const locale = useAppLocale();
   const [loading, setLoading] = useState(false);
 
   async function handleClick(): Promise<void> {
@@ -48,7 +51,7 @@ function ToggleActiveButton({ siteId, area, disabled }: { siteId: string; area: 
       });
       if (!response.ok) {
         const code = await parseErrorCode(response);
-        window.alert(errorMessageFor(code));
+        window.alert(errorMessageFor(locale, code));
         if (code === 'VERSION_CONFLICT') {
           router.refresh();
         }
@@ -57,20 +60,21 @@ function ToggleActiveButton({ siteId, area, disabled }: { siteId: string; area: 
       }
       router.refresh();
     } catch {
-      window.alert('Network error. Please try again.');
+      window.alert(localeText(locale, 'Network error. Please try again.', 'Ошибка сети. Попробуйте ещё раз.'));
       setLoading(false);
     }
   }
 
   return (
     <button type="button" className="setup-action" onClick={handleClick} disabled={loading || disabled}>
-      {area.active ? 'Deactivate' : 'Activate'}
+      {area.active ? localeText(locale, 'Deactivate', 'Отключить') : localeText(locale, 'Activate', 'Активировать')}
     </button>
   );
 }
 
 export function WorkAreaSection({ siteId, workAreas }: { siteId: string; workAreas: SiteWorkArea[] }) {
   const router = useRouter();
+  const locale = useAppLocale();
   const [name, setName] = useState('');
   const [loading, setLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -93,7 +97,7 @@ export function WorkAreaSection({ siteId, workAreas }: { siteId: string; workAre
 
       if (!response.ok) {
         const code = await parseErrorCode(response);
-        setErrorMessage(errorMessageFor(code));
+        setErrorMessage(errorMessageFor(locale, code));
         setLoading(false);
         return;
       }
@@ -102,23 +106,23 @@ export function WorkAreaSection({ siteId, workAreas }: { siteId: string; workAre
       router.refresh();
       setLoading(false);
     } catch {
-      setErrorMessage('Network error. Please try again.');
+      setErrorMessage(localeText(locale, 'Network error. Please try again.', 'Ошибка сети. Попробуйте ещё раз.'));
       setLoading(false);
     }
   }
 
   return (
     <>
-      <h2>Work areas</h2>
+      <h2>{localeText(locale, 'Work areas', 'Рабочие зоны')}</h2>
       {workAreas.length === 0 ? (
-        <p>None yet.</p>
+        <p>{localeText(locale, 'None yet.', 'Пока нет.')}</p>
       ) : (
         <ul className="setup-list">
           {workAreas.map((area) => (
             <li key={area.id} className="setup-item">
               <span className="setup-label">
                 {area.name}
-                {!area.active ? ' (inactive)' : ''}
+                {!area.active ? localeText(locale, ' (inactive)', ' (неактивна)') : ''}
               </span>
               <ToggleActiveButton siteId={siteId} area={area} disabled={loading} />
             </li>
@@ -128,7 +132,7 @@ export function WorkAreaSection({ siteId, workAreas }: { siteId: string; workAre
 
       <form onSubmit={handleCreate} aria-busy={loading}>
         <div className="login-field">
-          <label htmlFor="work-area-name">New work area name</label>
+          <label htmlFor="work-area-name">{localeText(locale, 'New work area name', 'Название новой рабочей зоны')}</label>
           <input
             id="work-area-name"
             type="text"
@@ -144,7 +148,7 @@ export function WorkAreaSection({ siteId, workAreas }: { siteId: string; workAre
           </p>
         ) : null}
         <button className="login-submit" type="submit" disabled={loading}>
-          {loading ? 'Adding…' : 'Add work area'}
+          {loading ? localeText(locale, 'Adding…', 'Добавление…') : localeText(locale, 'Add work area', 'Добавить рабочую зону')}
         </button>
       </form>
     </>

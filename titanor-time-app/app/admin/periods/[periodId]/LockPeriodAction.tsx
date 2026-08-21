@@ -2,6 +2,8 @@
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
+import { useAppLocale } from '@/components/i18n/AppLocaleProvider';
+import { localeText } from '@/lib/i18n/locale';
 
 const CSRF_HEADER_VALUE = 'titanor-time';
 
@@ -14,6 +16,7 @@ interface Blocker {
 
 export function LockPeriodAction({ periodId, canLock }: { periodId: string; canLock: boolean }) {
   const router = useRouter();
+  const locale = useAppLocale();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [blockers, setBlockers] = useState<Blocker[] | null>(null);
@@ -33,14 +36,14 @@ export function LockPeriodAction({ periodId, canLock }: { periodId: string; canL
         if (body?.error?.code === 'NOT_ALL_FINAL_APPROVED' && Array.isArray(body.error.blockers)) {
           setBlockers(body.error.blockers);
         } else {
-          setError('Something went wrong. Please try again.');
+          setError(localeText(locale, 'Something went wrong. Please try again.', 'Произошла ошибка. Попробуйте ещё раз.'));
         }
         setLoading(false);
         return;
       }
       router.refresh();
     } catch {
-      setError('Network error. Please try again.');
+      setError(localeText(locale, 'Network error. Please try again.', 'Ошибка сети. Попробуйте ещё раз.'));
       setLoading(false);
     }
   }
@@ -48,13 +51,13 @@ export function LockPeriodAction({ periodId, canLock }: { periodId: string; canL
   return (
     <div className="setup-card form">
       <p className="setup-subtitle">
-        Locking closes this period for normal work. It becomes available only after every participant is final approved.
+        {localeText(locale, 'Locking closes this period for normal work. It becomes available only after every participant is final approved.', 'Блокировка закрывает период для обычной работы. Она доступна только после окончательного утверждения табелей всех участников.')}
       </p>
       <button className="login-submit" type="button" disabled={loading || !canLock} onClick={handleLock}>
-        {loading ? 'Locking…' : 'Lock period'}
+        {loading ? localeText(locale, 'Locking…', 'Блокировка…') : localeText(locale, 'Lock period', 'Заблокировать период')}
       </button>
 
-      {!canLock ? <p>Nothing to press yet — finish reviewing and final approving all worker timesheets first.</p> : null}
+      {!canLock ? <p>{localeText(locale, 'Nothing to press yet — finish reviewing and final approving all worker timesheets first.', 'Пока блокировать нельзя — сначала проверьте и окончательно утвердите табели всех работников.')}</p> : null}
 
       {error ? (
         <p className="login-error" role="alert">
@@ -65,13 +68,13 @@ export function LockPeriodAction({ periodId, canLock }: { periodId: string; canL
       {blockers && blockers.length > 0 ? (
         <div>
           <p className="login-error" role="alert">
-            Not every participant has reached final approval yet:
+            {localeText(locale, 'Not every participant has reached final approval yet:', 'Ещё не все участники получили окончательное утверждение:')}
           </p>
           <ul className="setup-list">
             {blockers.map((b) => (
               <li key={b.employeeId} className="setup-item">
                 <span className="setup-label">{b.employeeName}</span>
-                <span className="setup-status setup-status-pending">{b.status ?? 'no timesheet'}</span>
+                <span className="setup-status setup-status-pending">{b.status ?? localeText(locale, 'no timesheet', 'нет табеля')}</span>
               </li>
             ))}
           </ul>

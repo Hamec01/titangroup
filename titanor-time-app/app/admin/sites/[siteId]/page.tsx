@@ -8,6 +8,8 @@ import { SiteEditForm } from './SiteEditForm';
 import { WorkAreaSection } from './WorkAreaSection';
 import { ForemanAssignmentSection } from './ForemanAssignmentSection';
 import { GeofenceSection } from './GeofenceSection';
+import { resolveAppLocale } from '@/lib/i18n/server';
+import { adminDailyStrings } from '@/lib/i18n/admin-daily';
 
 export const dynamic = 'force-dynamic';
 
@@ -20,13 +22,14 @@ export default async function SiteDetailPage({ params }: { params: Promise<{ sit
   if (!session) {
     redirect('/login');
   }
+  const s = adminDailyStrings(await resolveAppLocale());
 
   const isAdmin = session.user.roles.includes('ADMIN') || session.user.roles.includes('SUPER_ADMIN');
   if (!isAdmin) {
     return (
       <main className="setup-page">
         <p className="login-error" role="alert">
-          Access denied — this page requires the ADMIN or SUPER_ADMIN role.
+          {s.accessDenied}
         </p>
       </main>
     );
@@ -40,7 +43,7 @@ export default async function SiteDetailPage({ params }: { params: Promise<{ sit
       <main className="setup-page">
         <div className="setup-card">
           <p className="login-error" role="alert">
-            No site found with this id.
+            {s.sites.notFound}
           </p>
         </div>
       </main>
@@ -56,11 +59,11 @@ export default async function SiteDetailPage({ params }: { params: Promise<{ sit
       <div className="setup-card worker-card">
         <h1>{site.name}</h1>
         <p className="setup-subtitle">
-          {site.active ? 'Active' : 'Closed'}
-          {site.defaultForemanUsername ? ` · default foreman: ${site.defaultForemanUsername}` : ''}
+          {site.active ? s.common.active : s.common.closed}
+          {site.defaultForemanUsername ? ` · ${s.sites.defaultForeman}: ${site.defaultForemanUsername}` : ''}
         </p>
         <p>
-          <Link href={`/admin/reports/sites?siteId=${site.id}`}>View this site&apos;s time report</Link>
+          <Link href={`/admin/reports/sites?siteId=${site.id}`}>{s.sites.report}</Link>
         </p>
 
         <WorkAreaSection siteId={site.id} workAreas={site.workAreas} />
@@ -69,16 +72,16 @@ export default async function SiteDetailPage({ params }: { params: Promise<{ sit
 
         <GeofenceSection siteId={site.id} history={geofence} />
 
-        <h2>Active assignments</h2>
+        <h2>{s.sites.assignments}</h2>
         {site.activeAssignments.length === 0 ? (
-          <p>None.</p>
+          <p>{s.common.none}</p>
         ) : (
           <ul className="setup-list">
             {site.activeAssignments.map((assignment) => (
               <li key={assignment.employeeId} className="setup-item">
                 <span className="setup-label">
                   {assignment.employeeName}
-                  {assignment.isPrimary ? ' (primary)' : ''}
+                  {assignment.isPrimary ? ` (${s.common.primary})` : ''}
                   {assignment.workAreaName ? ` — ${assignment.workAreaName}` : ''}
                   {assignment.templateName ? ` — ${assignment.templateName}` : ''}
                 </span>

@@ -5,6 +5,8 @@ import { useRouter } from 'next/navigation';
 import type { GeofenceHistoryResult } from '@/lib/geofences';
 import { GeofenceMapPicker } from './GeofenceMapPicker';
 import type { AddressSearchResult } from '@/lib/site-geocoding';
+import { useAppLocale } from '@/components/i18n/AppLocaleProvider';
+import { localeText, type AppLocale } from '@/lib/i18n/locale';
 
 const CSRF_HEADER_VALUE = 'titanor-time';
 // docs/titanor-time/T7A_1_ATTENDANCE_CLOCK_DESIGN.md §5.1 — pilot default radius for a site's
@@ -20,20 +22,20 @@ async function parseErrorBody(response: Response): Promise<{ code?: string; fiel
   }
 }
 
-function genericErrorMessageFor(code: string | undefined): string {
+function genericErrorMessageFor(locale: AppLocale, code: string | undefined): string {
   switch (code) {
     case 'VALIDATION_ERROR':
-      return 'Please check the fields below.';
+      return localeText(locale, 'Please check the fields below.', 'Проверьте поля ниже.');
     case 'FORBIDDEN':
-      return 'You no longer have permission to manage this site’s geofence.';
+      return localeText(locale, 'You no longer have permission to manage this site’s geofence.', 'У вас больше нет права управлять геозоной этого объекта.');
     case 'IDEMPOTENCY_KEY_IN_PROGRESS':
-      return 'A previous save for this site is still being processed — please wait a moment and try again.';
+      return localeText(locale, 'A previous save for this site is still being processed — please wait a moment and try again.', 'Предыдущее сохранение ещё обрабатывается — немного подождите и повторите.');
     case 'IDEMPOTENCY_KEY_REUSED':
-      return 'That save could not be completed as a new request — please try again.';
+      return localeText(locale, 'That save could not be completed as a new request — please try again.', 'Не удалось выполнить сохранение как новый запрос — повторите.');
     case 'SITE_NOT_FOUND':
-      return 'This site no longer exists.';
+      return localeText(locale, 'This site no longer exists.', 'Этого объекта больше нет.');
     default:
-      return 'Something went wrong. Please try again.';
+      return localeText(locale, 'Something went wrong. Please try again.', 'Произошла ошибка. Попробуйте ещё раз.');
   }
 }
 
@@ -45,6 +47,7 @@ function genericErrorMessageFor(code: string | undefined): string {
  */
 export function GeofenceSection({ siteId, history }: { siteId: string; history: GeofenceHistoryResult }) {
   const router = useRouter();
+  const locale = useAppLocale();
   const { current, items } = history;
 
   const [latitude, setLatitude] = useState(current?.latitude ?? '');
@@ -91,7 +94,7 @@ export function GeofenceSection({ siteId, history }: { siteId: string; history: 
       if (!response.ok) {
         const { code, fieldErrors: apiFieldErrors } = await parseErrorBody(response);
         setFieldErrors(apiFieldErrors ?? {});
-        setErrorMessage(genericErrorMessageFor(code));
+        setErrorMessage(genericErrorMessageFor(locale, code));
         setLoading(false);
         return;
       }
@@ -99,7 +102,7 @@ export function GeofenceSection({ siteId, history }: { siteId: string; history: 
       router.refresh();
       setLoading(false);
     } catch {
-      setErrorMessage('Network error. Please try again.');
+      setErrorMessage(localeText(locale, 'Network error. Please try again.', 'Ошибка сети. Попробуйте ещё раз.'));
       setLoading(false);
     }
   }
@@ -114,14 +117,16 @@ export function GeofenceSection({ siteId, history }: { siteId: string; history: 
       const response = await fetch(`/api/admin/geocoding/search?q=${encodeURIComponent(address.trim())}`, { credentials: 'same-origin', cache: 'no-store' });
       const body = await response.json().catch(() => null) as { items?: AddressSearchResult[]; error?: { code?: string } } | null;
       if (!response.ok) {
-        setAddressMessage(body?.error?.code === 'RATE_LIMITED' ? 'Search is busy. Wait a second and try again.' : 'Address search is temporarily unavailable. You can still click the map.');
+        setAddressMessage(body?.error?.code === 'RATE_LIMITED'
+          ? localeText(locale, 'Search is busy. Wait a second and try again.', 'Поиск занят. Подождите секунду и повторите.')
+          : localeText(locale, 'Address search is temporarily unavailable. You can still click the map.', 'Поиск адреса временно недоступен. Можно выбрать точку на карте.'));
       } else {
         const items = body?.items ?? [];
         setAddressResults(items);
-        if (!items.length) setAddressMessage('No matching address found. Refine the search or click the map.');
+        if (!items.length) setAddressMessage(localeText(locale, 'No matching address found. Refine the search or click the map.', 'Подходящий адрес не найден. Уточните запрос или выберите точку на карте.'));
       }
     } catch {
-      setAddressMessage('Network error while searching. You can still click the map.');
+      setAddressMessage(localeText(locale, 'Network error while searching. You can still click the map.', 'Ошибка сети при поиске. Можно выбрать точку на карте.'));
     } finally {
       setAddressLoading(false);
     }
@@ -129,30 +134,30 @@ export function GeofenceSection({ siteId, history }: { siteId: string; history: 
 
   return (
     <>
-      <h2>Geofence</h2>
+      <h2>{localeText(locale, 'Geofence', 'Геозона')}</h2>
 
       {current ? (
         <div className="setup-item setup-item-column">
           <span className="setup-label">
-            Version {current.versionNumber} — {current.latitude}, {current.longitude} — radius {current.radiusMeters} m
+            {localeText(locale, 'Version', 'Версия')} {current.versionNumber} — {current.latitude}, {current.longitude} — {localeText(locale, 'radius', 'радиус')} {current.radiusMeters} {localeText(locale, 'm', 'м')}
           </span>
           <span className="setup-subtitle">
-            Created {new Date(current.createdAt).toLocaleString()} by {current.createdByUsername}
+            {localeText(locale, 'Created', 'Создано')} {new Date(current.createdAt).toLocaleString(locale === 'RU' ? 'ru-RU' : 'en-GB')} · {current.createdByUsername}
           </span>
         </div>
       ) : (
-        <p>Geofence not configured.</p>
+        <p>{localeText(locale, 'Geofence not configured.', 'Геозона не настроена.')}</p>
       )}
 
       {items.length > 0 ? (
         <>
-          <h3>Version history</h3>
+          <h3>{localeText(locale, 'Version history', 'История версий')}</h3>
           <ul className="setup-list">
             {items.map((version) => (
               <li key={version.id} className="setup-item">
                 <span className="setup-label">
-                  v{version.versionNumber} — {version.latitude}, {version.longitude} — {version.radiusMeters} m —{' '}
-                  {new Date(version.createdAt).toLocaleString()} by {version.createdByUsername}
+                  v{version.versionNumber} — {version.latitude}, {version.longitude} — {version.radiusMeters} {localeText(locale, 'm', 'м')} —{' '}
+                  {new Date(version.createdAt).toLocaleString(locale === 'RU' ? 'ru-RU' : 'en-GB')} · {version.createdByUsername}
                 </span>
               </li>
             ))}
@@ -162,17 +167,17 @@ export function GeofenceSection({ siteId, history }: { siteId: string; history: 
 
       <form onSubmit={searchAddress} className="geofence-address-search">
         <div className="login-field">
-          <label htmlFor="geofence-address">Find address</label>
-          <input id="geofence-address" type="search" minLength={3} maxLength={200} value={address} disabled={loading || addressLoading} onChange={(event) => setAddress(event.target.value)} placeholder="Street, city, Finland" />
+          <label htmlFor="geofence-address">{localeText(locale, 'Find address', 'Найти адрес')}</label>
+          <input id="geofence-address" type="search" minLength={3} maxLength={200} value={address} disabled={loading || addressLoading} onChange={(event) => setAddress(event.target.value)} placeholder={localeText(locale, 'Street, city, Finland', 'Улица, город, Финляндия')} />
         </div>
-        <button type="submit" className="secondary-button" disabled={loading || addressLoading || address.trim().length < 3}>{addressLoading ? 'Searching…' : 'Search address'}</button>
-        <p className="setup-subtitle">Search runs only when you press the button. Results © OpenStreetMap contributors.</p>
+        <button type="submit" className="secondary-button" disabled={loading || addressLoading || address.trim().length < 3}>{addressLoading ? localeText(locale, 'Searching…', 'Поиск…') : localeText(locale, 'Search address', 'Найти адрес')}</button>
+        <p className="setup-subtitle">{localeText(locale, 'Search runs only when you press the button. Results © OpenStreetMap contributors.', 'Поиск выполняется только после нажатия кнопки. Результаты © участники OpenStreetMap.')}</p>
         {addressMessage ? <p role="status" className="form-status">{addressMessage}</p> : null}
         {addressResults.length ? (
           <ul className="setup-list geofence-search-results">
             {addressResults.map((result) => (
               <li key={`${result.latitude}:${result.longitude}`} className="setup-item">
-                <button type="button" className="geofence-result-button" onClick={() => { setLatitude(result.latitude); setLongitude(result.longitude); setAddressResults([]); setAddressMessage('Location selected. Check the marker and radius, then save.'); }}>{result.displayName}</button>
+                <button type="button" className="geofence-result-button" onClick={() => { setLatitude(result.latitude); setLongitude(result.longitude); setAddressResults([]); setAddressMessage(localeText(locale, 'Location selected. Check the marker and radius, then save.', 'Место выбрано. Проверьте маркер и радиус, затем сохраните.')); }}>{result.displayName}</button>
               </li>
             ))}
           </ul>
@@ -183,7 +188,7 @@ export function GeofenceSection({ siteId, history }: { siteId: string; history: 
 
       <form onSubmit={handleSubmit} aria-busy={loading}>
         <div className="login-field">
-          <label htmlFor="geofence-latitude">Latitude</label>
+          <label htmlFor="geofence-latitude">{localeText(locale, 'Latitude', 'Широта')}</label>
           <input
             id="geofence-latitude"
             type="number"
@@ -201,7 +206,7 @@ export function GeofenceSection({ siteId, history }: { siteId: string; history: 
           {fieldErrors.latitude ? <p className="field-error">{fieldErrors.latitude.join(', ')}</p> : null}
         </div>
         <div className="login-field">
-          <label htmlFor="geofence-longitude">Longitude</label>
+          <label htmlFor="geofence-longitude">{localeText(locale, 'Longitude', 'Долгота')}</label>
           <input
             id="geofence-longitude"
             type="number"
@@ -214,7 +219,7 @@ export function GeofenceSection({ siteId, history }: { siteId: string; history: 
           {fieldErrors.longitude ? <p className="field-error">{fieldErrors.longitude.join(', ')}</p> : null}
         </div>
         <div className="login-field">
-          <label htmlFor="geofence-radius">Radius (meters)</label>
+          <label htmlFor="geofence-radius">{localeText(locale, 'Radius (meters)', 'Радиус (метры)')}</label>
           <input
             id="geofence-radius"
             type="number"
@@ -226,14 +231,14 @@ export function GeofenceSection({ siteId, history }: { siteId: string; history: 
           />
           {fieldErrors.radiusMeters ? <p className="field-error">{fieldErrors.radiusMeters.join(', ')}</p> : null}
         </div>
-        <p className="setup-subtitle">Saving creates a new, immutable geofence version — existing versions are never changed.</p>
+        <p className="setup-subtitle">{localeText(locale, 'Saving creates a new, immutable geofence version — existing versions are never changed.', 'Сохранение создаёт новую неизменяемую версию геозоны — старые версии не изменяются.')}</p>
         {errorMessage ? (
           <p className="login-error" role="alert">
             {errorMessage}
           </p>
         ) : null}
         <button className="login-submit" type="submit" disabled={loading}>
-          {loading ? 'Saving…' : current ? 'Create new geofence version' : 'Set geofence'}
+          {loading ? localeText(locale, 'Saving…', 'Сохранение…') : current ? localeText(locale, 'Create new geofence version', 'Создать новую версию геозоны') : localeText(locale, 'Set geofence', 'Настроить геозону')}
         </button>
       </form>
     </>

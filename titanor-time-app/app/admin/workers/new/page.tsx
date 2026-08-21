@@ -1,6 +1,8 @@
 import { redirect } from 'next/navigation';
 import { resolveServerSession } from '@/lib/server-session';
 import { NewWorkerForm } from './NewWorkerForm';
+import { resolveAppLocale } from '@/lib/i18n/server';
+import { adminDailyStrings } from '@/lib/i18n/admin-daily';
 
 export const dynamic = 'force-dynamic';
 
@@ -12,13 +14,14 @@ export default async function NewWorkerPage() {
   if (!session) {
     redirect('/login');
   }
+  const s = adminDailyStrings(await resolveAppLocale());
 
   const isAdmin = session.user.roles.includes('ADMIN') || session.user.roles.includes('SUPER_ADMIN');
   if (!isAdmin) {
     return (
       <main className="setup-page">
         <p className="login-error" role="alert">
-          Access denied — this page requires the ADMIN or SUPER_ADMIN role.
+          {s.accessDenied}
         </p>
       </main>
     );
@@ -27,11 +30,8 @@ export default async function NewWorkerPage() {
   return (
     <main className="setup-page">
       <div className="setup-card">
-        <h1>New worker</h1>
-        <p className="setup-subtitle">
-          Creates the worker record only — no login is possible yet. Assign a site and open a payroll
-          period first, then issue an activation code from the worker&apos;s profile.
-        </p>
+        <h1>{s.workers.newTitle}</h1>
+        <p className="setup-subtitle">{s.workers.newHelp}</p>
         <NewWorkerForm />
       </div>
     </main>

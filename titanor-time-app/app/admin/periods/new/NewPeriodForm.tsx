@@ -2,12 +2,15 @@
 
 import { useRef, useState, type FormEvent } from 'react';
 import { useRouter } from 'next/navigation';
+import { useAppLocale } from '@/components/i18n/AppLocaleProvider';
+import { localeText } from '@/lib/i18n/locale';
 
 // docs/titanor-time/04_ADMIN_FIRST_API_CONTRACTS.md §0 — required on every mutating request.
 const CSRF_HEADER_VALUE = 'titanor-time';
 
 export function NewPeriodForm() {
   const router = useRouter();
+  const locale = useAppLocale();
   const [startDate, setStartDate] = useState('');
   const [endDate, setEndDate] = useState('');
   const [loading, setLoading] = useState(false);
@@ -51,16 +54,16 @@ export function NewPeriodForm() {
 
         switch (code) {
           case 'VALIDATION_ERROR':
-            setErrorMessage(fieldErrors ? `Please check: ${Object.keys(fieldErrors).join(', ')}.` : 'Invalid form data.');
+            setErrorMessage(fieldErrors ? `${localeText(locale, 'Please check', 'Проверьте поля')}: ${Object.keys(fieldErrors).join(', ')}.` : localeText(locale, 'Invalid form data.', 'Форма заполнена неверно.'));
             break;
           case 'PERIOD_OVERLAP':
-            setErrorMessage('This date range overlaps an existing period.');
+            setErrorMessage(localeText(locale, 'This date range overlaps an existing period.', 'Этот диапазон дат пересекается с существующим периодом.'));
             break;
           case 'FORBIDDEN':
-            setErrorMessage('You no longer have permission to open periods.');
+            setErrorMessage(localeText(locale, 'You no longer have permission to open periods.', 'У вас больше нет права открывать периоды.'));
             break;
           default:
-            setErrorMessage('Something went wrong. Please try again.');
+            setErrorMessage(localeText(locale, 'Something went wrong. Please try again.', 'Произошла ошибка. Попробуйте ещё раз.'));
         }
         setLoading(false);
         return;
@@ -69,7 +72,7 @@ export function NewPeriodForm() {
       const created = (await response.json()) as { id: string };
       router.push(`/admin/periods/${created.id}`);
     } catch {
-      setErrorMessage('Network error. Please try again.');
+      setErrorMessage(localeText(locale, 'Network error. Please try again.', 'Ошибка сети. Попробуйте ещё раз.'));
       setLoading(false);
     }
   }
@@ -77,12 +80,12 @@ export function NewPeriodForm() {
   return (
     <form onSubmit={handleSubmit} aria-busy={loading}>
       <div className="login-field">
-        <label htmlFor="period-start">Start date</label>
+        <label htmlFor="period-start">{localeText(locale, 'Start date', 'Дата начала')}</label>
         <input id="period-start" name="startDate" type="date" required disabled={loading} value={startDate} onChange={(event) => setStartDate(event.target.value)} />
       </div>
 
       <div className="login-field">
-        <label htmlFor="period-end">End date</label>
+        <label htmlFor="period-end">{localeText(locale, 'End date', 'Дата окончания')}</label>
         <input id="period-end" name="endDate" type="date" required disabled={loading} value={endDate} onChange={(event) => setEndDate(event.target.value)} />
       </div>
 
@@ -93,7 +96,7 @@ export function NewPeriodForm() {
       ) : null}
 
       <button className="login-submit" type="submit" disabled={loading}>
-        {loading ? 'Opening…' : 'Open period'}
+        {loading ? localeText(locale, 'Opening…', 'Открытие…') : localeText(locale, 'Open period', 'Открыть период')}
       </button>
     </form>
   );

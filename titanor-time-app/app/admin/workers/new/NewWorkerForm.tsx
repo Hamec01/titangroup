@@ -1,12 +1,17 @@
 'use client';
 
 import { useRef, useState, type FormEvent } from 'react';
+import { useAppLocale } from '@/components/i18n/AppLocaleProvider';
+import { adminDailyStrings } from '@/lib/i18n/admin-daily';
+import { localeText } from '@/lib/i18n/locale';
 
 // docs/titanor-time/04_ADMIN_FIRST_API_CONTRACTS.md §0 — required on every
 // mutating request, same as /login and the sites/templates forms.
 const CSRF_HEADER_VALUE = 'titanor-time';
 
 export function NewWorkerForm() {
+  const locale = useAppLocale();
+  const s = adminDailyStrings(locale);
   const [firstName, setFirstName] = useState('');
   const [lastName, setLastName] = useState('');
   const [phone, setPhone] = useState('');
@@ -63,20 +68,22 @@ export function NewWorkerForm() {
         switch (code) {
           case 'VALIDATION_ERROR':
             setErrorMessage(
-              fieldErrors ? `Please check: ${Object.keys(fieldErrors).join(', ')}.` : 'Invalid form data.'
+              fieldErrors
+                ? `${localeText(locale, 'Please check', 'Проверьте поля')}: ${Object.keys(fieldErrors).join(', ')}.`
+                : localeText(locale, 'Invalid form data.', 'Форма заполнена неверно.')
             );
             break;
           case 'DUPLICATE_EMPLOYEE_NUMBER':
-            setErrorMessage('That employee number is already in use — try another one or leave it blank.');
+            setErrorMessage(localeText(locale, 'That employee number is already in use — try another one or leave it blank.', 'Этот табельный номер уже используется — укажите другой или оставьте поле пустым.'));
             break;
           case 'NOT_AUTHENTICATED':
-            setErrorMessage('Your session expired — please sign in again.');
+            setErrorMessage(localeText(locale, 'Your session expired — please sign in again.', 'Сессия завершилась — войдите снова.'));
             break;
           case 'FORBIDDEN':
-            setErrorMessage('You no longer have permission to create workers.');
+            setErrorMessage(localeText(locale, 'You no longer have permission to create workers.', 'У вас больше нет права создавать работников.'));
             break;
           default:
-            setErrorMessage('Something went wrong. Please try again.');
+            setErrorMessage(localeText(locale, 'Something went wrong. Please try again.', 'Произошла ошибка. Попробуйте ещё раз.'));
         }
         setLoading(false);
         return;
@@ -86,7 +93,7 @@ export function NewWorkerForm() {
       window.location.assign(`/admin/workers/${body.employee.id}`);
       // Deliberately not resetting `loading` here, same as the sites/templates forms.
     } catch {
-      setErrorMessage('Network error. Please try again.');
+      setErrorMessage(localeText(locale, 'Network error. Please try again.', 'Ошибка сети. Попробуйте ещё раз.'));
       setLoading(false);
     }
   }
@@ -94,7 +101,7 @@ export function NewWorkerForm() {
   return (
     <form onSubmit={handleSubmit} aria-busy={loading}>
       <div className="login-field">
-        <label htmlFor="worker-first-name">First name</label>
+        <label htmlFor="worker-first-name">{s.workers.firstName}</label>
         <input
           id="worker-first-name"
           name="firstName"
@@ -107,7 +114,7 @@ export function NewWorkerForm() {
       </div>
 
       <div className="login-field">
-        <label htmlFor="worker-last-name">Last name</label>
+        <label htmlFor="worker-last-name">{s.workers.lastName}</label>
         <input
           id="worker-last-name"
           name="lastName"
@@ -120,7 +127,7 @@ export function NewWorkerForm() {
       </div>
 
       <div className="login-field">
-        <label htmlFor="worker-phone">Phone (optional)</label>
+        <label htmlFor="worker-phone">{s.workers.phone}</label>
         <input
           id="worker-phone"
           name="phone"
@@ -132,7 +139,7 @@ export function NewWorkerForm() {
       </div>
 
       <div className="login-field">
-        <label htmlFor="worker-employee-number">Employee number (optional — auto-generated if left blank)</label>
+        <label htmlFor="worker-employee-number">{s.workers.numberOptional}</label>
         <input
           id="worker-employee-number"
           name="employeeNumber"
@@ -150,7 +157,7 @@ export function NewWorkerForm() {
       ) : null}
 
       <button className="login-submit" type="submit" disabled={loading}>
-        {loading ? 'Creating…' : 'Create worker'}
+        {loading ? s.common.creating : s.workers.create}
       </button>
     </form>
   );

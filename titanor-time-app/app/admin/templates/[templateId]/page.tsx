@@ -4,6 +4,8 @@ import { resolveServerSession } from '@/lib/server-session';
 import { getTemplateDetail } from '@/lib/templates';
 import { WEEKDAY_LABELS } from '../TemplateDaysEditor';
 import { EditTemplateForm } from './EditTemplateForm';
+import { resolveAppLocale } from '@/lib/i18n/server';
+import { adminDailyStrings } from '@/lib/i18n/admin-daily';
 
 export const dynamic = 'force-dynamic';
 
@@ -19,13 +21,15 @@ export default async function AdminTemplateDetailPage({ params }: RouteParams) {
   if (!session) {
     redirect('/login');
   }
+  const locale = await resolveAppLocale();
+  const s = adminDailyStrings(locale);
 
   const isAdmin = session.user.roles.includes('ADMIN') || session.user.roles.includes('SUPER_ADMIN');
   if (!isAdmin) {
     return (
       <main className="setup-page">
         <p className="login-error" role="alert">
-          Access denied — this page requires the ADMIN or SUPER_ADMIN role.
+          {s.accessDenied}
         </p>
       </main>
     );
@@ -39,9 +43,9 @@ export default async function AdminTemplateDetailPage({ params }: RouteParams) {
       <main className="setup-page">
         <div className="setup-card">
           <p className="login-error" role="alert">
-            No template with this id.
+            {s.templates.notFound}
           </p>
-          <Link href="/admin/templates">Back to templates</Link>
+          <Link href="/admin/templates">{s.templates.back}</Link>
         </div>
       </main>
     );
@@ -52,7 +56,7 @@ export default async function AdminTemplateDetailPage({ params }: RouteParams) {
       <div className="setup-card worker-card">
         <h1>{template.name}</h1>
         <p className="setup-subtitle">
-          {template.active ? 'Active' : 'Inactive'} · version {template.currentVersionNumber}
+          {template.active ? s.common.active : s.common.inactive} · {s.common.version} {template.currentVersionNumber}
         </p>
         {template.description ? <p>{template.description}</p> : null}
 
@@ -60,21 +64,21 @@ export default async function AdminTemplateDetailPage({ params }: RouteParams) {
           <table className="worker-table">
             <thead>
               <tr>
-                <th>Day</th>
-                <th>Working day</th>
-                <th>Start</th>
-                <th>End</th>
-                <th>Break</th>
+                <th>{s.templates.day}</th>
+                <th>{s.templates.workingDay}</th>
+                <th>{s.common.start}</th>
+                <th>{s.common.end}</th>
+                <th>{s.templates.break}</th>
               </tr>
             </thead>
             <tbody>
               {template.days.map((day) => (
                 <tr key={day.weekday}>
-                  <td>{WEEKDAY_LABELS[day.weekday]}</td>
-                  <td>{day.isWorkingDay ? 'Yes' : 'Off'}</td>
+                  <td>{locale === 'RU' ? ['Понедельник', 'Вторник', 'Среда', 'Четверг', 'Пятница', 'Суббота', 'Воскресенье'][day.weekday - 1] : WEEKDAY_LABELS[day.weekday]}</td>
+                  <td>{day.isWorkingDay ? s.common.yes : s.common.off}</td>
                   <td>{day.plannedStartTime ?? '—'}</td>
                   <td>{day.plannedEndTime ?? '—'}</td>
-                  <td>{day.isWorkingDay ? `${day.plannedBreakMinutes} min` : '—'}</td>
+                  <td>{day.isWorkingDay ? `${day.plannedBreakMinutes} ${s.templates.minutes}` : '—'}</td>
                 </tr>
               ))}
             </tbody>
@@ -84,7 +88,7 @@ export default async function AdminTemplateDetailPage({ params }: RouteParams) {
         <EditTemplateForm template={template} />
 
         <p>
-          <Link href="/admin/templates">Back to templates</Link>
+          <Link href="/admin/templates">{s.templates.back}</Link>
         </p>
       </div>
     </main>

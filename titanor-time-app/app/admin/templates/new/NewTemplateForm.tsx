@@ -10,12 +10,17 @@ import {
   templateDaysToRequestPayload,
   type TemplateDayState
 } from '../TemplateDaysEditor';
+import { useAppLocale } from '@/components/i18n/AppLocaleProvider';
+import { adminDailyStrings } from '@/lib/i18n/admin-daily';
+import { localeText } from '@/lib/i18n/locale';
 
 // docs/titanor-time/04_ADMIN_FIRST_API_CONTRACTS.md §0 — required on every mutating request.
 const CSRF_HEADER_VALUE = 'titanor-time';
 
 export function NewTemplateForm() {
   const router = useRouter();
+  const locale = useAppLocale();
+  const s = adminDailyStrings(locale);
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
   const [days, setDays] = useState<TemplateDayState[]>(defaultTemplateDays);
@@ -77,16 +82,16 @@ export function NewTemplateForm() {
 
         switch (code) {
           case 'VALIDATION_ERROR':
-            setErrorMessage(fieldErrors?.days?.[0] ?? fieldErrors?.name?.[0] ?? 'Invalid form data.');
+            setErrorMessage(fieldErrors?.days?.[0] ?? fieldErrors?.name?.[0] ?? localeText(locale, 'Invalid form data.', 'Форма заполнена неверно.'));
             break;
           case 'NOT_AUTHENTICATED':
-            setErrorMessage('Your session expired — please sign in again.');
+            setErrorMessage(localeText(locale, 'Your session expired — please sign in again.', 'Сессия завершилась — войдите снова.'));
             break;
           case 'FORBIDDEN':
-            setErrorMessage('You no longer have permission to create templates.');
+            setErrorMessage(localeText(locale, 'You no longer have permission to create templates.', 'У вас больше нет права создавать шаблоны.'));
             break;
           default:
-            setErrorMessage('Something went wrong. Please try again.');
+            setErrorMessage(localeText(locale, 'Something went wrong. Please try again.', 'Произошла ошибка. Попробуйте ещё раз.'));
         }
         setLoading(false);
         return;
@@ -94,7 +99,7 @@ export function NewTemplateForm() {
 
       router.push('/admin/setup');
     } catch {
-      setErrorMessage('Network error. Please try again.');
+      setErrorMessage(localeText(locale, 'Network error. Please try again.', 'Ошибка сети. Попробуйте ещё раз.'));
       setLoading(false);
     }
   }
@@ -102,7 +107,7 @@ export function NewTemplateForm() {
   return (
     <form onSubmit={handleSubmit} aria-busy={loading}>
       <div className="login-field">
-        <label htmlFor="template-name">Name</label>
+        <label htmlFor="template-name">{s.common.name}</label>
         <input
           id="template-name"
           type="text"
@@ -114,7 +119,7 @@ export function NewTemplateForm() {
       </div>
 
       <div className="login-field">
-        <label htmlFor="template-description">Description (optional)</label>
+        <label htmlFor="template-description">{s.sites.description}</label>
         <textarea
           id="template-description"
           rows={2}
@@ -133,7 +138,7 @@ export function NewTemplateForm() {
       ) : null}
 
       <button className="login-submit" type="submit" disabled={loading}>
-        {loading ? 'Creating…' : 'Create template'}
+        {loading ? s.common.creating : s.templates.create}
       </button>
     </form>
   );

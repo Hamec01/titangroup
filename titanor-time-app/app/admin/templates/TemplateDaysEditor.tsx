@@ -1,5 +1,8 @@
 'use client';
 
+import { useAppLocale } from '@/components/i18n/AppLocaleProvider';
+import { localeText } from '@/lib/i18n/locale';
+
 // docs/titanor-time/03_DATA_MODEL_ERD.md §4.5 — weekday 0=Mon..6=Sun. Shared by NewTemplateForm
 // (create, version 1) and EditTemplateForm (PATCH, version N+1) — the two forms must never drift
 // onto different day-editing UX, same reasoning as the server-side validateTemplateDays/
@@ -82,11 +85,15 @@ export function TemplateDaysEditor({
   onToggleWorkingDay: (weekday: number, isWorkingDay: boolean) => void;
   onUpdateDay: (weekday: number, patch: Partial<TemplateDayState>) => void;
 }) {
+  const locale = useAppLocale();
+  const weekdayLabels = locale === 'RU'
+    ? ['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Вс']
+    : WEEKDAY_LABELS;
   return (
     <div className="template-days">
       {days.map((day) => (
         <div key={day.weekday} className="template-day-row">
-          <span className="template-day-label">{WEEKDAY_LABELS[day.weekday]}</span>
+          <span className="template-day-label">{weekdayLabels[day.weekday]}</span>
           <label className="template-day-toggle">
             <input
               type="checkbox"
@@ -94,13 +101,13 @@ export function TemplateDaysEditor({
               checked={day.isWorkingDay}
               onChange={(event) => onToggleWorkingDay(day.weekday, event.target.checked)}
             />
-            Working day
+            {localeText(locale, 'Working day', 'Рабочий день')}
           </label>
           {day.isWorkingDay ? (
             <>
               <input
                 type="time"
-                aria-label={`${WEEKDAY_LABELS[day.weekday]} start time`}
+                aria-label={`${weekdayLabels[day.weekday]} ${localeText(locale, 'start time', 'начало')}`}
                 required
                 disabled={loading}
                 value={day.plannedStartTime}
@@ -109,7 +116,7 @@ export function TemplateDaysEditor({
               <span>–</span>
               <input
                 type="time"
-                aria-label={`${WEEKDAY_LABELS[day.weekday]} end time`}
+                aria-label={`${weekdayLabels[day.weekday]} ${localeText(locale, 'end time', 'окончание')}`}
                 required
                 disabled={loading}
                 value={day.plannedEndTime}
@@ -118,15 +125,15 @@ export function TemplateDaysEditor({
               <input
                 type="number"
                 min={0}
-                aria-label={`${WEEKDAY_LABELS[day.weekday]} break minutes`}
+                aria-label={`${weekdayLabels[day.weekday]} ${localeText(locale, 'break minutes', 'минуты перерыва')}`}
                 disabled={loading}
                 value={day.plannedBreakMinutes}
                 onChange={(event) => onUpdateDay(day.weekday, { plannedBreakMinutes: Number(event.target.value) })}
               />
-              <span className="template-day-unit">min break</span>
+              <span className="template-day-unit">{localeText(locale, 'min break', 'мин перерыв')}</span>
             </>
           ) : (
-            <span className="template-day-off">Day off</span>
+            <span className="template-day-off">{localeText(locale, 'Day off', 'Выходной')}</span>
           )}
         </div>
       ))}

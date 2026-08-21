@@ -2,6 +2,8 @@
 
 import { useEffect, useRef, useState } from 'react';
 import type { GeoJSONSource, Map as MapLibreMap, Marker as MapLibreMarker } from 'maplibre-gl';
+import { useAppLocale } from '@/components/i18n/AppLocaleProvider';
+import { localeText } from '@/lib/i18n/locale';
 
 const DEFAULT_CENTER: [number, number] = [24.9384, 60.1699];
 
@@ -27,6 +29,7 @@ export function GeofenceMapPicker(props: {
   disabled: boolean;
   onCoordinates: (latitude: string, longitude: string) => void;
 }) {
+  const locale = useAppLocale();
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<MapLibreMap | null>(null);
   const markerRef = useRef<MapLibreMarker | null>(null);
@@ -104,8 +107,8 @@ export function GeofenceMapPicker(props: {
 
   return (
     <div className="geofence-map-wrap">
-      <div ref={containerRef} className="geofence-map" aria-label="Map for selecting the site geofence center" />
-      <p className="setup-subtitle">Click the map or drag the marker. Map: OpenFreeMap · data © OpenStreetMap contributors.</p>
+      <div ref={containerRef} className="geofence-map" aria-label={localeText(locale, 'Map for selecting the site geofence center', 'Карта для выбора центра геозоны объекта')} />
+      <p className="setup-subtitle">{localeText(locale, 'Click the map or drag the marker. Map: OpenFreeMap · data © OpenStreetMap contributors.', 'Нажмите на карту или перетащите маркер. Карта: OpenFreeMap · данные © участники OpenStreetMap.')}</p>
     </div>
   );
 }

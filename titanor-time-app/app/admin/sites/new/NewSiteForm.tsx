@@ -2,6 +2,9 @@
 
 import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { useRouter } from 'next/navigation';
+import { useAppLocale } from '@/components/i18n/AppLocaleProvider';
+import { adminDailyStrings } from '@/lib/i18n/admin-daily';
+import { localeText } from '@/lib/i18n/locale';
 
 // docs/titanor-time/04_ADMIN_FIRST_API_CONTRACTS.md §0 — required on every
 // mutating request, same as /login.
@@ -14,6 +17,8 @@ interface CityOption {
 
 export function NewSiteForm() {
   const router = useRouter();
+  const locale = useAppLocale();
+  const s = adminDailyStrings(locale);
   const [cities, setCities] = useState<CityOption[]>([]);
   const [name, setName] = useState('');
   const [cityId, setCityId] = useState('');
@@ -95,20 +100,22 @@ export function NewSiteForm() {
         switch (code) {
           case 'VALIDATION_ERROR':
             setErrorMessage(
-              fieldErrors ? `Please check: ${Object.keys(fieldErrors).join(', ')}.` : 'Invalid form data.'
+              fieldErrors
+                ? `${localeText(locale, 'Please check', 'Проверьте поля')}: ${Object.keys(fieldErrors).join(', ')}.`
+                : localeText(locale, 'Invalid form data.', 'Форма заполнена неверно.')
             );
             break;
           case 'CITY_NOT_FOUND':
-            setErrorMessage('Selected city no longer exists — please pick another one.');
+            setErrorMessage(localeText(locale, 'Selected city no longer exists — please pick another one.', 'Выбранного города больше нет — выберите другой.'));
             break;
           case 'NOT_AUTHENTICATED':
-            setErrorMessage('Your session expired — please sign in again.');
+            setErrorMessage(localeText(locale, 'Your session expired — please sign in again.', 'Сессия завершилась — войдите снова.'));
             break;
           case 'FORBIDDEN':
-            setErrorMessage('You no longer have permission to create sites.');
+            setErrorMessage(localeText(locale, 'You no longer have permission to create sites.', 'У вас больше нет права создавать объекты.'));
             break;
           default:
-            setErrorMessage('Something went wrong. Please try again.');
+            setErrorMessage(localeText(locale, 'Something went wrong. Please try again.', 'Произошла ошибка. Попробуйте ещё раз.'));
         }
         setLoading(false);
         return;
@@ -121,7 +128,7 @@ export function NewSiteForm() {
       // Network-level failure — keep idempotencyKeyRef so a manual retry of
       // this exact request is safely deduped server-side if it actually
       // went through.
-      setErrorMessage('Network error. Please try again.');
+      setErrorMessage(localeText(locale, 'Network error. Please try again.', 'Ошибка сети. Попробуйте ещё раз.'));
       setLoading(false);
     }
   }
@@ -129,7 +136,7 @@ export function NewSiteForm() {
   return (
     <form onSubmit={handleSubmit} aria-busy={loading}>
       <div className="login-field">
-        <label htmlFor="site-name">Name</label>
+        <label htmlFor="site-name">{s.common.name}</label>
         <input
           id="site-name"
           name="name"
@@ -142,7 +149,7 @@ export function NewSiteForm() {
       </div>
 
       <div className="login-field">
-        <label htmlFor="site-city">City (optional)</label>
+        <label htmlFor="site-city">{s.sites.city}</label>
         <select
           id="site-city"
           name="cityId"
@@ -150,7 +157,7 @@ export function NewSiteForm() {
           value={cityId}
           onChange={(event) => setCityId(event.target.value)}
         >
-          <option value="">No city</option>
+          <option value="">{s.sites.noCity}</option>
           {cities.map((city) => (
             <option key={city.id} value={city.id}>
               {city.name}
@@ -160,7 +167,7 @@ export function NewSiteForm() {
       </div>
 
       <div className="login-field">
-        <label htmlFor="site-address">Address (optional)</label>
+        <label htmlFor="site-address">{s.sites.address}</label>
         <input
           id="site-address"
           name="address"
@@ -172,7 +179,7 @@ export function NewSiteForm() {
       </div>
 
       <div className="login-field">
-        <label htmlFor="site-description">Description (optional)</label>
+        <label htmlFor="site-description">{s.sites.description}</label>
         <textarea
           id="site-description"
           name="description"
@@ -190,7 +197,7 @@ export function NewSiteForm() {
       ) : null}
 
       <button className="login-submit" type="submit" disabled={loading}>
-        {loading ? 'Creating…' : 'Create site'}
+        {loading ? s.common.creating : s.sites.create}
       </button>
     </form>
   );

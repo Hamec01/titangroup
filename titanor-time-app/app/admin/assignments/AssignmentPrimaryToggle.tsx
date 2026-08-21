@@ -3,6 +3,8 @@
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import type { AssignmentListItem } from '@/lib/assignments';
+import { useAppLocale } from '@/components/i18n/AppLocaleProvider';
+import { localeText } from '@/lib/i18n/locale';
 
 const CSRF_HEADER_VALUE = 'titanor-time';
 
@@ -11,6 +13,7 @@ const CSRF_HEADER_VALUE = 'titanor-time';
 // action that's genuinely a one-click toggle.
 export function AssignmentPrimaryToggle({ assignment }: { assignment: AssignmentListItem }) {
   const router = useRouter();
+  const locale = useAppLocale();
   const [loading, setLoading] = useState(false);
 
   async function handleClick(): Promise<void> {
@@ -35,10 +38,10 @@ export function AssignmentPrimaryToggle({ assignment }: { assignment: Assignment
         }
         window.alert(
           code === 'VERSION_CONFLICT'
-            ? 'This assignment was changed elsewhere — reloading.'
+            ? localeText(locale, 'This assignment was changed elsewhere — reloading.', 'Назначение изменено в другом окне — обновляем страницу.')
             : code === 'FORBIDDEN'
-              ? 'You no longer have permission to edit assignments.'
-              : 'Something went wrong. Please try again.'
+              ? localeText(locale, 'You no longer have permission to edit assignments.', 'У вас больше нет права изменять назначения.')
+              : localeText(locale, 'Something went wrong. Please try again.', 'Произошла ошибка. Попробуйте ещё раз.')
         );
         if (code === 'VERSION_CONFLICT') {
           router.refresh();
@@ -48,14 +51,14 @@ export function AssignmentPrimaryToggle({ assignment }: { assignment: Assignment
       }
       router.refresh();
     } catch {
-      window.alert('Network error. Please try again.');
+      window.alert(localeText(locale, 'Network error. Please try again.', 'Ошибка сети. Попробуйте ещё раз.'));
       setLoading(false);
     }
   }
 
   return (
     <button type="button" className="setup-action" onClick={handleClick} disabled={loading}>
-      {assignment.isPrimary ? 'Unset primary' : 'Set primary'}
+      {assignment.isPrimary ? localeText(locale, 'Unset primary', 'Снять статус основного') : localeText(locale, 'Set primary', 'Сделать основным')}
     </button>
   );
 }

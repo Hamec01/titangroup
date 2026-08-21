@@ -32,3 +32,8 @@ export function normalizeToAppLocale(value: string | null | undefined): AppLocal
   }
   return DEFAULT_APP_LOCALE;
 }
+
+/** Small typed selector for copy that belongs to one screen rather than a shared dictionary. */
+export function localeText(locale: AppLocale, en: string, ru: string): string {
+  return locale === 'RU' ? ru : en;
+}

@@ -2,6 +2,8 @@ import { redirect } from 'next/navigation';
 import Link from 'next/link';
 import { resolveServerSession } from '@/lib/server-session';
 import { listSites } from '@/lib/sites';
+import { resolveAppLocale } from '@/lib/i18n/server';
+import { adminDailyStrings } from '@/lib/i18n/admin-daily';
 
 export const dynamic = 'force-dynamic';
 
@@ -16,13 +18,14 @@ export default async function AdminSitesPage() {
   if (!session) {
     redirect('/login');
   }
+  const s = adminDailyStrings(await resolveAppLocale());
 
   const isAdmin = session.user.roles.includes('ADMIN') || session.user.roles.includes('SUPER_ADMIN');
   if (!isAdmin) {
     return (
       <main className="setup-page">
         <p className="login-error" role="alert">
-          Access denied — this page requires the ADMIN or SUPER_ADMIN role.
+          {s.accessDenied}
         </p>
       </main>
     );
@@ -33,19 +36,19 @@ export default async function AdminSitesPage() {
   return (
     <main className="setup-page">
       <div className="setup-card worker-card">
-        <h1>Sites</h1>
+        <h1>{s.sites.title}</h1>
         <p className="setup-subtitle">
-          {totalItems} site{totalItems === 1 ? '' : 's'} · <Link href="/admin/sites/new">create new</Link>
+          {totalItems} {totalItems === 1 ? s.sites.singular : s.sites.plural} · <Link href="/admin/sites/new">{s.common.createNew}</Link>
         </p>
         {items.length === 0 ? (
-          <p>No sites yet.</p>
+          <p>{s.sites.empty}</p>
         ) : (
           <table className="worker-table">
             <thead>
               <tr>
-                <th>Name</th>
-                <th>Status</th>
-                <th>Active assignments</th>
+                <th>{s.common.name}</th>
+                <th>{s.common.status}</th>
+                <th>{s.sites.assignments}</th>
               </tr>
             </thead>
             <tbody>
@@ -54,7 +57,7 @@ export default async function AdminSitesPage() {
                   <td>
                     <Link href={`/admin/sites/${site.id}`}>{site.name}</Link>
                   </td>
-                  <td>{site.active ? 'Active' : 'Closed'}</td>
+                  <td>{site.active ? s.common.active : s.common.closed}</td>
                   <td>{site.activeAssignmentsCount}</td>
                 </tr>
               ))}

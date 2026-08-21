@@ -6,14 +6,10 @@ import { NewAssignmentForm } from '@/app/admin/assignments/new/NewAssignmentForm
 import { WorkerActions } from './WorkerActions';
 import { WorkerSubmissionScheduleForm } from './WorkerSubmissionScheduleForm';
 import { getWorkerSubmissionScheduleView } from '@/lib/timesheet-submission-schedules';
+import { resolveAppLocale } from '@/lib/i18n/server';
+import { adminDailyStrings } from '@/lib/i18n/admin-daily';
 
 export const dynamic = 'force-dynamic';
-
-const ACTIVATION_STATUS_LABEL: Record<string, string> = {
-  ALREADY_ACTIVE: 'Already active',
-  READY_FOR_ACTIVATION: 'Ready — activation code can be issued',
-  SETUP_INCOMPLETE: 'Setup incomplete — follow the steps below'
-};
 
 // docs/titanor-time/01_SCREEN_MAP.md §2 (/admin/workers/[employeeId]).
 // "Последние Timesheet" from the screen map's data list is not shown —
@@ -25,13 +21,14 @@ export default async function WorkerDetailPage({ params }: { params: Promise<{ e
   if (!session) {
     redirect('/login');
   }
+  const s = adminDailyStrings(await resolveAppLocale());
 
   const isAdmin = session.user.roles.includes('ADMIN') || session.user.roles.includes('SUPER_ADMIN');
   if (!isAdmin) {
     return (
       <main className="setup-page">
         <p className="login-error" role="alert">
-          Access denied — this page requires the ADMIN or SUPER_ADMIN role.
+          {s.accessDenied}
         </p>
       </main>
     );
@@ -45,7 +42,7 @@ export default async function WorkerDetailPage({ params }: { params: Promise<{ e
       <main className="setup-page">
         <div className="setup-card">
           <p className="login-error" role="alert">
-            No worker found with this id.
+            {s.workers.notFound}
           </p>
         </div>
       </main>
@@ -57,26 +54,26 @@ export default async function WorkerDetailPage({ params }: { params: Promise<{ e
   return (
     <main className="setup-page">
       <div className="setup-card worker-card">
-        <p className="setup-subtitle"><Link href="/admin">← Back to Today</Link></p>
+        <p className="setup-subtitle"><Link href="/admin">← {s.workers.backToday}</Link></p>
         <h1>
           {worker.firstName} {worker.lastName}
         </h1>
         <p className="setup-subtitle">
-          Employee number: {worker.employeeNumber} · Login username: {worker.username} ·{' '}
-          {worker.employment?.active ? 'Active employment' : 'Employment ended'} ·{' '}
-          {ACTIVATION_STATUS_LABEL[worker.activationStatus]}
+          {s.workers.employeeNumber}: {worker.employeeNumber} · {s.workers.login}: {worker.username} ·{' '}
+          {worker.employment?.active ? s.workers.activeEmployment : s.workers.employmentEnded} ·{' '}
+          {s.workers.activation[worker.activationStatus as keyof typeof s.workers.activation]}
         </p>
         <p>
-          <Link href={`/admin/reports?employeeId=${employeeId}`}>View time report</Link>
+          <Link href={`/admin/reports?employeeId=${employeeId}`}>{s.workers.report}</Link>
         </p>
         <p>
-          <Link href={`/admin/workers/${employeeId}/locations`}>View Check In/Out locations on map</Link>
+          <Link href={`/admin/workers/${employeeId}/locations`}>{s.workers.locations}</Link>
         </p>
 
-        <h2>Current assignments</h2>
+        <h2>{s.workers.currentAssignments}</h2>
         {worker.currentAssignments.length === 0 ? (
           <div className="worker-setup-callout">
-            <p>None yet. The worker may activate and install the app now; the app will explain that no site has been assigned.</p>
+            <p>{s.workers.noAssignment}</p>
           </div>
         ) : (
           <ul className="setup-list">
@@ -84,7 +81,7 @@ export default async function WorkerDetailPage({ params }: { params: Promise<{ e
               <li key={assignment.siteId} className="setup-item">
                 <span className="setup-label">
                   {assignment.siteName}
-                  {assignment.isPrimary ? ' (primary)' : ''}
+                  {assignment.isPrimary ? ` (${s.common.primary})` : ''}
                 </span>
               </li>
             ))}
@@ -92,10 +89,8 @@ export default async function WorkerDetailPage({ params }: { params: Promise<{ e
         )}
 
         <section className="worker-work-setup">
-          <h2>Add a site and work schedule</h2>
-          <p className="setup-subtitle">
-            Choose the worker&apos;s site, optional work area, schedule template and start date here. You do not need to leave this worker page.
-          </p>
+          <h2>{s.workers.addWork}</h2>
+          <p className="setup-subtitle">{s.workers.addWorkHelp}</p>
           <NewAssignmentForm
             initialEmployeeId={worker.id}
             initialValidFrom={helsinkiToday().toISOString().slice(0, 10)}
@@ -107,8 +102,8 @@ export default async function WorkerDetailPage({ params }: { params: Promise<{ e
 
         {submissionSchedule ? (
           <section className="worker-work-setup">
-            <h2>Timesheet submission</h2>
-            <p className="setup-subtitle">Choose whether this worker submits every week or every two weeks. Periods are prepared automatically.</p>
+            <h2>{s.workers.submission}</h2>
+            <p className="setup-subtitle">{s.workers.submissionHelp}</p>
             <WorkerSubmissionScheduleForm employeeId={worker.id} view={submissionSchedule} />
           </section>
         ) : null}
