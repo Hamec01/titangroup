@@ -325,9 +325,12 @@ reactivate шаблона — нет утверждённого контракт
 | `period.read.all` | `ADMIN`, `SUPER_ADMIN` | все периоды | — | нет | нет | — |
 | `period.read.assigned` | `FOREMAN` | периоды с табелями на его объектах | — | нет | нет | — |
 | `period.read.own` | `WORKER` | все actionable периоды работника (`03_...`, §8), не только календарно текущий | — | нет | нет | — |
+| `period.update` | `ADMIN`, `SUPER_ADMIN` | только legacy/manual `OPEN` period; generated period меняется через schedule со следующей границы | optimistic `version`; запрещено терять durable hours/versions | нет | да | нет |
 | `period.participant.exclude` | `ADMIN`, `SUPER_ADMIN` | вся компания | `409 HAS_PAYROLL_DATA`, если у участника есть хотя бы одно из: `TimesheetDraftSegment`, explicit payroll-relevant `TimesheetDraftDay.dayType`, `TimesheetDraftDay.confirmedZero=true`, **любая существующая `TimesheetVersion` для этого табеля — безусловно, даже полностью пустая `EMPTY_FALLBACK`-версия**, `Absence(PENDING\|APPROVED)` в датах периода. `CorrectionDraft`/`CorrectionRequest` **не проверяются отдельным условием** — логически избыточно: `correction.request` возможен только для табеля, уже прошедшего `FINAL_APPROVED`, поэтому существование `CorrectionDraft.basedOnVersionId` уже доказывает наличие `TimesheetVersion` и блокирует через это условие (v5.2 содержал логически противоречивое условие `MATERIAL_CORRECTION_DATA`, снятое в v5.3). **Автоматически предзаполненная пустая строка (`dayType=WORK`, `confirmedZero=false`, без сегментов) не блокирует** — см. `03_...`, §4.5 | да | да | нет |
 | `period.lock` | `ADMIN`, `SUPER_ADMIN` | вся компания | без override; требует `FINAL_APPROVED` у каждого `expected=true` участника | нет | да | нет |
 | `period.export` | `ADMIN`, `SUPER_ADMIN` | вся компания | только `LOCKED`/`EXPORTED`; повторный вызов для уже `EXPORTED` периода с накопленными `CorrectionRequest(pendingExport=true)` создаёт корректирующий `ExportBatch` | нет | да | нет |
+| `timesheet.schedule.read` | `ADMIN`, `SUPER_ADMIN` | company default и effective-dated schedule любого работника | weekly/biweekly; не рабочий шаблон | нет | нет | — |
+| `timesheet.schedule.update` | `ADMIN`, `SUPER_ADMIN` | company default и worker override | по умолчанию со следующей границы, история не переписывается | нет | да | нет |
 
 ### 2.8 Табели
 

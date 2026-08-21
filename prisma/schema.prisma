@@ -51,6 +51,11 @@ enum PayrollPeriodStatus {
   EXPORTED
 }
 
+enum TimesheetSubmissionCadence {
+  WEEKLY
+  BIWEEKLY
+}
+
 enum TimesheetStatus {
   DRAFT
   SUBMITTED
@@ -274,6 +279,9 @@ model User {
   resolvedAttendanceExceptions   AttendanceException[]         @relation("AttendanceExceptionResolvedBy")
   updatedAttendancePolicies      CompanyAttendancePolicy[]     @relation("CompanyAttendancePolicyUpdatedBy")
   createdExportBatches           ExportBatch[]                 @relation("ExportBatchCreatedBy")
+  createdSubmissionSchedules     TimesheetSubmissionSchedule[] @relation("TimesheetSubmissionScheduleCreatedBy")
+  updatedSubmissionSchedules     TimesheetSubmissionSchedule[] @relation("TimesheetSubmissionScheduleUpdatedBy")
+  assignedSubmissionSchedules    EmployeeTimesheetSchedule[]   @relation("EmployeeTimesheetScheduleAssignedBy")
 }
 
 model Role {
@@ -383,14 +391,14 @@ model UserActivationToken {
 }
 
 model Employee {
-  id                    String                     @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  employeeNumber        String                     @unique
+  id                    String                      @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  employeeNumber        String                      @unique
   firstName             String
   lastName              String
   phone                 String?
-  version               Int                        @default(1)
-  createdAt             DateTime                   @default(now()) @db.Timestamptz(6)
-  updatedAt             DateTime                   @updatedAt @db.Timestamptz(6)
+  version               Int                         @default(1)
+  createdAt             DateTime                    @default(now()) @db.Timestamptz(6)
+  updatedAt             DateTime                    @updatedAt @db.Timestamptz(6)
   user                  User?
   employments           Employment[]
   absences              Absence[]
@@ -405,6 +413,44 @@ model Employee {
   attendanceExceptions  AttendanceException[]
   clockEventIdConflicts ClockEventIdConflict[]
   exportItems           ExportItem[]
+  submissionSchedules   EmployeeTimesheetSchedule[]
+}
+
+model TimesheetSubmissionSchedule {
+  id                String                      @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  name              String                      @db.VarChar(80)
+  cadence           TimesheetSubmissionCadence
+  weekStartsOn      Int                         @default(0)
+  anchorDate        DateTime                    @db.Date
+  isCompanyDefault  Boolean                     @default(false)
+  active            Boolean                     @default(true)
+  version           Int                         @default(1)
+  createdByUserId   String?                     @db.Uuid
+  updatedByUserId   String?                     @db.Uuid
+  createdAt         DateTime                    @default(now()) @db.Timestamptz(6)
+  updatedAt         DateTime                    @updatedAt @db.Timestamptz(6)
+  createdByUser     User?                       @relation("TimesheetSubmissionScheduleCreatedBy", fields: [createdByUserId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  updatedByUser     User?                       @relation("TimesheetSubmissionScheduleUpdatedBy", fields: [updatedByUserId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  employeeSchedules EmployeeTimesheetSchedule[]
+  payrollPeriods    PayrollPeriod[]
+
+  @@index([active, cadence])
+}
+
+model EmployeeTimesheetSchedule {
+  id               String                      @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  employeeId       String                      @db.Uuid
+  scheduleId       String                      @db.Uuid
+  effectiveFrom    DateTime                    @db.Date
+  effectiveTo      DateTime?                   @db.Date
+  assignedByUserId String                      @db.Uuid
+  createdAt        DateTime                    @default(now()) @db.Timestamptz(6)
+  employee         Employee                    @relation(fields: [employeeId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  schedule         TimesheetSubmissionSchedule @relation(fields: [scheduleId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  assignedByUser   User                        @relation("EmployeeTimesheetScheduleAssignedBy", fields: [assignedByUserId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+
+  @@unique([employeeId, effectiveFrom])
+  @@index([scheduleId, effectiveFrom, effectiveTo])
 }
 
 model Employment {
@@ -612,26 +658,30 @@ model ForemanAssignment {
 }
 
 model PayrollPeriod {
-  id                   String                     @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  startDate            DateTime                   @db.Date
-  endDate              DateTime                   @db.Date
+  id                   String                       @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  startDate            DateTime                     @db.Date
+  endDate              DateTime                     @db.Date
   status               PayrollPeriodStatus
-  openedByUserId       String                     @db.Uuid
-  lockedAt             DateTime?                  @db.Timestamptz(6)
-  lockedByUserId       String?                    @db.Uuid
-  exportedAt           DateTime?                  @db.Timestamptz(6)
-  version              Int                        @default(1)
-  createdAt            DateTime                   @default(now()) @db.Timestamptz(6)
-  updatedAt            DateTime                   @updatedAt @db.Timestamptz(6)
-  openedByUser         User                       @relation("PayrollPeriodOpenedBy", fields: [openedByUserId], references: [id], onDelete: Restrict, onUpdate: Cascade)
-  lockedByUser         User?                      @relation("PayrollPeriodLockedBy", fields: [lockedByUserId], references: [id], onDelete: SetNull, onUpdate: Cascade)
+  openedByUserId       String                       @db.Uuid
+  submissionScheduleId String?                      @db.Uuid
+  lockedAt             DateTime?                    @db.Timestamptz(6)
+  lockedByUserId       String?                      @db.Uuid
+  exportedAt           DateTime?                    @db.Timestamptz(6)
+  version              Int                          @default(1)
+  createdAt            DateTime                     @default(now()) @db.Timestamptz(6)
+  updatedAt            DateTime                     @updatedAt @db.Timestamptz(6)
+  openedByUser         User                         @relation("PayrollPeriodOpenedBy", fields: [openedByUserId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  lockedByUser         User?                        @relation("PayrollPeriodLockedBy", fields: [lockedByUserId], references: [id], onDelete: SetNull, onUpdate: Cascade)
+  submissionSchedule   TimesheetSubmissionSchedule? @relation(fields: [submissionScheduleId], references: [id], onDelete: Restrict, onUpdate: Cascade)
   participants         PayrollPeriodParticipant[]
   timesheets           Timesheet[]
   clockShiftFragments  ClockShiftFragment[]
   attendanceExceptions AttendanceException[]
   exportBatches        ExportBatch[]
 
+  @@unique([submissionScheduleId, startDate, endDate])
   @@index([status, startDate, endDate])
+  @@index([submissionScheduleId, status, startDate, endDate])
 }
 
 model PayrollPeriodParticipant {
@@ -973,33 +1023,33 @@ model AuditEvent {
 // has no plannedShift entity of its own (corrections compare only against basedOnVersionId, never
 // a plan, §4.5) — CorrectionDraftSegment has no plannedShift FK, unlike TimesheetDraftSegment.
 model CorrectionRequest {
-  id                 String                  @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  timesheetId        String                  @db.Uuid
-  requestedByUserId  String                  @db.Uuid
-  reason             String                  @db.Text
-  status             CorrectionRequestStatus
-  draftId            String?                 @unique @db.Uuid
-  decidedByUserId    String?                 @db.Uuid
-  decidedAt          DateTime?               @db.Timestamptz(6)
-  resultingVersionId String?                 @db.Uuid
-  approvalOverride   Boolean                 @default(false)
-  overrideReason     String?                 @db.Text
-  pendingExport      Boolean                 @default(false)
+  id                     String                  @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  timesheetId            String                  @db.Uuid
+  requestedByUserId      String                  @db.Uuid
+  reason                 String                  @db.Text
+  status                 CorrectionRequestStatus
+  draftId                String?                 @unique @db.Uuid
+  decidedByUserId        String?                 @db.Uuid
+  decidedAt              DateTime?               @db.Timestamptz(6)
+  resultingVersionId     String?                 @db.Uuid
+  approvalOverride       Boolean                 @default(false)
+  overrideReason         String?                 @db.Text
+  pendingExport          Boolean                 @default(false)
   // T8.4B — docs/titanor-time/T8_REPORTS_DESIGN.md Addendum "T8.4B" §BE. Which ExportBatch (always
   // kind=CORRECTION, same period as this request's Timesheet — enforced by
   // trg_correction_request_covered_batch_check, not expressible as a CHECK/FK) covered this
   // correction, once pendingExport flips back to false. Set exactly once — immutable after that,
   // same trigger.
-  coveredByExportBatchId String?              @db.Uuid
-  createdAt          DateTime                @default(now()) @db.Timestamptz(6)
-  updatedAt          DateTime                @updatedAt @db.Timestamptz(6)
-  timesheet          Timesheet               @relation(fields: [timesheetId], references: [id], onDelete: Restrict, onUpdate: Cascade)
-  requestedByUser    User                    @relation("CorrectionRequestRequestedBy", fields: [requestedByUserId], references: [id], onDelete: Restrict, onUpdate: Cascade)
-  decidedByUser      User?                   @relation("CorrectionRequestDecidedBy", fields: [decidedByUserId], references: [id], onDelete: Restrict, onUpdate: Cascade)
-  resultingVersion   TimesheetVersion?       @relation("CorrectionRequestResultingVersion", fields: [resultingVersionId], references: [id], onDelete: Restrict, onUpdate: Cascade)
-  coveredByExportBatch ExportBatch?          @relation("ExportBatchCoveredCorrections", fields: [coveredByExportBatchId], references: [id], onDelete: Restrict, onUpdate: Cascade)
-  draft              CorrectionDraft?        @relation("CorrectionRequestDraftPointer", fields: [draftId], references: [id], onDelete: SetNull, onUpdate: Cascade)
-  draftOwner         CorrectionDraft?        @relation("CorrectionDraftOwnRequest")
+  coveredByExportBatchId String?                 @db.Uuid
+  createdAt              DateTime                @default(now()) @db.Timestamptz(6)
+  updatedAt              DateTime                @updatedAt @db.Timestamptz(6)
+  timesheet              Timesheet               @relation(fields: [timesheetId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  requestedByUser        User                    @relation("CorrectionRequestRequestedBy", fields: [requestedByUserId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  decidedByUser          User?                   @relation("CorrectionRequestDecidedBy", fields: [decidedByUserId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  resultingVersion       TimesheetVersion?       @relation("CorrectionRequestResultingVersion", fields: [resultingVersionId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  coveredByExportBatch   ExportBatch?            @relation("ExportBatchCoveredCorrections", fields: [coveredByExportBatchId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  draft                  CorrectionDraft?        @relation("CorrectionRequestDraftPointer", fields: [draftId], references: [id], onDelete: SetNull, onUpdate: Cascade)
+  draftOwner             CorrectionDraft?        @relation("CorrectionDraftOwnRequest")
 
   @@index([timesheetId, status])
   @@index([requestedByUserId])
@@ -1429,27 +1479,27 @@ model DeviceEventReceipt {
 // since changed (employee/site renames etc. — per-row snapshots on ExportItem cover that part too).
 // UPDATE/DELETE are physically banned by trg_export_batch_immutable (raw SQL, see migration).
 model ExportBatch {
-  id              String            @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  periodId        String            @db.Uuid
-  format          ExportFormat
-  kind            ExportBatchKind
-  createdByUserId String            @db.Uuid
-  correctsBatchId String?           @db.Uuid
-  fileName        String            @db.VarChar(255)
-  fileHash        String            @db.VarChar(64)
-  fileSizeBytes   Int
-  rowCount        Int
-  content         Bytes
-  createdAt       DateTime          @default(now()) @db.Timestamptz(6)
-  period          PayrollPeriod     @relation(fields: [periodId], references: [id], onDelete: Restrict, onUpdate: Cascade)
-  createdByUser   User              @relation("ExportBatchCreatedBy", fields: [createdByUserId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  id                 String              @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  periodId           String              @db.Uuid
+  format             ExportFormat
+  kind               ExportBatchKind
+  createdByUserId    String              @db.Uuid
+  correctsBatchId    String?             @db.Uuid
+  fileName           String              @db.VarChar(255)
+  fileHash           String              @db.VarChar(64)
+  fileSizeBytes      Int
+  rowCount           Int
+  content            Bytes
+  createdAt          DateTime            @default(now()) @db.Timestamptz(6)
+  period             PayrollPeriod       @relation(fields: [periodId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  createdByUser      User                @relation("ExportBatchCreatedBy", fields: [createdByUserId], references: [id], onDelete: Restrict, onUpdate: Cascade)
   // Self-FK — the batch this one corrects. CASCADE here is FK-semantics-only: trg_export_batch_
   // immutable unconditionally bans DELETE on ExportBatch before any cascade could ever fire, so this
   // action is structurally unreachable — kept as CASCADE (not RESTRICT) per explicit task decision,
   // not as an operational path.
-  correctsBatch   ExportBatch?      @relation("ExportBatchCorrection", fields: [correctsBatchId], references: [id], onDelete: Cascade, onUpdate: Cascade)
-  correctedBy     ExportBatch[]     @relation("ExportBatchCorrection")
-  items           ExportItem[]
+  correctsBatch      ExportBatch?        @relation("ExportBatchCorrection", fields: [correctsBatchId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  correctedBy        ExportBatch[]       @relation("ExportBatchCorrection")
+  items              ExportItem[]
   // T8.4B — reverse side of CorrectionRequest.coveredByExportBatchId (§BE).
   coveredCorrections CorrectionRequest[] @relation("ExportBatchCoveredCorrections")
 

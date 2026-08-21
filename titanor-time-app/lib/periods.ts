@@ -101,16 +101,14 @@ export function computePlannedShiftForAssignmentDate(templateDay: TemplateDayInp
   };
 }
 
-/**
- * EX-03 (`ex_payroll_period_date_overlap`, 05_RAW_SQL_REGISTER.md) is a
- * Postgres EXCLUDE constraint (SQLSTATE 23P01) — surfaces as an untyped
- * PrismaClientUnknownRequestError, same shape as EX-02 in lib/assignments.ts.
- */
+/** Legacy/manual period creation can now fail either on the retired company-wide EX-03 while
+ * running against an older schema, or on the worker-scoped overlap trigger introduced by T9.
+ * Match only the exact SQLSTATE/constraint or stable trigger identifier. */
 export function isPeriodOverlapViolation(error: unknown): boolean {
   return (
     error instanceof Prisma.PrismaClientUnknownRequestError &&
-    error.message.includes('23P01') &&
-    error.message.includes('ex_payroll_period_date_overlap')
+    ((error.message.includes('23P01') && error.message.includes('ex_payroll_period_date_overlap')) ||
+      (error.message.includes('P0001') && error.message.includes('PAYROLL_PERIOD_PARTICIPANT_DATE_OVERLAP')))
   );
 }
 

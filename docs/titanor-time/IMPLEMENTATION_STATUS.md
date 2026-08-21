@@ -2,6 +2,16 @@
 
 Обновлено: 2026-08-21 Europe/Helsinki (T9.7 — live ADMIN attendance clarity)
 
+**`[2026-08-21]` Worker-specific submission cycle schema foundation (product wiring pending).**
+Added weekly/biweekly `TimesheetSubmissionSchedule`, effective-dated
+`EmployeeTimesheetSchedule`, and nullable `PayrollPeriod.submissionScheduleId` for generated
+period identity; existing rows remain legacy/manual. The retired company-wide period EXCLUDE is
+replaced by employee-scoped DB triggers: overlapping weekly/biweekly periods for different workers
+are accepted, while an expected worker in both is rejected under an `Employee FOR UPDATE` lock.
+Seeded schedules: Weekly (company default) and Every two weeks. New permissions
+`timesheet.schedule.read/update` and `period.update` are ADMIN/SUPER_ADMIN only. This foundation
+does not yet expose UI/API/generation and therefore does not change pilot behavior by itself.
+
 **`[2026-08-21]` T9.7 — ADMIN live attendance clarity.** Physical-device pilot confirmed that
 `EmployeeOpenShift` was already durable and visible to ADMIN, but the `WORKING_NOW` badge used the
 neutral grey presentation and the overview did not show the elapsed duration of the still-open

@@ -372,10 +372,11 @@ CK-08 и CK-13 ниже. Бизнес-предикаты этих CHECK не и�
 |---|---|---|---|
 | EX-01 | `ex_absence_active_date_overlap` | `Absence` | current |
 | EX-02 | `ex_site_assignment_scope_date_overlap` | `SiteAssignment` | current |
-| EX-03 | `ex_payroll_period_date_overlap` | `PayrollPeriod` | current |
+| EX-03 | `ex_payroll_period_date_overlap` | `PayrollPeriod` | retired by `20260821100000` (T9 worker-specific submission cycles) |
 | EX-04 | `ex_timesheet_draft_segment_time_overlap` | `TimesheetDraftSegment` | current |
 | EX-05 | `ex_timesheet_draft_break_segment_time_overlap` | `TimesheetDraftBreakSegment` | current |
 | EX-06 | `ex_break_segment_time_overlap` | `BreakSegment` | current |
+| EX-07 | `ex_employee_timesheet_schedule_date_overlap` | `EmployeeTimesheetSchedule` | current |
 
 ### EX-01 `ex_absence_active_date_overlap`
 
@@ -422,13 +423,25 @@ CK-08 и CK-13 ниже. Бизнес-предикаты этих CHECK не и�
   ```sql
   daterange("startDate", "endDate" + 1, '[)') WITH &&
   ```
-- Несколько `OPEN`-периодов допустимы, если их даты не пересекаются.
+- Historical foundation rule. Retired by additive migration `20260821100000`: weekly and
+  biweekly worker cohorts must be allowed to overlap. Its replacement is the participant-scoped
+  trigger registered in §14, which rejects overlap only for the same expected employee.
 - SQLSTATE: `23P01` (`exclusion_violation`).
 - Service identity: точное имя `ex_payroll_period_date_overlap`.
 - `[)`-семантика (date range): доменная `endDate` включительна, поэтому верхняя exclusive-граница строится как следующий календарный день (`endDate + 1`). Смежные периоды, где `left.endDate + 1 = right.startDate`, допустимы. Реальное пересечение дат отклоняется.
 - Source: `03_DATA_MODEL_ERD.md` §4.5, строки 521-524.
 - Documentation synchronization: SYNCED.
 - Minimum negative test: два `PayrollPeriod` с пересекающимися датами — второй `INSERT` отклонён, SQLSTATE `23P01`; смежные периоды (`endDate` одного = `startDate - 1` следующего) — оба `INSERT` проходят.
+
+### EX-07 `ex_employee_timesheet_schedule_date_overlap`
+
+- Table: `EmployeeTimesheetSchedule`.
+- Key: `employeeId WITH =` plus inclusive effective date range converted to `[effectiveFrom,
+  effectiveTo + 1)`, with null end as infinity.
+- SQLSTATE: `23P01`; exact service identity above.
+- Different employees may use overlapping schedules. The same employee cannot have two active
+  schedule definitions on one date.
+- Source: `T9_TIMESHEET_CYCLES_MAP_DESIGN.md` §2.2.
 
 ### EX-04 `ex_timesheet_draft_segment_time_overlap`
 
@@ -1462,8 +1475,6 @@ Preflight guards: 1 (SYSTEM_SCHEDULER_USERNAME_OCCUPIED, migration's first state
 New PostgreSQL extensions: 0
 ```
 
----
-
 ## 12. T8.4A CSV Export Schema Foundation slice
 
 ```text
@@ -1980,3 +1991,24 @@ Legacy data repair: 1 UPDATE statement (idempotent — zero-row no-op on a datab
 New permissions: 0
 New PostgreSQL extensions: 0
 ```
+
+## 14. T9 worker-specific submission cycles
+
+Migration `20260821100000_add_timesheet_submission_schedules` adds four CHECK constraints:
+
+- `ck_timesheet_submission_schedule_week_start` (`0..6`);
+- `ck_timesheet_submission_schedule_anchor_alignment` (anchor weekday equals `weekStartsOn`);
+- `ck_timesheet_submission_schedule_version` (`version > 0`);
+- `ck_employee_timesheet_schedule_dates` (`effectiveTo IS NULL OR >= effectiveFrom`).
+
+It also adds partial unique index `ux_timesheet_submission_schedule_company_default`, EX-07, and
+the following cross-table trigger objects:
+
+| Table | Trigger | Function | Stable rejection |
+|---|---|---|---|
+| `PayrollPeriodParticipant` | `trg_payroll_period_participant_employee_overlap_check` | `fn_payroll_period_participant_employee_overlap_check` | `PAYROLL_PERIOD_PARTICIPANT_DATE_OVERLAP` (`P0001`) |
+| `PayrollPeriod` | `trg_payroll_period_date_update_participant_overlap_check` | `fn_payroll_period_date_update_participant_overlap_check` | `PAYROLL_PERIOD_PARTICIPANT_DATE_OVERLAP` (`P0001`) |
+
+Both paths lock affected `Employee` rows before the overlap read. Positive disposable-PostgreSQL
+proof: weekly `2026-08-17..23` for employee A and biweekly `2026-08-17..30` for employee B coexist.
+Negative proof: inserting A into the biweekly period is rejected with the exact stable identifier.
