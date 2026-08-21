@@ -31,8 +31,8 @@ const EMAIL_FORMAT = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 // Same pattern as every other admin route taking a path/body UUID (e.g. app/api/admin/sites/route.ts).
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const MAX_EMAIL_LENGTH = 255;
-const VALID_LOCALES: Locale[] = ['FI', 'EN', 'RU'];
-const DEFAULT_LOCALE: Locale = 'FI';
+const VALID_LOCALES: Locale[] = ['RU', 'EN'];
+const DEFAULT_LOCALE: Locale = 'RU';
 
 function errorBody(body: ApiErrorBody, requestId: string): { error: ApiErrorBody & { requestId: string } } {
   return { error: { ...body, requestId } };

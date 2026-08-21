@@ -8,6 +8,9 @@ import { ConnectivityBanner } from '@/components/worker-pwa/ConnectivityBanner';
 import { WorkerLink } from '@/components/worker-pwa/WorkerLink';
 import type { PeriodDetailPayload } from '@/lib/offline-outbox/read-snapshots';
 import { workerTimesheetStatusLabel } from '@/lib/worker-timesheet-presentation';
+import { resolveAppLocale } from '@/lib/i18n/server';
+import { COMMON_STRINGS } from '@/lib/i18n/common';
+import { WORKER_STRINGS } from '@/lib/i18n/worker';
 
 export const dynamic = 'force-dynamic';
 
@@ -22,7 +25,9 @@ const EDITABLE_STATUSES = new Set(['DRAFT', 'RETURNED']);
 type RouteParams = { params: Promise<{ periodId: string }> };
 
 export default async function WorkerPeriodDetailPage({ params }: RouteParams) {
-  const session = await resolveServerSession();
+  const [session, locale] = await Promise.all([resolveServerSession(), resolveAppLocale()]);
+  const common = COMMON_STRINGS[locale];
+  const t = WORKER_STRINGS[locale];
   if (!session) {
     redirect('/login');
   }
@@ -31,7 +36,7 @@ export default async function WorkerPeriodDetailPage({ params }: RouteParams) {
     return (
       <main className="wk-page">
         <p className="login-error" role="alert">
-          Access denied — this page requires the WORKER role.
+          {common.accessDeniedWorker}
         </p>
       </main>
     );
@@ -40,7 +45,7 @@ export default async function WorkerPeriodDetailPage({ params }: RouteParams) {
     return (
       <main className="wk-page">
         <div className="wk-card">
-          <p>Your account has no linked employee profile.</p>
+          <p>{common.noEmployeeProfile}</p>
         </div>
       </main>
     );
@@ -56,9 +61,9 @@ export default async function WorkerPeriodDetailPage({ params }: RouteParams) {
     return (
       <main className="wk-page">
         <div className="wk-card">
-          <p>This period is not available to you.</p>
+          <p>{t.periodNotAvailable}</p>
           <WorkerLink href="/worker/periods" className="wk-back-link">
-            Back to your periods
+            {common.backToYourPeriods}
           </WorkerLink>
         </div>
       </main>
@@ -88,20 +93,20 @@ export default async function WorkerPeriodDetailPage({ params }: RouteParams) {
         <h1>
           {period.startDate} – {period.endDate}
         </h1>
-        <span className={`wk-status-badge wk-status-${period.timesheetStatus.toLowerCase()}`}>{workerTimesheetStatusLabel(period.timesheetStatus, period.totalMinutes)}</span>
+        <span className={`wk-status-badge wk-status-${period.timesheetStatus.toLowerCase()}`}>{workerTimesheetStatusLabel(period.timesheetStatus, period.totalMinutes, locale)}</span>
 
         <ReturnReasonsNotice status={period.timesheetStatus} reasons={returnReasons} />
 
-        <h2 className="wk-section-title">Your assignments</h2>
+        <h2 className="wk-section-title">{t.yourAssignments}</h2>
         {assignments.length === 0 ? (
-          <p className="wk-empty">You haven&apos;t been assigned to a site yet.</p>
+          <p className="wk-empty">{t.notAssignedToSiteYet}</p>
         ) : (
           <ul className="wk-assignment-list">
             {assignments.map((assignment) => (
               <li key={assignment.id} className="wk-assignment-item">
                 <span className="wk-assignment-site">
                   {assignment.siteName}
-                  {assignment.isPrimary ? ' (primary)' : ''}
+                  {assignment.isPrimary ? t.primarySuffix : ''}
                 </span>
                 {assignment.workAreaName && <span className="wk-assignment-detail">{assignment.workAreaName}</span>}
                 {assignment.templateName && <span className="wk-assignment-detail">{assignment.templateName}</span>}
@@ -112,11 +117,11 @@ export default async function WorkerPeriodDetailPage({ params }: RouteParams) {
 
         {editable ? (
           <WorkerLink href={`/worker/periods/${period.id}/hours`} className="wk-action-button">
-            Enter hours
+            {t.enterHours}
           </WorkerLink>
         ) : (
           <WorkerLink href={`/worker/periods/${period.id}/hours`} className="wk-back-link">
-            View hours
+            {t.viewHours}
           </WorkerLink>
         )}
       </div>

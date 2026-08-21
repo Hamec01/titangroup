@@ -5,6 +5,9 @@ import { useRouter } from 'next/navigation';
 import type { ReturnReasonView } from '@/lib/worker-timesheets';
 import { helsinkiDateAndTimeToUtcIso as helsinkiTimeToIso, utcIsoToHelsinkiTime as isoToHelsinkiTime } from '@/lib/helsinki-datetime';
 import { ReturnReasonsNotice } from '../../ReturnReasonsNotice';
+import { useAppLocale } from '@/components/i18n/AppLocaleProvider';
+import { COMMON_STRINGS } from '@/lib/i18n/common';
+import { WORKER_STRINGS, dayTypeLabel, type WorkerStrings } from '@/lib/i18n/worker';
 
 // docs/titanor-time/04_ADMIN_FIRST_API_CONTRACTS.md §0 — required on every mutating request.
 const CSRF_HEADER_VALUE = 'titanor-time';
@@ -64,28 +67,28 @@ interface EditableSegment {
 
 let nextKey = 0;
 
-function describeError(code: string | undefined, fieldErrors: Record<string, string[]> | undefined): string {
+function describeError(code: string | undefined, fieldErrors: Record<string, string[]> | undefined, t: WorkerStrings): string {
   switch (code) {
     case 'WORK_SEGMENT_OVERLAP':
-      return 'These time ranges overlap — please adjust them.';
+      return t.errWorkSegmentOverlap;
     case 'SITE_NOT_ASSIGNED':
-      return 'You are not assigned to that site/area on this date.';
+      return t.errSiteNotAssigned;
     case 'DAY_TYPE_CONFLICT':
-      return 'Cannot have hours logged and mark the day as absence at the same time.';
+      return t.errDayTypeConflict;
     case 'DAY_STATE_CONFLICT':
-      return 'Cannot confirm zero hours while hours are logged.';
+      return t.errDayStateConflict;
     case 'DAY_TYPE_REQUIRES_ABSENCE':
-      return 'This day type requires an approved absence request.';
+      return t.errDayTypeRequiresAbsence;
     case 'DRAFT_NOT_EDITABLE':
-      return 'This timesheet can no longer be edited.';
+      return t.errDraftNotEditable;
     case 'VALIDATION_ERROR':
       return fieldErrors
         ? Object.entries(fieldErrors)
             .map(([field, messages]) => `${field}: ${messages.join(', ')}`)
             .join('; ')
-        : 'Invalid input.';
+        : t.errInvalidInput;
     default:
-      return 'Could not save — please try again.';
+      return t.errCouldNotSaveDay;
   }
 }
 
@@ -100,6 +103,9 @@ export default function DayEditor({
   timesheetStatus,
   returnReasons
 }: DayEditorProps) {
+  const locale = useAppLocale();
+  const t = WORKER_STRINGS[locale];
+  const common = COMMON_STRINGS[locale];
   const router = useRouter();
   const [segments, setSegments] = useState<EditableSegment[]>(() =>
     initialSegments.map((s) => ({
@@ -165,7 +171,7 @@ export default function DayEditor({
     });
     const normalizedReason = clockAdjustmentReason.trim();
     if (clockOriginChanged && normalizedReason.length === 0) {
-      setError('A reason is required when changing or removing recorded Check In/Out time.');
+      setError(t.clockAdjustmentReasonRequired);
       setSaving(false);
       return;
     }
@@ -199,13 +205,13 @@ export default function DayEditor({
       });
       if (!res.ok) {
         const data = await res.json().catch(() => null);
-        setError(describeError(data?.error?.code, data?.error?.fieldErrors));
+        setError(describeError(data?.error?.code, data?.error?.fieldErrors, t));
         setSaving(false);
         return;
       }
       router.push(`/worker/periods/${periodId}/hours`);
     } catch {
-      setError('Network error — please try again.');
+      setError(common.networkError);
       setSaving(false);
     }
   }
@@ -214,20 +220,20 @@ export default function DayEditor({
     <main className="wk-page">
       <div className="wk-card">
         <a href={`/worker/periods/${periodId}/hours`} className="wk-back-link">
-          ← Back
+          {t.backArrow}
         </a>
         <h1>{date}</h1>
 
         <ReturnReasonsNotice status={timesheetStatus} reasons={returnReasons} />
 
         {isAbsenceDay ? (
-          <p className="wk-readonly-note">This day is marked as {initialDayType.replace('_', ' ').toLowerCase()}. Manage absences from your profile.</p>
+          <p className="wk-readonly-note">{t.absenceDayNotice(dayTypeLabel(initialDayType, locale))}</p>
         ) : (
           <>
             {segments.length === 0 && (
               <label className="wk-checkbox-row">
                 <input type="checkbox" checked={confirmedZero} onChange={(e) => setConfirmedZero(e.target.checked)} disabled={saving} />
-                No hours worked today
+                {t.noHoursWorkedToday}
               </label>
             )}
 
@@ -258,31 +264,31 @@ export default function DayEditor({
                       <input type="time" value={b.endAt} onChange={(e) => updateBreak(segment.key, i, { endAt: e.target.value })} disabled={saving} />
                       <label className="wk-break-paid">
                         <input type="checkbox" checked={b.paid} onChange={(e) => updateBreak(segment.key, i, { paid: e.target.checked })} disabled={saving} />
-                        Paid
+                        {t.paid}
                       </label>
                       <button type="button" className="wk-remove-button" onClick={() => removeBreak(segment.key, i)} disabled={saving}>
-                        Remove break
+                        {t.removeBreak}
                       </button>
                     </div>
                   ))}
                   <button type="button" className="wk-secondary-button" onClick={() => addBreak(segment.key)} disabled={saving}>
-                    + Add break
+                    {t.addBreak}
                   </button>
 
                   <button type="button" className="wk-remove-button" onClick={() => removeSegment(segment.key)} disabled={saving}>
-                    Remove interval
+                    {t.removeInterval}
                   </button>
                 </li>
               ))}
             </ul>
 
             <button type="button" className="wk-secondary-button" onClick={addSegment} disabled={saving || assignmentOptions.length === 0}>
-              + Add interval
+              {t.addInterval}
             </button>
 
             {initialSegments.some((segment) => segment.originClockShiftFragmentId !== null) ? (
               <div className="wk-field">
-                <label htmlFor="clock-adjustment-reason">Reason for changing recorded Check In/Out time</label>
+                <label htmlFor="clock-adjustment-reason">{t.clockAdjustmentReasonLabel}</label>
                 <textarea
                   id="clock-adjustment-reason"
                   rows={3}
@@ -293,7 +299,7 @@ export default function DayEditor({
                   aria-describedby="clock-adjustment-help"
                 />
                 <p id="clock-adjustment-help" className="wk-readonly-note">
-                  Required only when a recorded interval is changed or removed. The reason is kept in the audit history.
+                  {t.clockAdjustmentReasonHelp}
                 </p>
               </div>
             ) : null}
@@ -308,7 +314,7 @@ export default function DayEditor({
 
         {!isAbsenceDay && (
           <button type="button" className="wk-action-button" onClick={handleSave} disabled={saving}>
-            {saving ? 'Saving…' : 'Save'}
+            {saving ? common.saving : common.save}
           </button>
         )}
       </div>

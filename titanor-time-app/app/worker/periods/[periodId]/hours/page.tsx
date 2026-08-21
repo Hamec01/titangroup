@@ -9,6 +9,9 @@ import { ConnectivityBanner } from '@/components/worker-pwa/ConnectivityBanner';
 import { WorkerLink } from '@/components/worker-pwa/WorkerLink';
 import type { HoursListPayload } from '@/lib/offline-outbox/read-snapshots';
 import { workedMinutesFromIsoSegments } from '@/lib/reporting/report-format';
+import { resolveAppLocale } from '@/lib/i18n/server';
+import { COMMON_STRINGS } from '@/lib/i18n/common';
+import { WORKER_STRINGS, dayTypeLabel } from '@/lib/i18n/worker';
 
 export const dynamic = 'force-dynamic';
 
@@ -29,7 +32,9 @@ function formatMinutes(minutes: number): string {
 type RouteParams = { params: Promise<{ periodId: string }> };
 
 export default async function WorkerHoursListPage({ params }: RouteParams) {
-  const session = await resolveServerSession();
+  const [session, locale] = await Promise.all([resolveServerSession(), resolveAppLocale()]);
+  const common = COMMON_STRINGS[locale];
+  const t = WORKER_STRINGS[locale];
   if (!session) {
     redirect('/login');
   }
@@ -46,9 +51,9 @@ export default async function WorkerHoursListPage({ params }: RouteParams) {
     return (
       <main className="wk-page">
         <div className="wk-card">
-          <p>This period is not available to you.</p>
+          <p>{t.periodNotAvailable}</p>
           <WorkerLink href="/worker/periods" className="wk-back-link">
-            Back to your periods
+            {common.backToYourPeriods}
           </WorkerLink>
         </div>
       </main>
@@ -102,9 +107,9 @@ export default async function WorkerHoursListPage({ params }: RouteParams) {
         <span className="wk-day-date">{day.date}</span>
         <span className="wk-day-summary">
           {day.dayType !== 'WORK'
-            ? day.dayType.replace('_', ' ').toLowerCase()
+            ? dayTypeLabel(day.dayType, locale)
             : day.confirmedZero
-              ? 'Confirmed 0h'
+              ? t.confirmedZeroShort
               : day.segments.length === 0
                 ? '—'
                 : `${formatMinutes(minutes)} · ${[...new Set(day.segments.map((s) => siteNameById.get(s.siteId) ?? s.siteId))].join(', ')}`}
@@ -131,18 +136,18 @@ export default async function WorkerHoursListPage({ params }: RouteParams) {
         <WorkerLink href={`/worker/periods/${periodId}`} className="wk-back-link">
           ← {period.startDate} – {period.endDate}
         </WorkerLink>
-        <h1>Hours</h1>
+        <h1>{t.hours}</h1>
         <ReturnReasonsNotice status={period.timesheetStatus} reasons={returnReasons} />
-        {!editable && <p className="wk-readonly-note">Read-only — this timesheet is being reviewed.</p>}
+        {!editable && <p className="wk-readonly-note">{t.readOnlyBeingReviewed}</p>}
 
         {days.length === 0 ? (
-          <p className="wk-empty">No days in this period yet.</p>
+          <p className="wk-empty">{t.noDaysInPeriodYet}</p>
         ) : (
           <>
             <ul className="wk-day-list">{visibleDays.map(renderDay)}</ul>
             {emptyDays.length > 0 && (
               <details className="wk-empty-days">
-                <summary>Choose another date ({emptyDays.length})</summary>
+                <summary>{t.chooseAnotherDate(emptyDays.length)}</summary>
                 <ul className="wk-day-list">{emptyDays.map(renderDay)}</ul>
               </details>
             )}
@@ -151,7 +156,7 @@ export default async function WorkerHoursListPage({ params }: RouteParams) {
 
         {editable && (
           <WorkerLink href={`/worker/periods/${periodId}/submit`} className="wk-action-button">
-            Review and submit
+            {t.reviewAndSubmit}
           </WorkerLink>
         )}
       </div>

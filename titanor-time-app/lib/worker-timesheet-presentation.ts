@@ -1,17 +1,19 @@
 import { formatWorkedDuration } from '@/lib/reporting/report-format';
-
-const STATUS_LABELS: Record<string, string> = {
-  RETURNED: 'Returned — needs your attention',
-  SUBMITTED: 'Submitted — awaiting review',
-  FOREMAN_APPROVED: 'Review complete — awaiting final approval',
-  FINAL_APPROVED: 'Finalized'
-};
+import { COMMON_STRINGS } from '@/lib/i18n/common';
+import type { AppLocale } from '@/lib/i18n/locale';
 
 /** A DRAFT describes workflow state, not whether it contains time. Never call a populated draft
  * "Not started": that hid successfully materialized Check In/Out time from workers. */
-export function workerTimesheetStatusLabel(status: string, totalMinutes = 0): string {
+export function workerTimesheetStatusLabel(status: string, totalMinutes = 0, locale: AppLocale = 'RU'): string {
+  const t = COMMON_STRINGS[locale];
   if (status === 'DRAFT') {
-    return totalMinutes > 0 ? `In progress · ${formatWorkedDuration(totalMinutes)}` : 'Not started';
+    return totalMinutes > 0 ? `${t.statusInProgress} · ${formatWorkedDuration(totalMinutes)}` : t.statusNotStarted;
   }
-  return STATUS_LABELS[status] ?? status;
+  const labels: Record<string, string> = {
+    RETURNED: t.statusReturned,
+    SUBMITTED: t.statusSubmitted,
+    FOREMAN_APPROVED: t.statusForemanApproved,
+    FINAL_APPROVED: t.statusFinalApproved
+  };
+  return labels[status] ?? status;
 }

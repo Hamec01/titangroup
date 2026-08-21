@@ -6,6 +6,9 @@ import { ConnectivityBanner } from '@/components/worker-pwa/ConnectivityBanner';
 import { WorkerLink } from '@/components/worker-pwa/WorkerLink';
 import type { HistoryListPayload } from '@/lib/offline-outbox/read-snapshots';
 import { workerTimesheetStatusLabel } from '@/lib/worker-timesheet-presentation';
+import { resolveAppLocale } from '@/lib/i18n/server';
+import { COMMON_STRINGS } from '@/lib/i18n/common';
+import { WORKER_STRINGS } from '@/lib/i18n/worker';
 
 export const dynamic = 'force-dynamic';
 
@@ -14,7 +17,9 @@ export const dynamic = 'force-dynamic';
 // /worker/history/[timesheetId] route — that page already branches editable-vs-read-only by
 // status, which is exactly what a history entry (often FINAL_APPROVED) needs.
 export default async function WorkerHistoryPage() {
-  const session = await resolveServerSession();
+  const [session, locale] = await Promise.all([resolveServerSession(), resolveAppLocale()]);
+  const common = COMMON_STRINGS[locale];
+  const t = WORKER_STRINGS[locale];
   if (!session) {
     redirect('/login');
   }
@@ -22,7 +27,7 @@ export default async function WorkerHistoryPage() {
     return (
       <main className="wk-page">
         <p className="login-error" role="alert">
-          Access denied — this page requires the WORKER role.
+          {common.accessDeniedWorker}
         </p>
       </main>
     );
@@ -31,7 +36,7 @@ export default async function WorkerHistoryPage() {
     return (
       <main className="wk-page">
         <div className="wk-card">
-          <p>Your account has no linked employee profile.</p>
+          <p>{common.noEmployeeProfile}</p>
         </div>
       </main>
     );
@@ -48,11 +53,11 @@ export default async function WorkerHistoryPage() {
       <div className="wk-card">
         <ConnectivityBanner />
         <WorkerLink href="/worker/periods" className="wk-back-link">
-          ← Current periods
+          {t.currentPeriods}
         </WorkerLink>
-        <h1>History</h1>
+        <h1>{t.historyTitle}</h1>
         {timesheets.length === 0 ? (
-          <p className="wk-empty">No periods yet.</p>
+          <p className="wk-empty">{t.noPeriodsYet}</p>
         ) : (
           <ul className="wk-period-list">
             {timesheets.map((t) => (
@@ -61,7 +66,7 @@ export default async function WorkerHistoryPage() {
                   <span className="wk-period-dates">
                     {t.startDate} – {t.endDate}
                   </span>
-                  <span className={`wk-status-badge wk-status-${t.timesheetStatus.toLowerCase()}`}>{workerTimesheetStatusLabel(t.timesheetStatus, t.totalMinutes)}</span>
+                  <span className={`wk-status-badge wk-status-${t.timesheetStatus.toLowerCase()}`}>{workerTimesheetStatusLabel(t.timesheetStatus, t.totalMinutes, locale)}</span>
                 </WorkerLink>
               </li>
             ))}

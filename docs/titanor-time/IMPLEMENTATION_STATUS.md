@@ -7883,6 +7883,23 @@ permanent test — 25/25; реальный Chromium — desktop+390×844, пои
 application console errors. Browser-проверка обнаружила и закрыла реальный старый дефект native GET:
 пустые select значения (`siteId=&periodId=&state=`) ошибочно считались malformed фильтрами.
 
+### RU/EN localization — foundation + worker/owner core (2026-08-21)
+
+Добавлен общий authenticated locale (`RU|EN`) с сохранением в `User.locale`, cookie
+`NEXT_LOCALE` и localStorage для статического PWA offline shell. Старые `FI`-значения безопасно
+нормализуются в русский; новые Worker/standalone User по умолчанию создаются с `RU`. На `/login`
+оставлены только явно заказанные RU/EN.
+
+Полностью подключён worker-контур: clock, Check In/Out/Switch Site, offline/sync состояния,
+календарь, ввод часов, отправка табеля, история, установка PWA, меню и account-bound offline
+snapshots. Переведены admin shell/navigation, `/admin` Today dashboard и `/admin/setup`; добавлен
+общий RU/EN control для foreman shell. Бизнес-DTO, clock/outbox/sync и расчёт часов не менялись.
+
+Это первый безопасный i18n-слайс, а не ложное заявление о переводе всех 75 admin и 16 foreman
+файлов: вторичные admin/foreman формы, отчёты, review/corrections/exports и activation/password
+экраны ещё содержат английские строки и должны переводиться следующими отдельными слайсами на
+том же фундаменте.
+
 ## 12. Правило обновления
 
 1. Каждая следующая задача сначала читает этот файл.

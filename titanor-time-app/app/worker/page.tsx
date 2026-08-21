@@ -4,6 +4,8 @@ import { getClockState } from '@/lib/attendance-clock';
 import { listWorkerCurrentAssignments, listActionablePeriods, getWorkerContext } from '@/lib/worker-context';
 import { helsinkiToday } from '@/lib/workers';
 import { WorkerClockPanel } from './WorkerClockPanel';
+import { resolveAppLocale } from '@/lib/i18n/server';
+import { COMMON_STRINGS } from '@/lib/i18n/common';
 
 export const dynamic = 'force-dynamic';
 
@@ -14,7 +16,8 @@ export const dynamic = 'force-dynamic';
 // state and only re-fetches GET clock-state itself after a mutating action or a network-unknown
 // reconciliation (§6/§7 of the task brief) — never as a redundant bootstrap call.
 export default async function WorkerHomePage() {
-  const session = await resolveServerSession();
+  const [session, locale] = await Promise.all([resolveServerSession(), resolveAppLocale()]);
+  const common = COMMON_STRINGS[locale];
   if (!session) {
     redirect('/login');
   }
@@ -23,7 +26,7 @@ export default async function WorkerHomePage() {
     return (
       <main className="wk-page">
         <p className="login-error" role="alert">
-          Access denied — this page requires the WORKER role.
+          {common.accessDeniedWorker}
         </p>
       </main>
     );
@@ -32,7 +35,7 @@ export default async function WorkerHomePage() {
     return (
       <main className="wk-page">
         <div className="wk-card">
-          <p>Your account has no linked employee profile.</p>
+          <p>{common.noEmployeeProfile}</p>
         </div>
       </main>
     );
@@ -49,7 +52,7 @@ export default async function WorkerHomePage() {
   ]);
 
   const periodsHref = periods.length === 1 ? `/worker/periods/${periods[0].id}` : '/worker/periods';
-  const todayLabel = new Intl.DateTimeFormat('en-GB', { timeZone: 'Europe/Helsinki', weekday: 'long', day: 'numeric', month: 'long' }).format(today);
+  const todayLabel = new Intl.DateTimeFormat(locale === 'RU' ? 'ru-RU' : 'en-GB', { timeZone: 'Europe/Helsinki', weekday: 'long', day: 'numeric', month: 'long' }).format(today);
   const workerName = context ? `${context.employee.firstName} ${context.employee.lastName}` : null;
   const todayKey = today.toISOString().slice(0, 10);
   const activityDays = periods.flatMap((period) => period.activityDays.map((day) => ({ ...day, periodId: period.id })));

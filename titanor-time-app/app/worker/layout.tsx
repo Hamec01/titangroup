@@ -3,6 +3,8 @@ import type { ReactNode } from 'react';
 import { ServiceWorkerRegistration } from '@/components/worker-pwa/ServiceWorkerRegistration';
 import { WorkerAppNavigation } from '@/components/worker-pwa/WorkerAppNavigation';
 import { resolveServerSession } from '@/lib/server-session';
+import { resolveAppLocale } from '@/lib/i18n/server';
+import { AppLocaleProvider } from '@/components/i18n/AppLocaleProvider';
 
 // docs/titanor-time/T7A_1_ATTENDANCE_CLOCK_DESIGN.md Addendum "T7A.10C.1" §C — the PWA manifest
 // link and service worker registration are scoped to the /worker* prefix ONLY via this nested
@@ -32,11 +34,11 @@ export const viewport: Viewport = {
 };
 
 export default async function WorkerLayout({ children }: { children: ReactNode }) {
-  const session = await resolveServerSession();
+  const [session, locale] = await Promise.all([resolveServerSession(), resolveAppLocale()]);
   const workerSession = session?.user.roles.includes('WORKER') ? session : null;
 
   return (
-    <>
+    <AppLocaleProvider locale={locale}>
       <ServiceWorkerRegistration />
       {workerSession ? (
         <div className="wk-app-shell">
@@ -46,6 +48,6 @@ export default async function WorkerLayout({ children }: { children: ReactNode }
       ) : (
         children
       )}
-    </>
+    </AppLocaleProvider>
   );
 }

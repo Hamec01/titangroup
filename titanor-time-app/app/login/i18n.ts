@@ -1,12 +1,12 @@
 // Self-contained translation dictionary for /login only — no i18n library.
 // docs/titanor-time/01_SCREEN_MAP.md §1 (/login): "переключатель языка
-// (FI/EN/RU, без отдельного route — persist в localStorage + cookie
+// (RU/EN, без отдельного route — persist в localStorage + cookie
 // NEXT_LOCALE до входа)".
 
-export type LoginLocale = 'FI' | 'EN' | 'RU';
+export type LoginLocale = 'EN' | 'RU';
 
-export const LOGIN_LOCALES: LoginLocale[] = ['FI', 'EN', 'RU'];
-export const DEFAULT_LOGIN_LOCALE: LoginLocale = 'FI';
+export const LOGIN_LOCALES: LoginLocale[] = ['RU', 'EN'];
+export const DEFAULT_LOGIN_LOCALE: LoginLocale = 'RU';
 export const LOGIN_LOCALE_STORAGE_KEY = 'titanor-time-locale';
 export const LOGIN_LOCALE_COOKIE_NAME = 'NEXT_LOCALE';
 
@@ -26,20 +26,6 @@ export interface LoginStrings {
 }
 
 export const LOGIN_STRINGS: Record<LoginLocale, LoginStrings> = {
-  FI: {
-    title: 'Titanor Time',
-    subtitle: 'Kirjaudu sisään',
-    identifierLabel: 'Käyttäjätunnus tai sähköposti',
-    passwordLabel: 'Salasana',
-    submit: 'Kirjaudu sisään',
-    submitting: 'Kirjaudutaan…',
-    errorInvalidCredentials: 'Väärä käyttäjätunnus/sähköposti tai salasana.',
-    errorPendingActivation: 'Tiliä ei ole vielä aktivoitu.',
-    errorDeactivated: 'Tili on poistettu käytöstä.',
-    errorRateLimited: 'Liian monta yritystä. Yritä myöhemmin uudelleen.',
-    errorGeneric: 'Jokin meni pieleen. Yritä uudelleen.',
-    noRole: 'Tilillä ei ole roolia. Ota yhteyttä ylläpitäjään.'
-  },
   EN: {
     title: 'Titanor Time',
     subtitle: 'Sign in',

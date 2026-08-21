@@ -3,10 +3,15 @@
 import { useEffect, useRef, useState } from 'react';
 import { usePathname, useRouter } from 'next/navigation';
 import { WorkerLink } from '@/components/worker-pwa/WorkerLink';
+import { LanguageSwitcher } from '@/components/i18n/LanguageSwitcher';
+import { useAppLocale } from '@/components/i18n/AppLocaleProvider';
+import { COMMON_STRINGS } from '@/lib/i18n/common';
 
 const CSRF_HEADER_VALUE = 'titanor-time';
 
 export function WorkerAppNavigation({ username }: { username: string }) {
+  const locale = useAppLocale();
+  const t = COMMON_STRINGS[locale];
   const pathname = usePathname();
   const router = useRouter();
   const [open, setOpen] = useState(false);
@@ -41,7 +46,7 @@ export function WorkerAppNavigation({ username }: { username: string }) {
       router.replace('/login');
       router.refresh();
     } catch {
-      setLogoutError('Could not sign out. Check your connection and try again.');
+      setLogoutError(t.navSignOutError);
       pendingRef.current = false;
       setLogoutPending(false);
     }
@@ -50,14 +55,14 @@ export function WorkerAppNavigation({ username }: { username: string }) {
   return (
     <header className="wk-app-header">
       <div className="wk-app-header-inner">
-        <WorkerLink href="/worker" className="wk-app-brand" aria-label="Titanor Time home">
+        <WorkerLink href="/worker" className="wk-app-brand" aria-label={`Titanor Time — ${t.navHome}`}>
           Titanor Time
         </WorkerLink>
         <div className="wk-app-header-actions">
           {pathname !== '/worker' ? (
-            <WorkerLink href="/worker" className="wk-home-button" aria-label="Back to Check In and Check Out">
+            <WorkerLink href="/worker" className="wk-home-button" aria-label={t.backToClock}>
               <span aria-hidden="true">⌂</span>
-              <span>Home</span>
+              <span>{t.navHome}</span>
             </WorkerLink>
           ) : null}
           <button
@@ -65,7 +70,7 @@ export function WorkerAppNavigation({ username }: { username: string }) {
             className="wk-menu-button"
             aria-expanded={open}
             aria-controls="worker-app-menu"
-            aria-label={open ? 'Close menu' : 'Open menu'}
+            aria-label={open ? t.navCloseMenu : t.navOpenMenu}
             onClick={() => setOpen((value) => !value)}
           >
             <span aria-hidden="true">{open ? '×' : '☰'}</span>
@@ -76,28 +81,32 @@ export function WorkerAppNavigation({ username }: { username: string }) {
       {open ? (
         <>
           <button type="button" className="wk-menu-backdrop" aria-hidden="true" tabIndex={-1} onClick={() => setOpen(false)} />
-          <nav id="worker-app-menu" className="wk-app-menu" aria-label="Worker navigation">
+          <nav id="worker-app-menu" className="wk-app-menu" aria-label={locale === 'RU' ? 'Навигация работника' : 'Worker navigation'}>
             <p className="wk-menu-account">
-              Signed in as <strong>{username}</strong>
+              {t.navSignedInAs} <strong>{username}</strong>
             </p>
             <WorkerLink href="/worker" className="wk-menu-link" aria-current={pathname === '/worker' ? 'page' : undefined}>
-              Home
+              {t.navHome}
             </WorkerLink>
             <WorkerLink
               href="/worker/periods"
               className="wk-menu-link"
               aria-current={pathname.startsWith('/worker/periods') ? 'page' : undefined}
             >
-              Calendar and hours
+              {t.navCalendarAndHours}
             </WorkerLink>
             <WorkerLink href="/worker/history" className="wk-menu-link" aria-current={pathname === '/worker/history' ? 'page' : undefined}>
-              History
+              {t.navHistory}
             </WorkerLink>
             <WorkerLink href="/worker/install" className="wk-menu-link" aria-current={pathname === '/worker/install' ? 'page' : undefined}>
-              Install app
+              {t.navInstallApp}
             </WorkerLink>
+            <div className="wk-menu-language">
+              <span>{t.navLanguage}</span>
+              <LanguageSwitcher compact />
+            </div>
             <button type="button" className="wk-menu-logout" disabled={logoutPending} onClick={logout}>
-              {logoutPending ? 'Signing out…' : 'Sign out'}
+              {logoutPending ? t.navSigningOut : t.navSignOut}
             </button>
             {logoutError ? (
               <p className="wk-menu-error" role="alert">

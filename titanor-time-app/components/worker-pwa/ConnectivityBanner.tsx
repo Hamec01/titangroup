@@ -1,6 +1,8 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { useAppLocale } from '@/components/i18n/AppLocaleProvider';
+import { WORKER_STRINGS } from '@/lib/i18n/worker';
 
 // docs/titanor-time/T8_PWA_DESIGN.md §F — shared connectivity banner for Worker pages OTHER than
 // /worker itself, which already has its own offline indicator (WorkerClockPanel's `wk-offline-bar`)
@@ -9,6 +11,7 @@ import { useEffect, useState } from 'react';
 // on both the server and the first client render, and is only corrected inside a mount effect, the
 // same pattern WorkerClockPanel's own indicator already uses.
 export function ConnectivityBanner() {
+  const t = WORKER_STRINGS[useAppLocale()];
   const [isOnline, setIsOnline] = useState(true);
 
   useEffect(() => {
@@ -33,7 +36,7 @@ export function ConnectivityBanner() {
 
   return (
     <div className="wk-connectivity-banner" role="status" aria-live="polite">
-      Offline — clock actions on /worker are saved and will sync later. This page shows the last saved information.
+      {t.connectivityBannerText}
     </div>
   );
 }

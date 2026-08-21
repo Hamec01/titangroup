@@ -2,6 +2,8 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { getSwRegistrationOutcome, subscribeSwRegistrationOutcome, type SwRegistrationOutcome } from '@/lib/offline-outbox/sw-registration-outcome';
+import { useAppLocale } from '@/components/i18n/AppLocaleProvider';
+import { WORKER_STRINGS } from '@/lib/i18n/worker';
 
 // docs/titanor-time/T8_PWA_DESIGN.md §C.3 — install state machine. CHECKING is the ONLY state
 // rendered on the server and on the very first client render (this component reads no
@@ -50,6 +52,7 @@ function isAndroidUa(): boolean {
 }
 
 export function InstallPrompt() {
+  const t = WORKER_STRINGS[useAppLocale()];
   const [state, setState] = useState<InstallState>('CHECKING');
   const [promptOutcomeNote, setPromptOutcomeNote] = useState<PromptOutcomeNote>(null);
   const [busy, setBusy] = useState(false);
@@ -138,54 +141,54 @@ export function InstallPrompt() {
     }
   }
 
-  const swNote = swOutcome === 'unsupported' || swOutcome === 'error' ? 'Offline mode may not be available in this browser right now.' : null;
+  const swNote = swOutcome === 'unsupported' || swOutcome === 'error' ? t.installOfflineNote : null;
 
   return (
     <div className="pwa-install-panel">
       <div className="pwa-install-status" role="status" aria-live="polite">
-        {state === 'CHECKING' && <p className="pwa-install-checking">Checking install options…</p>}
+        {state === 'CHECKING' && <p className="pwa-install-checking">{t.installChecking}</p>}
 
         {state === 'INSTALLABLE' && (
           <>
             <button type="button" className="pwa-install-button" onClick={handleInstallClick} disabled={busy}>
-              Install Titanor Time
+              {t.installButton}
             </button>
-            {promptOutcomeNote === 'accepted-pending' && <p className="pwa-install-note">Finishing installation…</p>}
-            {promptOutcomeNote === 'error' && <p className="pwa-install-note pwa-install-note-error">Something went wrong starting the install. You can try again, or use your browser&apos;s menu.</p>}
+            {promptOutcomeNote === 'accepted-pending' && <p className="pwa-install-note">{t.installFinishing}</p>}
+            {promptOutcomeNote === 'error' && <p className="pwa-install-note pwa-install-note-error">{t.installStartError}</p>}
           </>
         )}
 
-        {state === 'INSTALLED' && <p className="pwa-install-installed">App is installed. Open it from your home screen or app list.</p>}
+        {state === 'INSTALLED' && <p className="pwa-install-installed">{t.installInstalled}</p>}
 
         {state === 'IOS_SAFARI' && (
           <div>
-            <p>Install this app on your iPhone or iPad:</p>
+            <p>{t.installIosLead}</p>
             <ol className="pwa-install-steps">
-              <li>Tap the Share icon in Safari&apos;s toolbar.</li>
-              <li>Scroll down and tap &quot;Add to Home Screen&quot;.</li>
-              <li>Tap &quot;Add&quot; to confirm.</li>
+              <li>{t.installIosStep1}</li>
+              <li>{t.installIosStep2}</li>
+              <li>{t.installIosStep3}</li>
             </ol>
           </div>
         )}
 
-        {state === 'IOS_OTHER_BROWSER' && <p>To install this app on iPhone or iPad, open this page in Safari — other browsers on iOS cannot add it to your home screen.</p>}
+        {state === 'IOS_OTHER_BROWSER' && <p>{t.installIosOtherBrowser}</p>}
 
         {state === 'ANDROID_OR_DESKTOP_WITHOUT_PROMPT' && (
           <div>
-            <p>{promptOutcomeNote === 'dismissed' ? "Installation wasn't completed. You can still install the app from your browser's menu:" : androidUa ? 'Install this app from your browser menu:' : "Install this app from your browser's menu:"}</p>
+            <p>{promptOutcomeNote === 'dismissed' ? t.installDismissedLead : androidUa ? t.installAndroidLead : t.installGenericLead}</p>
             <ol className="pwa-install-steps">
               {androidUa ? (
-                <li>Tap the menu icon (usually three dots, ⋮) in your browser toolbar.</li>
+                <li>{t.installAndroidMenuStep}</li>
               ) : (
-                <li>Open your browser&apos;s menu (often three dots or lines) in the toolbar.</li>
+                <li>{t.installGenericMenuStep}</li>
               )}
-              <li>Look for &quot;Install app&quot; or &quot;Add to Home screen&quot;.</li>
-              <li>Follow the prompt to finish installing.</li>
+              <li>{t.installLookForStep}</li>
+              <li>{t.installFollowPromptStep}</li>
             </ol>
           </div>
         )}
 
-        {state === 'UNSUPPORTED_OR_UNKNOWN' && <p>This browser may not support installing the app as a shortcut. You can keep using it here in the browser — nothing else on this page requires installing.</p>}
+        {state === 'UNSUPPORTED_OR_UNKNOWN' && <p>{t.installUnsupported}</p>}
 
         {swNote && <p className="pwa-install-note">{swNote}</p>}
       </div>

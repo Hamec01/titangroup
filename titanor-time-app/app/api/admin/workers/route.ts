@@ -216,7 +216,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
         data: {
           username,
           status: 'PENDING_ACTIVATION',
-          locale: 'FI',
+          locale: 'RU',
           employeeId: employee.id
         }
       });

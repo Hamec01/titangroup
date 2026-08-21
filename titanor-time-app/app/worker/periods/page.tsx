@@ -6,6 +6,9 @@ import { ConnectivityBanner } from '@/components/worker-pwa/ConnectivityBanner';
 import { WorkerLink } from '@/components/worker-pwa/WorkerLink';
 import type { PeriodsListPayload } from '@/lib/offline-outbox/read-snapshots';
 import { workerTimesheetStatusLabel } from '@/lib/worker-timesheet-presentation';
+import { resolveAppLocale } from '@/lib/i18n/server';
+import { COMMON_STRINGS } from '@/lib/i18n/common';
+import { WORKER_STRINGS } from '@/lib/i18n/worker';
 
 export const dynamic = 'force-dynamic';
 
@@ -14,7 +17,9 @@ export const dynamic = 'force-dynamic';
 // straight through from /worker). DoD: two simultaneous actionable periods are
 // shown distinctly, each linking to its own timesheetId via its periodId.
 export default async function WorkerPeriodsPage() {
-  const session = await resolveServerSession();
+  const [session, locale] = await Promise.all([resolveServerSession(), resolveAppLocale()]);
+  const common = COMMON_STRINGS[locale];
+  const t = WORKER_STRINGS[locale];
   if (!session) {
     redirect('/login');
   }
@@ -23,7 +28,7 @@ export default async function WorkerPeriodsPage() {
     return (
       <main className="wk-page">
         <p className="login-error" role="alert">
-          Access denied — this page requires the WORKER role.
+          {common.accessDeniedWorker}
         </p>
       </main>
     );
@@ -32,7 +37,7 @@ export default async function WorkerPeriodsPage() {
     return (
       <main className="wk-page">
         <div className="wk-card">
-          <p>Your account has no linked employee profile.</p>
+          <p>{common.noEmployeeProfile}</p>
         </div>
       </main>
     );
@@ -48,12 +53,12 @@ export default async function WorkerPeriodsPage() {
     <main className="wk-page">
       <div className="wk-card">
         <ConnectivityBanner />
-        <h1>Your periods</h1>
+        <h1>{t.yourPeriods}</h1>
         <WorkerLink href="/worker/history" className="wk-back-link">
-          View history →
+          {t.viewHistory}
         </WorkerLink>
         {periods.length === 0 ? (
-          <p className="wk-empty">You haven&apos;t been assigned to a site yet.</p>
+          <p className="wk-empty">{t.notAssignedToSiteYet}</p>
         ) : (
           <ul className="wk-period-list">
             {periods.map((period) => (
@@ -63,7 +68,7 @@ export default async function WorkerPeriodsPage() {
                     {period.startDate} – {period.endDate}
                   </span>
                   <span className={`wk-status-badge wk-status-${period.timesheetStatus.toLowerCase()}`}>
-                    {workerTimesheetStatusLabel(period.timesheetStatus, period.totalMinutes)}
+                    {workerTimesheetStatusLabel(period.timesheetStatus, period.totalMinutes, locale)}
                   </span>
                 </WorkerLink>
               </li>

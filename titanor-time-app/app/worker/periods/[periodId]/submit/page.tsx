@@ -9,6 +9,8 @@ import { ConnectivityBanner } from '@/components/worker-pwa/ConnectivityBanner';
 import { WorkerLink } from '@/components/worker-pwa/WorkerLink';
 import type { SubmitSummaryPayload } from '@/lib/offline-outbox/read-snapshots';
 import { workedMinutesFromIsoSegments } from '@/lib/reporting/report-format';
+import { resolveAppLocale } from '@/lib/i18n/server';
+import { WORKER_STRINGS } from '@/lib/i18n/worker';
 
 export const dynamic = 'force-dynamic';
 
@@ -21,7 +23,8 @@ const EDITABLE_STATUSES = new Set(['DRAFT', 'RETURNED']);
 type RouteParams = { params: Promise<{ periodId: string }> };
 
 export default async function WorkerSubmitPage({ params }: RouteParams) {
-  const session = await resolveServerSession();
+  const [session, locale] = await Promise.all([resolveServerSession(), resolveAppLocale()]);
+  const t = WORKER_STRINGS[locale];
   if (!session) {
     redirect('/login');
   }
@@ -61,17 +64,17 @@ export default async function WorkerSubmitPage({ params }: RouteParams) {
       <div className="wk-card">
         <ConnectivityBanner />
         <WorkerLink href={`/worker/periods/${periodId}/hours`} className="wk-back-link">
-          ← Back to hours
+          {t.backToHours}
         </WorkerLink>
-        <h1>Submit timesheet</h1>
+        <h1>{t.submitTimesheetTitle}</h1>
         <ReturnReasonsNotice status={period.timesheetStatus} reasons={returnReasons} />
         <p>
           {period.startDate} – {period.endDate}
         </p>
         <p className="wk-readonly-note">
-          {workedDays.length} of {days.length} days filled in · {Math.floor(totalMinutes / 60)}h {Math.round(totalMinutes % 60)}m total
+          {t.daysFilledIn(workedDays.length, days.length, `${Math.floor(totalMinutes / 60)}h ${Math.round(totalMinutes % 60)}m`)}
         </p>
-        <p className="wk-empty">Once submitted, you won&apos;t be able to edit your hours unless it&apos;s returned to you.</p>
+        <p className="wk-empty">{t.submitWarning}</p>
         <SubmitButton periodId={periodId} timesheetId={period.timesheetId} />
       </div>
       <SnapshotWriter routeKind="submit-summary" ownerUserId={session.user.id} periodId={periodId} payload={snapshotPayload} />

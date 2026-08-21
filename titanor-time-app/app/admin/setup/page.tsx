@@ -2,6 +2,7 @@ import Link from 'next/link';
 import { redirect } from 'next/navigation';
 import { resolveServerSession } from '@/lib/server-session';
 import { getSetupStatus, type SetupStatus } from '@/lib/setup-status';
+import { resolveAppLocale } from '@/lib/i18n/server';
 
 export const dynamic = 'force-dynamic';
 
@@ -79,7 +80,8 @@ const CHECKLIST: ChecklistItem[] = [
 ];
 
 export default async function AdminSetupPage() {
-  const session = await resolveServerSession();
+  const [session, locale] = await Promise.all([resolveServerSession(), resolveAppLocale()]);
+  const ru = locale === 'RU';
   if (!session) {
     redirect('/login');
   }
@@ -89,7 +91,7 @@ export default async function AdminSetupPage() {
     return (
       <main className="setup-page">
         <p className="login-error" role="alert">
-          Access denied — this page requires the ADMIN or SUPER_ADMIN role.
+          {ru ? 'Доступ запрещён — эта страница доступна только администратору.' : 'Access denied — this page requires the ADMIN or SUPER_ADMIN role.'}
         </p>
       </main>
     );
@@ -100,25 +102,34 @@ export default async function AdminSetupPage() {
   return (
     <main className="setup-page">
       <div className="setup-card">
-        <h1>Setup checklist</h1>
+        <h1>{ru ? 'Первоначальная настройка' : 'Setup checklist'}</h1>
         <p className="setup-subtitle">
-          Signed in as {session.user.username} ({session.user.roles.join(', ')})
+          {ru ? 'Вы вошли как' : 'Signed in as'} {session.user.username} ({session.user.roles.join(', ')})
         </p>
         <ul className="setup-list">
           {CHECKLIST.map((item) => {
             const done = status[item.key];
             const actionHref = done ? item.doneHref : item.createHref;
-            const actionLabel = done ? (item.doneActionLabel ?? 'Manage') : (item.createActionLabel ?? 'Create');
+            const translated = ru ? ({
+              hasCity: ['Город', 'Необязательная справочная запись для группировки объектов. Не блокирует настройку.'],
+              hasSite: ['Объект', 'Фактическое место работы, куда назначается работник и где он отмечает приход.'],
+              hasWorkArea: ['Рабочая зона', 'Необязательная часть объекта. Пропустите, если весь объект является одной рабочей зоной.'],
+              hasTemplate: ['Шаблон рабочего графика', 'Определяет обычную рабочую неделю работника.'],
+              hasWorker: ['Работник', 'Учётная запись сотрудника для отметки прихода/ухода и внесения часов.'],
+              hasAssignment: ['Назначение', 'Связывает работника с объектом и графиком на выбранный срок.'],
+              hasSubmissionScheduleConfigured: ['Цикл отправки табеля', 'Выберите для каждого активного работника: еженедельно или раз в две недели. Периоды будут создаваться автоматически.']
+            } as Partial<Record<keyof SetupStatus, [string, string]>>)[item.key] : null;
+            const actionLabel = done ? (ru ? (item.doneActionLabel === 'Add another' ? 'Добавить ещё' : 'Управлять') : (item.doneActionLabel ?? 'Manage')) : (ru ? (item.createActionLabel === 'Manage sites' ? 'Управлять объектами' : item.createActionLabel === 'Configure workers' ? 'Настроить работников' : 'Создать') : (item.createActionLabel ?? 'Create'));
             return (
               <li key={item.key} className="setup-item">
                 <span
                   className={done ? 'setup-status setup-status-done' : item.optional ? 'setup-status setup-status-optional' : 'setup-status setup-status-pending'}
                 >
-                  {done ? 'Done' : item.optional ? 'Optional' : 'Not done'}
+                  {done ? (ru ? 'Готово' : 'Done') : item.optional ? (ru ? 'Необязательно' : 'Optional') : (ru ? 'Не готово' : 'Not done')}
                 </span>
                 <span className="setup-copy">
-                  <span className="setup-label">{item.label}</span>
-                  <span className="setup-description">{item.description}</span>
+                  <span className="setup-label">{translated?.[0] ?? item.label}</span>
+                  <span className="setup-description">{translated?.[1] ?? item.description}</span>
                 </span>
                 {actionHref ? (
                   <Link className="setup-action" href={actionHref}>

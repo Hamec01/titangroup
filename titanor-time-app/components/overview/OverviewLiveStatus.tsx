@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
+import { useAppLocale } from '@/components/i18n/AppLocaleProvider';
 
 const OVERVIEW_REFRESH_MS = 30 * 60 * 1000;
 const ELAPSED_REFRESH_MS = 60 * 1000;
@@ -18,6 +19,7 @@ function formatElapsed(startedAtMs: number, nowMs: number): string {
  * duration in the browser; it never writes periodic timer rows to the database.
  */
 export function LiveShiftDuration({ openedAt, initialAsOf }: { openedAt: string; initialAsOf: string }) {
+  const ru = useAppLocale() === 'RU';
   const startedAtMs = Date.parse(openedAt);
   const [nowMs, setNowMs] = useState(() => Date.parse(initialAsOf));
 
@@ -28,13 +30,14 @@ export function LiveShiftDuration({ openedAt, initialAsOf }: { openedAt: string;
     return () => window.clearInterval(timer);
   }, []);
 
-  return <span className="ov-live-duration">elapsed {formatElapsed(startedAtMs, nowMs)}</span>;
+  return <span className="ov-live-duration">{ru ? 'прошло' : 'elapsed'} {formatElapsed(startedAtMs, nowMs)}</span>;
 }
 
 /** Keeps the compact Today total moving while a shift is open. The server-provided total already
  * includes all closed shifts and the open shift through initialAsOf; only elapsed display minutes
  * are added here, with no API call or database write. */
 export function LiveWorkedToday({ initialMinutes, initialAsOf, running }: { initialMinutes: number; initialAsOf: string; running: boolean }) {
+  const ru = useAppLocale() === 'RU';
   const initialAsOfMs = Date.parse(initialAsOf);
   const [nowMs, setNowMs] = useState(initialAsOfMs);
 
@@ -49,7 +52,7 @@ export function LiveWorkedToday({ initialMinutes, initialAsOf, running }: { init
   const minutes = initialMinutes + (running ? Math.max(0, Math.floor((nowMs - initialAsOfMs) / 60_000)) : 0);
   const hours = Math.floor(minutes / 60);
   const remainder = minutes % 60;
-  return <span className="ov-live-duration">{hours > 0 ? `${hours} h ${remainder} min` : `${remainder} min`}</span>;
+  return <span className="ov-live-duration">{hours > 0 ? `${hours} ${ru ? 'ч' : 'h'} ${remainder} ${ru ? 'мин' : 'min'}` : `${remainder} ${ru ? 'мин' : 'min'}`}</span>;
 }
 
 /** Re-reads authoritative overview state twice an hour while this page is actually visible. */

@@ -1,3 +1,5 @@
+'use client';
+
 import Link from 'next/link';
 import type { OverviewResult, OverviewSummary, OverviewWorkerItem, OverviewConflicts, OperationalState } from '@/lib/attendance-overview';
 import { OPERATIONAL_STATE_VALUES } from '@/lib/attendance-overview';
@@ -15,6 +17,7 @@ import {
 import { exceptionTypeLabel, channelLabel, timesheetStatusLabel, formatDateTime } from '@/lib/attendance-exceptions-ui';
 import { formatHelsinkiDateTime } from '@/lib/helsinki-datetime';
 import { LiveShiftDuration, LiveWorkedToday, OverviewAutoRefresh } from '@/components/overview/OverviewLiveStatus';
+import { useAppLocale } from '@/components/i18n/AppLocaleProvider';
 
 // docs/titanor-time/T7A_1_ATTENDANCE_CLOCK_DESIGN.md Addendum "T7A.9A" + PROJECT_ROADMAP.md T7A.9 —
 // T7A.9B. Pure presentation: given an already-fetched OverviewResult (or a validation/not-found
@@ -52,22 +55,23 @@ interface Props {
 
 export function OverviewView({ role, basePath, rawQuery, outcome, periodOptions, siteOptions, legacy }: Props) {
   const isAdmin = role === 'admin';
+  const ru = useAppLocale() === 'RU';
 
   return (
     <div className="setup-card worker-card ov-card">
-      <h1>{isAdmin ? 'Today' : 'Overview'}</h1>
+      <h1>{isAdmin ? (ru ? 'Сегодня' : 'Today') : (ru ? 'Обзор' : 'Overview')}</h1>
 
       {legacy && <ForemanLegacySection legacy={legacy} />}
 
       {outcome.kind === 'invalid' && (
         <p className="login-error" role="alert">
-          These filters aren&apos;t valid: {Object.entries(outcome.fieldErrors).map(([field, msgs]) => `${field} ${msgs.join(', ')}`).join('; ')}
+          {ru ? 'Некорректные фильтры:' : "These filters aren't valid:"} {Object.entries(outcome.fieldErrors).map(([field, msgs]) => `${field} ${msgs.join(', ')}`).join('; ')}
         </p>
       )}
 
       {outcome.kind === 'period-not-found' && (
         <p className="login-error" role="alert">
-          That payroll period could not be found. <Link href={basePath}>Clear the period filter</Link>.
+          {ru ? 'Расчётный период не найден.' : 'That payroll period could not be found.'} <Link href={basePath}>{ru ? 'Сбросить фильтр периода' : 'Clear the period filter'}</Link>.
         </p>
       )}
 
@@ -79,29 +83,29 @@ export function OverviewView({ role, basePath, rawQuery, outcome, periodOptions,
 }
 
 function ForemanLegacySection({ legacy }: { legacy: { pendingCount: number; exceptionCount: number } }) {
+  const ru = useAppLocale() === 'RU';
   return (
     <div className="ov-legacy">
       {legacy.pendingCount === 0 ? (
-        <p className="wk-empty">Nothing waiting for review on your sites.</p>
+        <p className="wk-empty">{ru ? 'На ваших объектах нет табелей, ожидающих проверки.' : 'Nothing waiting for review on your sites.'}</p>
       ) : (
         <>
           <p className="setup-subtitle">
-            {legacy.pendingCount} pending{legacy.exceptionCount > 0 ? `, ${legacy.exceptionCount} with an exception` : ''}
+            {ru ? `Ожидают проверки: ${legacy.pendingCount}${legacy.exceptionCount > 0 ? `, с проблемами: ${legacy.exceptionCount}` : ''}` : `${legacy.pendingCount} pending${legacy.exceptionCount > 0 ? `, ${legacy.exceptionCount} with an exception` : ''}`}
           </p>
           <Link href="/foreman/review" className="wk-action-button">
-            Go to review queue
+            {ru ? 'Перейти к проверке' : 'Go to review queue'}
           </Link>
         </>
       )}
       <p className="ov-legacy-note">
-        The review queue above is <em>TimesheetReviewScope</em> — a plan-vs-actual flag on submitted timesheets. The scoped worker list and clock-event
-        exceptions below are a separate signal (<em>AttendanceException</em> — GPS/geofence/switch-site/overlap anomalies from Check In/Out itself).
+        {ru ? 'Очередь выше содержит отправленные табели, которые требуют проверки. Проблемы отметок прихода/ухода и GPS ниже отображаются отдельно.' : <>The review queue above is <em>TimesheetReviewScope</em> — a plan-vs-actual flag on submitted timesheets. The scoped worker list and clock-event exceptions below are a separate signal (<em>AttendanceException</em> — GPS/geofence/switch-site/overlap anomalies from Check In/Out itself).</>}
       </p>
       <Link href="/foreman/attendance/exceptions" className="wk-action-button">
-        Go to attendance exceptions
+        {ru ? 'Перейти к проблемам учёта' : 'Go to attendance exceptions'}
       </Link>
       <Link href="/foreman/reports/sites" className="wk-action-button">
-        Site reports
+        {ru ? 'Отчёты по объектам' : 'Site reports'}
       </Link>
     </div>
   );
@@ -163,16 +167,17 @@ function AdminTodayBody({
   periodOptions: PeriodOption[];
   siteOptions: SiteOption[];
 }) {
-  const todayLabel = new Intl.DateTimeFormat('en-GB', { timeZone: 'Europe/Helsinki', weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' }).format(new Date(result.asOf));
+  const ru = useAppLocale() === 'RU';
+  const todayLabel = new Intl.DateTimeFormat(ru ? 'ru-RU' : 'en-GB', { timeZone: 'Europe/Helsinki', weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' }).format(new Date(result.asOf));
   return (
     <>
       <OverviewAutoRefresh />
       <div className="owner-today-head">
         <div>
           <p className="owner-today-date">{todayLabel}</p>
-          <p className="ov-asof">Updated {formatHelsinkiDateTime(result.asOf)} · refreshes every 30 minutes · <Link href={basePath}>Refresh now</Link></p>
+          <p className="ov-asof">{ru ? 'Обновлено' : 'Updated'} {formatHelsinkiDateTime(result.asOf)} · {ru ? 'обновляется каждые 30 минут' : 'refreshes every 30 minutes'} · <Link href={basePath}>{ru ? 'Обновить сейчас' : 'Refresh now'}</Link></p>
         </div>
-        {result.period ? <span className="ov-badge ov-badge-neutral">{result.period.multipleCurrentCycles ? 'Multiple submission cycles' : `${result.period.startDate} – ${result.period.endDate}`}</span> : <span className="ov-badge ov-badge-issue">No current period</span>}
+        {result.period ? <span className="ov-badge ov-badge-neutral">{result.period.multipleCurrentCycles ? (ru ? 'Несколько циклов отправки' : 'Multiple submission cycles') : `${result.period.startDate} – ${result.period.endDate}`}</span> : <span className="ov-badge ov-badge-issue">{ru ? 'Нет текущего периода' : 'No current period'}</span>}
       </div>
 
       <OwnerSearchForm basePath={basePath} rawQuery={rawQuery} periodOptions={periodOptions} siteOptions={siteOptions} />
@@ -181,12 +186,12 @@ function AdminTodayBody({
       <Pagination basePath={basePath} rawQuery={rawQuery} page={result.page} totalPages={result.totalPages} totalItems={result.totalItems} />
 
       <details className="owner-secondary-panel">
-        <summary>Timesheets and approval details</summary>
+        <summary>{ru ? 'Табели и утверждение' : 'Timesheets and approval details'}</summary>
         <SummaryCards basePath={basePath} rawQuery={rawQuery} summary={result.summary} />
       </details>
       {result.conflicts ? (
         <details className="owner-secondary-panel" open={result.conflicts.totalOpenOrRecent > 0}>
-          <summary>Technical conflicts {result.conflicts.totalOpenOrRecent > 0 ? `(${result.conflicts.totalOpenOrRecent})` : ''}</summary>
+          <summary>{ru ? 'Технические конфликты' : 'Technical conflicts'} {result.conflicts.totalOpenOrRecent > 0 ? `(${result.conflicts.totalOpenOrRecent})` : ''}</summary>
           <ConflictsSection conflicts={result.conflicts} />
         </details>
       ) : null}
@@ -195,42 +200,43 @@ function AdminTodayBody({
 }
 
 function OwnerSearchForm({ basePath, rawQuery, periodOptions, siteOptions }: { basePath: string; rawQuery: OverviewRawQuery; periodOptions: PeriodOption[]; siteOptions: SiteOption[] }) {
+  const ru = useAppLocale() === 'RU';
   return (
-    <form method="GET" action={basePath} className="owner-search" aria-label="Search today's workers">
+    <form method="GET" action={basePath} className="owner-search" aria-label={ru ? 'Поиск работников' : "Search today's workers"}>
       <div className="owner-search-primary">
         <div className="ov-filter-field owner-search-query">
-          <label htmlFor="owner-search-q">Worker or site</label>
-          <input id="owner-search-q" name="q" type="search" maxLength={100} defaultValue={rawQuery.q ?? ''} placeholder="Name, employee number, site or work area" />
+          <label htmlFor="owner-search-q">{ru ? 'Работник или объект' : 'Worker or site'}</label>
+          <input id="owner-search-q" name="q" type="search" maxLength={100} defaultValue={rawQuery.q ?? ''} placeholder={ru ? 'Имя, номер, объект или рабочая зона' : 'Name, employee number, site or work area'} />
         </div>
         <div className="ov-filter-field">
-          <label htmlFor="owner-search-site">Site</label>
+          <label htmlFor="owner-search-site">{ru ? 'Объект' : 'Site'}</label>
           <select id="owner-search-site" name="siteId" defaultValue={rawQuery.siteId ?? ''}>
-            <option value="">All sites</option>
+            <option value="">{ru ? 'Все объекты' : 'All sites'}</option>
             {siteOptions.map((site) => <option key={site.id} value={site.id}>{site.name}</option>)}
           </select>
         </div>
-        <button type="submit" className="exc-apply-button">Search</button>
-        <Link href={basePath} className="exc-reset-link">Reset</Link>
+        <button type="submit" className="exc-apply-button">{ru ? 'Найти' : 'Search'}</button>
+        <Link href={basePath} className="exc-reset-link">{ru ? 'Сбросить' : 'Reset'}</Link>
       </div>
       <details className="owner-more-filters">
-        <summary>More filters</summary>
+        <summary>{ru ? 'Дополнительные фильтры' : 'More filters'}</summary>
         <div className="owner-more-filter-grid">
           <div className="ov-filter-field">
-            <label htmlFor="owner-filter-period">Period</label>
+            <label htmlFor="owner-filter-period">{ru ? 'Период' : 'Period'}</label>
             <select id="owner-filter-period" name="periodId" defaultValue={rawQuery.periodId ?? ''}>
-              <option value="">Current cycles</option>
+              <option value="">{ru ? 'Текущие циклы' : 'Current cycles'}</option>
               {periodOptions.map((period) => <option key={period.id} value={period.id}>{period.label}</option>)}
             </select>
           </div>
           <div className="ov-filter-field">
-            <label htmlFor="owner-filter-state">Status or issue</label>
+            <label htmlFor="owner-filter-state">{ru ? 'Статус или проблема' : 'Status or issue'}</label>
             <select id="owner-filter-state" name="state" defaultValue={rawQuery.state ?? ''}>
-              <option value="">All</option>
+              <option value="">{ru ? 'Все' : 'All'}</option>
               {OPERATIONAL_STATE_VALUES.map((state) => <option key={state} value={state}>{operationalStateLabel(state)}</option>)}
             </select>
           </div>
           <div className="ov-filter-field">
-            <label htmlFor="owner-filter-pagesize">Workers per page</label>
+            <label htmlFor="owner-filter-pagesize">{ru ? 'Работников на странице' : 'Workers per page'}</label>
             <select id="owner-filter-pagesize" name="pageSize" defaultValue={rawQuery.pageSize ?? '20'}>
               {[20, 50, 100].map((size) => <option key={size} value={size}>{size}</option>)}
             </select>
@@ -242,12 +248,13 @@ function OwnerSearchForm({ basePath, rawQuery, periodOptions, siteOptions }: { b
 }
 
 function OwnerQuickSummary({ summary }: { summary: OverviewSummary }) {
+  const ru = useAppLocale() === 'RU';
   const items = [
-    { label: 'Active workers', value: summary.totalWorkers, className: 'owner-stat-neutral' },
-    { label: 'Working now', value: summary.workingNow, className: 'owner-stat-working' },
-    { label: 'Finished today', value: summary.finishedToday, className: 'owner-stat-finished' },
-    { label: 'Not started', value: summary.notStartedToday, className: 'owner-stat-neutral' },
-    { label: 'Need attention', value: summary.needsAttention, className: summary.needsAttention > 0 ? 'owner-stat-attention' : 'owner-stat-neutral' }
+    { label: ru ? 'Активные работники' : 'Active workers', value: summary.totalWorkers, className: 'owner-stat-neutral' },
+    { label: ru ? 'Сейчас работают' : 'Working now', value: summary.workingNow, className: 'owner-stat-working' },
+    { label: ru ? 'Закончили сегодня' : 'Finished today', value: summary.finishedToday, className: 'owner-stat-finished' },
+    { label: ru ? 'Не начинали' : 'Not started', value: summary.notStartedToday, className: 'owner-stat-neutral' },
+    { label: ru ? 'Требуют внимания' : 'Need attention', value: summary.needsAttention, className: summary.needsAttention > 0 ? 'owner-stat-attention' : 'owner-stat-neutral' }
   ];
   return <ul className="owner-quick-stats" aria-label="Today's worker summary">{items.map((item) => <li key={item.label} className={item.className}><strong>{item.value}</strong><span>{item.label}</span></li>)}</ul>;
 }
@@ -258,11 +265,12 @@ function formatTodayTime(value: string | null): string {
 }
 
 function OwnerWorkerList({ items, totalItems, asOf }: { items: OverviewWorkerItem[]; totalItems: number; asOf: string }) {
-  if (totalItems === 0) return <p className="wk-empty" role="status">No workers match this search.</p>;
+  const ru = useAppLocale() === 'RU';
+  if (totalItems === 0) return <p className="wk-empty" role="status">{ru ? 'Работники не найдены.' : 'No workers match this search.'}</p>;
   return (
     <section className="owner-workers" aria-labelledby="owner-workers-title">
-      <div className="owner-workers-heading"><h2 id="owner-workers-title">Workers today</h2><span>{totalItems}</span></div>
-      <div className="owner-worker-columns" aria-hidden="true"><span>Worker</span><span>Status</span><span>Site</span><span>Check In</span><span>Check Out</span><span>Today</span><span>Issues</span><span /></div>
+      <div className="owner-workers-heading"><h2 id="owner-workers-title">{ru ? 'Работники сегодня' : 'Workers today'}</h2><span>{totalItems}</span></div>
+      <div className="owner-worker-columns" aria-hidden="true"><span>{ru ? 'Работник' : 'Worker'}</span><span>{ru ? 'Статус' : 'Status'}</span><span>{ru ? 'Объект' : 'Site'}</span><span>{ru ? 'Приход' : 'Check In'}</span><span>{ru ? 'Уход' : 'Check Out'}</span><span>{ru ? 'Сегодня' : 'Today'}</span><span>{ru ? 'Проблемы' : 'Issues'}</span><span /></div>
       <ul className="owner-worker-list">
         {items.map((item) => <OwnerWorkerRow key={item.employee.id} item={item} asOf={asOf} />)}
       </ul>
@@ -271,25 +279,26 @@ function OwnerWorkerList({ items, totalItems, asOf }: { items: OverviewWorkerIte
 }
 
 function OwnerWorkerRow({ item, asOf }: { item: OverviewWorkerItem; asOf: string }) {
+  const ru = useAppLocale() === 'RU';
   const assignment = item.openShift
     ? { site: item.openShift.site, workArea: item.openShift.workArea }
     : item.currentAssignments.find((current) => current.isPrimary) ?? item.currentAssignments[0] ?? (item.latestFinishedShiftToday ? { site: item.latestFinishedShiftToday.site, workArea: null } : null);
   const startedAt = item.openShift?.openedAt ?? item.latestFinishedShiftToday?.recordedStartAt ?? null;
   const endedAt = item.openShift ? null : item.latestFinishedShiftToday?.recordedEndAt ?? null;
-  const statusLabel = item.todayStatus === 'WORKING' ? 'Working now' : item.todayStatus === 'FINISHED' ? 'Finished' : 'Not started';
+  const statusLabel = item.todayStatus === 'WORKING' ? (ru ? 'Сейчас работает' : 'Working now') : item.todayStatus === 'FINISHED' ? (ru ? 'Закончил' : 'Finished') : (ru ? 'Не начинал' : 'Not started');
   const statusClass = item.todayStatus === 'WORKING' ? 'owner-status-working' : item.todayStatus === 'FINISHED' ? 'owner-status-finished' : 'owner-status-not-started';
-  const issueLabel = item.openExceptionCount > 0 ? `${item.openExceptionCount} issue${item.openExceptionCount === 1 ? '' : 's'}` : item.needsAttention ? 'Review needed' : 'No issues';
+  const issueLabel = item.openExceptionCount > 0 ? (ru ? `Проблем: ${item.openExceptionCount}` : `${item.openExceptionCount} issue${item.openExceptionCount === 1 ? '' : 's'}`) : item.needsAttention ? (ru ? 'Нужна проверка' : 'Review needed') : (ru ? 'Нет проблем' : 'No issues');
   return (
     <li>
       <Link href={`/admin/workers/${item.employee.id}`} className="owner-worker-row" aria-label={`Open ${item.employee.name}`}>
         <span className="owner-worker-identity"><strong>{item.employee.name}</strong><small>#{item.employee.employeeNumber}</small></span>
         <span><span className={`owner-status ${statusClass}`}>{statusLabel}</span>{item.timesheet ? <small>{timesheetStatusLabel(item.timesheet.status)}</small> : null}</span>
-        <span className="owner-worker-site"><strong>{assignment?.site.name ?? 'No site assigned'}</strong>{assignment?.workArea ? <small>{assignment.workArea.name}</small> : null}</span>
+        <span className="owner-worker-site"><strong>{assignment?.site.name ?? (ru ? 'Объект не назначен' : 'No site assigned')}</strong>{assignment?.workArea ? <small>{assignment.workArea.name}</small> : null}</span>
         <span data-label="Check In">{formatTodayTime(startedAt)}</span>
         <span data-label="Check Out">{formatTodayTime(endedAt)}</span>
         <span data-label="Today"><LiveWorkedToday initialMinutes={item.todayWorkedMinutes} initialAsOf={asOf} running={item.todayStatus === 'WORKING'} /></span>
         <span data-label="Issues" className={item.needsAttention ? 'owner-issue' : 'owner-no-issue'}>{issueLabel}</span>
-        <span className="owner-worker-open">View →</span>
+        <span className="owner-worker-open">{ru ? 'Открыть →' : 'View →'}</span>
       </Link>
     </li>
   );

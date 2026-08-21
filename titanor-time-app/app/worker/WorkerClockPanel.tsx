@@ -13,6 +13,8 @@ import { subscribeOutboxChanges } from '@/lib/offline-outbox/broadcast';
 import { warmOfflineShellCache } from '@/lib/offline-outbox/pwa-warm-cache';
 import { WorkerLink } from '@/components/worker-pwa/WorkerLink';
 import { formatWorkedDuration } from '@/lib/reporting/report-format';
+import { useAppLocale } from '@/components/i18n/AppLocaleProvider';
+import { WORKER_STRINGS, type WorkerStrings } from '@/lib/i18n/worker';
 
 // docs/titanor-time/T7A_1_ATTENDANCE_CLOCK_DESIGN.md §6/§7/§9.11 (T7A.7B — offline outbox client).
 // Every Check In/Out/Switch Site action now writes to the IndexedDB outbox FIRST (one atomic
@@ -32,34 +34,34 @@ function assignmentKey(siteId: string, workAreaId: string | null): string {
   return `${siteId}::${workAreaId ?? ''}`;
 }
 
-function describeErrorCode(code: string | undefined): string {
+function describeErrorCode(code: string | undefined, t: WorkerStrings): string {
   switch (code) {
     case 'OUTSIDE_GEOFENCE':
-      return "You're outside this site's work area. Move closer and sync again.";
+      return t.errOutsideGeofence;
     case 'VALIDATION_ERROR':
-      return 'This record could not be validated. Please contact your administrator.';
+      return t.errValidation;
     case 'CLIENT_EVENT_ID_REUSED':
     case 'DEVICE_SEQUENCE_REUSED':
-      return 'This device record conflicted with another one. Please contact your administrator.';
+      return t.errDeviceRecordConflict;
     case 'SWITCH_SITE_GROUP_FAILED':
     case 'SWITCH_SITE_GROUP_INVALID':
-      return 'This site switch could not be completed. Please contact your administrator.';
+      return t.errSwitchSiteFailed;
     case 'RATE_LIMITED':
-      return 'Too many attempts. Please wait a moment and try again.';
+      return t.errRateLimited;
     case 'NOT_AUTHENTICATED':
-      return 'Your session has expired.';
+      return t.errSessionExpired;
     case 'FORBIDDEN':
     case 'NO_EMPLOYEE_PROFILE':
-      return "You don't have permission to do that. Contact your administrator.";
+      return t.errNoPermission;
     case 'DEVICE_NOT_OWNED':
-      return 'This device is no longer linked to your account.';
+      return t.errDeviceNotOwned;
     case 'DEVICE_REVOKED':
-      return 'This device has been disabled by an administrator.';
+      return t.errDeviceRevoked;
     case 'SYNC_PROTOCOL_ERROR':
     case 'NETWORK_ERROR':
-      return "We couldn't reach the server. It will retry automatically.";
+      return t.errCouldNotReachServer;
     default:
-      return 'This action needs attention. Please contact your administrator.';
+      return t.errActionNeedsAttention;
   }
 }
 
@@ -116,6 +118,7 @@ export interface WorkerClockPanelProps {
 }
 
 export function WorkerClockPanel({ initialClockState, assignments, workerName, todayLabel, recentActivity, periodsHref, historyHref, installHref }: WorkerClockPanelProps) {
+  const t = WORKER_STRINGS[useAppLocale()];
   const router = useRouter();
   const [bootstrap, setBootstrap] = useState<BootstrapOutcome | null>(null);
   const [clockState, setClockState] = useState<ClockStateWire>(initialClockState);
@@ -164,22 +167,22 @@ export function WorkerClockPanel({ initialClockState, assignments, workerName, t
           setNowTick(Date.now());
         }
         if (outcome.failedCount > 0) {
-          setStatusMessage({ kind: 'error', text: 'One or more actions need attention — see below.' });
+          setStatusMessage({ kind: 'error', text: t.syncOneOrMoreNeedAttention });
         } else if (outcome.ackedCount > 0) {
-          setStatusMessage({ kind: 'info', text: 'Synced.' });
+          setStatusMessage({ kind: 'info', text: t.synced });
           router.refresh();
         }
       } else if (outcome.kind === 'AUTH_EXPIRED') {
-        setStatusMessage({ kind: 'error', text: describeErrorCode('NOT_AUTHENTICATED'), code: 'NOT_AUTHENTICATED' });
+        setStatusMessage({ kind: 'error', text: describeErrorCode('NOT_AUTHENTICATED', t), code: 'NOT_AUTHENTICATED' });
         // A pause discovered mid-sync (as opposed to at bootstrap time) must still surface the
         // paused/return-notice UI (§8 "a paused auth/device state") — `bootstrap` otherwise stays
         // stale at its last READY value from mount, silently leaving the Check In/Out UI visible.
         setBootstrap({ kind: 'AUTH_EXPIRED' });
       } else if (outcome.kind === 'DEVICE_PAUSED') {
-        setStatusMessage({ kind: 'error', text: describeErrorCode(outcome.reason), code: outcome.reason });
+        setStatusMessage({ kind: 'error', text: describeErrorCode(outcome.reason, t), code: outcome.reason });
         setBootstrap({ kind: 'PAUSED', reason: outcome.reason });
       } else if (outcome.kind === 'RATE_LIMITED') {
-        setStatusMessage({ kind: 'error', text: describeErrorCode('RATE_LIMITED'), code: 'RATE_LIMITED' });
+        setStatusMessage({ kind: 'error', text: describeErrorCode('RATE_LIMITED', t), code: 'RATE_LIMITED' });
       } else if (outcome.kind === 'NETWORK_ERROR' || outcome.kind === 'RETRYABLE_HTTP' || outcome.kind === 'PROTOCOL_ERROR') {
         // Expected/transient while offline or the server is briefly unavailable — no alarming
         // message; the pending-count/offline indicator already communicates this.
@@ -189,7 +192,7 @@ export function WorkerClockPanel({ initialClockState, assignments, workerName, t
     } finally {
       setSyncing(false);
     }
-  }, [syncing, refreshOutboxSnapshot, router]);
+  }, [syncing, refreshOutboxSnapshot, router, t]);
 
   // ---- Bootstrap + initial outbox snapshot ----
   useEffect(() => {
@@ -305,7 +308,7 @@ export function WorkerClockPanel({ initialClockState, assignments, workerName, t
     }
     busyRef.current = true;
     setLocating(true);
-    setStatusMessage({ kind: 'info', text: 'Getting location…' });
+    setStatusMessage({ kind: 'info', text: t.gettingLocation });
     try {
       const gpsSnapshot: GpsSnapshot = await captureGpsSnapshot();
       setLocating(false);
@@ -320,7 +323,7 @@ export function WorkerClockPanel({ initialClockState, assignments, workerName, t
         cachedGeofenceVersionId: cachedGeofenceVersionIdFor(assignment.siteId)
       });
       await refreshOutboxSnapshot();
-      setStatusMessage({ kind: 'info', text: isOnline ? 'Saved on device — syncing…' : 'Saved on device — waiting for sync.' });
+      setStatusMessage({ kind: 'info', text: isOnline ? t.savedSyncing : t.savedWaitingForSync });
       void triggerSync();
     } catch (err) {
       handleEnqueueError(err);
@@ -336,7 +339,7 @@ export function WorkerClockPanel({ initialClockState, assignments, workerName, t
     }
     busyRef.current = true;
     setLocating(true);
-    setStatusMessage({ kind: 'info', text: 'Getting location…' });
+    setStatusMessage({ kind: 'info', text: t.gettingLocation });
     try {
       const gpsSnapshot: GpsSnapshot = await captureGpsSnapshot();
       setLocating(false);
@@ -350,7 +353,7 @@ export function WorkerClockPanel({ initialClockState, assignments, workerName, t
       await refreshOutboxSnapshot();
       setSwitchPanelOpen(false);
       setSwitchTargetId(null);
-      setStatusMessage({ kind: 'info', text: isOnline ? 'Saved on device — syncing…' : 'Saved on device — waiting for sync.' });
+      setStatusMessage({ kind: 'info', text: isOnline ? t.savedSyncing : t.savedWaitingForSync });
       void triggerSync();
     } catch (err) {
       handleEnqueueError(err);
@@ -388,7 +391,7 @@ export function WorkerClockPanel({ initialClockState, assignments, workerName, t
     }
     busyRef.current = true;
     setLocating(true);
-    setStatusMessage({ kind: 'info', text: 'Getting location…' });
+    setStatusMessage({ kind: 'info', text: t.gettingLocation });
     try {
       const gpsSnapshot: GpsSnapshot = await captureGpsSnapshot();
       setLocating(false);
@@ -406,7 +409,7 @@ export function WorkerClockPanel({ initialClockState, assignments, workerName, t
       await refreshOutboxSnapshot();
       setSwitchPanelOpen(false);
       setSwitchTargetId(null);
-      setStatusMessage({ kind: 'info', text: isOnline ? 'Saved on device — syncing…' : 'Saved on device — waiting for sync.' });
+      setStatusMessage({ kind: 'info', text: isOnline ? t.savedSyncing : t.savedWaitingForSync });
       void triggerSync();
     } catch (err) {
       handleEnqueueError(err);
@@ -418,10 +421,10 @@ export function WorkerClockPanel({ initialClockState, assignments, workerName, t
 
   function handleEnqueueError(err: unknown) {
     if (err instanceof EnqueueError) {
-      setStatusMessage({ kind: 'error', text: err.code === 'SEQUENCE_OVERFLOW' ? err.message : 'Offline setup is not ready yet.', code: err.code });
+      setStatusMessage({ kind: 'error', text: err.code === 'SEQUENCE_OVERFLOW' ? err.message : t.offlineSetupNotReady, code: err.code });
       return;
     }
-    setStatusMessage({ kind: 'error', text: 'Could not save this action on this device. Please try again.' });
+    setStatusMessage({ kind: 'error', text: t.couldNotSaveAction });
   }
 
   async function handleRetryBootstrap() {
@@ -473,36 +476,36 @@ export function WorkerClockPanel({ initialClockState, assignments, workerName, t
 
       <div className="wk-offline-bar" role="status" aria-live="polite">
         <span className={`wk-connectivity-dot${isOnline ? ' online' : ' offline'}`} aria-hidden="true" />
-        <span>{isOnline ? 'Online' : 'Offline'}</span>
-        {pendingCount > 0 && <span className="wk-pending-count">{pendingCount} pending</span>}
+        <span>{isOnline ? t.online : t.offline}</span>
+        {pendingCount > 0 && <span className="wk-pending-count">{t.pendingCount(pendingCount)}</span>}
         <button type="button" className="wk-sync-now-button" onClick={handleManualSync} disabled={syncing || setupNotReady}>
-          {syncing ? 'Syncing…' : 'Sync now'}
+          {syncing ? t.syncing : t.syncNow}
         </button>
       </div>
 
       {setupNotReady && (
         <p className="wk-empty" role="status">
-          Offline setup is not ready yet{isOnline ? ' — connecting…' : '. Connect to the internet once to finish setup.'}
+          {isOnline ? t.offlineSetupNotReadyConnecting : t.offlineSetupNotReadyConnectOnce}
         </p>
       )}
 
       {paused && (
         <div className="wk-return-notice">
           <p className="wk-return-notice-title">
-            {paused === 'DEVICE_NOT_OWNED' && 'This device is not linked to your account.'}
-            {paused === 'DEVICE_REVOKED' && 'This device has been disabled.'}
-            {paused === 'AUTH_EXPIRED' && 'Your session has expired.'}
+            {paused === 'DEVICE_NOT_OWNED' && t.deviceNotLinked}
+            {paused === 'DEVICE_REVOKED' && t.deviceDisabled}
+            {paused === 'AUTH_EXPIRED' && t.sessionExpiredTitle}
           </p>
           {paused === 'AUTH_EXPIRED' ? (
             <Link href="/login" className="wk-back-link">
-              Log in again →
+              {t.logInAgain}
             </Link>
           ) : (
             <button type="button" className="wk-clock-secondary-button" onClick={handleRetryBootstrap}>
-              Retry
+              {t.retry}
             </button>
           )}
-          <p className="wk-return-reason-text">Nothing saved on this device has been lost.</p>
+          <p className="wk-return-reason-text">{t.nothingLost}</p>
         </div>
       )}
 
@@ -510,10 +513,10 @@ export function WorkerClockPanel({ initialClockState, assignments, workerName, t
         <>
           {projected.state === 'CLOCKED_OUT' ? (
             <>
-              <p className="wk-clock-status-label wk-clock-status-out">Clocked out</p>
+              <p className="wk-clock-status-label wk-clock-status-out">{t.clockedOut}</p>
 
               {assignments.length === 0 ? (
-                <p className="wk-empty">Your manager has not assigned a site to you yet. You can use the app, but Check In will become available after a site is assigned.</p>
+                <p className="wk-empty">{t.noSiteAssignedYet}</p>
               ) : (
                 <div role="radiogroup" aria-label="Select site to check in" className="wk-assignment-options">
                   {assignments.map((a) => (
@@ -529,7 +532,7 @@ export function WorkerClockPanel({ initialClockState, assignments, workerName, t
                       <span className="wk-assignment-option-body">
                         <span className="wk-assignment-site">
                           {a.siteName}
-                          {a.isPrimary ? ' · Primary' : ''}
+                          {a.isPrimary ? t.primarySuffix : ''}
                         </span>
                         {a.workAreaName && <span className="wk-assignment-detail">{a.workAreaName}</span>}
                       </span>
@@ -539,32 +542,32 @@ export function WorkerClockPanel({ initialClockState, assignments, workerName, t
               )}
 
               <button type="button" className="wk-action-button" onClick={handleCheckIn} disabled={busy || assignments.length === 0 || !selectedAssignmentId}>
-                Check in
+                {t.checkIn}
               </button>
             </>
           ) : (
             <>
-              <p className="wk-clock-status-label wk-clock-status-in">Clocked in{projected.isProjected ? ' (waiting for sync)' : ''}</p>
+              <p className="wk-clock-status-label wk-clock-status-in">{t.clockedIn}{projected.isProjected ? t.waitingForSync : ''}</p>
               {projected.siteName && <p className="wk-clock-site">{projected.siteName}</p>}
               {projected.workAreaName && <p className="wk-clock-workarea">{projected.workAreaName}</p>}
-              {projected.openedAt && <p className="wk-clock-since">Since {formatHelsinkiTime(projected.openedAt)}</p>}
+              {projected.openedAt && <p className="wk-clock-since">{t.sinceTime(formatHelsinkiTime(projected.openedAt))}</p>}
               <p className="wk-clock-timer" aria-label={`Elapsed time ${formatDuration(durationMs)}`}>
                 {formatDuration(durationMs)}
               </p>
 
               <button type="button" className="wk-action-button" onClick={handleCheckOut} disabled={busy}>
-                Check out
+                {t.checkOut}
               </button>
 
               {alternateAssignments.length > 0 && !switchPanelOpen && (
                 <button type="button" className="wk-clock-secondary-button" onClick={openSwitchPanel} disabled={busy}>
-                  Switch site
+                  {t.switchSite}
                 </button>
               )}
 
               {switchPanelOpen && (
                 <div className="wk-switch-panel">
-                  <p className="wk-section-title">Switch to a different site</p>
+                  <p className="wk-section-title">{t.switchToDifferentSite}</p>
                   <div role="radiogroup" aria-label="Select new site" className="wk-assignment-options">
                     {alternateAssignments.map((a) => (
                       <label key={a.id} className={`wk-assignment-option${switchTargetId === a.id ? ' selected' : ''}`}>
@@ -578,15 +581,15 @@ export function WorkerClockPanel({ initialClockState, assignments, workerName, t
                   </div>
                   {switchTarget && (
                     <p className="wk-switch-summary">
-                      From <strong>{projected.siteName}</strong> to <strong>{switchTarget.siteName}</strong>
+                      {t.switchFromTo(projected.siteName ?? '', switchTarget.siteName)}
                     </p>
                   )}
                   <div className="wk-switch-actions">
                     <button type="button" className="wk-clock-secondary-button" onClick={handleConfirmSwitch} disabled={busy || !switchTargetId}>
-                      Confirm switch
+                      {t.confirmSwitch}
                     </button>
                     <button type="button" className="wk-clock-cancel-button" onClick={closeSwitchPanel} disabled={busy}>
-                      Cancel
+                      {t.cancel}
                     </button>
                   </div>
                 </div>
@@ -608,12 +611,12 @@ export function WorkerClockPanel({ initialClockState, assignments, workerName, t
 
       {failedRecords.length > 0 && (
         <div className="wk-return-notice" aria-live="polite">
-          <p className="wk-return-notice-title">Needs attention</p>
+          <p className="wk-return-notice-title">{t.needsAttention}</p>
           <ul className="wk-return-reason-list">
             {failedRecords.map((r) => (
               <li key={r.clientEventId} className="wk-return-reason-item">
-                <span className="wk-return-reason-scope">{r.operationType === 'CHECK_IN' ? 'Check in' : 'Check out'}</span>
-                <span className="wk-return-reason-text">{describeErrorCode(r.lastErrorCode ?? undefined)}</span>
+                <span className="wk-return-reason-scope">{r.operationType === 'CHECK_IN' ? t.checkIn : t.checkOut}</span>
+                <span className="wk-return-reason-text">{describeErrorCode(r.lastErrorCode ?? undefined, t)}</span>
               </li>
             ))}
           </ul>
@@ -622,7 +625,7 @@ export function WorkerClockPanel({ initialClockState, assignments, workerName, t
 
       <section className="wk-recent-activity" aria-labelledby="wk-recent-activity-title">
         <div className="wk-recent-activity-heading">
-          <h2 id="wk-recent-activity-title">{recentActivity?.isToday ? "Today's time" : 'Recent time'}</h2>
+          <h2 id="wk-recent-activity-title">{recentActivity?.isToday ? t.todaysTime : t.recentTime}</h2>
           {recentActivity && <span>{recentActivity.date}</span>}
         </div>
         {recentActivity ? (
@@ -632,7 +635,7 @@ export function WorkerClockPanel({ initialClockState, assignments, workerName, t
             <span aria-hidden="true">→</span>
           </WorkerLink>
         ) : (
-          <p className="wk-empty">No completed time entries yet.</p>
+          <p className="wk-empty">{t.noCompletedTimeEntries}</p>
         )}
       </section>
 
@@ -640,17 +643,17 @@ export function WorkerClockPanel({ initialClockState, assignments, workerName, t
         <div className="wk-clock-nav">
           {periodsHref && (
             <WorkerLink href={periodsHref} className="wk-back-link">
-              My periods →
+              {t.myPeriods}
             </WorkerLink>
           )}
           {historyHref && (
             <WorkerLink href={historyHref} className="wk-back-link">
-              History →
+              {t.historyLink}
             </WorkerLink>
           )}
           {installHref && (
             <WorkerLink href={installHref} className="wk-back-link">
-              Install app →
+              {t.installAppLink}
             </WorkerLink>
           )}
         </div>

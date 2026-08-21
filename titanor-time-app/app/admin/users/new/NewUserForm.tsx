@@ -7,7 +7,7 @@ import { ActivationCodeIssuer } from '../ActivationCodeIssuer';
 
 // docs/titanor-time/04_ADMIN_FIRST_API_CONTRACTS.md §14 — POST /api/admin/users, both modes.
 const CSRF_HEADER_VALUE = 'titanor-time';
-const LOCALES = ['FI', 'EN', 'RU'] as const;
+const LOCALES = ['RU', 'EN'] as const;
 type Locale = (typeof LOCALES)[number];
 type Mode = 'STANDALONE' | 'EXISTING_EMPLOYEE';
 
@@ -47,7 +47,7 @@ export function NewUserForm({ employees }: { employees: ForemanSelectableEmploye
 
   const [username, setUsername] = useState('');
   const [email, setEmail] = useState('');
-  const [locale, setLocale] = useState<Locale>('FI');
+  const [locale, setLocale] = useState<Locale>('RU');
   const [employeeId, setEmployeeId] = useState('');
 
   const [loading, setLoading] = useState(false);

@@ -5,6 +5,11 @@ import { getDeviceState, getLocalClockState } from '@/lib/offline-outbox/db';
 import type { ClockStateWire } from '@/lib/offline-outbox/sync-runner';
 import { WorkerClockPanel, type ClockPanelAssignment } from '../worker/WorkerClockPanel';
 import { WorkerSnapshotView } from '@/components/worker-pwa/WorkerSnapshotView';
+import { AppLocaleProvider, useAppLocale } from '@/components/i18n/AppLocaleProvider';
+import { readClientLocale } from '@/lib/i18n/client';
+import { DEFAULT_APP_LOCALE, type AppLocale } from '@/lib/i18n/locale';
+import { COMMON_STRINGS } from '@/lib/i18n/common';
+import { WORKER_STRINGS } from '@/lib/i18n/worker';
 
 // docs/titanor-time/T7A_1_ATTENDANCE_CLOCK_DESIGN.md Addendum "T7A.10C.1" §C — the offline shell's
 // clock behavior (this component's original job) is completely unchanged: turning IndexedDB reads
@@ -22,15 +27,18 @@ import { WorkerSnapshotView } from '@/components/worker-pwa/WorkerSnapshotView';
 // rendering the real clock, exactly as before; a known OTHER route renders the read-only snapshot
 // view instead.
 
-function todayLabelNow(): string {
-  return new Intl.DateTimeFormat('en-GB', { timeZone: 'Europe/Helsinki', weekday: 'long', day: 'numeric', month: 'long' }).format(new Date());
+function todayLabelNow(locale: AppLocale): string {
+  return new Intl.DateTimeFormat(locale === 'RU' ? 'ru-RU' : 'en-GB', { timeZone: 'Europe/Helsinki', weekday: 'long', day: 'numeric', month: 'long' }).format(new Date());
 }
 
 type ReadState = { kind: 'loading' } | { kind: 'not-bootstrapped' } | { kind: 'ready'; initialClockState: ClockStateWire; assignments: ClockPanelAssignment[] };
 
 const CLOCK_PATHS = new Set(['/worker', '/worker-offline']);
 
-export function OfflineShellClient() {
+function OfflineShellContent() {
+  const locale = useAppLocale();
+  const common = COMMON_STRINGS[locale];
+  const t = WORKER_STRINGS[locale];
   const [state, setState] = useState<ReadState>({ kind: 'loading' });
   // Resolved inside the effect below (not read synchronously in the render body), same
   // hydration-safety reasoning as `state` itself — this is a single effect, not two racing ones,
@@ -100,7 +108,7 @@ export function OfflineShellClient() {
     return (
       <div className="wk-card">
         <p role="status" aria-live="polite">
-          Loading…
+          {common.loading}
         </p>
       </div>
     );
@@ -114,7 +122,7 @@ export function OfflineShellClient() {
     return (
       <div className="wk-card">
         <p role="status" aria-live="polite">
-          Loading…
+          {common.loading}
         </p>
       </div>
     );
@@ -124,7 +132,7 @@ export function OfflineShellClient() {
     return (
       <div className="wk-card">
         <p role="status" aria-live="polite">
-          Offline setup is not ready. Connect to the internet once, open the app, and try again.
+          {t.offlineShellNotReady}
         </p>
       </div>
     );
@@ -135,11 +143,21 @@ export function OfflineShellClient() {
       initialClockState={state.initialClockState}
       assignments={state.assignments}
       workerName={null}
-      todayLabel={todayLabelNow()}
+      todayLabel={todayLabelNow(locale)}
       recentActivity={null}
       periodsHref={null}
       historyHref={null}
       installHref={null}
     />
+  );
+}
+
+export function OfflineShellClient() {
+  const [locale, setLocale] = useState<AppLocale>(DEFAULT_APP_LOCALE);
+  useEffect(() => setLocale(readClientLocale()), []);
+  return (
+    <AppLocaleProvider locale={locale}>
+      <OfflineShellContent />
+    </AppLocaleProvider>
   );
 }

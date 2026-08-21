@@ -2,21 +2,27 @@
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
+import { useAppLocale } from '@/components/i18n/AppLocaleProvider';
+import { COMMON_STRINGS } from '@/lib/i18n/common';
+import { WORKER_STRINGS, type WorkerStrings } from '@/lib/i18n/worker';
 
 const CSRF_HEADER_VALUE = 'titanor-time';
 
-function describeError(code: string | undefined): string {
+function describeError(code: string | undefined, t: WorkerStrings): string {
   switch (code) {
     case 'INVALID_STATE_TRANSITION':
-      return 'This timesheet can no longer be submitted (it may already be submitted).';
+      return t.errSubmitAlreadySubmitted;
     case 'UNRESOLVED_PROPOSALS':
-      return 'Some foreman proposals still need your response before you can submit.';
+      return t.errUnresolvedProposals;
     default:
-      return 'Could not submit — please try again.';
+      return t.errCouldNotSubmit;
   }
 }
 
 export default function SubmitButton({ periodId, timesheetId }: { periodId: string; timesheetId: string }) {
+  const locale = useAppLocale();
+  const t = WORKER_STRINGS[locale];
+  const common = COMMON_STRINGS[locale];
   const router = useRouter();
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -31,13 +37,13 @@ export default function SubmitButton({ periodId, timesheetId }: { periodId: stri
       });
       if (!res.ok) {
         const data = await res.json().catch(() => null);
-        setError(describeError(data?.error?.code));
+        setError(describeError(data?.error?.code, t));
         setSubmitting(false);
         return;
       }
       router.push(`/worker/periods/${periodId}`);
     } catch {
-      setError('Network error — please try again.');
+      setError(common.networkError);
       setSubmitting(false);
     }
   }
@@ -50,7 +56,7 @@ export default function SubmitButton({ periodId, timesheetId }: { periodId: stri
         </p>
       )}
       <button type="button" className="wk-action-button" onClick={handleSubmit} disabled={submitting}>
-        {submitting ? 'Submitting…' : 'Submit timesheet'}
+        {submitting ? t.submitting : t.submitTimesheet}
       </button>
     </>
   );

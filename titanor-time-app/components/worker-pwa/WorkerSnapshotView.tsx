@@ -5,6 +5,10 @@ import { WorkerLink } from './WorkerLink';
 import { parseWorkerRoute, readAccountBoundSnapshot, type ReadSnapshotOutcome, type PeriodsListPayload, type HistoryListPayload, type PeriodDetailPayload, type HoursListPayload, type DayDetailPayload, type SubmitSummaryPayload, type SnapshotReturnReason } from '@/lib/offline-outbox/read-snapshots';
 import type { WorkerReadSnapshotRecord } from '@/lib/offline-outbox/db';
 import { workerTimesheetStatusLabel } from '@/lib/worker-timesheet-presentation';
+import { useAppLocale } from '@/components/i18n/AppLocaleProvider';
+import { COMMON_STRINGS } from '@/lib/i18n/common';
+import { WORKER_STRINGS, dayTypeLabel } from '@/lib/i18n/worker';
+import type { AppLocale } from '@/lib/i18n/locale';
 
 // docs/titanor-time/T8_PWA_DESIGN.md §F.6/§F.9 — the shell's read-only renderer, one branch per
 // SnapshotRouteKind. Never renders an editable input, a Save/Submit control, or a mutation-
@@ -25,16 +29,17 @@ function formatMinutes(minutes: number): string {
 }
 
 function ReturnReasonsReadOnly({ reasons }: { reasons: SnapshotReturnReason[] }) {
+  const t = COMMON_STRINGS[useAppLocale()];
   if (reasons.length === 0) {
     return null;
   }
   return (
     <div className="wk-return-notice" role="note">
-      <h2 className="wk-return-notice-title">Returned for correction</h2>
+      <h2 className="wk-return-notice-title">{t.returnedForCorrectionTitle}</h2>
       <ul className="wk-return-reason-list">
         {reasons.map((r, i) => (
           <li key={i} className="wk-return-reason-item">
-            <span className="wk-return-reason-scope">{r.scopeType === 'SITE' ? (r.siteName ?? 'Unknown site') : r.contextSiteName ? `General / non-site (${r.contextSiteName})` : 'General / non-site'}</span>
+            <span className="wk-return-reason-scope">{r.scopeType === 'SITE' ? (r.siteName ?? t.unknownSite) : r.contextSiteName ? `${t.generalNonSite} (${r.contextSiteName})` : t.generalNonSite}</span>
             <p className="wk-return-reason-text">{r.reason}</p>
           </li>
         ))}
@@ -44,58 +49,68 @@ function ReturnReasonsReadOnly({ reasons }: { reasons: SnapshotReturnReason[] })
 }
 
 function UnavailableNotice() {
+  const locale = useAppLocale();
+  const t = WORKER_STRINGS[locale];
+  const common = COMMON_STRINGS[locale];
   return (
     <div className="wk-card wk-snap-card">
       <p role="status" aria-live="polite">
-        This page has not been saved for offline viewing yet. Connect and open it once.
+        {t.snapUnavailable}
       </p>
       <WorkerLink href="/worker" className="wk-back-link">
-        ← Back to clock
+        {common.backToClock}
       </WorkerLink>
     </div>
   );
 }
 
 function InstallOfflineNotice() {
+  const locale = useAppLocale();
+  const t = WORKER_STRINGS[locale];
+  const common = COMMON_STRINGS[locale];
   return (
     <div className="wk-card wk-snap-card">
-      <p role="status" aria-live="polite">You&apos;re offline. Installation guidance needs a connection to check your browser&apos;s install status.</p>
+      <p role="status" aria-live="polite">{t.snapInstallOffline}</p>
       <WorkerLink href="/worker" className="wk-back-link">
-        ← Back to clock
+        {common.backToClock}
       </WorkerLink>
     </div>
   );
 }
 
 function ShellFrame({ capturedAt, children }: { capturedAt: string; children: ReactNode }) {
+  const locale = useAppLocale();
+  const t = WORKER_STRINGS[locale];
+  const common = COMMON_STRINGS[locale];
   return (
     <div className="wk-card wk-snap-card">
       <div className="wk-snap-header" role="status" aria-live="polite">
-        <span className="wk-snap-badge">Offline — read-only</span>
-        <span className="wk-snap-updated">Last updated: {formatCapturedAt(capturedAt)}</span>
+        <span className="wk-snap-badge">{t.snapOfflineReadOnly}</span>
+        <span className="wk-snap-updated">{t.snapLastUpdated(formatCapturedAt(capturedAt))}</span>
       </div>
       {children}
       <div className="wk-snap-actions">
         <button type="button" className="wk-clock-secondary-button" onClick={() => window.location.reload()}>
-          Reload when online
+          {t.snapReloadWhenOnline}
         </button>
         <WorkerLink href="/worker" className="wk-back-link">
-          ← Back to clock
+          {common.backToClock}
         </WorkerLink>
       </div>
     </div>
   );
 }
 
-function renderPayload(record: WorkerReadSnapshotRecord) {
+function renderPayload(record: WorkerReadSnapshotRecord, locale: AppLocale) {
+  const t = WORKER_STRINGS[locale];
   switch (record.routeKind) {
     case 'periods-list': {
       const payload = record.payload as PeriodsListPayload;
       return (
         <>
-          <h1>Your periods</h1>
+          <h1>{t.yourPeriods}</h1>
           {payload.periods.length === 0 ? (
-            <p className="wk-empty">You haven&apos;t been assigned to a site yet.</p>
+            <p className="wk-empty">{t.notAssignedToSiteYet}</p>
           ) : (
             <ul className="wk-period-list">
               {payload.periods.map((p) => (
@@ -104,7 +119,7 @@ function renderPayload(record: WorkerReadSnapshotRecord) {
                     <span className="wk-period-dates">
                       {p.startDate} – {p.endDate}
                     </span>
-                    <span className={`wk-status-badge wk-status-${p.timesheetStatus.toLowerCase()}`}>{workerTimesheetStatusLabel(p.timesheetStatus, p.totalMinutes)}</span>
+                    <span className={`wk-status-badge wk-status-${p.timesheetStatus.toLowerCase()}`}>{workerTimesheetStatusLabel(p.timesheetStatus, p.totalMinutes, locale)}</span>
                   </WorkerLink>
                 </li>
               ))}
@@ -117,9 +132,9 @@ function renderPayload(record: WorkerReadSnapshotRecord) {
       const payload = record.payload as HistoryListPayload;
       return (
         <>
-          <h1>History</h1>
+          <h1>{t.historyTitle}</h1>
           {payload.timesheets.length === 0 ? (
-            <p className="wk-empty">No periods yet.</p>
+            <p className="wk-empty">{t.noPeriodsYet}</p>
           ) : (
             <ul className="wk-period-list">
               {payload.timesheets.map((t) => (
@@ -128,7 +143,7 @@ function renderPayload(record: WorkerReadSnapshotRecord) {
                     <span className="wk-period-dates">
                       {t.startDate} – {t.endDate}
                     </span>
-                    <span className={`wk-status-badge wk-status-${t.timesheetStatus.toLowerCase()}`}>{workerTimesheetStatusLabel(t.timesheetStatus, t.totalMinutes)}</span>
+                    <span className={`wk-status-badge wk-status-${t.timesheetStatus.toLowerCase()}`}>{workerTimesheetStatusLabel(t.timesheetStatus, t.totalMinutes, locale)}</span>
                   </WorkerLink>
                 </li>
               ))}
@@ -144,18 +159,18 @@ function renderPayload(record: WorkerReadSnapshotRecord) {
           <h1>
             {payload.startDate} – {payload.endDate}
           </h1>
-          <span className={`wk-status-badge wk-status-${payload.timesheetStatus.toLowerCase()}`}>{workerTimesheetStatusLabel(payload.timesheetStatus, payload.totalMinutes)}</span>
+          <span className={`wk-status-badge wk-status-${payload.timesheetStatus.toLowerCase()}`}>{workerTimesheetStatusLabel(payload.timesheetStatus, payload.totalMinutes, locale)}</span>
           <ReturnReasonsReadOnly reasons={payload.returnReasons} />
-          <h2 className="wk-section-title">Your assignments</h2>
+          <h2 className="wk-section-title">{t.yourAssignments}</h2>
           {payload.assignments.length === 0 ? (
-            <p className="wk-empty">You haven&apos;t been assigned to a site yet.</p>
+            <p className="wk-empty">{t.notAssignedToSiteYet}</p>
           ) : (
             <ul className="wk-assignment-list">
               {payload.assignments.map((a) => (
                 <li key={a.id} className="wk-assignment-item">
                   <span className="wk-assignment-site">
                     {a.siteName}
-                    {a.isPrimary ? ' (primary)' : ''}
+                    {a.isPrimary ? t.primarySuffix : ''}
                   </span>
                   {a.workAreaName && <span className="wk-assignment-detail">{a.workAreaName}</span>}
                 </li>
@@ -163,7 +178,7 @@ function renderPayload(record: WorkerReadSnapshotRecord) {
             </ul>
           )}
           <WorkerLink href={`/worker/periods/${payload.periodId}/hours`} className="wk-back-link">
-            View hours
+            {t.viewHours}
           </WorkerLink>
         </>
       );
@@ -172,11 +187,11 @@ function renderPayload(record: WorkerReadSnapshotRecord) {
       const payload = record.payload as HoursListPayload;
       return (
         <>
-          <h1>Hours</h1>
+          <h1>{t.hours}</h1>
           <ReturnReasonsReadOnly reasons={payload.returnReasons} />
-          <p className="wk-readonly-note">Read-only — offline snapshot.</p>
+          <p className="wk-readonly-note">{t.snapReadOnlyOffline}</p>
           {payload.days.length === 0 ? (
-            <p className="wk-empty">No days in this period yet.</p>
+            <p className="wk-empty">{t.noDaysInPeriodYet}</p>
           ) : (
             <ul className="wk-day-list">
               {payload.days.map((day) => (
@@ -185,9 +200,9 @@ function renderPayload(record: WorkerReadSnapshotRecord) {
                     <span className="wk-day-date">{day.date}</span>
                     <span className="wk-day-summary">
                       {day.dayType !== 'WORK'
-                        ? day.dayType.replace('_', ' ').toLowerCase()
+                        ? dayTypeLabel(day.dayType, locale)
                         : day.confirmedZero
-                          ? 'Confirmed 0h'
+                          ? t.confirmedZeroShort
                           : day.siteNames.length === 0
                             ? '—'
                             : `${formatMinutes(day.totalMinutes)} · ${day.siteNames.join(', ')}`}
@@ -207,11 +222,11 @@ function renderPayload(record: WorkerReadSnapshotRecord) {
           <h1>{payload.date}</h1>
           <ReturnReasonsReadOnly reasons={payload.returnReasons} />
           {payload.dayType !== 'WORK' ? (
-            <p className="wk-empty">{payload.dayType.replace('_', ' ').toLowerCase()}</p>
+            <p className="wk-empty">{dayTypeLabel(payload.dayType, locale)}</p>
           ) : payload.confirmedZero ? (
-            <p className="wk-empty">Confirmed 0 hours</p>
+            <p className="wk-empty">{t.snapConfirmedZeroHours}</p>
           ) : payload.segments.length === 0 ? (
-            <p className="wk-empty">No hours logged for this day.</p>
+            <p className="wk-empty">{t.snapNoHoursLoggedDay}</p>
           ) : (
             <ul className="wk-period-list">
               {payload.segments.map((s, i) => (
@@ -234,15 +249,15 @@ function renderPayload(record: WorkerReadSnapshotRecord) {
       const payload = record.payload as SubmitSummaryPayload;
       return (
         <>
-          <h1>Submit timesheet</h1>
+          <h1>{t.submitTimesheetTitle}</h1>
           <ReturnReasonsReadOnly reasons={payload.returnReasons} />
           <p>
             {payload.startDate} – {payload.endDate}
           </p>
           <p className="wk-readonly-note">
-            {payload.workedDaysCount} of {payload.totalDaysCount} days filled in · {formatMinutes(payload.totalMinutes)} total
+            {t.daysFilledIn(payload.workedDaysCount, payload.totalDaysCount, formatMinutes(payload.totalMinutes))}
           </p>
-          <p className="wk-empty">Connect to submit — this snapshot is read-only.</p>
+          <p className="wk-empty">{t.snapConnectToSubmit}</p>
         </>
       );
     }
@@ -250,6 +265,8 @@ function renderPayload(record: WorkerReadSnapshotRecord) {
 }
 
 export function WorkerSnapshotView({ pathname }: { pathname: string }) {
+  const locale = useAppLocale();
+  const common = COMMON_STRINGS[locale];
   const [outcome, setOutcome] = useState<ReadSnapshotOutcome | 'loading' | 'no-route'>('loading');
 
   useEffect(() => {
@@ -282,7 +299,7 @@ export function WorkerSnapshotView({ pathname }: { pathname: string }) {
     return (
       <div className="wk-card">
         <p role="status" aria-live="polite">
-          Loading…
+          {common.loading}
         </p>
       </div>
     );
@@ -291,5 +308,5 @@ export function WorkerSnapshotView({ pathname }: { pathname: string }) {
     return <UnavailableNotice />;
   }
 
-  return <ShellFrame capturedAt={outcome.record.capturedAt}>{renderPayload(outcome.record)}</ShellFrame>;
+  return <ShellFrame capturedAt={outcome.record.capturedAt}>{renderPayload(outcome.record, locale)}</ShellFrame>;
 }
