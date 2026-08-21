@@ -34,6 +34,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   const { searchParams } = new URL(request.url);
   const parsed = parseOverviewQuery(
     {
+      q: searchParams.get('q'),
       periodId: searchParams.get('periodId'),
       siteId: searchParams.get('siteId'),
       state: searchParams.get('state'),

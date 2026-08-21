@@ -7869,6 +7869,20 @@ materializer rounding 7/7, map/GPS 6/6, grants подтверждены прям
 назначение не включает unscheduled worker в generated period другого schedule. Pilot/production в
 этой задаче не мигрировались и не перезапускались.
 
+### T9 owner Today dashboard (2026-08-21)
+
+Главная `/admin` перестроена под ежедневную работу начальника: поиск по работнику/номеру/Site/Work
+Area, Site-фильтр, 5 быстрых показателей и компактный список всех активных работников. Строка
+показывает working/finished/not started, объект/рабочую зону, Check In/Out, суммарное recorded-time
+сегодня и проблемы; целиком ведёт в личное дело, откуда есть Back to Today. Workers без объекта или
+period participant больше не исчезают с главного экрана. Payroll/review/conflict аналитика сохранена
+в сворачиваемых вторичных блоках.
+
+Сервис остаётся одним REPEATABLE READ snapshot и set-based: query-count 50/200 = 26/26. Новый
+permanent test — 25/25; реальный Chromium — desktop+390×844, поиск/drill-down/back, без overflow и
+application console errors. Browser-проверка обнаружила и закрыла реальный старый дефект native GET:
+пустые select значения (`siteId=&periodId=&state=`) ошибочно считались malformed фильтрами.
+
 ## 12. Правило обновления
 
 1. Каждая следующая задача сначала читает этот файл.

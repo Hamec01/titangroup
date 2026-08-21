@@ -925,6 +925,13 @@ Check In/Out projection округляется nearest 30 minutes (raw собы�
 ADMIN-only audited/no-store экран. Следующее действие — обновить isolated pilot и повторить ручной
 iPhone/Android сценарий.
 
+## T9.8 — Главный экран начальника «Сегодня» 🟢 `[2026-08-21]`
+
+`/admin` теперь начинает не с payroll-аналитики, а с компактного списка активных работников:
+поиск по имени/номеру/объекту/рабочей зоне, working/finished/not started, Check In/Out, время за
+сегодня, проблемы и переход в личное дело. Расширенная timesheet/conflict аналитика сохранена ниже
+в сворачиваемых секциях. Контракт и проверки: `docs/titanor-time/T9_OWNER_TODAY_DASHBOARD_DESIGN.md`.
+
 # ЭТАП 10. НЕДЕЛЬНАЯ ОБКАТКА
 
 ## T10.1 — Ограниченный запуск

@@ -31,6 +31,27 @@ export function LiveShiftDuration({ openedAt, initialAsOf }: { openedAt: string;
   return <span className="ov-live-duration">elapsed {formatElapsed(startedAtMs, nowMs)}</span>;
 }
 
+/** Keeps the compact Today total moving while a shift is open. The server-provided total already
+ * includes all closed shifts and the open shift through initialAsOf; only elapsed display minutes
+ * are added here, with no API call or database write. */
+export function LiveWorkedToday({ initialMinutes, initialAsOf, running }: { initialMinutes: number; initialAsOf: string; running: boolean }) {
+  const initialAsOfMs = Date.parse(initialAsOf);
+  const [nowMs, setNowMs] = useState(initialAsOfMs);
+
+  useEffect(() => {
+    if (!running) return;
+    const update = () => setNowMs(Date.now());
+    update();
+    const timer = window.setInterval(update, ELAPSED_REFRESH_MS);
+    return () => window.clearInterval(timer);
+  }, [running]);
+
+  const minutes = initialMinutes + (running ? Math.max(0, Math.floor((nowMs - initialAsOfMs) / 60_000)) : 0);
+  const hours = Math.floor(minutes / 60);
+  const remainder = minutes % 60;
+  return <span className="ov-live-duration">{hours > 0 ? `${hours} h ${remainder} min` : `${remainder} min`}</span>;
+}
+
 /** Re-reads authoritative overview state twice an hour while this page is actually visible. */
 export function OverviewAutoRefresh() {
   const router = useRouter();

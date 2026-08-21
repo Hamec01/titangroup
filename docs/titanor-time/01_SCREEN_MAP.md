@@ -146,19 +146,20 @@ touch target ≥ 48px), `/foreman/*` — desktop-first с поддержкой �
 - API: `GET /api/admin/setup-status`
 - DoD: точно отражает БД, не кэширует «выполнено» после деактивации сущности
 
-#### `/admin` (operational overview) 🟢 **`[2026-08-18] T7A.9B реализовано`**
+#### `/admin` (owner Today dashboard) 🟢 **`[2026-08-21] T9 owner UX обновлено`**
 - Роли: `ADMIN`, `SUPER_ADMIN` (`timesheet.read.all`+`attendance.exception.read.all`+
   `attendance.conflict.read` одновременно, permission-check не role-check)
-- Приоритет: desktop
-- Назначение: полный операционный обзор — больше не безусловный `redirect('/admin/setup')`. Кто
-  работает сейчас/закончил/missing checkout/GPS/sync issue, что draft/отправлено вручную-
-  автоматически/ждёт прораба/возвращено/готово к final approval/в correction, плюс recorded-vs-
-  reported diff и компактная conflicts-секция (ADMIN-only)
+- Приоритет: desktop + mobile
+- Назначение: первый экран начальника «Сегодня». Сразу показывает всех активных работников (в том
+  числе ещё без объекта/периода), кто работает/закончил/не начал, объект и рабочую зону, последнее
+  Check In/Out, накопленное сегодня время и сигнал проблем. Вся строка открывает личное дело.
+  Payroll/review/conflicts не удалены, а перенесены в сворачиваемые вторичные секции.
 - Данные: `OverviewResult` целиком — `summary`(15 карточек)/`items`(worker rows)/`conflicts`/
   `period`/`asOf`, без клиентского пересчёта — все числа уже посчитаны backend
-- Действия: 13 operational-state summary-карточек — каждая ссылка/кнопка фильтра (`state` в URL,
-  `aria-current` на активной), фильтры period/site/state/pageSize (URL query string), явный
-  Refresh, ссылки на `/admin/workers/:id`/`/admin/timesheets/:id`/`/admin/periods/:id`/
+- Действия: серверный поиск `q` по имени/employee number/Site/Work Area до пагинации, быстрый Site-
+  фильтр, 5 счётчиков «сегодня», явный Refresh и переход в `/admin/workers/:id`. Старые 13
+  operational-state фильтров и period/state/pageSize доступны в More filters/secondary details;
+  ссылки на `/admin/timesheets/:id`/`/admin/periods/:id`/
   `/admin/attendance/exceptions?status=OPEN&employeeId=`/`/admin/corrections`
 - Состояния: loading (`app/admin/loading.tsx`, skeleton той же формы); normal; no active period
   (честный баннер, clock-state всё равно показан); no workers; фильтр вернул ноль строк (отдельная
@@ -170,9 +171,9 @@ touch target ≥ 48px), `/foreman/*` — desktop-first с поддержкой �
 - API: не самостоятельный fetch — Server Component напрямую вызывает `getAdminOperationalOverview`
   (`lib/attendance-overview.ts`), тот же server-only wrapper, что и `GET /api/admin/overview`
   (`04_ADMIN_FIRST_API_CONTRACTS.md` §9.1e) — контракт API не менялся
-- DoD: не показывает цифру, не посчитанную напрямую из БД в момент запроса (уже гарантировано на
-  уровне backend); ноль запрещённых полей (GPS/payload/hash/device/requestId) в DOM; bounded query
-  count не изменился (n=50/200 → 24 запроса, как в T7A.9A)
+- DoD: один REPEATABLE READ snapshot; live-счётчик только отображает прошедшие минуты и ничего не
+  пишет в БД; ноль raw GPS/payload/hash/device/requestId в DTO/DOM; bounded query count после
+  добавления одного bulk assignment query: n=50/200 → 26/26; 390×844 без horizontal overflow.
 
 #### `/admin/workers` 🟢
 - Роли: `ADMIN`, `SUPER_ADMIN`

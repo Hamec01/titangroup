@@ -1509,9 +1509,11 @@ target-identity-алгоритм. **Обязательное архитекту�
 теперь используют и сами route-файлы) напрямую как Server Components, без HTTP-запроса к
 собственному API и без второй копии транзакционного контракта.
 
-**Общие query-параметры обоих endpoint** (все опциональны): `periodId` (UUID), `siteId` (UUID),
+**Общие query-параметры обоих endpoint** (все опциональны): `q` (до 100 символов; имя/employee
+number/Site/Work Area, case-insensitive, применяется до пагинации), `periodId` (UUID), `siteId` (UUID),
 `state` (один из 13 значений ниже), `page` (default 1), `pageSize` (default 20, максимум 100).
-Явно переданное невалидное значение любого параметра → `400 VALIDATION_ERROR` + `fieldErrors`,
+Пустое значение необязательного select (`siteId=&periodId=&state=` из обычной HTML-формы) означает
+«фильтр не выбран». Иное явно переданное невалидное значение → `400 VALIDATION_ERROR` + `fieldErrors`,
 никогда не заменяется дефолтом молча. `periodId` не передан → текущий `OPEN` `PayrollPeriod`,
 покрывающий сегодняшний Helsinki calendar date, либо `period: null`, если такого нет (clock-state
 всё равно считается, timesheet/review-счётчики — нулевые). Явно переданный несуществующий
@@ -1533,8 +1535,13 @@ target-identity-алгоритм. **Обязательное архитекту�
   "summary": { "totalWorkers": 0, "workingNow": 0, "finishedToday": 0, "missingCheckout": 0,
     "gpsIssue": 0, "syncIssue": 0, "draft": 0, "submittedManual": 0, "submittedAuto": 0,
     "awaitingForeman": 0, "returned": 0, "readyForFinalApproval": 0, "finalApproved": 0,
-    "correctionOpen": 0, "openAttendanceExceptions": 0 },
+    "correctionOpen": 0, "openAttendanceExceptions": 0, "notStartedToday": 0,
+    "needsAttention": 0 },
   "items": [ { "employee": { "id": "uuid", "name": "string", "employeeNumber": "string" },
+      "todayStatus": "WORKING" | "FINISHED" | "NOT_STARTED", "todayWorkedMinutes": 0,
+      "needsAttention": false,
+      "currentAssignments": [ { "site": {"id":"uuid","name":"string"},
+        "workArea": {"id":"uuid","name":"string"} | null, "isPrimary": true } ],
       "states": ["WORKING_NOW", "..."],
       "openShift": { "site": {"id":"uuid","name":"string"}, "workArea": {"id":"uuid","name":"string"} | null,
         "openedAt": "iso", "channel": "ONLINE" | "OFFLINE" } | null,
@@ -1599,8 +1606,8 @@ target-identity-алгоритм. **Обязательное архитекту�
   тот же `REPEATABLE READ` snapshot, что и остальной ответ.
 
 **Query-count contract** (§11 ТЗ T7A.9A): число SQL-запросов ограничено константой, не растёт
-линейно с числом работников/scope — подтверждено `scripts/_test-overview-querycount.ts` на
-disposable БД: n=50 работников → 24 запроса, n=200 работников → 24 запроса (идентично).
+линейно с числом работников/scope — после T9 owner Today bulk current-assignment query подтверждено
+`scripts/_test-overview-querycount.ts`: n=50 работников → 26 запросов, n=200 → 26 (идентично).
 
 ### 9.1f Attendance auto-submit backend + company policy API (T7A.10A,
 `T7A_1_ATTENDANCE_CLOCK_DESIGN.md` §9.6 + Addendum "T7A.10A" — **backend реализован**;

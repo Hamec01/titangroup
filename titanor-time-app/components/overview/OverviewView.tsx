@@ -14,7 +14,7 @@ import {
 } from '@/lib/attendance-overview-ui';
 import { exceptionTypeLabel, channelLabel, timesheetStatusLabel, formatDateTime } from '@/lib/attendance-exceptions-ui';
 import { formatHelsinkiDateTime } from '@/lib/helsinki-datetime';
-import { LiveShiftDuration, OverviewAutoRefresh } from '@/components/overview/OverviewLiveStatus';
+import { LiveShiftDuration, LiveWorkedToday, OverviewAutoRefresh } from '@/components/overview/OverviewLiveStatus';
 
 // docs/titanor-time/T7A_1_ATTENDANCE_CLOCK_DESIGN.md Addendum "T7A.9A" + PROJECT_ROADMAP.md T7A.9 —
 // T7A.9B. Pure presentation: given an already-fetched OverviewResult (or a validation/not-found
@@ -23,6 +23,7 @@ import { LiveShiftDuration, OverviewAutoRefresh } from '@/components/overview/Ov
 // Shared verbatim by /admin and /foreman, which differ only in role/basePath/links/conflicts.
 
 export interface OverviewRawQuery {
+  q: string | null;
   periodId: string | null;
   siteId: string | null;
   state: string | null;
@@ -54,7 +55,7 @@ export function OverviewView({ role, basePath, rawQuery, outcome, periodOptions,
 
   return (
     <div className="setup-card worker-card ov-card">
-      <h1>{isAdmin ? 'Operational overview' : 'Overview'}</h1>
+      <h1>{isAdmin ? 'Today' : 'Overview'}</h1>
 
       {legacy && <ForemanLegacySection legacy={legacy} />}
 
@@ -107,7 +108,7 @@ function ForemanLegacySection({ legacy }: { legacy: { pendingCount: number; exce
 }
 
 function currentFilterBase(rawQuery: OverviewRawQuery) {
-  return { periodId: rawQuery.periodId, siteId: rawQuery.siteId, employeeId: rawQuery.employeeId, pageSize: rawQuery.pageSize };
+  return { q: rawQuery.q, periodId: rawQuery.periodId, siteId: rawQuery.siteId, employeeId: rawQuery.employeeId, pageSize: rawQuery.pageSize };
 }
 
 function OverviewBody({
@@ -127,6 +128,10 @@ function OverviewBody({
 }) {
   const isAdmin = role === 'admin';
 
+  if (isAdmin) {
+    return <AdminTodayBody basePath={basePath} rawQuery={rawQuery} result={result} periodOptions={periodOptions} siteOptions={siteOptions} />;
+  }
+
   return (
     <>
       <OverviewAutoRefresh />
@@ -142,6 +147,151 @@ function OverviewBody({
 
       <Pagination basePath={basePath} rawQuery={rawQuery} page={result.page} totalPages={result.totalPages} totalItems={result.totalItems} />
     </>
+  );
+}
+
+function AdminTodayBody({
+  basePath,
+  rawQuery,
+  result,
+  periodOptions,
+  siteOptions
+}: {
+  basePath: string;
+  rawQuery: OverviewRawQuery;
+  result: OverviewResult;
+  periodOptions: PeriodOption[];
+  siteOptions: SiteOption[];
+}) {
+  const todayLabel = new Intl.DateTimeFormat('en-GB', { timeZone: 'Europe/Helsinki', weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' }).format(new Date(result.asOf));
+  return (
+    <>
+      <OverviewAutoRefresh />
+      <div className="owner-today-head">
+        <div>
+          <p className="owner-today-date">{todayLabel}</p>
+          <p className="ov-asof">Updated {formatHelsinkiDateTime(result.asOf)} · refreshes every 30 minutes · <Link href={basePath}>Refresh now</Link></p>
+        </div>
+        {result.period ? <span className="ov-badge ov-badge-neutral">{result.period.multipleCurrentCycles ? 'Multiple submission cycles' : `${result.period.startDate} – ${result.period.endDate}`}</span> : <span className="ov-badge ov-badge-issue">No current period</span>}
+      </div>
+
+      <OwnerSearchForm basePath={basePath} rawQuery={rawQuery} periodOptions={periodOptions} siteOptions={siteOptions} />
+      <OwnerQuickSummary summary={result.summary} />
+      <OwnerWorkerList items={result.items} totalItems={result.totalItems} asOf={result.asOf} />
+      <Pagination basePath={basePath} rawQuery={rawQuery} page={result.page} totalPages={result.totalPages} totalItems={result.totalItems} />
+
+      <details className="owner-secondary-panel">
+        <summary>Timesheets and approval details</summary>
+        <SummaryCards basePath={basePath} rawQuery={rawQuery} summary={result.summary} />
+      </details>
+      {result.conflicts ? (
+        <details className="owner-secondary-panel" open={result.conflicts.totalOpenOrRecent > 0}>
+          <summary>Technical conflicts {result.conflicts.totalOpenOrRecent > 0 ? `(${result.conflicts.totalOpenOrRecent})` : ''}</summary>
+          <ConflictsSection conflicts={result.conflicts} />
+        </details>
+      ) : null}
+    </>
+  );
+}
+
+function OwnerSearchForm({ basePath, rawQuery, periodOptions, siteOptions }: { basePath: string; rawQuery: OverviewRawQuery; periodOptions: PeriodOption[]; siteOptions: SiteOption[] }) {
+  return (
+    <form method="GET" action={basePath} className="owner-search" aria-label="Search today's workers">
+      <div className="owner-search-primary">
+        <div className="ov-filter-field owner-search-query">
+          <label htmlFor="owner-search-q">Worker or site</label>
+          <input id="owner-search-q" name="q" type="search" maxLength={100} defaultValue={rawQuery.q ?? ''} placeholder="Name, employee number, site or work area" />
+        </div>
+        <div className="ov-filter-field">
+          <label htmlFor="owner-search-site">Site</label>
+          <select id="owner-search-site" name="siteId" defaultValue={rawQuery.siteId ?? ''}>
+            <option value="">All sites</option>
+            {siteOptions.map((site) => <option key={site.id} value={site.id}>{site.name}</option>)}
+          </select>
+        </div>
+        <button type="submit" className="exc-apply-button">Search</button>
+        <Link href={basePath} className="exc-reset-link">Reset</Link>
+      </div>
+      <details className="owner-more-filters">
+        <summary>More filters</summary>
+        <div className="owner-more-filter-grid">
+          <div className="ov-filter-field">
+            <label htmlFor="owner-filter-period">Period</label>
+            <select id="owner-filter-period" name="periodId" defaultValue={rawQuery.periodId ?? ''}>
+              <option value="">Current cycles</option>
+              {periodOptions.map((period) => <option key={period.id} value={period.id}>{period.label}</option>)}
+            </select>
+          </div>
+          <div className="ov-filter-field">
+            <label htmlFor="owner-filter-state">Status or issue</label>
+            <select id="owner-filter-state" name="state" defaultValue={rawQuery.state ?? ''}>
+              <option value="">All</option>
+              {OPERATIONAL_STATE_VALUES.map((state) => <option key={state} value={state}>{operationalStateLabel(state)}</option>)}
+            </select>
+          </div>
+          <div className="ov-filter-field">
+            <label htmlFor="owner-filter-pagesize">Workers per page</label>
+            <select id="owner-filter-pagesize" name="pageSize" defaultValue={rawQuery.pageSize ?? '20'}>
+              {[20, 50, 100].map((size) => <option key={size} value={size}>{size}</option>)}
+            </select>
+          </div>
+        </div>
+      </details>
+    </form>
+  );
+}
+
+function OwnerQuickSummary({ summary }: { summary: OverviewSummary }) {
+  const items = [
+    { label: 'Active workers', value: summary.totalWorkers, className: 'owner-stat-neutral' },
+    { label: 'Working now', value: summary.workingNow, className: 'owner-stat-working' },
+    { label: 'Finished today', value: summary.finishedToday, className: 'owner-stat-finished' },
+    { label: 'Not started', value: summary.notStartedToday, className: 'owner-stat-neutral' },
+    { label: 'Need attention', value: summary.needsAttention, className: summary.needsAttention > 0 ? 'owner-stat-attention' : 'owner-stat-neutral' }
+  ];
+  return <ul className="owner-quick-stats" aria-label="Today's worker summary">{items.map((item) => <li key={item.label} className={item.className}><strong>{item.value}</strong><span>{item.label}</span></li>)}</ul>;
+}
+
+function formatTodayTime(value: string | null): string {
+  if (!value) return '—';
+  return new Intl.DateTimeFormat('en-GB', { timeZone: 'Europe/Helsinki', hour: '2-digit', minute: '2-digit', hour12: false }).format(new Date(value));
+}
+
+function OwnerWorkerList({ items, totalItems, asOf }: { items: OverviewWorkerItem[]; totalItems: number; asOf: string }) {
+  if (totalItems === 0) return <p className="wk-empty" role="status">No workers match this search.</p>;
+  return (
+    <section className="owner-workers" aria-labelledby="owner-workers-title">
+      <div className="owner-workers-heading"><h2 id="owner-workers-title">Workers today</h2><span>{totalItems}</span></div>
+      <div className="owner-worker-columns" aria-hidden="true"><span>Worker</span><span>Status</span><span>Site</span><span>Check In</span><span>Check Out</span><span>Today</span><span>Issues</span><span /></div>
+      <ul className="owner-worker-list">
+        {items.map((item) => <OwnerWorkerRow key={item.employee.id} item={item} asOf={asOf} />)}
+      </ul>
+    </section>
+  );
+}
+
+function OwnerWorkerRow({ item, asOf }: { item: OverviewWorkerItem; asOf: string }) {
+  const assignment = item.openShift
+    ? { site: item.openShift.site, workArea: item.openShift.workArea }
+    : item.currentAssignments.find((current) => current.isPrimary) ?? item.currentAssignments[0] ?? (item.latestFinishedShiftToday ? { site: item.latestFinishedShiftToday.site, workArea: null } : null);
+  const startedAt = item.openShift?.openedAt ?? item.latestFinishedShiftToday?.recordedStartAt ?? null;
+  const endedAt = item.openShift ? null : item.latestFinishedShiftToday?.recordedEndAt ?? null;
+  const statusLabel = item.todayStatus === 'WORKING' ? 'Working now' : item.todayStatus === 'FINISHED' ? 'Finished' : 'Not started';
+  const statusClass = item.todayStatus === 'WORKING' ? 'owner-status-working' : item.todayStatus === 'FINISHED' ? 'owner-status-finished' : 'owner-status-not-started';
+  const issueLabel = item.openExceptionCount > 0 ? `${item.openExceptionCount} issue${item.openExceptionCount === 1 ? '' : 's'}` : item.needsAttention ? 'Review needed' : 'No issues';
+  return (
+    <li>
+      <Link href={`/admin/workers/${item.employee.id}`} className="owner-worker-row" aria-label={`Open ${item.employee.name}`}>
+        <span className="owner-worker-identity"><strong>{item.employee.name}</strong><small>#{item.employee.employeeNumber}</small></span>
+        <span><span className={`owner-status ${statusClass}`}>{statusLabel}</span>{item.timesheet ? <small>{timesheetStatusLabel(item.timesheet.status)}</small> : null}</span>
+        <span className="owner-worker-site"><strong>{assignment?.site.name ?? 'No site assigned'}</strong>{assignment?.workArea ? <small>{assignment.workArea.name}</small> : null}</span>
+        <span data-label="Check In">{formatTodayTime(startedAt)}</span>
+        <span data-label="Check Out">{formatTodayTime(endedAt)}</span>
+        <span data-label="Today"><LiveWorkedToday initialMinutes={item.todayWorkedMinutes} initialAsOf={asOf} running={item.todayStatus === 'WORKING'} /></span>
+        <span data-label="Issues" className={item.needsAttention ? 'owner-issue' : 'owner-no-issue'}>{issueLabel}</span>
+        <span className="owner-worker-open">View →</span>
+      </Link>
+    </li>
   );
 }
 
@@ -194,6 +344,10 @@ function FilterForm({
   return (
     <form method="GET" action={basePath} className="ov-filters" aria-label="Filter overview">
       {rawQuery.employeeId && <input type="hidden" name="employeeId" value={rawQuery.employeeId} />}
+      <div className="ov-filter-field">
+        <label htmlFor="ov-filter-q">Worker or site</label>
+        <input id="ov-filter-q" name="q" type="search" maxLength={100} defaultValue={rawQuery.q ?? ''} placeholder="Name, number, site or work area" />
+      </div>
       <div className="ov-filter-field">
         <label htmlFor="ov-filter-period">Period</label>
         <select id="ov-filter-period" name="periodId" defaultValue={rawQuery.periodId ?? ''}>

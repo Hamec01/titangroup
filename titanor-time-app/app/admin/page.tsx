@@ -46,6 +46,7 @@ export default async function AdminOverviewPage({ searchParams }: RouteParams) {
 
   const sp = await searchParams;
   const rawQuery = {
+    q: one(sp.q),
     periodId: one(sp.periodId),
     siteId: one(sp.siteId),
     state: one(sp.state),

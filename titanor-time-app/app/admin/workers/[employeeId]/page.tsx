@@ -57,6 +57,7 @@ export default async function WorkerDetailPage({ params }: { params: Promise<{ e
   return (
     <main className="setup-page">
       <div className="setup-card worker-card">
+        <p className="setup-subtitle"><Link href="/admin">← Back to Today</Link></p>
         <h1>
           {worker.firstName} {worker.lastName}
         </h1>

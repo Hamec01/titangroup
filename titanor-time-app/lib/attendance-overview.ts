@@ -44,6 +44,7 @@ const SYNC_ISSUE_TYPES = new Set(['DOUBLE_CHECK_IN', 'CHECKOUT_WITHOUT_OPEN_SHIF
 // ---------------------------------------------------------------------------------------------
 
 export interface OverviewQueryInput {
+  q?: string | null;
   periodId: string | null;
   siteId: string | null;
   state: string | null;
@@ -53,6 +54,7 @@ export interface OverviewQueryInput {
 }
 
 export interface OverviewFilters {
+  q?: string;
   periodId?: string;
   siteId?: string;
   state?: OperationalState;
@@ -65,6 +67,16 @@ export type OverviewQueryResult = { ok: true; filters: OverviewFilters } | { ok:
 
 export function parseOverviewQuery(input: OverviewQueryInput, options: { allowEmployeeId: boolean }): OverviewQueryResult {
   const fieldErrors: Record<string, string[]> = {};
+
+  let q: string | undefined;
+  if (input.q !== null && input.q !== undefined) {
+    const normalized = input.q.trim().replace(/\s+/g, ' ');
+    if (normalized.length > 100) {
+      fieldErrors.q = ['must be at most 100 characters'];
+    } else if (normalized.length > 0) {
+      q = normalized;
+    }
+  }
 
   let page = 1;
   if (input.page !== null) {
@@ -87,7 +99,7 @@ export function parseOverviewQuery(input: OverviewQueryInput, options: { allowEm
   }
 
   let periodId: string | undefined;
-  if (input.periodId !== null) {
+  if (input.periodId !== null && input.periodId !== '') {
     if (!UUID_PATTERN.test(input.periodId)) {
       fieldErrors.periodId = ['must be a UUID'];
     } else {
@@ -96,7 +108,7 @@ export function parseOverviewQuery(input: OverviewQueryInput, options: { allowEm
   }
 
   let siteId: string | undefined;
-  if (input.siteId !== null) {
+  if (input.siteId !== null && input.siteId !== '') {
     if (!UUID_PATTERN.test(input.siteId)) {
       fieldErrors.siteId = ['must be a UUID'];
     } else {
@@ -105,7 +117,7 @@ export function parseOverviewQuery(input: OverviewQueryInput, options: { allowEm
   }
 
   let state: OperationalState | undefined;
-  if (input.state !== null) {
+  if (input.state !== null && input.state !== '') {
     if (!(OPERATIONAL_STATE_VALUES as readonly string[]).includes(input.state)) {
       fieldErrors.state = [`must be one of ${OPERATIONAL_STATE_VALUES.join(', ')}`];
     } else {
@@ -114,7 +126,7 @@ export function parseOverviewQuery(input: OverviewQueryInput, options: { allowEm
   }
 
   let employeeId: string | undefined;
-  if (input.employeeId !== null) {
+  if (input.employeeId !== null && input.employeeId !== '') {
     if (!options.allowEmployeeId) {
       fieldErrors.employeeId = ['not a supported filter on this endpoint'];
     } else if (!UUID_PATTERN.test(input.employeeId)) {
@@ -127,7 +139,7 @@ export function parseOverviewQuery(input: OverviewQueryInput, options: { allowEm
   if (Object.keys(fieldErrors).length > 0) {
     return { ok: false, fieldErrors };
   }
-  return { ok: true, filters: { periodId, siteId, state, employeeId, page, pageSize } };
+  return { ok: true, filters: { q, periodId, siteId, state, employeeId, page, pageSize } };
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -213,6 +225,8 @@ export interface OverviewSummary {
   finalApproved: number;
   correctionOpen: number;
   openAttendanceExceptions: number;
+  notStartedToday: number;
+  needsAttention: number;
 }
 
 export interface OverviewDiff {
@@ -224,6 +238,10 @@ export interface OverviewDiff {
 
 export interface OverviewWorkerItem {
   employee: { id: string; name: string; employeeNumber: string };
+  todayStatus: 'WORKING' | 'FINISHED' | 'NOT_STARTED';
+  todayWorkedMinutes: number;
+  needsAttention: boolean;
+  currentAssignments: Array<{ site: { id: string; name: string }; workArea: { id: string; name: string } | null; isPrimary: boolean }>;
   states: OperationalState[];
   openShift: { site: { id: string; name: string }; workArea: { id: string; name: string } | null; openedAt: string; channel: string } | null;
   latestFinishedShiftToday: { id: string; site: { id: string; name: string }; recordedStartAt: string; recordedEndAt: string } | null;
@@ -303,7 +321,24 @@ export async function buildOperationalOverview(tx: Prisma.TransactionClient, fil
 
   // ---- 1. Base employee universe -------------------------------------------------------------
   let employeeIds: string[];
-  if (period) {
+  if (!filters.periodId && scope.includeConflicts) {
+    // The owner's default Today dashboard must also show newly-created active workers who have
+    // not received a Site or submission period yet. Historical period views remain participant-
+    // scoped below, and foreman visibility remains site-scoped.
+    const activeEmployees = await tx.employee.findMany({
+      where: {
+        employments: {
+          some: {
+            active: true,
+            startDate: { lte: today },
+            OR: [{ endDate: null }, { endDate: { gte: today } }]
+          }
+        }
+      },
+      select: { id: true }
+    });
+    employeeIds = activeEmployees.map((employee) => employee.id);
+  } else if (period) {
     const participants = await tx.payrollPeriodParticipant.findMany({ where: { periodId: { in: currentPeriodIds }, expected: true }, select: { employeeId: true } });
     employeeIds = participants.map((p) => p.employeeId);
   } else {
@@ -337,14 +372,34 @@ export async function buildOperationalOverview(tx: Prisma.TransactionClient, fil
   }
 
   // ---- 2. Bulk fetch everything, bounded by employeeIds.length (never per-row awaits) --------
-  const [employees, openShifts, finishedShiftsRaw, openExceptions, timesheets] = await Promise.all([
+  const [employees, currentAssignments, openShifts, finishedShiftsRaw, openExceptions, timesheets] = await Promise.all([
     tx.employee.findMany({ where: { id: { in: employeeIds } }, select: { id: true, employeeNumber: true, firstName: true, lastName: true } }),
+    tx.siteAssignment.findMany({
+      where: {
+        employeeId: { in: employeeIds },
+        ...currentAssignmentWhere(today),
+        ...(siteRestriction !== null ? { siteId: { in: siteRestriction } } : {})
+      },
+      orderBy: [{ isPrimary: 'desc' }, { validFrom: 'desc' }, { id: 'asc' }],
+      select: {
+        employeeId: true,
+        siteId: true,
+        site: { select: { name: true } },
+        workAreaId: true,
+        workArea: { select: { name: true } },
+        isPrimary: true
+      }
+    }),
     tx.employeeOpenShift.findMany({
       where: { employeeId: { in: employeeIds } },
       select: { employeeId: true, siteId: true, site: { select: { name: true } }, workAreaId: true, workArea: { select: { name: true } }, openedAt: true, openedByClockEvent: { select: { channel: true } } }
     }),
     tx.clockShift.findMany({
-      where: { employeeId: { in: employeeIds }, recordedEndAt: { gte: todayStart, lt: todayEnd } },
+      where: {
+        employeeId: { in: employeeIds },
+        recordedStartAt: { lt: todayEnd },
+        recordedEndAt: { gt: todayStart, lte: asOf }
+      },
       orderBy: { recordedEndAt: 'desc' },
       select: { id: true, employeeId: true, siteId: true, site: { select: { name: true } }, recordedStartAt: true, recordedEndAt: true }
     }),
@@ -365,9 +420,19 @@ export async function buildOperationalOverview(tx: Prisma.TransactionClient, fil
   ]);
 
   const employeeById = new Map(employees.map((e) => [e.id, e]));
+  const assignmentsByEmployee = new Map<string, typeof currentAssignments>();
+  for (const assignment of currentAssignments) {
+    const list = assignmentsByEmployee.get(assignment.employeeId) ?? [];
+    list.push(assignment);
+    assignmentsByEmployee.set(assignment.employeeId, list);
+  }
   const openShiftByEmployee = new Map(openShifts.map((s) => [s.employeeId, s]));
+  const finishedTodayAllByEmployee = new Map<string, typeof finishedShiftsRaw>();
   const finishedTodayByEmployee = new Map<string, (typeof finishedShiftsRaw)[number]>();
   for (const shift of finishedShiftsRaw) {
+    const list = finishedTodayAllByEmployee.get(shift.employeeId) ?? [];
+    list.push(shift);
+    finishedTodayAllByEmployee.set(shift.employeeId, list);
     if (!finishedTodayByEmployee.has(shift.employeeId)) {
       finishedTodayByEmployee.set(shift.employeeId, shift); // already ordered recordedEndAt desc
     }
@@ -428,7 +493,9 @@ export async function buildOperationalOverview(tx: Prisma.TransactionClient, fil
     readyForFinalApproval: 0,
     finalApproved: 0,
     correctionOpen: 0,
-    openAttendanceExceptions: 0
+    openAttendanceExceptions: 0,
+    notStartedToday: 0,
+    needsAttention: 0
   };
 
   const allItems: OverviewWorkerItem[] = [];
@@ -442,6 +509,16 @@ export async function buildOperationalOverview(tx: Prisma.TransactionClient, fil
     if (openShift) states.push('WORKING_NOW');
     const finishedShift = finishedTodayByEmployee.get(employeeId) ?? null;
     if (finishedShift) states.push('FINISHED_TODAY');
+    const todayStatus: OverviewWorkerItem['todayStatus'] = openShift ? 'WORKING' : finishedShift ? 'FINISHED' : 'NOT_STARTED';
+    const closedTodayMs = (finishedTodayAllByEmployee.get(employeeId) ?? []).reduce((total, shift) => {
+      const startMs = Math.max(shift.recordedStartAt.getTime(), todayStart.getTime());
+      const endMs = Math.min(shift.recordedEndAt.getTime(), todayEnd.getTime(), asOf.getTime());
+      return total + Math.max(0, endMs - startMs);
+    }, 0);
+    const openTodayMs = openShift
+      ? Math.max(0, asOf.getTime() - Math.max(openShift.openedAt.getTime(), todayStart.getTime()))
+      : 0;
+    const todayWorkedMinutes = Math.floor((closedTodayMs + openTodayMs) / 60_000);
 
     const myExceptions = openExceptionsByEmployee.get(employeeId) ?? [];
     const myExceptionTypes = new Set(myExceptions.map((e) => e.type));
@@ -495,6 +572,7 @@ export async function buildOperationalOverview(tx: Prisma.TransactionClient, fil
 
       correctionDto = correction ? { status: correction.status } : null;
     }
+    const needsAttention = myExceptions.length > 0 || states.some((state) => ['MISSING_CHECKOUT', 'GPS_ISSUE', 'SYNC_ISSUE', 'RETURNED', 'CORRECTION_OPEN'].includes(state));
 
     // summary tallies (unaffected by the `state` display filter — see module doc)
     summary.totalWorkers += 1;
@@ -512,9 +590,21 @@ export async function buildOperationalOverview(tx: Prisma.TransactionClient, fil
     if (timesheet?.status === 'SUBMITTED' && timesheet.currentVersion?.submissionSource === 'AUTO') summary.submittedAuto += 1;
     if (states.includes('AWAITING_FOREMAN')) summary.awaitingForeman += 1;
     if (states.includes('CORRECTION_OPEN')) summary.correctionOpen += 1;
+    if (todayStatus === 'NOT_STARTED') summary.notStartedToday += 1;
+    if (needsAttention) summary.needsAttention += 1;
+
+    const myAssignments = assignmentsByEmployee.get(employeeId) ?? [];
 
     const item: OverviewWorkerItem = {
       employee: { id: employee.id, name: `${employee.firstName} ${employee.lastName}`, employeeNumber: employee.employeeNumber },
+      todayStatus,
+      todayWorkedMinutes,
+      needsAttention,
+      currentAssignments: myAssignments.map((assignment) => ({
+        site: { id: assignment.siteId, name: assignment.site.name },
+        workArea: assignment.workAreaId && assignment.workArea ? { id: assignment.workAreaId, name: assignment.workArea.name } : null,
+        isPrimary: assignment.isPrimary
+      })),
       states,
       openShift: openShift
         ? {
@@ -541,7 +631,25 @@ export async function buildOperationalOverview(tx: Prisma.TransactionClient, fil
     allItems.push(item);
   }
 
-  const filtered = filters.state ? allItems.filter((it) => it.states.includes(filters.state as OperationalState)) : allItems;
+  const stateFiltered = filters.state ? allItems.filter((it) => it.states.includes(filters.state as OperationalState)) : allItems;
+  const query = filters.q?.toLocaleLowerCase('fi-FI');
+  const filtered = query
+    ? stateFiltered.filter((item) => [
+        item.employee.name,
+        item.employee.employeeNumber,
+        ...item.currentAssignments.flatMap((assignment) => [assignment.site.name, assignment.workArea?.name ?? '']),
+        item.openShift?.site.name ?? '',
+        item.openShift?.workArea?.name ?? '',
+        item.latestFinishedShiftToday?.site.name ?? ''
+      ].join(' ').toLocaleLowerCase('fi-FI').includes(query))
+    : stateFiltered;
+  const statusPriority: Record<OverviewWorkerItem['todayStatus'], number> = { WORKING: 0, FINISHED: 1, NOT_STARTED: 2 };
+  filtered.sort((left, right) => {
+    const statusOrder = statusPriority[left.todayStatus] - statusPriority[right.todayStatus];
+    if (statusOrder) return statusOrder;
+    if (left.needsAttention !== right.needsAttention) return left.needsAttention ? -1 : 1;
+    return left.employee.name.localeCompare(right.employee.name, 'fi');
+  });
   const totalItems = filtered.length;
   const totalPages = Math.ceil(totalItems / filters.pageSize);
   const pageItems = filtered.slice((filters.page - 1) * filters.pageSize, (filters.page - 1) * filters.pageSize + filters.pageSize);
@@ -571,7 +679,9 @@ function emptyResult(asOf: Date, period: OverviewPeriod | null, filters: Overvie
       readyForFinalApproval: 0,
       finalApproved: 0,
       correctionOpen: 0,
-      openAttendanceExceptions: 0
+      openAttendanceExceptions: 0,
+      notStartedToday: 0,
+      needsAttention: 0
     },
     items: [],
     conflicts: scope.includeConflicts ? { totalOpenOrRecent: 0, clockEventIdConflicts: [], rejectedTerminalReceipts: [], fifoLedgerInconsistencies: [] } : null,
