@@ -1,6 +1,19 @@
 # Titanor Time — Implementation Status
 
-Обновлено: 2026-08-20 Europe/Helsinki (T9.7 — первый physical-device UX feedback)
+Обновлено: 2026-08-21 Europe/Helsinki (T9.7 — live ADMIN attendance clarity)
+
+**`[2026-08-21]` T9.7 — ADMIN live attendance clarity.** Physical-device pilot confirmed that
+`EmployeeOpenShift` was already durable and visible to ADMIN, but the `WORKING_NOW` badge used the
+neutral grey presentation and the overview did not show the elapsed duration of the still-open
+shift. `WORKING_NOW` is now a positive green state. The worker card derives a non-negative elapsed
+duration from authoritative `openedAt`, initializes it from the response's fixed `asOf`, and then
+updates the display once per minute in the browser. The overview re-reads authoritative state every
+30 minutes while the tab is visible. Neither timer writes periodic rows: Check In remains the
+durable start and Check Out remains the durable end, avoiding load and artificial fragments.
+The same physical-device pass exposed a display-only timezone defect: the shared attendance UI
+formatter used server-local `Date.toLocaleString()`, while the production host runs in UTC. A
+10:52 Europe/Helsinki Check In therefore appeared as 07:52. Durable instants were correct and are
+not migrated; the formatter now always uses the explicit DST-aware `Europe/Helsinki` timezone.
 
 **`[2026-08-20]` T9.7 — прямой возврат из worker timetable к clock Home.** Реальный iPhone-
 прогон показал, что локальные Back-ссылки корректно идут `day → hours → period`, но после этого

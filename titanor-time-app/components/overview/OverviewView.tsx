@@ -14,6 +14,7 @@ import {
 } from '@/lib/attendance-overview-ui';
 import { exceptionTypeLabel, channelLabel, timesheetStatusLabel, formatDateTime } from '@/lib/attendance-exceptions-ui';
 import { formatHelsinkiDateTime } from '@/lib/helsinki-datetime';
+import { LiveShiftDuration, OverviewAutoRefresh } from '@/components/overview/OverviewLiveStatus';
 
 // docs/titanor-time/T7A_1_ATTENDANCE_CLOCK_DESIGN.md Addendum "T7A.9A" + PROJECT_ROADMAP.md T7A.9 —
 // T7A.9B. Pure presentation: given an already-fetched OverviewResult (or a validation/not-found
@@ -128,6 +129,7 @@ function OverviewBody({
 
   return (
     <>
+      <OverviewAutoRefresh />
       <PeriodBanner basePath={basePath} isAdmin={isAdmin} period={result.period} asOf={result.asOf} />
 
       <FilterForm basePath={basePath} rawQuery={rawQuery} periodOptions={periodOptions} siteOptions={siteOptions} />
@@ -136,7 +138,7 @@ function OverviewBody({
 
       {isAdmin && result.conflicts && <ConflictsSection conflicts={result.conflicts} />}
 
-      <WorkerList role={role} items={result.items} totalWorkers={result.summary.totalWorkers} />
+      <WorkerList role={role} items={result.items} totalWorkers={result.summary.totalWorkers} asOf={result.asOf} />
 
       <Pagination basePath={basePath} rawQuery={rawQuery} page={result.page} totalPages={result.totalPages} totalItems={result.totalItems} />
     </>
@@ -329,7 +331,7 @@ function ConflictList({ title, items }: { title: string; items: { id: string; ta
   );
 }
 
-function WorkerList({ role, items, totalWorkers }: { role: 'admin' | 'foreman'; items: OverviewWorkerItem[]; totalWorkers: number }) {
+function WorkerList({ role, items, totalWorkers, asOf }: { role: 'admin' | 'foreman'; items: OverviewWorkerItem[]; totalWorkers: number; asOf: string }) {
   if (totalWorkers === 0) {
     return (
       <p className="wk-empty" role="status" aria-live="polite">
@@ -348,13 +350,13 @@ function WorkerList({ role, items, totalWorkers }: { role: 'admin' | 'foreman'; 
   return (
     <ul className="ov-worker-list">
       {items.map((item) => (
-        <WorkerCard key={item.employee.id} role={role} item={item} />
+        <WorkerCard key={item.employee.id} role={role} item={item} asOf={asOf} />
       ))}
     </ul>
   );
 }
 
-function WorkerCard({ role, item }: { role: 'admin' | 'foreman'; item: OverviewWorkerItem }) {
+function WorkerCard({ role, item, asOf }: { role: 'admin' | 'foreman'; item: OverviewWorkerItem; asOf: string }) {
   const isAdmin = role === 'admin';
 
   return (
@@ -387,6 +389,8 @@ function WorkerCard({ role, item }: { role: 'admin' | 'foreman'; item: OverviewW
               <>
                 {item.openShift.site.name}
                 {item.openShift.workArea ? ` · ${item.openShift.workArea.name}` : ''} — since {formatDateTime(item.openShift.openedAt)} ({channelLabel(item.openShift.channel)})
+                {' · '}
+                <LiveShiftDuration openedAt={item.openShift.openedAt} initialAsOf={asOf} />
               </>
             ) : (
               'Not currently clocked in'

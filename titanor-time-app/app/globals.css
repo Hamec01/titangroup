@@ -1995,6 +1995,12 @@ a.ov-summary-card:focus-visible {
   background: rgba(252, 211, 77, 0.14);
 }
 
+.ov-live-duration {
+  color: #86efac;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
 .ov-worker-list {
   list-style: none;
   margin: 0 0 20px;

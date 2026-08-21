@@ -26,7 +26,7 @@ export function operationalStateLabel(state: OperationalState): string {
 }
 
 const ISSUE_STATES = new Set<OperationalState>(['MISSING_CHECKOUT', 'GPS_ISSUE', 'SYNC_ISSUE', 'RETURNED', 'CORRECTION_OPEN']);
-const POSITIVE_STATES = new Set<OperationalState>(['FINISHED_TODAY', 'READY_FOR_FINAL_APPROVAL', 'FINAL_APPROVED']);
+const POSITIVE_STATES = new Set<OperationalState>(['WORKING_NOW', 'FINISHED_TODAY', 'READY_FOR_FINAL_APPROVAL', 'FINAL_APPROVED']);
 
 /** Status is never conveyed by color alone (task §13) — this only adds a visual accent on top of
  * the always-present text label above. */

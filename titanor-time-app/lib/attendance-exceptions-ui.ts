@@ -1,4 +1,5 @@
 import type { ExceptionStatusFilter, ExceptionTypeFilter } from '@/lib/attendance-exceptions';
+import { formatHelsinkiDateTime } from '@/lib/helsinki-datetime';
 
 // docs/titanor-time/T7A_1_ATTENDANCE_CLOCK_DESIGN.md §11 — T7A.8C.1 UI foundation. Pure,
 // presentation-only label/formatting helpers shared by the admin and foreman exception list/detail
@@ -130,10 +131,11 @@ export function timesheetStatusLabel(status: string): string {
     .join(' ');
 }
 
-/** Server-rendered wall-clock formatting, same `toLocaleString()` convention already used by
- * GeofenceSection/ActivationCodeIssuer/ReturnReasonsNotice — not a new formatting scheme. */
+/** Attendance instants are stored in UTC and always displayed in the company timezone. Never use
+ * the Node host's local timezone here: production runs in UTC while the company operates in
+ * Europe/Helsinki (a three-hour difference during EEST). */
 export function formatDateTime(iso: string): string {
-  return new Date(iso).toLocaleString();
+  return formatHelsinkiDateTime(iso);
 }
 
 const DETAIL_KEY_LABELS: Record<string, string> = {
