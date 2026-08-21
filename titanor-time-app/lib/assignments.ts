@@ -160,14 +160,31 @@ export async function createAssignment(
       }
     });
 
-    const intersectingOpenPeriods = await tx.payrollPeriod.findMany({
+    const openPeriodCandidates = await tx.payrollPeriod.findMany({
       where: {
         status: 'OPEN',
         endDate: { gte: input.validFrom },
         ...(input.validTo ? { startDate: { lte: input.validTo } } : {})
       },
-      select: { id: true, startDate: true, endDate: true }
+      select: { id: true, startDate: true, endDate: true, submissionScheduleId: true }
     });
+    const employeeScheduleWindows = await tx.employeeTimesheetSchedule.findMany({
+      where: {
+        employeeId: input.employeeId,
+        effectiveFrom: { lte: input.validTo ?? new Date('9999-12-31T00:00:00.000Z') },
+        OR: [{ effectiveTo: null }, { effectiveTo: { gte: input.validFrom } }]
+      },
+      select: { scheduleId: true, effectiveFrom: true, effectiveTo: true }
+    });
+    // Legacy/manual periods retain the old assignment-driven behavior. Generated periods belong
+    // only to workers whose effective schedule matches that period; without this filter, adding a
+    // site to one new worker would try to enroll them in every weekly/biweekly cohort currently
+    // open for other employees and trip the worker-overlap invariant.
+    const intersectingOpenPeriods = openPeriodCandidates.filter((period) =>
+      period.submissionScheduleId === null || employeeScheduleWindows.some((window) =>
+        window.scheduleId === period.submissionScheduleId && window.effectiveFrom <= period.endDate && (!window.effectiveTo || window.effectiveTo >= period.startDate)
+      )
+    );
 
     const templateDays = templateVersionId
       ? await tx.workScheduleTemplateVersionDay.findMany({ where: { templateVersionId } })

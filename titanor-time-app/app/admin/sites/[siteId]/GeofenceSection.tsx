@@ -3,6 +3,8 @@
 import { useEffect, useState, type FormEvent } from 'react';
 import { useRouter } from 'next/navigation';
 import type { GeofenceHistoryResult } from '@/lib/geofences';
+import { GeofenceMapPicker } from './GeofenceMapPicker';
+import type { AddressSearchResult } from '@/lib/site-geocoding';
 
 const CSRF_HEADER_VALUE = 'titanor-time';
 // docs/titanor-time/T7A_1_ATTENDANCE_CLOCK_DESIGN.md §5.1 — pilot default radius for a site's
@@ -36,9 +38,8 @@ function genericErrorMessageFor(code: string | undefined): string {
 }
 
 /**
- * docs/titanor-time/T7A_1_ATTENDANCE_CLOCK_DESIGN.md §16 "Geofence admin" — no map SDK, no
- * Haversine/GPS evaluation here (server-only concern for a later slice): this section only
- * manages the site's own configured center/radius via GET/POST
+ * docs/titanor-time/T7A_1_ATTENDANCE_CLOCK_DESIGN.md §16 "Geofence admin" — this section manages
+ * the site's configured center/radius via an optional MapLibre picker and GET/POST
  * /api/admin/sites/:siteId/geofence-versions. `history` is fetched server-side (SiteDetailPage)
  * and refreshed via `router.refresh()` after a successful save — no client-side GET.
  */
@@ -52,6 +53,10 @@ export function GeofenceSection({ siteId, history }: { siteId: string; history: 
   const [loading, setLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [fieldErrors, setFieldErrors] = useState<Record<string, string[]>>({});
+  const [address, setAddress] = useState('');
+  const [addressLoading, setAddressLoading] = useState(false);
+  const [addressMessage, setAddressMessage] = useState<string | null>(null);
+  const [addressResults, setAddressResults] = useState<AddressSearchResult[]>([]);
 
   // Prefill with the (possibly newly refreshed) current version's values — runs again after a
   // successful create switches `current` to the just-created version.
@@ -99,6 +104,29 @@ export function GeofenceSection({ siteId, history }: { siteId: string; history: 
     }
   }
 
+  async function searchAddress(event: FormEvent<HTMLFormElement>): Promise<void> {
+    event.preventDefault();
+    if (addressLoading || address.trim().length < 3) return;
+    setAddressLoading(true);
+    setAddressMessage(null);
+    setAddressResults([]);
+    try {
+      const response = await fetch(`/api/admin/geocoding/search?q=${encodeURIComponent(address.trim())}`, { credentials: 'same-origin', cache: 'no-store' });
+      const body = await response.json().catch(() => null) as { items?: AddressSearchResult[]; error?: { code?: string } } | null;
+      if (!response.ok) {
+        setAddressMessage(body?.error?.code === 'RATE_LIMITED' ? 'Search is busy. Wait a second and try again.' : 'Address search is temporarily unavailable. You can still click the map.');
+      } else {
+        const items = body?.items ?? [];
+        setAddressResults(items);
+        if (!items.length) setAddressMessage('No matching address found. Refine the search or click the map.');
+      }
+    } catch {
+      setAddressMessage('Network error while searching. You can still click the map.');
+    } finally {
+      setAddressLoading(false);
+    }
+  }
+
   return (
     <>
       <h2>Geofence</h2>
@@ -131,6 +159,27 @@ export function GeofenceSection({ siteId, history }: { siteId: string; history: 
           </ul>
         </>
       ) : null}
+
+      <form onSubmit={searchAddress} className="geofence-address-search">
+        <div className="login-field">
+          <label htmlFor="geofence-address">Find address</label>
+          <input id="geofence-address" type="search" minLength={3} maxLength={200} value={address} disabled={loading || addressLoading} onChange={(event) => setAddress(event.target.value)} placeholder="Street, city, Finland" />
+        </div>
+        <button type="submit" className="secondary-button" disabled={loading || addressLoading || address.trim().length < 3}>{addressLoading ? 'Searching…' : 'Search address'}</button>
+        <p className="setup-subtitle">Search runs only when you press the button. Results © OpenStreetMap contributors.</p>
+        {addressMessage ? <p role="status" className="form-status">{addressMessage}</p> : null}
+        {addressResults.length ? (
+          <ul className="setup-list geofence-search-results">
+            {addressResults.map((result) => (
+              <li key={`${result.latitude}:${result.longitude}`} className="setup-item">
+                <button type="button" className="geofence-result-button" onClick={() => { setLatitude(result.latitude); setLongitude(result.longitude); setAddressResults([]); setAddressMessage('Location selected. Check the marker and radius, then save.'); }}>{result.displayName}</button>
+              </li>
+            ))}
+          </ul>
+        ) : null}
+      </form>
+
+      <GeofenceMapPicker latitude={latitude} longitude={longitude} radiusMeters={radiusMeters} disabled={loading} onCoordinates={(nextLatitude, nextLongitude) => { setLatitude(nextLatitude); setLongitude(nextLongitude); }} />
 
       <form onSubmit={handleSubmit} aria-busy={loading}>
         <div className="login-field">

@@ -7851,6 +7851,24 @@ WORKER_NOT_FOUND`; ни один malformed-запрос не создал `Audit
 build app`/`git diff --check` — чисто. Схема/migrations не менялись (48 без изменений);
 `titanor-time-app-1`/`titanor-time-db-1` не пересобирались.
 
+### T9.7 owner follow-up: submission cycles, rounding and maps (2026-08-21)
+
+Реализован owner workflow после физического iPhone-прогона: worker-specific Weekly/Biweekly
+schedule на карточке работника, worker-scoped current+next generation и шестичасовое scheduler-
+продление, guarded editor старого OPEN period, multi-cohort ADMIN overview. Raw Check In/Out остаётся
+точным, TimesheetDraftSegment округляется nearest 30 minutes half-up; короткий схлопывающийся
+интервал сохраняет exact positive range вместо потери/завышения.
+
+Site geofence editor получил MapLibre/OpenFreeMap pin+radius и button-only server Nominatim search:
+межпроцессный DB rate gate 1.1s, 7-day cache, allowlisted DTO, provider URL/UA в env. Отдельный raw
+GPS screen требует `attendance.gps.read.raw` (только ADMIN/SUPER_ADMIN), private no-store, 31-day/
+200-row cap и пишет sanitized audit event; 90-day retention не менялся. Disposable PostgreSQL 16:
+67 migrations, повторный deploy no-op; schedule integration 22/22, pure rounding 9/9,
+materializer rounding 7/7, map/GPS 6/6, grants подтверждены прямым SQL. Дополнительно закрыта
+изоляция cohorts: materializer выбирает period только через participant данного employee, а новое
+назначение не включает unscheduled worker в generated period другого schedule. Pilot/production в
+этой задаче не мигрировались и не перезапускались.
+
 ## 12. Правило обновления
 
 1. Каждая следующая задача сначала читает этот файл.

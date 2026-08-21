@@ -437,6 +437,22 @@ model TimesheetSubmissionSchedule {
   @@index([active, cadence])
 }
 
+model AddressGeocodeCache {
+  id              String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  queryHash       String   @unique @db.Char(64)
+  queryNormalized String   @db.VarChar(200)
+  results         Json
+  fetchedAt       DateTime @db.Timestamptz(6)
+  createdAt       DateTime @default(now()) @db.Timestamptz(6)
+
+  @@index([fetchedAt])
+}
+
+model GeocodingProviderState {
+  provider      String   @id @db.VarChar(32)
+  lastRequestAt DateTime @db.Timestamptz(6)
+}
+
 model EmployeeTimesheetSchedule {
   id               String                      @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   employeeId       String                      @db.Uuid

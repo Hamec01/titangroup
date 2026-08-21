@@ -2507,3 +2507,33 @@ a.ov-summary-card:focus-visible {
   color: #fde68a;
   margin: 0 0 12px;
 }
+.geofence-map-wrap {
+  margin: 1rem 0 1.5rem;
+}
+
+.geofence-map {
+  width: 100%;
+  height: min(52vh, 430px);
+  min-height: 300px;
+  border: 1px solid var(--border);
+  border-radius: 0.75rem;
+  overflow: hidden;
+}
+
+.geofence-address-search {
+  margin-top: 1rem;
+}
+
+.geofence-search-results {
+  margin-top: 0.75rem;
+}
+
+.geofence-result-button {
+  width: 100%;
+  padding: 0.75rem;
+  color: inherit;
+  text-align: left;
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+}

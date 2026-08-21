@@ -2234,3 +2234,20 @@ Server Components вызывают `lib/csv-export.ts`'s функции (`listEx
 `<a href>` браузером — никогда через `fetch()` на клиенте. Ни один route, DTO, error code,
 permission requirement или CSV byte contract этим коммитом не менялся; `lib/csv-export.ts` и все
 четыре route.ts файла — ноль diff (подтверждено `git diff --stat`). T8.4 полностью завершён.
+
+## 24. T9.7 owner follow-up — cycles, maps and raw GPS (2026-08-21)
+
+- `GET/PATCH /api/admin/workers/:employeeId/timesheet-schedule`: permissions
+  `timesheet.schedule.read/update`; PATCH требует CSRF + UUID Idempotency-Key и
+  `{scheduleId,effectiveFrom}` на реальной календарной границе cadence. Успех возвращает два
+  подготовленных периода; legacy overlap → `409 PERIOD_OVERLAP`, уже запланированная более поздняя
+  граница → `409 EFFECTIVE_FROM_BEFORE_CURRENT`, несуществующая дата/не-граница → `400
+  VALIDATION_ERROR|EFFECTIVE_FROM_NOT_BOUNDARY`; schedule write всегда откатывается при ошибке.
+- `PATCH /api/admin/periods/:periodId`: `period.update`, CSRF, idempotency, optimistic `version`;
+  только legacy/manual OPEN. Submitted/versioned или durable time за новой границей →
+  `DATA_OUTSIDE_RANGE` без удаления данных.
+- `GET /api/admin/geocoding/search?q=`: `site.update`; явный submit, 3–200 символов, allowlisted
+  пять результатов; `429 RATE_LIMITED`/`503 PROVIDER_UNAVAILABLE`; private no-store.
+- `GET /api/admin/attendance/workers/:employeeId/locations?from=&to=`:
+  `attendance.gps.read.raw` + `worker.read.all`, максимум 31 день/200 строк, private no-store.
+  Каждый success пишет sanitized `ATTENDANCE_RAW_GPS_VIEWED`, никогда сами координаты.

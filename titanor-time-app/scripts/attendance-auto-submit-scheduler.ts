@@ -3,6 +3,7 @@ import { runAttendanceAutoSubmitTick } from '../lib/attendance-auto-submit';
 import { runAttendanceLocationRetention } from '../lib/attendance-location-retention';
 import { writeHeartbeat } from '../lib/attendance-scheduler-heartbeat';
 import { resolveIntervalSecondsOrExit, sleep, logSafe, runOneTickCore, maybeRunRetentionCore } from '../lib/attendance-scheduler-runtime';
+import { ensureSubmissionScheduleHorizon } from '../lib/timesheet-submission-schedules';
 
 // docs/titanor-time/T7A_1_ATTENDANCE_CLOCK_DESIGN.md Addendum "T7A.10B" §1-§6 + "T7A.10C.1" §B —
 // permanent scheduler process. Not the CLI one-shot `attendance-auto-submit-tick.ts` (T7A.10A,
@@ -39,6 +40,7 @@ async function main(): Promise<void> {
   logSafe({ event: 'attendance_scheduler_started', intervalSeconds });
 
   let lastRetentionSuccessAt: Date | null = null;
+  let lastPeriodGenerationSuccessAt: Date | null = null;
 
   while (!shuttingDown) {
     await runOneTickCore((now) => runAttendanceAutoSubmitTick({ now }), writeHeartbeat, logSafe);
@@ -48,6 +50,20 @@ async function main(): Promise<void> {
 
     const retentionStep = await maybeRunRetentionCore(lastRetentionSuccessAt, new Date(), runAttendanceLocationRetention, logSafe);
     lastRetentionSuccessAt = retentionStep.lastSuccessAt;
+    if (shuttingDown) {
+      break;
+    }
+
+    const generationNow = new Date();
+    if (lastPeriodGenerationSuccessAt === null || generationNow.getTime() - lastPeriodGenerationSuccessAt.getTime() >= 6 * 60 * 60 * 1000) {
+      try {
+        const result = await ensureSubmissionScheduleHorizon(generationNow);
+        lastPeriodGenerationSuccessAt = new Date();
+        logSafe({ event: 'timesheet_period_generation', outcome: 'ok', ...result });
+      } catch {
+        logSafe({ event: 'timesheet_period_generation', outcome: 'top_level_error', errorCode: 'PERIOD_GENERATION_TOP_LEVEL_ERROR' });
+      }
+    }
     if (shuttingDown) {
       break;
     }

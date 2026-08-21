@@ -134,6 +134,107 @@ export interface CreatePeriodResult {
 }
 
 /**
+ * Adds one worker to an already-created period and creates the editable draft
+ * projection for every calendar day. This is the worker-scoped counterpart of
+ * legacy createPeriod(), used by weekly/biweekly schedule generation.
+ *
+ * The caller must hold the Employee row lock. Repeated calls are safe: an
+ * existing participant/timesheet is returned unchanged and only missing day /
+ * planned-shift rows are inserted.
+ */
+export async function ensureEmployeePeriodCore(
+  tx: Prisma.TransactionClient,
+  input: { periodId: string; employeeId: string; startDate: Date; endDate: Date }
+): Promise<{ timesheetId: string }> {
+  await tx.payrollPeriodParticipant.upsert({
+    where: { periodId_employeeId: { periodId: input.periodId, employeeId: input.employeeId } },
+    create: { periodId: input.periodId, employeeId: input.employeeId, expected: true },
+    update: {}
+  });
+
+  const timesheet = await tx.timesheet.upsert({
+    where: { employeeId_periodId: { employeeId: input.employeeId, periodId: input.periodId } },
+    create: { employeeId: input.employeeId, periodId: input.periodId, status: 'DRAFT' },
+    update: {},
+    select: { id: true }
+  });
+  const draft = await tx.timesheetDraft.upsert({
+    where: { timesheetId: timesheet.id },
+    create: { timesheetId: timesheet.id, employeeId: input.employeeId },
+    update: {},
+    select: { id: true }
+  });
+
+  const dates = enumerateDates(input.startDate, input.endDate);
+  const [assignments, absences, existingDays] = await Promise.all([
+    tx.siteAssignment.findMany({
+      where: {
+        employeeId: input.employeeId,
+        validFrom: { lte: input.endDate },
+        OR: [{ validTo: null }, { validTo: { gte: input.startDate } }]
+      },
+      select: { id: true, siteId: true, validFrom: true, validTo: true, templateVersionId: true }
+    }),
+    tx.absence.findMany({
+      where: {
+        employeeId: input.employeeId,
+        status: 'APPROVED',
+        startDate: { lte: input.endDate },
+        endDate: { gte: input.startDate }
+      },
+      select: { id: true, startDate: true, endDate: true, type: true }
+    }),
+    tx.timesheetDraftDay.findMany({ where: { draftId: draft.id }, select: { date: true } })
+  ]);
+
+  const existingDateKeys = new Set(existingDays.map((day) => formatDate(day.date)));
+  const missingDates = dates.filter((date) => !existingDateKeys.has(formatDate(date)));
+  if (missingDates.length > 0) {
+    await tx.timesheetDraftDay.createMany({
+      data: missingDates.map((date) => {
+        const overlay = absences.find((absence) => absence.startDate <= date && absence.endDate >= date);
+        return {
+          draftId: draft.id,
+          date,
+          dayType: overlay ? overlay.type : 'WORK',
+          confirmedZero: false,
+          sourceAbsenceId: overlay ? overlay.id : null
+        };
+      }),
+      skipDuplicates: true
+    });
+  }
+
+  const templateVersionIds = [...new Set(assignments.map((a) => a.templateVersionId).filter((id): id is string => id !== null))];
+  const templateDays = templateVersionIds.length
+    ? await tx.workScheduleTemplateVersionDay.findMany({ where: { templateVersionId: { in: templateVersionIds } } })
+    : [];
+  const templateDayByKey = new Map(templateDays.map((day) => [`${day.templateVersionId}:${day.weekday}`, day]));
+  const plannedRows: Prisma.TimesheetDraftPlannedShiftCreateManyInput[] = [];
+  for (const assignment of assignments) {
+    for (const date of dates) {
+      if (date < assignment.validFrom || (assignment.validTo && date > assignment.validTo)) continue;
+      const templateDay = assignment.templateVersionId
+        ? templateDayByKey.get(`${assignment.templateVersionId}:${toTemplateWeekday(date)}`)
+        : undefined;
+      plannedRows.push({
+        draftId: draft.id,
+        employeeId: input.employeeId,
+        date,
+        siteId: assignment.siteId,
+        sourceAssignmentId: assignment.id,
+        ...computePlannedShiftForAssignmentDate(templateDay, date)
+      });
+    }
+  }
+  if (plannedRows.length > 0) {
+    await tx.timesheetDraftPlannedShift.createMany({ data: plannedRows, skipDuplicates: true });
+  }
+
+  return { timesheetId: timesheet.id };
+}
+
+/**
  * Creates the PayrollPeriod, then for every Employee with a SiteAssignment
  * intersecting [startDate, endDate]: the PayrollPeriodParticipant +
  * Timesheet(DRAFT) + TimesheetDraft triple, pre-filled with one
@@ -273,14 +374,16 @@ export interface PeriodListItem {
   startDate: string;
   endDate: string;
   status: string;
+  submissionSchedule: { name: string; cadence: string } | null;
+  participantsCount: number;
 }
 
 export async function listPeriods(): Promise<PeriodListItem[]> {
   const periods = await prisma.payrollPeriod.findMany({
     orderBy: { startDate: 'desc' },
-    select: { id: true, startDate: true, endDate: true, status: true }
+    select: { id: true, startDate: true, endDate: true, status: true, submissionSchedule: { select: { name: true, cadence: true } }, _count: { select: { participants: true } } }
   });
-  return periods.map((p) => ({ id: p.id, startDate: formatDate(p.startDate), endDate: formatDate(p.endDate), status: p.status }));
+  return periods.map((p) => ({ id: p.id, startDate: formatDate(p.startDate), endDate: formatDate(p.endDate), status: p.status, submissionSchedule: p.submissionSchedule, participantsCount: p._count.participants }));
 }
 
 export interface PeriodDetail {
@@ -298,6 +401,7 @@ export interface PeriodDetail {
   participantsTotal: number;
   timesheetsFinalApproved: number;
   timesheetsPending: number;
+  submissionScheduleId: string | null;
 }
 
 /** timesheetsPending = every status other than FINAL_APPROVED — mirrors what period.lock itself requires (03_DATA_MODEL_ERD.md §4.5: "требует FINAL_APPROVED у каждого expected=true участника"), i.e. "how many are still blocking a lock". */
@@ -328,16 +432,102 @@ export async function getPeriodDetail(periodId: string): Promise<PeriodDetail | 
     participantsTotal,
     timesheetsFinalApproved,
     timesheetsPending
+    ,submissionScheduleId: period.submissionScheduleId
   };
 }
 
-/** Several periods may be OPEN at once, but EX-03 forbids any two periods (any status) from overlapping in dates — so at most one period's range can ever contain a given calendar day. "Current" = that one, if its status is OPEN. */
+export type UpdateLegacyPeriodResult =
+  | { ok: true; id: string; startDate: string; endDate: string; version: number }
+  | { ok: false; code: 'PERIOD_NOT_FOUND' | 'NOT_LEGACY_OPEN_PERIOD' | 'VERSION_CONFLICT' | 'DATA_OUTSIDE_RANGE' | 'PERIOD_OVERLAP' };
+
+/** Guarded correction for the old manually-created OPEN periods which predate submission
+ * schedules. Submitted/versioned periods are immutable; a shrink is allowed only when every
+ * durable segment/fragment remains inside the new range. */
+export async function updateLegacyOpenPeriod(input: {
+  periodId: string;
+  startDate: Date;
+  endDate: Date;
+  version: number;
+  actorUserId: string;
+  requestId: string;
+}): Promise<UpdateLegacyPeriodResult> {
+  try {
+    return await prisma.$transaction(async (tx) => {
+      await tx.$queryRaw`SELECT id FROM "PayrollPeriod" WHERE id = ${input.periodId}::uuid FOR UPDATE`;
+      const period = await tx.payrollPeriod.findUnique({
+        where: { id: input.periodId },
+        include: { participants: { where: { expected: true }, select: { employeeId: true } } }
+      });
+      if (!period) return { ok: false, code: 'PERIOD_NOT_FOUND' } as const;
+      if (period.version !== input.version) return { ok: false, code: 'VERSION_CONFLICT' } as const;
+      if (period.status !== 'OPEN' || period.submissionScheduleId !== null) return { ok: false, code: 'NOT_LEGACY_OPEN_PERIOD' } as const;
+
+      const employeeIds = period.participants.map((participant) => participant.employeeId).sort();
+      if (employeeIds.length) {
+        await tx.$queryRaw`SELECT id FROM "Employee" WHERE id = ANY(${employeeIds}::uuid[]) ORDER BY id FOR UPDATE`;
+      }
+      const [nonDraftTimesheets, versions, outsideSegments, outsideFragments] = await Promise.all([
+        tx.timesheet.count({ where: { periodId: period.id, status: { notIn: ['DRAFT', 'RETURNED'] } } }),
+        tx.timesheetVersion.count({ where: { timesheet: { periodId: period.id } } }),
+        tx.timesheetDraftSegment.count({
+          where: { draft: { timesheet: { periodId: period.id } }, OR: [{ date: { lt: input.startDate } }, { date: { gt: input.endDate } }] }
+        }),
+        tx.clockShiftFragment.count({
+          where: { payrollPeriodId: period.id, OR: [{ date: { lt: input.startDate } }, { date: { gt: input.endDate } }] }
+        })
+      ]);
+      if (nonDraftTimesheets || versions || outsideSegments || outsideFragments) {
+        return { ok: false, code: 'DATA_OUTSIDE_RANGE' } as const;
+      }
+
+      const drafts = await tx.timesheetDraft.findMany({
+        where: { timesheet: { periodId: period.id } },
+        select: { id: true }
+      });
+      const draftIds = drafts.map((draft) => draft.id);
+      if (draftIds.length) {
+        await tx.timesheetDraftPlannedShift.deleteMany({
+          where: { draftId: { in: draftIds }, OR: [{ date: { lt: input.startDate } }, { date: { gt: input.endDate } }] }
+        });
+        await tx.timesheetDraftDay.deleteMany({
+          where: { draftId: { in: draftIds }, OR: [{ date: { lt: input.startDate } }, { date: { gt: input.endDate } }] }
+        });
+      }
+
+      const updated = await tx.payrollPeriod.update({
+        where: { id: period.id },
+        data: { startDate: input.startDate, endDate: input.endDate, version: { increment: 1 } }
+      });
+      for (const employeeId of employeeIds) {
+        await ensureEmployeePeriodCore(tx, { periodId: period.id, employeeId, startDate: input.startDate, endDate: input.endDate });
+      }
+      await createAuditEvent(tx, {
+        actorUserId: input.actorUserId,
+        eventType: 'LEGACY_PAYROLL_PERIOD_UPDATED',
+        entityType: 'PAYROLL_PERIOD',
+        entityId: period.id,
+        requestId: input.requestId,
+        beforeValue: { startDate: formatDate(period.startDate), endDate: formatDate(period.endDate), version: period.version },
+        afterValue: { startDate: formatDate(updated.startDate), endDate: formatDate(updated.endDate), version: updated.version }
+      });
+      return { ok: true, id: updated.id, startDate: formatDate(updated.startDate), endDate: formatDate(updated.endDate), version: updated.version } as const;
+    });
+  } catch (error) {
+    if (isPeriodOverlapViolation(error)) return { ok: false, code: 'PERIOD_OVERLAP' };
+    throw error;
+  }
+}
+
+/** Compatibility helper for screens that still expect one current period. With worker-scoped
+ * schedules several cohorts may contain today, so this deliberately returns the earliest stable
+ * match. Cohort-aware screens (notably the operational overview) query all current periods. */
 export async function getCurrentPeriod(today: Date): Promise<PeriodListItem | null> {
   const period = await prisma.payrollPeriod.findFirst({
     where: { status: 'OPEN', startDate: { lte: today }, endDate: { gte: today } },
-    select: { id: true, startDate: true, endDate: true, status: true }
+    orderBy: [{ startDate: 'asc' }, { id: 'asc' }],
+    select: { id: true, startDate: true, endDate: true, status: true, submissionSchedule: { select: { name: true, cadence: true } }, _count: { select: { participants: true } } }
   });
-  return period ? { id: period.id, startDate: formatDate(period.startDate), endDate: formatDate(period.endDate), status: period.status } : null;
+  return period ? { id: period.id, startDate: formatDate(period.startDate), endDate: formatDate(period.endDate), status: period.status, submissionSchedule: period.submissionSchedule, participantsCount: period._count.participants } : null;
 }
 
 export interface LockBlocker {

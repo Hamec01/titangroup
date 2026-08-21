@@ -917,6 +917,14 @@ legacy OPEN-периода; это не смешивается с шаблоно
 Найден и исправлен отдельный display-only timezone defect: production host показывал сохранённый
 UTC instant в UTC (`07:52`) вместо `Europe/Helsinki` (`10:52`). Хранимые события не менялись.
 
+**`[2026-08-21] Owner follow-up реализован в feature branch.`** Цикл табеля настраивается на
+карточке Worker (weekly/biweekly), current+next periods генерируются worker-scoped и продлеваются
+scheduler'ом; legacy OPEN period получил guarded date editor. Overview объединяет текущие cohorts.
+Check In/Out projection округляется nearest 30 minutes (raw события неизменны). Site editor получил
+бесплатную MapLibre/OpenFreeMap карту и Nominatim proxy/cache/rate gate; raw GPS — отдельный
+ADMIN-only audited/no-store экран. Следующее действие — обновить isolated pilot и повторить ручной
+iPhone/Android сценарий.
+
 # ЭТАП 10. НЕДЕЛЬНАЯ ОБКАТКА
 
 ## T10.1 — Ограниченный запуск

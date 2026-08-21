@@ -31,13 +31,13 @@ export default async function AdminPeriodsPage() {
       <div className="setup-card worker-card">
         <h1>Payroll periods</h1>
         <p className="setup-subtitle">
-          {periods.length} period{periods.length === 1 ? '' : 's'} · <Link href="/admin/periods/new">open new period</Link>
+          {periods.length} period{periods.length === 1 ? '' : 's'}
         </p>
         <div className="worker-setup-callout">
           <p>
-            A payroll period is one timesheet cycle (usually a week, two weeks, or a month). Keep it <strong>OPEN</strong> while workers enter hours.
+            A payroll period is generated from each worker&apos;s Weekly or Every two weeks setting. Keep it <strong>OPEN</strong> while workers enter hours.
           </p>
-          <p>When a new assignment overlaps an open period, that worker is added automatically. Do not open another overlapping period.</p>
+          <p>Configure the cycle on the worker page. Manual period creation is retained only for legacy recovery.</p>
         </div>
         {periods.length === 0 ? (
           <p>No periods yet.</p>
@@ -48,6 +48,8 @@ export default async function AdminPeriodsPage() {
                 <th>Start</th>
                 <th>End</th>
                 <th>Status</th>
+                <th>Cycle</th>
+                <th>Workers</th>
               </tr>
             </thead>
             <tbody>
@@ -58,6 +60,8 @@ export default async function AdminPeriodsPage() {
                   </td>
                   <td>{period.endDate}</td>
                   <td>{period.status}</td>
+                  <td>{period.submissionSchedule?.name ?? 'Legacy manual'}</td>
+                  <td>{period.participantsCount}</td>
                 </tr>
               ))}
             </tbody>

@@ -140,6 +140,7 @@ export interface OverviewPeriod {
   startDate: string;
   endDate: string;
   status: string;
+  multipleCurrentCycles?: boolean;
 }
 
 function formatDate(date: Date): string {
@@ -157,11 +158,26 @@ export async function resolvePeriodForOverview(tx: Prisma.TransactionClient, per
     return { ok: true, period: { id: period.id, startDate: formatDate(period.startDate), endDate: formatDate(period.endDate), status: period.status } };
   }
 
-  const period = await tx.payrollPeriod.findFirst({
+  const periods = await tx.payrollPeriod.findMany({
     where: { status: 'OPEN', startDate: { lte: today }, endDate: { gte: today } },
+    orderBy: [{ startDate: 'asc' }, { endDate: 'asc' }, { id: 'asc' }],
     select: { id: true, startDate: true, endDate: true, status: true }
   });
-  return { ok: true, period: period ? { id: period.id, startDate: formatDate(period.startDate), endDate: formatDate(period.endDate), status: period.status } : null };
+  if (periods.length === 0) return { ok: true, period: null };
+  if (periods.length === 1) {
+    const period = periods[0];
+    return { ok: true, period: { id: period.id, startDate: formatDate(period.startDate), endDate: formatDate(period.endDate), status: period.status } };
+  }
+  return {
+    ok: true,
+    period: {
+      id: '',
+      startDate: formatDate(periods[0].startDate),
+      endDate: formatDate(periods.reduce((latest, period) => period.endDate > latest ? period.endDate : latest, periods[0].endDate)),
+      status: 'MULTIPLE_CURRENT_CYCLES',
+      multipleCurrentCycles: true
+    }
+  };
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -277,6 +293,9 @@ export async function buildOperationalOverview(tx: Prisma.TransactionClient, fil
   const asOf = new Date();
   const { start: todayStart, end: todayEnd } = todayRange(today);
   const siteRestriction = effectiveSiteIds(scope, filters);
+  const currentPeriodIds = period?.multipleCurrentCycles
+    ? (await tx.payrollPeriod.findMany({ where: { status: 'OPEN', startDate: { lte: today }, endDate: { gte: today } }, select: { id: true } })).map((row) => row.id)
+    : period ? [period.id] : [];
 
   if (siteRestriction === 'NONE') {
     return emptyResult(asOf, period, filters, scope);
@@ -285,7 +304,7 @@ export async function buildOperationalOverview(tx: Prisma.TransactionClient, fil
   // ---- 1. Base employee universe -------------------------------------------------------------
   let employeeIds: string[];
   if (period) {
-    const participants = await tx.payrollPeriodParticipant.findMany({ where: { periodId: period.id, expected: true }, select: { employeeId: true } });
+    const participants = await tx.payrollPeriodParticipant.findMany({ where: { periodId: { in: currentPeriodIds }, expected: true }, select: { employeeId: true } });
     employeeIds = participants.map((p) => p.employeeId);
   } else {
     // No open period covering today: clock-state is still meaningful (§3 ТЗ), timesheet/review
@@ -332,7 +351,7 @@ export async function buildOperationalOverview(tx: Prisma.TransactionClient, fil
     tx.attendanceException.findMany({ where: { employeeId: { in: employeeIds }, status: 'OPEN' }, select: { employeeId: true, type: true, payrollPeriodId: true, clockShiftFragmentId: true } }),
     period
       ? tx.timesheet.findMany({
-          where: { employeeId: { in: employeeIds }, periodId: period.id },
+          where: { employeeId: { in: employeeIds }, periodId: { in: currentPeriodIds } },
           select: {
             id: true,
             employeeId: true,
@@ -457,7 +476,7 @@ export async function buildOperationalOverview(tx: Prisma.TransactionClient, fil
         };
       }
 
-      const openExceptionForPeriod = myExceptions.some((e) => period && e.payrollPeriodId === period.id);
+      const openExceptionForPeriod = myExceptions.some((e) => period && e.payrollPeriodId !== null && currentPeriodIds.includes(e.payrollPeriodId));
       const returnedScope = scopesForVersion.some((s) => s.status === 'RETURNED');
       if (timesheet.status === 'DRAFT') finalApprovalBlockedReasons.push('TIMESHEET_NOT_SUBMITTED');
       if (pendingSite) finalApprovalBlockedReasons.push('PENDING_SITE_REVIEW');

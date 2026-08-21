@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { Prisma } from '@prisma/client';
 import { prisma } from '@/lib/prisma';
+import { roundReportedInterval } from '@/lib/reporting/time-rounding';
 import { createAuditEvent } from '@/lib/audit';
 import { overlapCandidates, overlapExists, resolveOverlapTransition } from '@/lib/attendance-reported-projection';
 import { computePlannedShiftForAssignmentDate, toTemplateWeekday, helsinkiWallClockToUtc, type TemplateDayInput } from '@/lib/periods';
@@ -91,7 +92,14 @@ async function planFragments(tx: Prisma.TransactionClient, employeeId: string, r
 
   while (cursor.getTime() < recordedEndAt.getTime()) {
     const calDate = helsinkiCalendarDate(cursor);
-    const period = await tx.payrollPeriod.findFirst({ where: { startDate: { lte: calDate }, endDate: { gte: calDate } }, select: { id: true, endDate: true } });
+    const period = await tx.payrollPeriod.findFirst({
+      where: {
+        startDate: { lte: calDate },
+        endDate: { gte: calDate },
+        participants: { some: { employeeId, expected: true } }
+      },
+      select: { id: true, endDate: true }
+    });
     if (!period) {
       return { ok: false, reason: items.length > 0 ? 'PERIOD_BOUNDARY_SPAN' : 'STALE_ASSIGNMENT' };
     }
@@ -435,14 +443,15 @@ async function projectFragments(tx: Prisma.TransactionClient, clockShiftId: stri
       continue;
     }
 
+    const reportedInterval = roundReportedInterval(fragment.recordedStartAt, fragment.recordedEndAt);
     await tx.timesheetDraftSegment.create({
       data: {
         draftDayId: draftDay.id,
         draftId: draft.id,
         employeeId,
         date: fragment.date,
-        startAt: fragment.recordedStartAt,
-        endAt: fragment.recordedEndAt,
+        startAt: reportedInterval.startAt,
+        endAt: reportedInterval.endAt,
         siteId: fragment.siteId,
         workAreaId: fragment.workAreaId,
         sourceAssignmentId: fragment.sourceAssignmentId,

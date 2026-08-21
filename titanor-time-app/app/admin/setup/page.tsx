@@ -69,12 +69,12 @@ const CHECKLIST: ChecklistItem[] = [
     doneHref: '/admin/assignments'
   },
   {
-    key: 'hasOpenPeriod',
-    label: 'Current payroll period',
-    description: 'The date range in which workers enter and submit their hours.',
-    createHref: '/admin/periods/new',
-    doneHref: '/admin/periods',
-    createActionLabel: 'Open period'
+    key: 'hasSubmissionScheduleConfigured',
+    label: 'Timesheet submission cycle',
+    description: 'Choose Weekly or Every two weeks on each active worker. Payroll periods are then created automatically.',
+    createHref: '/admin/workers',
+    doneHref: '/admin/workers',
+    createActionLabel: 'Configure workers'
   }
 ];
 

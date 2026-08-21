@@ -151,8 +151,12 @@ function PeriodBanner({ basePath, isAdmin, period, asOf }: { basePath: string; i
     <div className="ov-period-banner">
       {period ? (
         <p className="ov-period-line">
-          Period: <strong>{period.startDate} – {period.endDate}</strong> · {period.status}
-          {isAdmin && (
+          {period.multipleCurrentCycles ? (
+            <>Current submission cycles: <strong>weekly and two-week groups</strong></>
+          ) : (
+            <>Period: <strong>{period.startDate} – {period.endDate}</strong> · {period.status}</>
+          )}
+          {isAdmin && !period.multipleCurrentCycles && (
             <>
               {' · '}
               <Link href={`/admin/periods/${period.id}`}>View period</Link>

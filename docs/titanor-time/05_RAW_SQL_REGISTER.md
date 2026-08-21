@@ -1996,10 +1996,10 @@ New PostgreSQL extensions: 0
 
 Migration `20260821100000_add_timesheet_submission_schedules` adds four CHECK constraints:
 
-- `ck_timesheet_submission_schedule_week_start` (`0..6`);
-- `ck_timesheet_submission_schedule_anchor_alignment` (anchor weekday equals `weekStartsOn`);
-- `ck_timesheet_submission_schedule_version` (`version > 0`);
-- `ck_employee_timesheet_schedule_dates` (`effectiveTo IS NULL OR >= effectiveFrom`).
+- CK-47 `ck_timesheet_submission_schedule_week_start` (`0..6`);
+- CK-48 `ck_timesheet_submission_schedule_anchor_alignment` (anchor weekday equals `weekStartsOn`);
+- CK-49 `ck_timesheet_submission_schedule_version` (`version > 0`);
+- CK-50 `ck_employee_timesheet_schedule_dates` (`effectiveTo IS NULL OR >= effectiveFrom`).
 
 It also adds partial unique index `ux_timesheet_submission_schedule_company_default`, EX-07, and
 the following cross-table trigger objects:
@@ -2012,3 +2012,12 @@ the following cross-table trigger objects:
 Both paths lock affected `Employee` rows before the overlap read. Positive disposable-PostgreSQL
 proof: weekly `2026-08-17..23` for employee A and biweekly `2026-08-17..30` for employee B coexist.
 Negative proof: inserting A into the biweekly period is rejected with the exact stable identifier.
+
+## 15. T9 address-geocoding cache
+
+Migration `20260821102000_add_address_geocoding_cache` adds CK-51
+`ck_address_geocode_cache_query_hash`: `AddressGeocodeCache.queryHash` must be exactly 64 lowercase
+hex characters. It is the SHA-256 key of the normalized explicit administrator query; the original
+provider response is never stored, only an allowlisted JSON array of display name/latitude/
+longitude. `GeocodingProviderState` is the cross-process Nominatim pacing row and adds no raw SQL
+constraint. No trigger, extension or worker GPS relation is introduced by this migration.

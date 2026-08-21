@@ -4,6 +4,8 @@ import { resolveServerSession } from '@/lib/server-session';
 import { getWorkerDetail, helsinkiToday } from '@/lib/workers';
 import { NewAssignmentForm } from '@/app/admin/assignments/new/NewAssignmentForm';
 import { WorkerActions } from './WorkerActions';
+import { WorkerSubmissionScheduleForm } from './WorkerSubmissionScheduleForm';
+import { getWorkerSubmissionScheduleView } from '@/lib/timesheet-submission-schedules';
 
 export const dynamic = 'force-dynamic';
 
@@ -50,6 +52,8 @@ export default async function WorkerDetailPage({ params }: { params: Promise<{ e
     );
   }
 
+  const submissionSchedule = await getWorkerSubmissionScheduleView(employeeId);
+
   return (
     <main className="setup-page">
       <div className="setup-card worker-card">
@@ -63,6 +67,9 @@ export default async function WorkerDetailPage({ params }: { params: Promise<{ e
         </p>
         <p>
           <Link href={`/admin/reports?employeeId=${employeeId}`}>View time report</Link>
+        </p>
+        <p>
+          <Link href={`/admin/workers/${employeeId}/locations`}>View Check In/Out locations on map</Link>
         </p>
 
         <h2>Current assignments</h2>
@@ -96,6 +103,14 @@ export default async function WorkerDetailPage({ params }: { params: Promise<{ e
             lockEmployee
           />
         </section>
+
+        {submissionSchedule ? (
+          <section className="worker-work-setup">
+            <h2>Timesheet submission</h2>
+            <p className="setup-subtitle">Choose whether this worker submits every week or every two weeks. Periods are prepared automatically.</p>
+            <WorkerSubmissionScheduleForm employeeId={worker.id} view={submissionSchedule} />
+          </section>
+        ) : null}
 
         {worker.employment && !worker.employment.active ? (
           <p className="setup-subtitle">

@@ -129,9 +129,10 @@ payroll rounding. Подтверждённая входная формула: ne
 - 07:52 → 08:00.
 
 Округлённые start/end сохраняются как timesheet reported segment, с origin fragment link. UI
-показывает `Recorded` и `Payable/Reported`, чтобы ADMIN видел разницу. Правило Check Out требует
-явного owner confirmation до product change. Нулевой/отрицательный результат после округления не
-создаёт нелегальный segment: он становится явным exception/review case.
+показывает `Recorded` и `Payable/Reported`, чтобы ADMIN видел разницу. То же правило подтверждено
+владельцем для Check Out. Если две округлённые границы редкого короткого интервала совпали бы,
+reported projection сохраняет точные положительные границы: нулевая строка запрещена моделью,
+тихое удаление потеряло бы время, а искусственные 30 минут завысили бы оплату.
 
 ## 8. Бесплатная карта и GPS
 
@@ -153,13 +154,15 @@ Site editor:
 - выбрать результат или кликнуть/перетащить pin;
 - увидеть координаты и radius circle;
 - сохранить новую immutable GeofenceVersion;
-- адрес хранить отдельно как display metadata, координаты остаются источником геозоны.
+- выбранные координаты остаются единственным источником геозоны; нормализованный запрос и
+  allowlisted результаты живут только в серверном cache провайдера.
 
 Attendance location viewer:
 
 - отдельное `attendance.gps.read.raw`, только ADMIN/SUPER_ADMIN;
-- detail action для конкретного ClockEvent, не массовая карта слежения;
-- check-in/check-out marker, accuracy circle, geofence circle, distance/verdict;
+- worker-scoped экран за выбранный диапазон (не более 31 дня и 200 событий), не постоянный tracking;
+- check-in/check-out markers и текстовые accuracy/verdict/distance, только для событий с реально
+  сохранённым GPS snapshot;
 - каждое раскрытие создаёт sanitized AuditEvent;
 - Cache-Control no-store, координаты не попадают в overview/HTML/log;
 - существующий 90-day retention сохраняется;
@@ -176,4 +179,14 @@ Attendance location viewer:
 7. audited GPS detail viewer;
 8. rounding policy после подтверждения Check Out semantics.
 
-Каждый пункт — отдельный коммит с disposable PostgreSQL и regression предыдущих отчётов/экспорта.
+## 10. Реализованное продолжение (2026-08-21)
+
+- Worker page: выбор Weekly/Every two weeks и только допустимых границ выбранного цикла;
+- current+next period создаются только для выбранного Employee; scheduler каждые 6 часов
+  идемпотентно поддерживает тот же горизонт;
+- legacy OPEN period меняется только без потери fragment/segment/immutable version;
+- overview без periodId объединяет текущие cohorts;
+- TimesheetDraftSegment получает nearest-30 границы, raw ClockEvent/ClockShift не меняются;
+- site editor использует MapLibre 5.24 + OpenFreeMap, pin/radius и button-only Nominatim proxy с
+  DB-cache и межпроцессным rate gate;
+- raw GPS вынесен в отдельный audited/no-store ADMIN screen, retention остаётся 90 дней.

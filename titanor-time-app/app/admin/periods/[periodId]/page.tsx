@@ -3,6 +3,7 @@ import Link from 'next/link';
 import { resolveServerSession } from '@/lib/server-session';
 import { getPeriodDetail } from '@/lib/periods';
 import { LockPeriodAction } from './LockPeriodAction';
+import { LegacyPeriodEditForm } from './LegacyPeriodEditForm';
 
 export const dynamic = 'force-dynamic';
 
@@ -57,6 +58,8 @@ export default async function AdminPeriodDetailPage({ params }: RouteParams) {
             <p>New workers are added automatically when their assignment dates overlap this period.</p>
           </div>
         ) : null}
+
+        {period.status === 'OPEN' && period.submissionScheduleId === null ? <LegacyPeriodEditForm period={period} /> : null}
 
         <ul className="setup-list">
           <li className="setup-item">
