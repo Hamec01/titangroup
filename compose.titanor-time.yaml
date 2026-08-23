@@ -50,6 +50,9 @@ services:
     ports:
       - "127.0.0.1:3200:3000"
 
+    volumes:
+      - /mnt/250gb/titanor-time-foundation/uploads:/app/public/uploads
+
     networks:
       - internal
       - lan
