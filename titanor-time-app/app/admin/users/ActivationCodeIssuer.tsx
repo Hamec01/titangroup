@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
+import { useAppLocale } from '@/components/i18n/AppLocaleProvider';
 
 // docs/titanor-time/04_ADMIN_FIRST_API_CONTRACTS.md §15 — POST
 // /api/admin/users/:userId/activation. Shared by the /admin/users list (manual issue/reissue per
@@ -15,27 +16,31 @@ interface IssuedCode {
   expiresAt: string;
 }
 
-const AMBIGUOUS_MESSAGE =
-  'The result could not be confirmed. Retry to recover the same activation response. Do not use the previously displayed code.';
+function ambiguousMessage(ru: boolean): string {
+  return ru
+    ? 'Результат не удалось подтвердить. Повторите попытку, чтобы получить тот же ответ активации. Не используйте ранее показанный код.'
+    : 'The result could not be confirmed. Retry to recover the same activation response. Do not use the previously displayed code.';
+}
 
-function describeIssueError(code: string | undefined): string {
+function describeIssueError(code: string | undefined, ru: boolean): string {
   switch (code) {
     case 'USER_NOT_FOUND':
-      return 'This user no longer exists.';
+      return ru ? 'Этот пользователь больше не существует.' : 'This user no longer exists.';
     case 'USER_ALREADY_ACTIVE':
-      return 'This account has already been activated.';
+      return ru ? 'Эта учётная запись уже активирована.' : 'This account has already been activated.';
     case 'USER_USES_WORKER_ACTIVATION':
-      return 'This user is linked to a worker profile and uses the regular worker activation flow instead.';
+      return ru ? 'Этот пользователь связан с профилем работника и использует обычный процесс активации работника.' : 'This user is linked to a worker profile and uses the regular worker activation flow instead.';
     case 'ACCOUNT_NOT_ELIGIBLE':
-      return 'This account is not eligible for activation right now.';
+      return ru ? 'Эта учётная запись сейчас не может быть активирована.' : 'This account is not eligible for activation right now.';
     case 'FORBIDDEN':
-      return 'You no longer have permission to issue activation codes.';
+      return ru ? 'У вас больше нет права выдавать коды активации.' : 'You no longer have permission to issue activation codes.';
     default:
-      return 'Something went wrong. Please try again.';
+      return ru ? 'Что-то пошло не так. Попробуйте снова.' : 'Something went wrong. Please try again.';
   }
 }
 
 export function ActivationCodeIssuer({ userId, autoIssue = false }: { userId: string; autoIssue?: boolean }) {
+  const ru = useAppLocale() === 'RU';
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   // True only when the last attempt's HTTP outcome is unknown (fetch threw) — distinct from a
@@ -102,7 +107,7 @@ export function ActivationCodeIssuer({ userId, autoIssue = false }: { userId: st
         } catch {
           // Non-JSON error body — fall through to the generic message.
         }
-        setError(describeIssueError(code));
+        setError(describeIssueError(code, ru));
         setAutoIssueFailed(isAutoAttempt);
         setLoading(false);
         return;
@@ -140,7 +145,7 @@ export function ActivationCodeIssuer({ userId, autoIssue = false }: { userId: st
       // into the cached response instead of risking a second token, and never generate a new key
       // until a determinate HTTP response is actually received.
       setAmbiguous(true);
-      setError(AMBIGUOUS_MESSAGE);
+      setError(ambiguousMessage(ru));
       setLoading(false);
     }
   }
@@ -183,30 +188,31 @@ export function ActivationCodeIssuer({ userId, autoIssue = false }: { userId: st
     return (
       <div className="activation-print-card">
         <p className="login-error" role="alert">
-          This code is shown only once — write it down, copy it, or print it now. It will not be shown again after
-          you leave or refresh this page.
+          {ru
+            ? 'Этот код показывается только один раз — запишите, скопируйте или распечатайте его сейчас. Он больше не будет показан после того, как вы покинете эту страницу или обновите её.'
+            : 'This code is shown only once — write it down, copy it, or print it now. It will not be shown again after you leave or refresh this page.'}
         </p>
         <p>
           <strong>{issuedCode.code}</strong>{' '}
           <button type="button" className="login-submit" onClick={copyIssuedCode}>
-            {codeCopied ? 'Copied' : 'Copy code'}
+            {codeCopied ? (ru ? 'Скопировано' : 'Copied') : (ru ? 'Скопировать код' : 'Copy code')}
           </button>
         </p>
-        <p>Expires: {new Date(issuedCode.expiresAt).toLocaleString()}</p>
+        <p>{ru ? 'Истекает:' : 'Expires:'} {new Date(issuedCode.expiresAt).toLocaleString(ru ? 'ru-RU' : 'en-GB')}</p>
         {qrDataUrl ? (
           // Generated locally in this browser — the raw code is never sent to a third-party image service.
           // eslint-disable-next-line @next/next/no-img-element
-          <img className="activation-qr" src={qrDataUrl} alt="Foreman account activation QR code" />
+          <img className="activation-qr" src={qrDataUrl} alt={ru ? 'QR-код активации учётной записи прораба' : 'Foreman account activation QR code'} />
         ) : null}
         <div className="activation-actions">
           <button type="button" className="login-submit" onClick={copyActivationLink}>
-            {linkCopied ? 'Link copied' : 'Copy activation link'}
+            {linkCopied ? (ru ? 'Ссылка скопирована' : 'Link copied') : (ru ? 'Скопировать ссылку активации' : 'Copy activation link')}
           </button>
           <button type="button" className="login-submit" onClick={() => window.print()}>
-            Print code and QR
+            {ru ? 'Печать кода и QR' : 'Print code and QR'}
           </button>
           <button type="button" className="login-submit" disabled={loading} onClick={() => handleIssue(false)}>
-            {loading ? 'Issuing…' : 'Issue / reissue activation code'}
+            {loading ? (ru ? 'Выдача…' : 'Issuing…') : (ru ? 'Выдать / перевыдать код активации' : 'Issue / reissue activation code')}
           </button>
         </div>
       </div>
@@ -217,7 +223,7 @@ export function ActivationCodeIssuer({ userId, autoIssue = false }: { userId: st
     <div>
       {autoIssueFailed ? (
         <p className="login-error" role="alert">
-          Account created, but the activation code could not be issued automatically.
+          {ru ? 'Учётная запись создана, но код активации не удалось выдать автоматически.' : 'Account created, but the activation code could not be issued automatically.'}
         </p>
       ) : null}
       {ambiguous ? (
@@ -227,14 +233,14 @@ export function ActivationCodeIssuer({ userId, autoIssue = false }: { userId: st
           disabled={loading}
           onClick={() => handleIssue(lastAttemptWasAutoRef.current)}
         >
-          {loading ? 'Retrying…' : 'Retry'}
+          {loading ? (ru ? 'Повтор…' : 'Retrying…') : (ru ? 'Повторить' : 'Retry')}
         </button>
       ) : (
         <button type="button" className="login-submit" disabled={loading} onClick={() => handleIssue(false)}>
-          {loading ? 'Issuing…' : 'Issue / reissue activation code'}
+          {loading ? (ru ? 'Выдача…' : 'Issuing…') : (ru ? 'Выдать / перевыдать код активации' : 'Issue / reissue activation code')}
         </button>
       )}
-      <p className="setup-subtitle">Reissuing revokes any previously issued code for this user.</p>
+      <p className="setup-subtitle">{ru ? 'Перевыдача аннулирует любой ранее выданный код для этого пользователя.' : 'Reissuing revokes any previously issued code for this user.'}</p>
       {error ? (
         <p className="login-error" role="alert">
           {error}

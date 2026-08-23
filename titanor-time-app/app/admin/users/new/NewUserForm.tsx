@@ -4,6 +4,7 @@ import { useRef, useState, type FormEvent } from 'react';
 import Link from 'next/link';
 import type { ForemanSelectableEmployee } from '@/lib/users';
 import { ActivationCodeIssuer } from '../ActivationCodeIssuer';
+import { useAppLocale } from '@/components/i18n/AppLocaleProvider';
 
 // docs/titanor-time/04_ADMIN_FIRST_API_CONTRACTS.md §14 — POST /api/admin/users, both modes.
 const CSRF_HEADER_VALUE = 'titanor-time';
@@ -17,32 +18,35 @@ interface CreatedUser {
   status: string;
 }
 
-function describeCreateError(code: string | undefined, fieldErrors: Record<string, string[]> | undefined): string {
+function describeCreateError(code: string | undefined, fieldErrors: Record<string, string[]> | undefined, ru: boolean): string {
   switch (code) {
     case 'VALIDATION_ERROR':
-      return fieldErrors ? `Please check: ${Object.keys(fieldErrors).join(', ')}.` : 'Please check the fields above.';
+      return fieldErrors
+        ? (ru ? `Проверьте: ${Object.keys(fieldErrors).join(', ')}.` : `Please check: ${Object.keys(fieldErrors).join(', ')}.`)
+        : (ru ? 'Проверьте поля выше.' : 'Please check the fields above.');
     case 'DUPLICATE_USERNAME':
-      return 'That username is already in use.';
+      return ru ? 'Этот логин уже используется.' : 'That username is already in use.';
     case 'DUPLICATE_EMAIL':
-      return 'That email is already in use.';
+      return ru ? 'Этот email уже используется.' : 'That email is already in use.';
     case 'EMPLOYEE_NOT_FOUND':
-      return 'That worker no longer exists.';
+      return ru ? 'Этот работник больше не существует.' : 'That worker no longer exists.';
     case 'EMPLOYEE_USER_MISSING':
-      return 'That worker has no linked account.';
+      return ru ? 'У этого работника нет связанной учётной записи.' : 'That worker has no linked account.';
     case 'USER_NOT_ELIGIBLE':
-      return "That worker's account is not eligible for the FOREMAN role right now (offboarded or deactivated).";
+      return ru ? 'Учётная запись этого работника сейчас не может получить роль прораба (уволен или деактивирован).' : "That worker's account is not eligible for the FOREMAN role right now (offboarded or deactivated).";
     case 'USER_ALREADY_FOREMAN':
-      return 'That worker already has an active or scheduled FOREMAN role.';
+      return ru ? 'У этого работника уже есть активная или запланированная роль прораба.' : 'That worker already has an active or scheduled FOREMAN role.';
     case 'NOT_AUTHENTICATED':
-      return 'Your session expired — please sign in again.';
+      return ru ? 'Сессия истекла — войдите снова.' : 'Your session expired — please sign in again.';
     case 'FORBIDDEN':
-      return 'You no longer have permission to create foreman accounts.';
+      return ru ? 'У вас больше нет права создавать учётные записи прорабов.' : 'You no longer have permission to create foreman accounts.';
     default:
-      return 'Something went wrong. Please try again.';
+      return ru ? 'Что-то пошло не так. Попробуйте снова.' : 'Something went wrong. Please try again.';
   }
 }
 
 export function NewUserForm({ employees }: { employees: ForemanSelectableEmployee[] }) {
+  const ru = useAppLocale() === 'RU';
   const [mode, setMode] = useState<Mode>('STANDALONE');
 
   const [username, setUsername] = useState('');
@@ -97,7 +101,7 @@ export function NewUserForm({ employees }: { employees: ForemanSelectableEmploye
         } catch {
           // Non-JSON error body — fall through to the generic message.
         }
-        setErrorMessage(describeCreateError(code, fieldErrors));
+        setErrorMessage(describeCreateError(code, fieldErrors, ru));
         setLoading(false);
         return;
       }
@@ -110,7 +114,7 @@ export function NewUserForm({ employees }: { employees: ForemanSelectableEmploye
       }
       setLoading(false);
     } catch {
-      setErrorMessage('Network error. Please try again.');
+      setErrorMessage(ru ? 'Ошибка сети. Попробуйте снова.' : 'Network error. Please try again.');
       setLoading(false);
     }
   }
@@ -119,11 +123,11 @@ export function NewUserForm({ employees }: { employees: ForemanSelectableEmploye
     return (
       <div>
         <p>
-          Account created: <strong>{createdStandalone.username}</strong>
+          {ru ? 'Учётная запись создана:' : 'Account created:'} <strong>{createdStandalone.username}</strong>
         </p>
         <ActivationCodeIssuer userId={createdStandalone.id} autoIssue />
         <p>
-          <Link href="/admin/users">Back to Users list</Link>
+          <Link href="/admin/users">{ru ? 'К списку пользователей' : 'Back to Users list'}</Link>
         </p>
       </div>
     );
@@ -133,18 +137,19 @@ export function NewUserForm({ employees }: { employees: ForemanSelectableEmploye
     return (
       <div>
         <p>
-          FOREMAN role granted to <strong>{createdDualRole.username}</strong>.
+          {ru ? 'Роль прораба предоставлена' : 'FOREMAN role granted to'} <strong>{createdDualRole.username}</strong>.
         </p>
         {createdDualRole.status === 'ACTIVE' ? (
-          <p>This worker already has a password and can log in as usual — no new code is needed.</p>
+          <p>{ru ? 'У этого работника уже есть пароль, он может войти как обычно — новый код не требуется.' : 'This worker already has a password and can log in as usual — no new code is needed.'}</p>
         ) : (
           <p>
-            This worker will set their password through the normal worker activation flow — a separate system
-            activation code is not needed.
+            {ru
+              ? 'Этот работник установит пароль через обычный процесс активации работника — отдельный системный код активации не требуется.'
+              : 'This worker will set their password through the normal worker activation flow — a separate system activation code is not needed.'}
           </p>
         )}
         <p>
-          <Link href="/admin/users">Back to Users list</Link>
+          <Link href="/admin/users">{ru ? 'К списку пользователей' : 'Back to Users list'}</Link>
         </p>
       </div>
     );
@@ -152,9 +157,9 @@ export function NewUserForm({ employees }: { employees: ForemanSelectableEmploye
 
   return (
     <form onSubmit={handleSubmit} aria-busy={loading}>
-      <div className="login-locale-switch" role="group" aria-label="Creation mode">
+      <div className="login-locale-switch" role="group" aria-label={ru ? 'Способ создания' : 'Creation mode'}>
         <button type="button" aria-pressed={mode === 'STANDALONE'} disabled={loading} onClick={() => setMode('STANDALONE')}>
-          Standalone foreman
+          {ru ? 'Отдельный прораб' : 'Standalone foreman'}
         </button>
         <button
           type="button"
@@ -162,14 +167,14 @@ export function NewUserForm({ employees }: { employees: ForemanSelectableEmploye
           disabled={loading}
           onClick={() => setMode('EXISTING_EMPLOYEE')}
         >
-          Existing worker (dual-role)
+          {ru ? 'Существующий работник (двойная роль)' : 'Existing worker (dual-role)'}
         </button>
       </div>
 
       {mode === 'STANDALONE' ? (
         <>
           <div className="login-field">
-            <label htmlFor="user-username">Username</label>
+            <label htmlFor="user-username">{ru ? 'Логин' : 'Username'}</label>
             <input
               id="user-username"
               name="username"
@@ -184,7 +189,7 @@ export function NewUserForm({ employees }: { employees: ForemanSelectableEmploye
           </div>
 
           <div className="login-field">
-            <label htmlFor="user-email">Email (optional)</label>
+            <label htmlFor="user-email">{ru ? 'Email (необязательно)' : 'Email (optional)'}</label>
             <input
               id="user-email"
               name="email"
@@ -197,8 +202,8 @@ export function NewUserForm({ employees }: { employees: ForemanSelectableEmploye
           </div>
 
           <div className="login-field">
-            <label>Locale</label>
-            <div className="login-locale-switch" role="group" aria-label="Locale">
+            <label>{ru ? 'Язык' : 'Locale'}</label>
+            <div className="login-locale-switch" role="group" aria-label={ru ? 'Язык' : 'Locale'}>
               {LOCALES.map((candidate) => (
                 <button
                   key={candidate}
@@ -214,11 +219,11 @@ export function NewUserForm({ employees }: { employees: ForemanSelectableEmploye
           </div>
         </>
       ) : employees.length === 0 ? (
-        <p>No workers yet — create one from Workers first.</p>
+        <p>{ru ? 'Работников пока нет — сначала создайте одного в разделе «Работники».' : 'No workers yet — create one from Workers first.'}</p>
       ) : (
         <>
           <div className="login-field">
-            <label htmlFor="user-employee">Worker</label>
+            <label htmlFor="user-employee">{ru ? 'Работник' : 'Worker'}</label>
             <select
               id="user-employee"
               required
@@ -227,7 +232,7 @@ export function NewUserForm({ employees }: { employees: ForemanSelectableEmploye
               onChange={(event) => setEmployeeId(event.target.value)}
             >
               <option value="" disabled>
-                Select a worker…
+                {ru ? 'Выберите работника…' : 'Select a worker…'}
               </option>
               {employees.map((employee) => (
                 <option key={employee.id} value={employee.id}>
@@ -238,9 +243,9 @@ export function NewUserForm({ employees }: { employees: ForemanSelectableEmploye
             </select>
           </div>
           <p className="setup-subtitle">
-            If the selected worker is ACTIVE, they keep their existing password — no new code is issued. If
-            PENDING_ACTIVATION, they will set their password through the normal worker activation flow — a
-            separate system activation code is not needed.
+            {ru
+              ? 'Если выбранный работник активен, он сохраняет существующий пароль — новый код не выдаётся. Если ожидает активации, он установит пароль через обычный процесс активации работника — отдельный системный код активации не требуется.'
+              : 'If the selected worker is ACTIVE, they keep their existing password — no new code is issued. If PENDING_ACTIVATION, they will set their password through the normal worker activation flow — a separate system activation code is not needed.'}
           </p>
         </>
       )}
@@ -256,7 +261,7 @@ export function NewUserForm({ employees }: { employees: ForemanSelectableEmploye
         type="submit"
         disabled={loading || (mode === 'EXISTING_EMPLOYEE' && employees.length === 0)}
       >
-        {loading ? 'Creating…' : mode === 'STANDALONE' ? 'Create foreman' : 'Grant FOREMAN role'}
+        {loading ? (ru ? 'Создание…' : 'Creating…') : mode === 'STANDALONE' ? (ru ? 'Создать прораба' : 'Create foreman') : (ru ? 'Предоставить роль прораба' : 'Grant FOREMAN role')}
       </button>
     </form>
   );

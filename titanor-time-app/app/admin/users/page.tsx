@@ -4,14 +4,30 @@ import Link from 'next/link';
 import { resolveServerSession } from '@/lib/server-session';
 import { listUsers } from '@/lib/users';
 import { ActivationCodeIssuer } from './ActivationCodeIssuer';
+import { resolveAppLocale } from '@/lib/i18n/server';
+import { adminDailyStrings } from '@/lib/i18n/admin-daily';
+import { localeText, type AppLocale } from '@/lib/i18n/locale';
 
 export const dynamic = 'force-dynamic';
 
 const PAGE_SIZE = 100;
 
-function statusBadge(status: string): ReactNode {
+const USER_STATUS_LABELS: Record<string, { en: string; ru: string }> = {
+  PENDING_ACTIVATION: { en: 'PENDING_ACTIVATION', ru: 'Ожидает активации' },
+  ACTIVE: { en: 'ACTIVE', ru: 'Активен' },
+  OFFBOARDING: { en: 'OFFBOARDING', ru: 'Увольнение' },
+  DEACTIVATED: { en: 'DEACTIVATED', ru: 'Деактивирован' }
+};
+
+function userStatusLabel(status: string, locale: AppLocale): string {
+  const entry = USER_STATUS_LABELS[status];
+  if (!entry) return status;
+  return locale === 'RU' ? entry.ru : entry.en;
+}
+
+function statusBadge(status: string, locale: AppLocale): ReactNode {
   const done = status === 'ACTIVE';
-  return <span className={`setup-status ${done ? 'setup-status-done' : 'setup-status-pending'}`}>{status}</span>;
+  return <span className={`setup-status ${done ? 'setup-status-done' : 'setup-status-pending'}`}>{userStatusLabel(status, locale)}</span>;
 }
 
 // docs/titanor-time/01_SCREEN_MAP.md — /admin/users. System users (FOREMAN/ADMIN/SUPER_ADMIN,
@@ -22,13 +38,15 @@ export default async function AdminUsersPage() {
   if (!session) {
     redirect('/login');
   }
+  const locale = await resolveAppLocale();
+  const s = adminDailyStrings(locale);
 
   const isAdmin = session.user.roles.includes('ADMIN') || session.user.roles.includes('SUPER_ADMIN');
   if (!isAdmin) {
     return (
       <main className="setup-page">
         <p className="login-error" role="alert">
-          Access denied — this page requires the ADMIN or SUPER_ADMIN role.
+          {s.accessDenied}
         </p>
       </main>
     );
@@ -39,23 +57,23 @@ export default async function AdminUsersPage() {
   return (
     <main className="setup-page">
       <div className="setup-card worker-card">
-        <h1>Users</h1>
+        <h1>{localeText(locale, 'Users', 'Пользователи')}</h1>
         <p className="setup-subtitle">
-          {totalItems} system user{totalItems === 1 ? '' : 's'} ·{' '}
-          <Link href="/admin/users/new">Add foreman</Link>
+          {localeText(locale, `${totalItems} system user${totalItems === 1 ? '' : 's'}`, `Системных пользователей: ${totalItems}`)} ·{' '}
+          <Link href="/admin/users/new">{localeText(locale, 'Add foreman', 'Добавить прораба')}</Link>
         </p>
         {items.length === 0 ? (
-          <p>No system users yet.</p>
+          <p>{localeText(locale, 'No system users yet.', 'Системных пользователей пока нет.')}</p>
         ) : (
           <table className="worker-table">
             <thead>
               <tr>
-                <th>Username</th>
-                <th>Email</th>
-                <th>Status</th>
-                <th>Roles</th>
-                <th>Employee</th>
-                <th>Activation</th>
+                <th>{localeText(locale, 'Username', 'Логин')}</th>
+                <th>{localeText(locale, 'Email', 'Email')}</th>
+                <th>{s.common.status}</th>
+                <th>{localeText(locale, 'Roles', 'Роли')}</th>
+                <th>{localeText(locale, 'Employee', 'Работник')}</th>
+                <th>{localeText(locale, 'Activation', 'Активация')}</th>
               </tr>
             </thead>
             <tbody>
@@ -63,7 +81,7 @@ export default async function AdminUsersPage() {
                 <tr key={user.id}>
                   <td>{user.username}</td>
                   <td>{user.email ?? '—'}</td>
-                  <td>{statusBadge(user.status)}</td>
+                  <td>{statusBadge(user.status, locale)}</td>
                   <td>{user.roles.join(', ')}</td>
                   <td>
                     {user.employee ? (
@@ -76,13 +94,13 @@ export default async function AdminUsersPage() {
                   </td>
                   <td>
                     {user.employee ? (
-                      <span>Uses worker activation / existing password</span>
+                      <span>{localeText(locale, 'Uses worker activation / existing password', 'Использует активацию работника / существующий пароль')}</span>
                     ) : user.status === 'PENDING_ACTIVATION' ? (
                       <ActivationCodeIssuer userId={user.id} />
                     ) : user.status === 'ACTIVE' ? (
-                      <span>Activated</span>
+                      <span>{localeText(locale, 'Activated', 'Активирован')}</span>
                     ) : (
-                      <span>{user.status}</span>
+                      <span>{userStatusLabel(user.status, locale)}</span>
                     )}
                   </td>
                 </tr>
