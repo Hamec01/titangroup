@@ -80,10 +80,35 @@ button:disabled {
   text-align: right;
 }
 
+.admin-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.admin-guide-link {
+  color: var(--accent-light);
+  font-size: 0.82rem;
+  text-decoration: none;
+  white-space: nowrap;
+  border-bottom: 1px dotted rgba(123, 153, 170, 0.6);
+}
+
+.admin-guide-link:hover,
+.admin-guide-link:focus-visible {
+  color: var(--white);
+  outline: none;
+}
+
+/* Grouped dropdown nav — a top row of "Today" + 5 group buttons (was a flat 15-link row).
+   Groups open a positioned menu below their trigger; see components/admin/AdminNav.tsx for the
+   open/close interaction (click-to-toggle, closes on outside click / Escape / route change). */
 .admin-nav {
+  position: relative;
+  z-index: 20;
   border-block: 1px solid rgba(255, 255, 255, 0.08);
   background: rgba(7, 11, 17, 0.78);
-  overflow-x: auto;
+  overflow: visible;
 }
 
 .admin-nav-inner {
@@ -93,23 +118,83 @@ button:disabled {
   margin: 0 auto;
   padding: 0 24px;
   display: flex;
-  align-items: center;
+  align-items: stretch;
   gap: 4px;
+  flex-wrap: wrap;
 }
 
-.admin-nav a {
+.admin-nav-top {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
   padding: 13px 12px;
+  border: none;
+  background: transparent;
   color: var(--text-soft);
   font-size: 0.88rem;
+  font-family: inherit;
+  text-decoration: none;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.admin-nav-top:hover,
+.admin-nav-top:focus-visible {
+  color: var(--white);
+  background: rgba(82, 130, 168, 0.18);
+  outline: none;
+}
+
+.admin-nav-top-active {
+  color: var(--white);
+  font-weight: 600;
+}
+
+.admin-nav-group {
+  position: relative;
+}
+
+.admin-nav-caret {
+  font-size: 0.7em;
+  color: var(--text-soft);
+  transform: translateY(1px);
+}
+
+.admin-nav-menu {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  min-width: 220px;
+  margin-top: 2px;
+  padding: 6px;
+  display: grid;
+  gap: 2px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 6px;
+  background: #0b0f16;
+  box-shadow: 0 16px 32px rgba(0, 0, 0, 0.45);
+}
+
+.admin-nav-menu-link {
+  padding: 9px 10px;
+  border-radius: 4px;
+  color: var(--text-soft);
+  font-size: 0.86rem;
   text-decoration: none;
   white-space: nowrap;
 }
 
-.admin-nav a:hover,
-.admin-nav a:focus-visible {
+.admin-nav-menu-link:hover,
+.admin-nav-menu-link:focus-visible {
   color: var(--white);
   background: rgba(82, 130, 168, 0.18);
   outline: none;
+}
+
+.admin-nav-menu-link-active {
+  color: var(--white);
+  font-weight: 600;
+  background: rgba(82, 130, 168, 0.12);
 }
 
 .admin-content .setup-page {
@@ -125,6 +210,19 @@ button:disabled {
   justify-content: center;
   padding: 24px;
   gap: 24px;
+}
+
+.login-guide-link {
+  color: var(--accent-light);
+  font-size: 0.85rem;
+  text-decoration: none;
+  border-bottom: 1px dotted rgba(123, 153, 170, 0.6);
+}
+
+.login-guide-link:hover,
+.login-guide-link:focus-visible {
+  color: var(--white);
+  outline: none;
 }
 
 .login-locale-switch {
@@ -356,6 +454,154 @@ button:disabled {
 .setup-card form {
   display: grid;
   gap: 16px;
+}
+
+/* Public /guide page — components/guide/GuideView.tsx. Reuses .setup-page/.setup-card's shell,
+   .wk-section-title for headings, .owner-secondary-panel for the collapsible reference groups,
+   and .policy-notice for the tips callouts; only what's genuinely new gets its own .guide-* rule. */
+.guide-page {
+  align-items: flex-start;
+  padding-top: 40px;
+  padding-bottom: 64px;
+}
+
+.guide-card {
+  width: 100%;
+  max-width: 880px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: linear-gradient(180deg, rgba(16, 23, 34, 0.96), rgba(10, 14, 21, 0.96));
+  padding: 32px;
+  border-radius: 6px;
+}
+
+.guide-topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 24px;
+}
+
+.guide-back-link {
+  color: var(--accent-light);
+  font-size: 0.88rem;
+  text-decoration: none;
+}
+
+.guide-back-link:hover,
+.guide-back-link:focus-visible {
+  color: var(--white);
+  outline: none;
+}
+
+.guide-section {
+  margin-top: 32px;
+  padding-top: 24px;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.guide-section:first-of-type {
+  margin-top: 8px;
+  padding-top: 0;
+  border-top: none;
+}
+
+.guide-section p {
+  color: var(--text-soft);
+  line-height: 1.6;
+}
+
+.guide-roles-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 14px;
+  margin-top: 14px;
+}
+
+.guide-role-card {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 14px 16px;
+}
+
+.guide-role-card h3 {
+  margin: 0 0 6px;
+  font-size: 0.95rem;
+  color: var(--white);
+}
+
+.guide-role-card p {
+  margin: 0;
+  font-size: 0.88rem;
+}
+
+.guide-steps {
+  list-style: none;
+  margin: 16px 0 0;
+  padding: 0;
+  display: grid;
+  gap: 10px;
+}
+
+.guide-step {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 12px 16px;
+}
+
+.guide-step strong {
+  color: var(--white);
+  font-size: 0.92rem;
+}
+
+.guide-step p {
+  margin: 6px 0 0;
+  font-size: 0.88rem;
+}
+
+.guide-reference-group {
+  margin-top: 14px;
+}
+
+.guide-reference-group > summary {
+  font-size: 1rem;
+}
+
+.guide-reference-list {
+  display: grid;
+  gap: 14px;
+  margin: 0;
+}
+
+.guide-reference-item dt {
+  color: var(--white);
+  font-weight: 650;
+  font-size: 0.92rem;
+}
+
+.guide-reference-item dd {
+  margin: 4px 0 0;
+  color: var(--text-soft);
+  font-size: 0.88rem;
+  line-height: 1.55;
+}
+
+.guide-tips {
+  list-style: none;
+  margin: 14px 0 0;
+  padding: 0;
+  display: grid;
+  gap: 8px;
+}
+
+@media (max-width: 700px) {
+  .guide-roles-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .guide-topbar {
+    flex-wrap: wrap;
+  }
 }
 
 .setup-list {

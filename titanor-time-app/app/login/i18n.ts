@@ -23,6 +23,7 @@ export interface LoginStrings {
   errorRateLimited: string;
   errorGeneric: string;
   noRole: string;
+  guideLink: string;
 }
 
 export const LOGIN_STRINGS: Record<LoginLocale, LoginStrings> = {
@@ -38,7 +39,8 @@ export const LOGIN_STRINGS: Record<LoginLocale, LoginStrings> = {
     errorDeactivated: 'This account has been deactivated.',
     errorRateLimited: 'Too many attempts. Try again later.',
     errorGeneric: 'Something went wrong. Please try again.',
-    noRole: 'This account has no assigned role. Contact your administrator.'
+    noRole: 'This account has no assigned role. Contact your administrator.',
+    guideLink: 'How to use this app — user guide'
   },
   RU: {
     title: 'Titanor Time',
@@ -52,7 +54,8 @@ export const LOGIN_STRINGS: Record<LoginLocale, LoginStrings> = {
     errorDeactivated: 'Учётная запись отключена.',
     errorRateLimited: 'Слишком много попыток. Попробуйте позже.',
     errorGeneric: 'Что-то пошло не так. Попробуйте ещё раз.',
-    noRole: 'У учётной записи нет роли. Обратитесь к администратору.'
+    noRole: 'У учётной записи нет роли. Обратитесь к администратору.',
+    guideLink: 'Как пользоваться системой — инструкция'
   }
 };
 

@@ -16,11 +16,17 @@ export default async function ForemanLayout({ children }: { children: ReactNode 
             <Link href="/foreman" className="admin-brand">Titanor Time</Link>
             <nav aria-label={ru ? 'Навигация уполномоченного' : 'Authorized reviewer navigation'}>
               <Link href="/foreman">{ru ? 'Сегодня' : 'Today'}</Link>
+              <Link href="/foreman/workers">{ru ? 'Работники' : 'Workers'}</Link>
               <Link href="/foreman/review">{ru ? 'Проверка табелей' : 'Timesheet review'}</Link>
               <Link href="/foreman/attendance/exceptions">{ru ? 'Проблемы учёта' : 'Attendance issues'}</Link>
               <Link href="/foreman/reports/sites">{ru ? 'Отчёты по объектам' : 'Site reports'}</Link>
             </nav>
-            <LanguageSwitcher compact />
+            <div className="admin-header-actions">
+              <Link href="/guide" className="admin-guide-link">
+                {ru ? 'Инструкция' : 'User guide'}
+              </Link>
+              <LanguageSwitcher compact />
+            </div>
           </header>
         ) : null}
         {children}

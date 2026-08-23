@@ -161,6 +161,9 @@ export default function LoginPage() {
 
   return (
     <main className="login-page">
+      <a href="/guide" className="login-guide-link">
+        {t.guideLink}
+      </a>
       <div className="login-locale-switch" role="group" aria-label="Language">
         {LOGIN_LOCALES.map((code) => (
           <button

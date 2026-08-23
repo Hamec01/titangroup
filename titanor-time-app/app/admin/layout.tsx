@@ -3,27 +3,10 @@ import Link from 'next/link';
 import { redirect } from 'next/navigation';
 import { resolveServerSession } from '@/lib/server-session';
 import { resolveAppLocale } from '@/lib/i18n/server';
-import { ADMIN_STRINGS } from '@/lib/i18n/admin';
+import { ADMIN_STRINGS, ADMIN_NAV } from '@/lib/i18n/admin';
 import { AppLocaleProvider } from '@/components/i18n/AppLocaleProvider';
 import { LanguageSwitcher } from '@/components/i18n/LanguageSwitcher';
-
-const ADMIN_NAVIGATION = [
-  { href: '/admin', label: 'Overview' },
-  { href: '/admin/setup', label: 'Setup' },
-  { href: '/admin/workers', label: 'Workers' },
-  { href: '/admin/users', label: 'Users' },
-  { href: '/admin/sites', label: 'Sites' },
-  { href: '/admin/templates', label: 'Templates' },
-  { href: '/admin/assignments', label: 'Assignments' },
-  { href: '/admin/periods', label: 'Periods' },
-  { href: '/admin/timesheets', label: 'Timesheets' },
-  { href: '/admin/reports', label: 'Reports' },
-  { href: '/admin/review-scopes', label: 'Review' },
-  { href: '/admin/corrections', label: 'Corrections' },
-  { href: '/admin/export', label: 'Exports' },
-  { href: '/admin/attendance/exceptions', label: 'Attendance exceptions' },
-  { href: '/admin/attendance/policy', label: 'Attendance policy' }
-] as const;
+import { AdminNav } from '@/components/admin/AdminNav';
 
 export default async function AdminLayout({ children }: Readonly<{ children: ReactNode }>) {
   const [session, locale] = await Promise.all([resolveServerSession(), resolveAppLocale()]);
@@ -53,17 +36,14 @@ export default async function AdminLayout({ children }: Readonly<{ children: Rea
         <span className="admin-identity">
           {session.user.username} · {session.user.roles.join(', ')}
         </span>
-        <LanguageSwitcher compact />
-      </header>
-      <nav className="admin-nav" aria-label={t.adminNavigation}>
-        <div className="admin-nav-inner">
-          {ADMIN_NAVIGATION.map((item) => (
-            <Link key={item.href} href={item.href}>
-              {t.nav[item.label] ?? item.label}
-            </Link>
-          ))}
+        <div className="admin-header-actions">
+          <Link href="/guide" className="admin-guide-link">
+            {t.guideLink}
+          </Link>
+          <LanguageSwitcher compact />
         </div>
-      </nav>
+      </header>
+      <AdminNav strings={ADMIN_NAV[locale]} ariaLabel={t.adminNavigation} />
       <div className="admin-content">{children}</div>
     </div>
     </AppLocaleProvider>
