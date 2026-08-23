@@ -2,7 +2,12 @@
 // by the export history/detail views. Never recomputes anything the backend already produced
 // (lib/csv-export.ts) — purely string formatting.
 
-export function exportKindLabel(kind: 'FULL' | 'CORRECTION'): string {
+import type { AppLocale } from '@/lib/i18n/locale';
+
+export function exportKindLabel(kind: 'FULL' | 'CORRECTION', locale: AppLocale = 'EN'): string {
+  if (locale === 'RU') {
+    return kind === 'FULL' ? 'Полная выгрузка' : 'Выгрузка корректировок';
+  }
   return kind === 'FULL' ? 'Full export' : 'Correction export';
 }
 

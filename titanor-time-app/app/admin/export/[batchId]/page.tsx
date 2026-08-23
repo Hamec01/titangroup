@@ -4,6 +4,8 @@ import { hasPermission } from '@/lib/permissions';
 import { getExportBatchDetail, isValidExportBatchId, parsePageQuery } from '@/lib/csv-export';
 import { getPeriodDetail } from '@/lib/periods';
 import { ExportBatchDetailView, type ExportBatchDetailOutcome } from '@/components/exports/ExportBatchDetailView';
+import { resolveAppLocale } from '@/lib/i18n/server';
+import { localeText } from '@/lib/i18n/locale';
 
 export const dynamic = 'force-dynamic';
 
@@ -25,12 +27,13 @@ export default async function AdminExportBatchDetailPage({ params, searchParams 
   if (!session) {
     redirect('/login');
   }
+  const locale = await resolveAppLocale();
 
   if (!(await hasPermission(session.user.roles, REQUIRED_PERMISSION))) {
     return (
       <main className="setup-page">
         <p className="login-error" role="alert">
-          Access denied — this page requires the {REQUIRED_PERMISSION} permission.
+          {localeText(locale, `Access denied — this page requires the ${REQUIRED_PERMISSION} permission.`, `Доступ запрещён — для этой страницы требуется право ${REQUIRED_PERMISSION}.`)}
         </p>
       </main>
     );
@@ -59,7 +62,7 @@ export default async function AdminExportBatchDetailPage({ params, searchParams 
   return (
     <main className="setup-page">
       <div className="setup-card worker-card">
-        <ExportBatchDetailView batchId={batchId} outcome={outcome} page={page} pageSize={pageSize} />
+        <ExportBatchDetailView batchId={batchId} outcome={outcome} page={page} pageSize={pageSize} locale={locale} />
       </div>
     </main>
   );

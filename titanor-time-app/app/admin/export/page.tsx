@@ -6,6 +6,8 @@ import { listPeriodOptions } from '@/lib/attendance-overview-lookups';
 import { getPeriodDetail } from '@/lib/periods';
 import { UUID_PATTERN } from '@/lib/attendance-exceptions';
 import { ExportHistoryView, type ExportHistoryOutcome, type RawExportFilters, type CreatePanelInfo } from '@/components/exports/ExportHistoryView';
+import { resolveAppLocale } from '@/lib/i18n/server';
+import { localeText } from '@/lib/i18n/locale';
 
 export const dynamic = 'force-dynamic';
 
@@ -28,12 +30,13 @@ export default async function AdminExportHistoryPage({ searchParams }: RoutePara
   if (!session) {
     redirect('/login');
   }
+  const locale = await resolveAppLocale();
 
   if (!(await hasPermission(session.user.roles, REQUIRED_READ_PERMISSION))) {
     return (
       <main className="setup-page">
         <p className="login-error" role="alert">
-          Access denied — this page requires the {REQUIRED_READ_PERMISSION} permission.
+          {localeText(locale, `Access denied — this page requires the ${REQUIRED_READ_PERMISSION} permission.`, `Доступ запрещён — для этой страницы требуется право ${REQUIRED_READ_PERMISSION}.`)}
         </p>
       </main>
     );
@@ -92,7 +95,7 @@ export default async function AdminExportHistoryPage({ searchParams }: RoutePara
   return (
     <main className="setup-page">
       <div className="setup-card worker-card">
-        <ExportHistoryView rawFilters={rawFilters} periodOptions={periodOptions} outcome={outcome} createPanel={createPanel} />
+        <ExportHistoryView rawFilters={rawFilters} periodOptions={periodOptions} outcome={outcome} createPanel={createPanel} locale={locale} />
       </div>
     </main>
   );
