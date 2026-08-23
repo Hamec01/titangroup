@@ -4,6 +4,7 @@ import { resolveServerSession } from '@/lib/server-session';
 import { resolveAppLocale } from '@/lib/i18n/server';
 import { AppLocaleProvider } from '@/components/i18n/AppLocaleProvider';
 import { LanguageSwitcher } from '@/components/i18n/LanguageSwitcher';
+import { LogoutButton } from '@/components/admin/LogoutButton';
 
 export default async function ForemanLayout({ children }: { children: ReactNode }) {
   const [session, locale] = await Promise.all([resolveServerSession(), resolveAppLocale()]);
@@ -26,6 +27,11 @@ export default async function ForemanLayout({ children }: { children: ReactNode 
                 {ru ? 'Инструкция' : 'User guide'}
               </Link>
               <LanguageSwitcher compact />
+              <LogoutButton
+                signOut={ru ? 'Выйти' : 'Sign out'}
+                signingOut={ru ? 'Выполняется выход…' : 'Signing out…'}
+                error={ru ? 'Не удалось выйти. Проверьте соединение и попробуйте ещё раз.' : 'Could not sign out. Check your connection and try again.'}
+              />
             </div>
           </header>
         ) : null}

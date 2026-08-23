@@ -100,6 +100,25 @@ button:disabled {
   outline: none;
 }
 
+.admin-logout-button {
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: rgba(7, 11, 17, 0.6);
+  color: var(--text-soft);
+  font-family: inherit;
+  font-size: 0.82rem;
+  padding: 6px 12px;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.admin-logout-button:hover,
+.admin-logout-button:focus-visible {
+  color: var(--white);
+  border-color: var(--accent-light);
+  outline: none;
+}
+
 /* Grouped dropdown nav — a top row of "Today" + 5 group buttons (was a flat 15-link row).
    Groups open a positioned menu below their trigger; see components/admin/AdminNav.tsx for the
    open/close interaction (click-to-toggle, closes on outside click / Escape / route change). */

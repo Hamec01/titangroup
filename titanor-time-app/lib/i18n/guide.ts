@@ -87,7 +87,7 @@ export const GUIDE_CONTENT: Record<AppLocale, GuideContent> = {
       },
       {
         title: '5. Работник',
-        text: 'Добавьте сотрудника в разделе «Работники → Работники»: имя, фамилия, при необходимости телефон. Табельный номер система может присвоить автоматически. Сразу после создания можно выдать код или QR-код активации — по нему работник установит и войдёт в мобильное приложение.'
+        text: 'Добавьте сотрудника в разделе «Работники → Работники»: имя, фамилия, при необходимости телефон. Табельный номер система может присвоить автоматически. Сразу после создания можно выдать код или QR-код активации — по нему работник установит и войдёт в мобильное приложение. На iPhone приложение нужно устанавливать только через встроенный браузер Safari — через другие браузеры (например, Chrome на iOS) установка на iPhone не сработает.'
       },
       {
         title: '6. Назначение',
@@ -213,7 +213,7 @@ export const GUIDE_CONTENT: Record<AppLocale, GuideContent> = {
       },
       {
         title: '5. Worker',
-        text: 'Add an employee under People → Workers: first name, last name, phone if needed. The system can assign an employee number automatically. Right after creation you can issue an activation code or QR code — the worker uses it to install and log into the mobile app.'
+        text: 'Add an employee under People → Workers: first name, last name, phone if needed. The system can assign an employee number automatically. Right after creation you can issue an activation code or QR code — the worker uses it to install and log into the mobile app. On iPhone, the app must be installed through the built-in Safari browser only — installing from another browser (e.g. Chrome on iOS) will not work on iPhone.'
       },
       {
         title: '6. Assignment',

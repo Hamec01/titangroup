@@ -7,6 +7,7 @@ import { ADMIN_STRINGS, ADMIN_NAV } from '@/lib/i18n/admin';
 import { AppLocaleProvider } from '@/components/i18n/AppLocaleProvider';
 import { LanguageSwitcher } from '@/components/i18n/LanguageSwitcher';
 import { AdminNav } from '@/components/admin/AdminNav';
+import { LogoutButton } from '@/components/admin/LogoutButton';
 
 export default async function AdminLayout({ children }: Readonly<{ children: ReactNode }>) {
   const [session, locale] = await Promise.all([resolveServerSession(), resolveAppLocale()]);
@@ -41,6 +42,7 @@ export default async function AdminLayout({ children }: Readonly<{ children: Rea
             {t.guideLink}
           </Link>
           <LanguageSwitcher compact />
+          <LogoutButton signOut={t.signOut} signingOut={t.signingOut} error={t.signOutError} />
         </div>
       </header>
       <AdminNav strings={ADMIN_NAV[locale]} ariaLabel={t.adminNavigation} />
