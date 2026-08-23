@@ -1,4 +1,5 @@
 import Link from 'next/link';
+import type { AppLocale } from '@/lib/i18n/locale';
 
 // docs/titanor-time/T8_REPORTS_DESIGN.md Addendum "T8.3B" (extended by "T8.4C" §BT) — single shared
 // tab switcher for every ADMIN report/export screen. T8.1 (/admin/reports), T8.2's admin view
@@ -9,24 +10,25 @@ import Link from 'next/link';
 
 export type AdminReportTab = 'worker' | 'site' | 'period' | 'export';
 
-const TABS: { key: AdminReportTab; href: string; label: string }[] = [
-  { key: 'worker', href: '/admin/reports', label: 'By worker' },
-  { key: 'site', href: '/admin/reports/sites', label: 'By site' },
-  { key: 'period', href: '/admin/reports/periods', label: 'By period' },
-  { key: 'export', href: '/admin/export', label: 'CSV exports' }
+const TABS: { key: AdminReportTab; href: string; label: { en: string; ru: string } }[] = [
+  { key: 'worker', href: '/admin/reports', label: { en: 'By worker', ru: 'По работнику' } },
+  { key: 'site', href: '/admin/reports/sites', label: { en: 'By site', ru: 'По объекту' } },
+  { key: 'period', href: '/admin/reports/periods', label: { en: 'By period', ru: 'По периоду' } },
+  { key: 'export', href: '/admin/export', label: { en: 'CSV exports', ru: 'Выгрузки CSV' } }
 ];
 
-export function AdminReportTabs({ active }: { active: AdminReportTab }) {
+export function AdminReportTabs({ active, locale }: { active: AdminReportTab; locale: AppLocale }) {
+  const ru = locale === 'RU';
   return (
-    <nav className="ov-legacy" aria-label="Report type">
+    <nav className="ov-legacy" aria-label={ru ? 'Тип отчёта' : 'Report type'}>
       {TABS.map((tab, i) => (
         <span key={tab.key}>
           {i > 0 && ' · '}
           {tab.key === active ? (
-            <span aria-current="page">{tab.label}</span>
+            <span aria-current="page">{ru ? tab.label.ru : tab.label.en}</span>
           ) : (
             <Link href={tab.href} className="wk-back-link">
-              {tab.label}
+              {ru ? tab.label.ru : tab.label.en}
             </Link>
           )}
         </span>

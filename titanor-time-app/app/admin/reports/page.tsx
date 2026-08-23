@@ -8,6 +8,8 @@ import { listEmployeesForReportSelect } from '@/lib/users';
 import { listPeriodOptions } from '@/lib/attendance-overview-lookups';
 import { formatWorkedDuration, timesheetStatusLabel, dataSourceLabel } from '@/lib/reporting/report-format';
 import { AdminReportTabs } from '@/components/reports/AdminReportTabs';
+import { resolveAppLocale } from '@/lib/i18n/server';
+import { localeText, type AppLocale } from '@/lib/i18n/locale';
 
 export const dynamic = 'force-dynamic';
 
@@ -31,13 +33,14 @@ export default async function AdminReportsPage({ searchParams }: RouteParams) {
   if (!session) {
     redirect('/login');
   }
+  const locale = await resolveAppLocale();
 
   for (const permissionCode of REQUIRED_PERMISSIONS) {
     if (!(await hasPermission(session.user.roles, permissionCode))) {
       return (
         <main className="setup-page">
           <p className="login-error" role="alert">
-            Access denied — this page requires the {permissionCode} permission.
+            {localeText(locale, `Access denied — this page requires the ${permissionCode} permission.`, `Доступ запрещён — для этой страницы требуется право ${permissionCode}.`)}
           </p>
         </main>
       );
@@ -62,24 +65,25 @@ export default async function AdminReportsPage({ searchParams }: RouteParams) {
   }
 
   const [employeeOptions, periodOptions] = await Promise.all([listEmployeesForReportSelect(), listPeriodOptions()]);
+  const ru = locale === 'RU';
 
   return (
     <main className="setup-page">
       <div className="setup-card worker-card">
-        <h1>Worker time report</h1>
-        <AdminReportTabs active="worker" />
-        <p className="setup-subtitle">Select a worker and a payroll period to see their timesheet status, hours by site, and total.</p>
+        <h1>{ru ? 'Отчёт по времени работника' : 'Worker time report'}</h1>
+        <AdminReportTabs active="worker" locale={locale} />
+        <p className="setup-subtitle">{ru ? 'Выберите работника и расчётный период, чтобы увидеть статус табеля, часы по объектам и итог.' : 'Select a worker and a payroll period to see their timesheet status, hours by site, and total.'}</p>
 
         {employeeOptions.length === 0 ? (
-          <p role="status">No workers exist yet.</p>
+          <p role="status">{ru ? 'Работников пока нет.' : 'No workers exist yet.'}</p>
         ) : periodOptions.length === 0 ? (
-          <p role="status">No payroll periods exist yet.</p>
+          <p role="status">{ru ? 'Расчётных периодов пока нет.' : 'No payroll periods exist yet.'}</p>
         ) : (
-          <form method="GET" action="/admin/reports" className="ov-filters" aria-label="Select worker and period">
+          <form method="GET" action="/admin/reports" className="ov-filters" aria-label={ru ? 'Выбор работника и периода' : 'Select worker and period'}>
             <div className="ov-filter-field">
-              <label htmlFor="report-filter-employee">Worker</label>
+              <label htmlFor="report-filter-employee">{ru ? 'Работник' : 'Worker'}</label>
               <select id="report-filter-employee" name="employeeId" defaultValue={employeeId ?? ''}>
-                <option value="">Select a worker…</option>
+                <option value="">{ru ? 'Выберите работника…' : 'Select a worker…'}</option>
                 {employeeOptions.map((e) => (
                   <option key={e.id} value={e.id}>
                     {e.lastName} {e.firstName} ({e.employeeNumber})
@@ -88,9 +92,9 @@ export default async function AdminReportsPage({ searchParams }: RouteParams) {
               </select>
             </div>
             <div className="ov-filter-field">
-              <label htmlFor="report-filter-period">Payroll period</label>
+              <label htmlFor="report-filter-period">{ru ? 'Расчётный период' : 'Payroll period'}</label>
               <select id="report-filter-period" name="periodId" defaultValue={periodId ?? ''}>
-                <option value="">Select a period…</option>
+                <option value="">{ru ? 'Выберите период…' : 'Select a period…'}</option>
                 {periodOptions.map((p) => (
                   <option key={p.id} value={p.id}>
                     {p.label}
@@ -100,40 +104,41 @@ export default async function AdminReportsPage({ searchParams }: RouteParams) {
             </div>
             <div className="ov-filter-actions">
               <button type="submit" className="exc-apply-button">
-                Show report
+                {ru ? 'Показать отчёт' : 'Show report'}
               </button>
               <Link href="/admin/reports" className="exc-reset-link">
-                Reset
+                {ru ? 'Сбросить' : 'Reset'}
               </Link>
             </div>
           </form>
         )}
 
-        <ReportBody outcome={outcome} />
+        <ReportBody outcome={outcome} locale={locale} />
       </div>
     </main>
   );
 }
 
-function ReportBody({ outcome }: { outcome: Outcome }) {
+function ReportBody({ outcome, locale }: { outcome: Outcome; locale: AppLocale }) {
+  const ru = locale === 'RU';
   if (outcome.kind === 'prompt') {
     return (
       <p role="status" className="setup-subtitle">
-        Choose a worker and a payroll period above to see their report.
+        {ru ? 'Выберите работника и расчётный период выше, чтобы увидеть отчёт.' : 'Choose a worker and a payroll period above to see their report.'}
       </p>
     );
   }
   if (outcome.kind === 'worker-not-found') {
     return (
       <p className="login-error" role="alert">
-        No worker with this id.
+        {ru ? 'Работник с таким идентификатором не найден.' : 'No worker with this id.'}
       </p>
     );
   }
   if (outcome.kind === 'period-not-found') {
     return (
       <p className="login-error" role="alert">
-        No payroll period with this id.
+        {ru ? 'Расчётный период с таким идентификатором не найден.' : 'No payroll period with this id.'}
       </p>
     );
   }
@@ -146,48 +151,48 @@ function ReportBody({ outcome }: { outcome: Outcome }) {
         {report.employee.lastName} {report.employee.firstName} <span className="setup-subtitle">({report.employee.employeeNumber})</span>
       </h2>
       <p className="setup-subtitle">
-        Period {report.period.startDate} – {report.period.endDate} · {report.period.status}
+        {ru ? 'Период' : 'Period'} {report.period.startDate} – {report.period.endDate} · {report.period.status}
       </p>
       {report.participant && !report.participant.expected && (
         <p role="status" className="setup-subtitle">
-          This worker was excluded from this payroll period.
+          {ru ? 'Этот работник был исключён из этого расчётного периода.' : 'This worker was excluded from this payroll period.'}
         </p>
       )}
 
       {!report.timesheet ? (
         <p role="status" className="setup-subtitle">
-          No timesheet exists for this worker in this period.
+          {ru ? 'Табель для этого работника за этот период не существует.' : 'No timesheet exists for this worker in this period.'}
         </p>
       ) : (
         <p className="setup-subtitle">
-          Timesheet status: <strong>{timesheetStatusLabel(report.timesheet.status)}</strong> · {dataSourceLabel(report.timesheet.dataSource, report.timesheet.versionNumber)}
+          {ru ? 'Статус табеля:' : 'Timesheet status:'} <strong>{timesheetStatusLabel(report.timesheet.status, locale)}</strong> · {dataSourceLabel(report.timesheet.dataSource, report.timesheet.versionNumber, locale)}
         </p>
       )}
 
       {report.sites.length === 0 ? (
-        <p role="status">No worked segments in this period.</p>
+        <p role="status">{ru ? 'В этом периоде нет отработанных интервалов.' : 'No worked segments in this period.'}</p>
       ) : (
         <div className="worker-table-scroll">
           <table className="worker-table">
             <thead>
               <tr>
-                <th>Site</th>
-                <th>Gross</th>
-                <th>Paid break</th>
-                <th>Unpaid break</th>
-                <th>Worked</th>
-                <th>Segments</th>
-                <th>Days</th>
+                <th>{ru ? 'Объект' : 'Site'}</th>
+                <th>{ru ? 'Всего' : 'Gross'}</th>
+                <th>{ru ? 'Оплач. перерыв' : 'Paid break'}</th>
+                <th>{ru ? 'Неоплач. перерыв' : 'Unpaid break'}</th>
+                <th>{ru ? 'Отработано' : 'Worked'}</th>
+                <th>{ru ? 'Интервалы' : 'Segments'}</th>
+                <th>{ru ? 'Дни' : 'Days'}</th>
               </tr>
             </thead>
             <tbody>
               {report.sites.map((s) => (
                 <tr key={s.siteId}>
                   <td>{s.siteName}</td>
-                  <td>{formatWorkedDuration(s.grossMinutes)}</td>
-                  <td>{formatWorkedDuration(s.paidBreakMinutes)}</td>
-                  <td>{formatWorkedDuration(s.unpaidBreakMinutes)}</td>
-                  <td>{formatWorkedDuration(s.workedMinutes)}</td>
+                  <td>{formatWorkedDuration(s.grossMinutes, locale)}</td>
+                  <td>{formatWorkedDuration(s.paidBreakMinutes, locale)}</td>
+                  <td>{formatWorkedDuration(s.unpaidBreakMinutes, locale)}</td>
+                  <td>{formatWorkedDuration(s.workedMinutes, locale)}</td>
                   <td>{s.segmentCount}</td>
                   <td>{s.workedDayCount}</td>
                 </tr>
@@ -195,11 +200,11 @@ function ReportBody({ outcome }: { outcome: Outcome }) {
             </tbody>
             <tfoot>
               <tr>
-                <th>Total ({report.total.siteCount} site{report.total.siteCount === 1 ? '' : 's'})</th>
-                <th>{formatWorkedDuration(report.total.grossMinutes)}</th>
-                <th>{formatWorkedDuration(report.total.paidBreakMinutes)}</th>
-                <th>{formatWorkedDuration(report.total.unpaidBreakMinutes)}</th>
-                <th>{formatWorkedDuration(report.total.workedMinutes)}</th>
+                <th>{ru ? `Итого (объектов: ${report.total.siteCount})` : `Total (${report.total.siteCount} site${report.total.siteCount === 1 ? '' : 's'})`}</th>
+                <th>{formatWorkedDuration(report.total.grossMinutes, locale)}</th>
+                <th>{formatWorkedDuration(report.total.paidBreakMinutes, locale)}</th>
+                <th>{formatWorkedDuration(report.total.unpaidBreakMinutes, locale)}</th>
+                <th>{formatWorkedDuration(report.total.workedMinutes, locale)}</th>
                 <th>{report.total.segmentCount}</th>
                 <th>{report.total.workedDayCount}</th>
               </tr>

@@ -4,6 +4,8 @@ import { hasPermission } from '@/lib/permissions';
 import { getPeriodTimeReport, parsePeriodReportQuery, isValidPeriodId } from '@/lib/period-time-report';
 import { listPeriodOptions } from '@/lib/attendance-overview-lookups';
 import { PeriodTimeReportView, type PeriodReportOutcome, type RawPeriodReportFilters } from '@/components/reports/PeriodTimeReportView';
+import { resolveAppLocale } from '@/lib/i18n/server';
+import { localeText } from '@/lib/i18n/locale';
 
 export const dynamic = 'force-dynamic';
 
@@ -25,13 +27,14 @@ export default async function AdminPeriodReportsPage({ searchParams }: RoutePara
   if (!session) {
     redirect('/login');
   }
+  const locale = await resolveAppLocale();
 
   for (const permissionCode of REQUIRED_PERMISSIONS) {
     if (!(await hasPermission(session.user.roles, permissionCode))) {
       return (
         <main className="setup-page">
           <p className="login-error" role="alert">
-            Access denied — this page requires the {permissionCode} permission.
+            {localeText(locale, `Access denied — this page requires the ${permissionCode} permission.`, `Доступ запрещён — для этой страницы требуется право ${permissionCode}.`)}
           </p>
         </main>
       );
@@ -65,7 +68,7 @@ export default async function AdminPeriodReportsPage({ searchParams }: RoutePara
   return (
     <main className="setup-page">
       <div className="setup-card worker-card">
-        <PeriodTimeReportView basePath={BASE_PATH} rawFilters={rawFilters} periodOptions={periodOptions} outcome={outcome} />
+        <PeriodTimeReportView basePath={BASE_PATH} rawFilters={rawFilters} periodOptions={periodOptions} outcome={outcome} locale={locale} />
       </div>
     </main>
   );

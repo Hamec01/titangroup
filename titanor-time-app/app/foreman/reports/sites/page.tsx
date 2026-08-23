@@ -5,6 +5,8 @@ import { helsinkiToday } from '@/lib/workers';
 import { getSiteTimeReport, parseSiteReportQuery } from '@/lib/site-time-report';
 import { listSiteOptionsForForeman, listPeriodOptions } from '@/lib/attendance-overview-lookups';
 import { SiteTimeReportView, type SiteReportOutcome, type RawSiteReportFilters } from '@/components/reports/SiteTimeReportView';
+import { resolveAppLocale } from '@/lib/i18n/server';
+import { localeText } from '@/lib/i18n/locale';
 
 export const dynamic = 'force-dynamic';
 
@@ -27,13 +29,14 @@ export default async function ForemanSiteReportsPage({ searchParams }: RoutePara
   if (!session) {
     redirect('/login');
   }
+  const locale = await resolveAppLocale();
 
   for (const permissionCode of REQUIRED_PERMISSIONS) {
     if (!(await hasPermission(session.user.roles, permissionCode))) {
       return (
         <main className="setup-page">
           <p className="login-error" role="alert">
-            Access denied — this page requires the {permissionCode} permission.
+            {localeText(locale, `Access denied — this page requires the ${permissionCode} permission.`, `Доступ запрещён — для этой страницы требуется право ${permissionCode}.`)}
           </p>
         </main>
       );
@@ -69,7 +72,7 @@ export default async function ForemanSiteReportsPage({ searchParams }: RoutePara
   return (
     <main className="wk-page">
       <div className="setup-card worker-card">
-        <SiteTimeReportView role="foreman" basePath={BASE_PATH} rawFilters={rawFilters} siteOptions={siteOptions} periodOptions={periodOptions} outcome={outcome} />
+        <SiteTimeReportView role="foreman" basePath={BASE_PATH} rawFilters={rawFilters} siteOptions={siteOptions} periodOptions={periodOptions} outcome={outcome} locale={locale} />
       </div>
     </main>
   );
