@@ -3,7 +3,7 @@ export default function Loading() {
     <main className="setup-page">
       <div className="setup-card policy-card">
         <p role="status" aria-live="polite">
-          Loading attendance policy…
+          Загрузка политики учёта…
         </p>
       </div>
     </main>

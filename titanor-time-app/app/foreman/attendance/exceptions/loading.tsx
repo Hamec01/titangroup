@@ -3,7 +3,7 @@ export default function Loading() {
     <main className="setup-page">
       <div className="setup-card worker-card exc-card">
         <p role="status" aria-live="polite">
-          Loading exceptions…
+          Загрузка исключений…
         </p>
       </div>
     </main>

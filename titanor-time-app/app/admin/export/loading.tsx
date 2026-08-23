@@ -2,9 +2,9 @@ export default function AdminExportHistoryLoading() {
   return (
     <main className="setup-page">
       <div className="setup-card worker-card">
-        <h1>CSV exports</h1>
+        <h1>Выгрузки CSV</h1>
         <p role="status" aria-live="polite">
-          Loading exports…
+          Загрузка выгрузок…
         </p>
       </div>
     </main>

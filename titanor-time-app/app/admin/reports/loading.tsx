@@ -3,7 +3,7 @@ export default function Loading() {
     <main className="setup-page">
       <div className="setup-card worker-card">
         <p role="status" aria-live="polite">
-          Loading report…
+          Загрузка отчёта…
         </p>
       </div>
     </main>

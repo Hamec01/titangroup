@@ -2,6 +2,7 @@
 
 import { useRef, useState, type FormEvent } from 'react';
 import { useRouter } from 'next/navigation';
+import { useAppLocale } from '@/components/i18n/AppLocaleProvider';
 
 const CSRF_HEADER_VALUE = 'titanor-time';
 
@@ -12,6 +13,7 @@ interface Attempt {
 
 export function NewCityForm() {
   const router = useRouter();
+  const ru = useAppLocale() === 'RU';
   const [name, setName] = useState('');
   const [loading, setLoading] = useState(false);
   const [unknownResult, setUnknownResult] = useState(false);
@@ -51,23 +53,23 @@ export function NewCityForm() {
       const responseBody = (await response.json().catch(() => null)) as { error?: { code?: string } } | null;
       switch (responseBody?.error?.code) {
         case 'DUPLICATE_CITY_NAME':
-          setErrorMessage('A city with this name already exists.');
+          setErrorMessage(ru ? 'Город с таким названием уже существует.' : 'A city with this name already exists.');
           break;
         case 'VALIDATION_ERROR':
-          setErrorMessage('Enter a city name between 1 and 255 characters.');
+          setErrorMessage(ru ? 'Введите название города от 1 до 255 символов.' : 'Enter a city name between 1 and 255 characters.');
           break;
         case 'FORBIDDEN':
-          setErrorMessage('You no longer have permission to create cities.');
+          setErrorMessage(ru ? 'У вас больше нет права создавать города.' : 'You no longer have permission to create cities.');
           break;
         case 'NOT_AUTHENTICATED':
-          setErrorMessage('Your session expired — please sign in again.');
+          setErrorMessage(ru ? 'Сессия истекла — войдите снова.' : 'Your session expired — please sign in again.');
           break;
         default:
-          setErrorMessage('Could not create the city. Please try again.');
+          setErrorMessage(ru ? 'Не удалось создать город. Попробуйте снова.' : 'Could not create the city. Please try again.');
       }
     } catch {
       setUnknownResult(true);
-      setErrorMessage('Result unknown because the connection was lost. Retry sends the exact same request safely.');
+      setErrorMessage(ru ? 'Результат неизвестен из-за потери соединения. Повторная отправка безопасна — уйдёт точно такой же запрос.' : 'Result unknown because the connection was lost. Retry sends the exact same request safely.');
     } finally {
       pendingRef.current = false;
       setLoading(false);
@@ -77,7 +79,7 @@ export function NewCityForm() {
   return (
     <form onSubmit={submit} aria-busy={loading} noValidate>
       <div className="login-field">
-        <label htmlFor="city-name">City name</label>
+        <label htmlFor="city-name">{ru ? 'Название города' : 'City name'}</label>
         <input
           id="city-name"
           name="name"
@@ -95,7 +97,7 @@ export function NewCityForm() {
         </p>
       ) : null}
       <button className="login-submit" type="submit" disabled={loading}>
-        {loading ? 'Creating…' : unknownResult ? 'Retry same request' : 'Create city'}
+        {loading ? (ru ? 'Создание…' : 'Creating…') : unknownResult ? (ru ? 'Повторить запрос' : 'Retry same request') : (ru ? 'Создать город' : 'Create city')}
       </button>
     </form>
   );

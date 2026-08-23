@@ -2,9 +2,9 @@ export default function Loading() {
   return (
     <main className="setup-page">
       <div className="setup-card worker-card">
-        <h1>Site time report</h1>
+        <h1>Отчёт по времени объекта</h1>
         <p role="status" aria-live="polite">
-          Loading report…
+          Загрузка отчёта…
         </p>
       </div>
     </main>
