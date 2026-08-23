@@ -4,6 +4,7 @@ import { useRef, useState, type FormEvent } from 'react';
 import { useRouter } from 'next/navigation';
 import type { PolicyView, PolicyPatchInput } from '@/lib/attendance-policy';
 import { formatHelsinkiDateTime } from '@/lib/helsinki-datetime';
+import { useAppLocale } from '@/components/i18n/AppLocaleProvider';
 
 // docs/titanor-time/T7A_1_ATTENDANCE_CLOCK_DESIGN.md Addendum "T7A.10B" §7 — retry/idempotency
 // semantics for this form. One "attempt" object (UUID Idempotency-Key + frozen payload) per Save
@@ -74,22 +75,22 @@ function buildPatch(form: FormState, policy: PolicyView): { patch: PolicyPatchIn
   return { patch, incompleteFields };
 }
 
-function describeErrorCode(code: string | undefined, fallback: string | undefined): string {
+function describeErrorCode(code: string | undefined, fallback: string | undefined, ru: boolean): string {
   switch (code) {
     case 'VALIDATION_ERROR':
-      return 'Please check the highlighted fields.';
+      return ru ? 'Проверьте выделенные поля.' : 'Please check the highlighted fields.';
     case 'FORBIDDEN':
-      return 'You no longer have permission to update the attendance policy.';
+      return ru ? 'У вас больше нет права изменять политику учёта.' : 'You no longer have permission to update the attendance policy.';
     case 'NOT_AUTHENTICATED':
-      return 'Your session has expired — please log in again.';
+      return ru ? 'Сессия истекла — войдите снова.' : 'Your session has expired — please log in again.';
     case 'CSRF_REJECTED':
-      return 'Your session needs a refresh — please reload the page and try again.';
+      return ru ? 'Сессию нужно обновить — перезагрузите страницу и попробуйте снова.' : 'Your session needs a refresh — please reload the page and try again.';
     case 'IDEMPOTENCY_KEY_REUSED':
-      return 'This save could not be completed as a new request. Please make a fresh change and save again.';
+      return ru ? 'Это сохранение не удалось выполнить как новый запрос. Внесите новое изменение и сохраните снова.' : 'This save could not be completed as a new request. Please make a fresh change and save again.';
     case 'IDEMPOTENCY_KEY_IN_PROGRESS':
-      return 'This save is still being processed. Please wait a moment before trying again.';
+      return ru ? 'Это сохранение всё ещё обрабатывается. Подождите немного перед повторной попыткой.' : 'This save is still being processed. Please wait a moment before trying again.';
     default:
-      return fallback && fallback.length > 0 ? fallback : 'Something went wrong. Please review and try again.';
+      return fallback && fallback.length > 0 ? fallback : (ru ? 'Что-то пошло не так. Проверьте и попробуйте снова.' : 'Something went wrong. Please review and try again.');
   }
 }
 
@@ -107,6 +108,7 @@ function FieldError({ fieldErrors, field }: { fieldErrors: Record<string, string
 
 export function PolicyForm({ initialPolicy, canUpdate }: { initialPolicy: PolicyView; canUpdate: boolean }) {
   const router = useRouter();
+  const ru = useAppLocale() === 'RU';
   const [policy, setPolicy] = useState(initialPolicy);
   const [form, setForm] = useState(() => formStateFromPolicy(initialPolicy));
   const [attempt, setAttempt] = useState<Attempt | null>(null);
@@ -135,7 +137,7 @@ export function PolicyForm({ initialPolicy, canUpdate }: { initialPolicy: Policy
     }
     pendingRef.current = true;
     setStatus('saving');
-    setAnnouncement('Saving…');
+    setAnnouncement(ru ? 'Сохранение…' : 'Saving…');
     setErrorMessage(null);
     setFieldErrors({});
 
@@ -159,7 +161,7 @@ export function PolicyForm({ initialPolicy, canUpdate }: { initialPolicy: Policy
         setForm(formStateFromPolicy(data as PolicyView));
         setAttempt(null);
         setStatus('saved');
-        setAnnouncement('Saved.');
+        setAnnouncement(ru ? 'Сохранено.' : 'Saved.');
         router.refresh();
         return;
       }
@@ -172,15 +174,15 @@ export function PolicyForm({ initialPolicy, canUpdate }: { initialPolicy: Policy
       // be silently reused; the next Save (after an edit) generates a fresh one (§7).
       setAttempt(null);
       setFieldErrors(apiFieldErrors);
-      setErrorMessage(describeErrorCode(code, message));
+      setErrorMessage(describeErrorCode(code, message, ru));
       setStatus(res.status === 400 ? 'validation-error' : 'server-error');
-      setAnnouncement(describeErrorCode(code, message));
+      setAnnouncement(describeErrorCode(code, message, ru));
     } catch {
       // Network failure/timeout — the request may or may not have reached the server. Keep the
       // SAME attempt (same key, same payload) alive for an explicit Retry — never regenerate it,
       // never auto-retry silently.
       setStatus('network-unknown');
-      const msg = 'Connection problem — the result of this save is unknown. Retry sends the exact same request; it is safe to click again.';
+      const msg = ru ? 'Проблема с соединением — результат сохранения неизвестен. «Повторить» отправит точно такой же запрос; можно нажимать ещё раз.' : 'Connection problem — the result of this save is unknown. Retry sends the exact same request; it is safe to click again.';
       setErrorMessage(msg);
       setAnnouncement(msg);
     } finally {
@@ -197,14 +199,14 @@ export function PolicyForm({ initialPolicy, canUpdate }: { initialPolicy: Policy
     const { patch, incompleteFields } = buildPatch(form, policy);
     if (incompleteFields.length > 0) {
       setStatus('validation-error');
-      setFieldErrors(Object.fromEntries(incompleteFields.map((f) => [f, ['This field is required.']])));
-      setErrorMessage('Please fill in all fields before saving.');
+      setFieldErrors(Object.fromEntries(incompleteFields.map((f) => [f, [ru ? 'Это поле обязательно.' : 'This field is required.']])));
+      setErrorMessage(ru ? 'Заполните все поля перед сохранением.' : 'Please fill in all fields before saving.');
       return;
     }
     if (Object.keys(patch).length === 0) {
       setStatus('validation-error');
       setFieldErrors({});
-      setErrorMessage('Change at least one field before saving.');
+      setErrorMessage(ru ? 'Измените хотя бы одно поле перед сохранением.' : 'Change at least one field before saving.');
       return;
     }
 
@@ -224,22 +226,22 @@ export function PolicyForm({ initialPolicy, canUpdate }: { initialPolicy: Policy
     <div className="policy-form-wrap">
       <dl className="policy-readonly-grid">
         <div>
-          <dt>Timezone</dt>
-          <dd>{policy.timezone} (fixed)</dd>
+          <dt>{ru ? 'Часовой пояс' : 'Timezone'}</dt>
+          <dd>{policy.timezone} ({ru ? 'фиксировано' : 'fixed'})</dd>
         </div>
         <div>
-          <dt>Last updated</dt>
+          <dt>{ru ? 'Последнее обновление' : 'Last updated'}</dt>
           <dd>{formatHelsinkiDateTime(policy.updatedAt)}</dd>
         </div>
       </dl>
 
       {!canUpdate && (
-        <p className="policy-readonly-note">You can view this policy but do not have permission to change it.</p>
+        <p className="policy-readonly-note">{ru ? 'Вы можете просматривать эту политику, но у вас нет прав на её изменение.' : 'You can view this policy but do not have permission to change it.'}</p>
       )}
 
       <form onSubmit={handleSubmit} noValidate aria-busy={status === 'saving'}>
         <div className="policy-field">
-          <label htmlFor="policy-cutoff-days">Cutoff days after period end</label>
+          <label htmlFor="policy-cutoff-days">{ru ? 'Дней после окончания периода до закрытия' : 'Cutoff days after period end'}</label>
           <input
             id="policy-cutoff-days"
             name="cutoffDaysAfterPeriodEnd"
@@ -255,7 +257,7 @@ export function PolicyForm({ initialPolicy, canUpdate }: { initialPolicy: Policy
         </div>
 
         <div className="policy-field">
-          <label htmlFor="policy-cutoff-time">Cutoff time (Europe/Helsinki)</label>
+          <label htmlFor="policy-cutoff-time">{ru ? 'Время закрытия (Europe/Helsinki)' : 'Cutoff time (Europe/Helsinki)'}</label>
           <input
             id="policy-cutoff-time"
             name="cutoffTime"
@@ -269,7 +271,7 @@ export function PolicyForm({ initialPolicy, canUpdate }: { initialPolicy: Policy
         </div>
 
         <div className="policy-field">
-          <label htmlFor="policy-debounce-minutes">System reopen debounce (minutes)</label>
+          <label htmlFor="policy-debounce-minutes">{ru ? 'Задержка повторного открытия системой (минуты)' : 'System reopen debounce (minutes)'}</label>
           <input
             id="policy-debounce-minutes"
             name="systemReopenDebounceMinutes"
@@ -285,7 +287,7 @@ export function PolicyForm({ initialPolicy, canUpdate }: { initialPolicy: Policy
         </div>
 
         <div className="policy-field">
-          <label htmlFor="policy-max-shift-hours">Maximum shift duration (hours)</label>
+          <label htmlFor="policy-max-shift-hours">{ru ? 'Максимальная длительность смены (часы)' : 'Maximum shift duration (hours)'}</label>
           <input
             id="policy-max-shift-hours"
             name="maxShiftDurationHours"
@@ -312,14 +314,14 @@ export function PolicyForm({ initialPolicy, canUpdate }: { initialPolicy: Policy
           <div className="policy-network-unknown" role="alert">
             <p>{errorMessage}</p>
             <button type="button" className="login-submit" onClick={handleRetry}>
-              Retry
+              {ru ? 'Повторить' : 'Retry'}
             </button>
           </div>
         )}
 
         {canUpdate && status !== 'network-unknown' && (
           <button className="login-submit" type="submit" disabled={fieldsDisabled}>
-            {status === 'saving' ? 'Saving…' : 'Save'}
+            {status === 'saving' ? (ru ? 'Сохранение…' : 'Saving…') : (ru ? 'Сохранить' : 'Save')}
           </button>
         )}
 

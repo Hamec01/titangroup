@@ -10,6 +10,7 @@ import {
   formatDateTime,
   buildExceptionsQueryString
 } from '@/lib/attendance-exceptions-ui';
+import type { AppLocale } from '@/lib/i18n/locale';
 
 // docs/titanor-time/T7A_1_ATTENDANCE_CLOCK_DESIGN.md §11/§12.1/§12.3 — T7A.8C.1. Pure presentation:
 // given already-validated filters and an already-scoped ExceptionListResult (or a validation
@@ -38,64 +39,66 @@ interface Props {
   title: string;
   rawQuery: ExceptionsListRawQuery;
   outcome: ExceptionsListOutcome;
+  locale: AppLocale;
 }
 
-export function ExceptionsListView({ basePath, title, rawQuery, outcome }: Props) {
+export function ExceptionsListView({ basePath, title, rawQuery, outcome, locale }: Props) {
+  const ru = locale === 'RU';
   const statusValue = rawQuery.status ?? 'OPEN';
 
   return (
     <div className="setup-card worker-card exc-card">
       <h1>{title}</h1>
 
-      <form method="GET" action={basePath} className="exc-filters" aria-label="Filter exceptions">
+      <form method="GET" action={basePath} className="exc-filters" aria-label={ru ? 'Фильтр исключений' : 'Filter exceptions'}>
         {rawQuery.siteId && <input type="hidden" name="siteId" value={rawQuery.siteId} />}
         {rawQuery.employeeId && <input type="hidden" name="employeeId" value={rawQuery.employeeId} />}
         {rawQuery.payrollPeriodId && <input type="hidden" name="payrollPeriodId" value={rawQuery.payrollPeriodId} />}
         <div className="exc-filter-field">
-          <label htmlFor="exc-filter-status">Status</label>
+          <label htmlFor="exc-filter-status">{ru ? 'Статус' : 'Status'}</label>
           <select id="exc-filter-status" name="status" defaultValue={statusValue}>
             {EXCEPTION_STATUS_VALUES.map((s) => (
               <option key={s} value={s}>
-                {exceptionStatusLabel(s)}
+                {exceptionStatusLabel(s, locale)}
               </option>
             ))}
           </select>
         </div>
         <div className="exc-filter-field">
-          <label htmlFor="exc-filter-type">Type</label>
+          <label htmlFor="exc-filter-type">{ru ? 'Тип' : 'Type'}</label>
           <select id="exc-filter-type" name="type" defaultValue={rawQuery.type ?? ''}>
-            <option value="">All types</option>
+            <option value="">{ru ? 'Все типы' : 'All types'}</option>
             {EXCEPTION_TYPE_VALUES.map((t) => (
               <option key={t} value={t}>
-                {exceptionTypeLabel(t)}
+                {exceptionTypeLabel(t, locale)}
               </option>
             ))}
           </select>
         </div>
         <div className="exc-filter-field">
-          <label htmlFor="exc-filter-from">From</label>
+          <label htmlFor="exc-filter-from">{ru ? 'С' : 'From'}</label>
           <input id="exc-filter-from" type="date" name="from" defaultValue={rawQuery.from ?? ''} />
         </div>
         <div className="exc-filter-field">
-          <label htmlFor="exc-filter-to">To</label>
+          <label htmlFor="exc-filter-to">{ru ? 'По' : 'To'}</label>
           <input id="exc-filter-to" type="date" name="to" defaultValue={rawQuery.to ?? ''} />
         </div>
         <div className="exc-filter-actions">
           <button type="submit" className="exc-apply-button">
-            Apply filters
+            {ru ? 'Применить фильтры' : 'Apply filters'}
           </button>
           <Link href={basePath} className="exc-reset-link">
-            Reset
+            {ru ? 'Сбросить' : 'Reset'}
           </Link>
         </div>
       </form>
 
       {outcome.kind === 'invalid' ? (
         <p className="login-error" role="alert">
-          These filters aren&apos;t valid: {Object.entries(outcome.fieldErrors).map(([field, msgs]) => `${field} ${msgs.join(', ')}`).join('; ')}
+          {ru ? 'Эти фильтры некорректны:' : "These filters aren't valid:"} {Object.entries(outcome.fieldErrors).map(([field, msgs]) => `${field} ${msgs.join(', ')}`).join('; ')}
         </p>
       ) : (
-        <ExceptionsListBody basePath={basePath} rawQuery={rawQuery} result={outcome.result} emptyNoAssignedSites={outcome.emptyNoAssignedSites ?? false} />
+        <ExceptionsListBody basePath={basePath} rawQuery={rawQuery} result={outcome.result} emptyNoAssignedSites={outcome.emptyNoAssignedSites ?? false} locale={locale} />
       )}
     </div>
   );
@@ -105,17 +108,22 @@ function ExceptionsListBody({
   basePath,
   rawQuery,
   result,
-  emptyNoAssignedSites
+  emptyNoAssignedSites,
+  locale
 }: {
   basePath: string;
   rawQuery: ExceptionsListRawQuery;
   result: ExceptionListResult;
   emptyNoAssignedSites: boolean;
+  locale: AppLocale;
 }) {
+  const ru = locale === 'RU';
   if (result.totalItems === 0) {
     return (
       <p className="wk-empty" role="status" aria-live="polite">
-        {emptyNoAssignedSites ? 'You have no current site assignments as a foreman yet.' : 'No exceptions match these filters.'}
+        {emptyNoAssignedSites
+          ? (ru ? 'У вас пока нет текущих назначений на объекты как у прораба.' : 'You have no current site assignments as a foreman yet.')
+          : (ru ? 'Нет исключений, соответствующих этим фильтрам.' : 'No exceptions match these filters.')}
       </p>
     );
   }
@@ -135,17 +143,19 @@ function ExceptionsListBody({
   return (
     <>
       <p className="setup-subtitle" role="status" aria-live="polite">
-        {result.totalItems} exception{result.totalItems === 1 ? '' : 's'} · page {result.page} of {result.totalPages}
+        {ru
+          ? `Исключений: ${result.totalItems} · страница ${result.page} из ${result.totalPages}`
+          : `${result.totalItems} exception${result.totalItems === 1 ? '' : 's'} · page ${result.page} of ${result.totalPages}`}
       </p>
 
       <div className="exc-row-head" aria-hidden="true">
-        <span>Type</span>
-        <span>Status</span>
-        <span>Employee</span>
-        <span>Site</span>
-        <span>Occurred</span>
-        <span>Source</span>
-        <span>Period</span>
+        <span>{ru ? 'Тип' : 'Type'}</span>
+        <span>{ru ? 'Статус' : 'Status'}</span>
+        <span>{ru ? 'Работник' : 'Employee'}</span>
+        <span>{ru ? 'Объект' : 'Site'}</span>
+        <span>{ru ? 'Произошло' : 'Occurred'}</span>
+        <span>{ru ? 'Источник' : 'Source'}</span>
+        <span>{ru ? 'Период' : 'Period'}</span>
       </div>
 
       <ul className="exc-list">
@@ -153,40 +163,40 @@ function ExceptionsListBody({
           <li key={item.id}>
             <Link href={`${basePath}/${item.id}`} className="exc-row">
               <span className="exc-cell exc-cell-type">
-                <span className="exc-field-label">Type</span>
-                <span className="exc-type-name">{exceptionTypeLabel(item.type)}</span>
+                <span className="exc-field-label">{ru ? 'Тип' : 'Type'}</span>
+                <span className="exc-type-name">{exceptionTypeLabel(item.type, locale)}</span>
                 <span className="exc-summary">{item.summary}</span>
               </span>
               <span className="exc-cell">
-                <span className="exc-field-label">Status</span>
-                <span className={exceptionStatusBadgeClass(item.status)}>{exceptionStatusLabel(item.status)}</span>
+                <span className="exc-field-label">{ru ? 'Статус' : 'Status'}</span>
+                <span className={exceptionStatusBadgeClass(item.status)}>{exceptionStatusLabel(item.status, locale)}</span>
               </span>
               <span className="exc-cell">
-                <span className="exc-field-label">Employee</span>
+                <span className="exc-field-label">{ru ? 'Работник' : 'Employee'}</span>
                 {item.employee.name}
               </span>
               <span className="exc-cell">
-                <span className="exc-field-label">Site</span>
+                <span className="exc-field-label">{ru ? 'Объект' : 'Site'}</span>
                 {item.site ? item.site.name : '—'}
               </span>
               <span className="exc-cell">
-                <span className="exc-field-label">Occurred</span>
+                <span className="exc-field-label">{ru ? 'Произошло' : 'Occurred'}</span>
                 {formatDateTime(item.occurredAt)}
               </span>
               <span className="exc-cell">
-                <span className="exc-field-label">Source</span>
+                <span className="exc-field-label">{ru ? 'Источник' : 'Source'}</span>
                 {item.clockEventSummary ? (
                   <>
-                    {channelLabel(item.clockEventSummary.channel)}
+                    {channelLabel(item.clockEventSummary.channel, locale)}
                     <br />
-                    <span className="exc-muted">{gpsVerificationLabel(item.clockEventSummary.gpsVerification)}</span>
+                    <span className="exc-muted">{gpsVerificationLabel(item.clockEventSummary.gpsVerification, locale)}</span>
                   </>
                 ) : (
                   '—'
                 )}
               </span>
               <span className="exc-cell">
-                <span className="exc-field-label">Period</span>
+                <span className="exc-field-label">{ru ? 'Период' : 'Period'}</span>
                 {item.payrollPeriod ? `${item.payrollPeriod.startDate} – ${item.payrollPeriod.endDate}` : '—'}
               </span>
             </Link>
@@ -194,19 +204,19 @@ function ExceptionsListBody({
         ))}
       </ul>
 
-      <nav className="exc-pagination" aria-label="Pagination">
+      <nav className="exc-pagination" aria-label={ru ? 'Постраничная навигация' : 'Pagination'}>
         {result.page > 1 ? (
-          <Link href={pageHref(result.page - 1)}>Previous</Link>
+          <Link href={pageHref(result.page - 1)}>{ru ? 'Назад' : 'Previous'}</Link>
         ) : (
-          <span className="exc-pagination-disabled">Previous</span>
+          <span className="exc-pagination-disabled">{ru ? 'Назад' : 'Previous'}</span>
         )}
         <span>
-          Page {result.page} of {result.totalPages}
+          {ru ? `Страница ${result.page} из ${result.totalPages}` : `Page ${result.page} of ${result.totalPages}`}
         </span>
         {result.page < result.totalPages ? (
-          <Link href={pageHref(result.page + 1)}>Next</Link>
+          <Link href={pageHref(result.page + 1)}>{ru ? 'Далее' : 'Next'}</Link>
         ) : (
-          <span className="exc-pagination-disabled">Next</span>
+          <span className="exc-pagination-disabled">{ru ? 'Далее' : 'Next'}</span>
         )}
       </nav>
     </>

@@ -6,6 +6,8 @@ import { getAttendanceExceptionDetail, UUID_PATTERN } from '@/lib/attendance-exc
 import { getResolutionContext } from '@/lib/attendance-exception-resolution-context';
 import { ExceptionDetailView } from '@/components/attendance-exceptions/ExceptionDetailView';
 import { ExceptionActionPanel } from '@/components/attendance-exceptions/ExceptionActionPanel';
+import { resolveAppLocale } from '@/lib/i18n/server';
+import { localeText } from '@/lib/i18n/locale';
 
 export const dynamic = 'force-dynamic';
 
@@ -22,12 +24,13 @@ export default async function AdminAttendanceExceptionDetailPage({ params }: Rou
   if (!session) {
     redirect('/login');
   }
+  const locale = await resolveAppLocale();
 
   if (!(await hasPermission(session.user.roles, 'attendance.exception.read.all'))) {
     return (
       <main className="setup-page">
         <p className="login-error" role="alert">
-          Access denied — this page requires the attendance.exception.read.all permission.
+          {localeText(locale, 'Access denied — this page requires the attendance.exception.read.all permission.', 'Доступ запрещён — для этой страницы требуется право attendance.exception.read.all.')}
         </p>
       </main>
     );
@@ -41,9 +44,9 @@ export default async function AdminAttendanceExceptionDetailPage({ params }: Rou
       <main className="setup-page">
         <div className="setup-card">
           <p className="login-error" role="alert">
-            No attendance exception with this id.
+            {localeText(locale, 'No attendance exception with this id.', 'Исключение учёта с таким идентификатором не найдено.')}
           </p>
-          <Link href={BASE_PATH}>Back to exceptions</Link>
+          <Link href={BASE_PATH}>{localeText(locale, 'Back to exceptions', 'К списку исключений')}</Link>
         </div>
       </main>
     );
@@ -62,7 +65,7 @@ export default async function AdminAttendanceExceptionDetailPage({ params }: Rou
 
   return (
     <main className="setup-page">
-      <ExceptionDetailView basePath={BASE_PATH} detail={detail} timesheetHref={detail.timesheet ? `/admin/timesheets/${detail.timesheet.id}` : null} resolutionPanel={resolutionPanel} />
+      <ExceptionDetailView basePath={BASE_PATH} detail={detail} timesheetHref={detail.timesheet ? `/admin/timesheets/${detail.timesheet.id}` : null} resolutionPanel={resolutionPanel} locale={locale} />
     </main>
   );
 }

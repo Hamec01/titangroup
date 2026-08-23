@@ -3,6 +3,8 @@ import { resolveServerSession } from '@/lib/server-session';
 import { hasPermission } from '@/lib/permissions';
 import { listAttendanceExceptions, parseExceptionListQuery } from '@/lib/attendance-exceptions';
 import { ExceptionsListView, type ExceptionsListOutcome } from '@/components/attendance-exceptions/ExceptionsListView';
+import { resolveAppLocale } from '@/lib/i18n/server';
+import { localeText } from '@/lib/i18n/locale';
 
 export const dynamic = 'force-dynamic';
 
@@ -26,6 +28,7 @@ export default async function AdminAttendanceExceptionsPage({ searchParams }: Ro
   if (!session) {
     redirect('/login');
   }
+  const locale = await resolveAppLocale();
 
   // Permission-checked, not role-checked — a role membership without the underlying grant (e.g.
   // if attendance.exception.read.all were ever revoked from ADMIN) must not see this page.
@@ -33,7 +36,7 @@ export default async function AdminAttendanceExceptionsPage({ searchParams }: Ro
     return (
       <main className="setup-page">
         <p className="login-error" role="alert">
-          Access denied — this page requires the attendance.exception.read.all permission.
+          {localeText(locale, 'Access denied — this page requires the attendance.exception.read.all permission.', 'Доступ запрещён — для этой страницы требуется право attendance.exception.read.all.')}
         </p>
       </main>
     );
@@ -77,7 +80,7 @@ export default async function AdminAttendanceExceptionsPage({ searchParams }: Ro
 
   return (
     <main className="setup-page">
-      <ExceptionsListView basePath={BASE_PATH} title="Attendance exceptions" rawQuery={rawQuery} outcome={outcome} />
+      <ExceptionsListView basePath={BASE_PATH} title={localeText(locale, 'Attendance exceptions', 'Исключения учёта')} rawQuery={rawQuery} outcome={outcome} locale={locale} />
     </main>
   );
 }

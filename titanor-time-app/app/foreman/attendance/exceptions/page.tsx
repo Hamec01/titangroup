@@ -5,6 +5,8 @@ import { helsinkiToday } from '@/lib/workers';
 import { getForemanSiteIds } from '@/lib/foreman-review';
 import { listAttendanceExceptions, parseExceptionListQuery } from '@/lib/attendance-exceptions';
 import { ExceptionsListView, type ExceptionsListOutcome } from '@/components/attendance-exceptions/ExceptionsListView';
+import { resolveAppLocale } from '@/lib/i18n/server';
+import { localeText } from '@/lib/i18n/locale';
 
 export const dynamic = 'force-dynamic';
 
@@ -29,12 +31,13 @@ export default async function ForemanAttendanceExceptionsPage({ searchParams }: 
   if (!session) {
     redirect('/login');
   }
+  const locale = await resolveAppLocale();
 
   if (!(await hasPermission(session.user.roles, 'attendance.exception.read.assigned'))) {
     return (
       <main className="setup-page">
         <p className="login-error" role="alert">
-          Access denied — this page requires the attendance.exception.read.assigned permission.
+          {localeText(locale, 'Access denied — this page requires the attendance.exception.read.assigned permission.', 'Доступ запрещён — для этой страницы требуется право attendance.exception.read.assigned.')}
         </p>
       </main>
     );
@@ -80,7 +83,7 @@ export default async function ForemanAttendanceExceptionsPage({ searchParams }: 
 
   return (
     <main className="setup-page">
-      <ExceptionsListView basePath={BASE_PATH} title="Attendance exceptions" rawQuery={rawQuery} outcome={outcome} />
+      <ExceptionsListView basePath={BASE_PATH} title={localeText(locale, 'Attendance exceptions', 'Исключения учёта')} rawQuery={rawQuery} outcome={outcome} locale={locale} />
     </main>
   );
 }

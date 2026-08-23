@@ -15,6 +15,7 @@ import {
   formatDateTime,
   detailKeyLabel
 } from '@/lib/attendance-exceptions-ui';
+import type { AppLocale } from '@/lib/i18n/locale';
 
 // docs/titanor-time/T7A_1_ATTENDANCE_CLOCK_DESIGN.md §11/§12.1/§12.3 — T7A.8C.1. Renders only the
 // already-allowlisted ExceptionDetail DTO returned by lib/attendance-exceptions.ts's
@@ -33,58 +34,60 @@ interface Props {
    * exception is still OPEN. The page always passes one; this component never builds it itself
    * (it stays a pure display of the already-allowlisted ExceptionDetail DTO, same as T7A.8C.1). */
   resolutionPanel: ReactNode;
+  locale: AppLocale;
 }
 
-export function ExceptionDetailView({ basePath, detail, timesheetHref, resolutionPanel }: Props) {
+export function ExceptionDetailView({ basePath, detail, timesheetHref, resolutionPanel, locale }: Props) {
+  const ru = locale === 'RU';
   const isTerminal = detail.status !== 'OPEN';
 
   return (
     <div className="setup-card worker-card exc-card">
       <p>
-        <Link href={basePath}>&larr; Back to exceptions</Link>
+        <Link href={basePath}>&larr; {ru ? 'К списку исключений' : 'Back to exceptions'}</Link>
       </p>
 
       <div className="exc-detail-header">
-        <h1>{exceptionTypeLabel(detail.type)}</h1>
-        <span className={exceptionStatusBadgeClass(detail.status)}>{exceptionStatusLabel(detail.status)}</span>
+        <h1>{exceptionTypeLabel(detail.type, locale)}</h1>
+        <span className={exceptionStatusBadgeClass(detail.status)}>{exceptionStatusLabel(detail.status, locale)}</span>
       </div>
       <p className="exc-summary-lead">{detail.summary}</p>
-      <p className="exc-muted exc-id-line">Exception ID: {detail.id}</p>
+      <p className="exc-muted exc-id-line">{ru ? 'ID исключения:' : 'Exception ID:'} {detail.id}</p>
 
       <section className="exc-detail-section">
-        <h2 className="wk-section-title">Overview</h2>
+        <h2 className="wk-section-title">{ru ? 'Обзор' : 'Overview'}</h2>
         <dl className="exc-detail-grid">
           <div>
-            <dt>Employee</dt>
+            <dt>{ru ? 'Работник' : 'Employee'}</dt>
             <dd>{detail.employee.name}</dd>
           </div>
           <div>
-            <dt>Site</dt>
+            <dt>{ru ? 'Объект' : 'Site'}</dt>
             <dd>{detail.site ? detail.site.name : '—'}</dd>
           </div>
           <div>
-            <dt>Occurred at</dt>
+            <dt>{ru ? 'Произошло в' : 'Occurred at'}</dt>
             <dd>{formatDateTime(detail.occurredAt)}</dd>
           </div>
           <div>
-            <dt>Created at</dt>
+            <dt>{ru ? 'Создано' : 'Created at'}</dt>
             <dd>{formatDateTime(detail.createdAt)}</dd>
           </div>
           <div>
-            <dt>Payroll period</dt>
-            <dd>{detail.payrollPeriod ? `${detail.payrollPeriod.startDate} – ${detail.payrollPeriod.endDate}` : 'Not linked'}</dd>
+            <dt>{ru ? 'Расчётный период' : 'Payroll period'}</dt>
+            <dd>{detail.payrollPeriod ? `${detail.payrollPeriod.startDate} – ${detail.payrollPeriod.endDate}` : (ru ? 'Не связано' : 'Not linked')}</dd>
           </div>
           <div>
-            <dt>Timesheet</dt>
+            <dt>{ru ? 'Табель' : 'Timesheet'}</dt>
             <dd>
               {detail.timesheet ? (
                 timesheetHref ? (
-                  <Link href={timesheetHref}>View timesheet ({timesheetStatusLabel(detail.timesheet.status)})</Link>
+                  <Link href={timesheetHref}>{ru ? 'Открыть табель' : 'View timesheet'} ({timesheetStatusLabel(detail.timesheet.status, locale)})</Link>
                 ) : (
-                  timesheetStatusLabel(detail.timesheet.status)
+                  timesheetStatusLabel(detail.timesheet.status, locale)
                 )
               ) : (
-                'Not linked'
+                ru ? 'Не связано' : 'Not linked'
               )}
             </dd>
           </div>
@@ -93,55 +96,55 @@ export function ExceptionDetailView({ basePath, detail, timesheetHref, resolutio
 
       {detail.clockEvent && (
         <section className="exc-detail-section">
-          <h2 className="wk-section-title">Clock event</h2>
+          <h2 className="wk-section-title">{ru ? 'Событие учёта' : 'Clock event'}</h2>
           <dl className="exc-detail-grid">
             <div>
-              <dt>Operation</dt>
-              <dd>{operationTypeLabel(detail.clockEvent.operationType)}</dd>
+              <dt>{ru ? 'Операция' : 'Operation'}</dt>
+              <dd>{operationTypeLabel(detail.clockEvent.operationType, locale)}</dd>
             </div>
             <div>
-              <dt>Effective at</dt>
+              <dt>{ru ? 'Время события' : 'Effective at'}</dt>
               <dd>{formatDateTime(detail.clockEvent.effectiveAt)}</dd>
             </div>
             <div>
-              <dt>Received by server</dt>
+              <dt>{ru ? 'Получено сервером' : 'Received by server'}</dt>
               <dd>{formatDateTime(detail.clockEvent.serverReceivedAt)}</dd>
             </div>
             <div>
-              <dt>Source</dt>
+              <dt>{ru ? 'Источник' : 'Source'}</dt>
               <dd>
-                {channelLabel(detail.clockEvent.channel)}
-                {detail.clockEvent.capturedOffline ? ' · captured offline' : ''}
+                {channelLabel(detail.clockEvent.channel, locale)}
+                {detail.clockEvent.capturedOffline ? (ru ? ' · зафиксировано оффлайн' : ' · captured offline') : ''}
               </dd>
             </div>
             <div>
-              <dt>GPS verification</dt>
-              <dd>{gpsVerificationLabel(detail.clockEvent.gpsVerification)}</dd>
+              <dt>{ru ? 'Подтверждение GPS' : 'GPS verification'}</dt>
+              <dd>{gpsVerificationLabel(detail.clockEvent.gpsVerification, locale)}</dd>
             </div>
             <div>
-              <dt>GPS accuracy</dt>
-              <dd>{detail.clockEvent.gpsAccuracyMeters !== null ? `${detail.clockEvent.gpsAccuracyMeters} m` : '—'}</dd>
+              <dt>{ru ? 'Точность GPS' : 'GPS accuracy'}</dt>
+              <dd>{detail.clockEvent.gpsAccuracyMeters !== null ? `${detail.clockEvent.gpsAccuracyMeters} ${ru ? 'м' : 'm'}` : '—'}</dd>
             </div>
             {detail.clockEvent.gpsUnavailableReason && (
               <div>
-                <dt>GPS unavailable reason</dt>
-                <dd>{gpsUnavailableReasonLabel(detail.clockEvent.gpsUnavailableReason)}</dd>
+                <dt>{ru ? 'Причина недоступности GPS' : 'GPS unavailable reason'}</dt>
+                <dd>{gpsUnavailableReasonLabel(detail.clockEvent.gpsUnavailableReason, locale)}</dd>
               </div>
             )}
           </dl>
         </section>
       )}
 
-      <ClockShiftSection title="Shift" shift={detail.clockShift} />
-      <ClockShiftSection title="Related shift" shift={detail.relatedClockShift} />
+      <ClockShiftSection title={ru ? 'Смена' : 'Shift'} shift={detail.clockShift} locale={locale} />
+      <ClockShiftSection title={ru ? 'Связанная смена' : 'Related shift'} shift={detail.relatedClockShift} locale={locale} />
 
       {detail.detail && (
         <section className="exc-detail-section">
-          <h2 className="wk-section-title">Additional detail</h2>
+          <h2 className="wk-section-title">{ru ? 'Дополнительные сведения' : 'Additional detail'}</h2>
           <dl className="exc-detail-grid">
             {Object.entries(detail.detail).map(([key, value]) => (
               <div key={key}>
-                <dt>{detailKeyLabel(key)}</dt>
+                <dt>{detailKeyLabel(key, locale)}</dt>
                 <dd>{String(value)}</dd>
               </div>
             ))}
@@ -150,20 +153,20 @@ export function ExceptionDetailView({ basePath, detail, timesheetHref, resolutio
       )}
 
       <section className="exc-detail-section">
-        <h2 className="wk-section-title">Resolution</h2>
+        <h2 className="wk-section-title">{ru ? 'Решение' : 'Resolution'}</h2>
         {isTerminal ? (
           <dl className="exc-detail-grid">
             <div>
-              <dt>Resolved at</dt>
+              <dt>{ru ? 'Решено в' : 'Resolved at'}</dt>
               <dd>{detail.resolvedAt ? formatDateTime(detail.resolvedAt) : '—'}</dd>
             </div>
             <div>
-              <dt>Resolved by</dt>
+              <dt>{ru ? 'Решено кем' : 'Resolved by'}</dt>
               <dd>{detail.resolvedBy ? detail.resolvedBy.name : '—'}</dd>
             </div>
             <div>
-              <dt>Note</dt>
-              <dd>{detail.resolutionNote ?? 'No note'}</dd>
+              <dt>{ru ? 'Примечание' : 'Note'}</dt>
+              <dd>{detail.resolutionNote ?? (ru ? 'Без примечания' : 'No note')}</dd>
             </div>
           </dl>
         ) : (
@@ -174,12 +177,13 @@ export function ExceptionDetailView({ basePath, detail, timesheetHref, resolutio
   );
 }
 
-function ClockShiftSection({ title, shift }: { title: string; shift: ClockShiftDetail | null }) {
+function ClockShiftSection({ title, shift, locale }: { title: string; shift: ClockShiftDetail | null; locale: AppLocale }) {
+  const ru = locale === 'RU';
   if (!shift) {
     return (
       <section className="exc-detail-section">
         <h2 className="wk-section-title">{title}</h2>
-        <p className="exc-muted">Not available.</p>
+        <p className="exc-muted">{ru ? 'Недоступно.' : 'Not available.'}</p>
       </section>
     );
   }
@@ -189,36 +193,36 @@ function ClockShiftSection({ title, shift }: { title: string; shift: ClockShiftD
       <h2 className="wk-section-title">{title}</h2>
       <dl className="exc-detail-grid">
         <div>
-          <dt>Site</dt>
+          <dt>{ru ? 'Объект' : 'Site'}</dt>
           <dd>{shift.site.name}</dd>
         </div>
         <div>
-          <dt>Work area</dt>
+          <dt>{ru ? 'Рабочая зона' : 'Work area'}</dt>
           <dd>{shift.workArea ? shift.workArea.name : '—'}</dd>
         </div>
         <div>
-          <dt>Recorded start</dt>
+          <dt>{ru ? 'Зафиксированное начало' : 'Recorded start'}</dt>
           <dd>{formatDateTime(shift.recordedStartAt)}</dd>
         </div>
         <div>
-          <dt>Recorded end</dt>
+          <dt>{ru ? 'Зафиксированное окончание' : 'Recorded end'}</dt>
           <dd>
             {formatDateTime(shift.recordedEndAt)}
-            {shift.endAtProvisional ? ' (provisional)' : ''}
+            {shift.endAtProvisional ? (ru ? ' (предварительно)' : ' (provisional)') : ''}
           </dd>
         </div>
         <div>
-          <dt>Materialization</dt>
-          <dd>{materializationStateLabel(shift.materializationState)}</dd>
+          <dt>{ru ? 'Обработка' : 'Materialization'}</dt>
+          <dd>{materializationStateLabel(shift.materializationState, locale)}</dd>
         </div>
       </dl>
       {shift.fragments.length > 0 && (
         <>
-          <h3 className="exc-subsection-title">Fragments</h3>
+          <h3 className="exc-subsection-title">{ru ? 'Фрагменты' : 'Fragments'}</h3>
           <ul className="exc-fragment-list">
             {shift.fragments.map((f) => (
               <li key={f.id}>
-                #{f.fragmentIndex}: {formatDateTime(f.recordedStartAt)} – {formatDateTime(f.recordedEndAt)} · {projectionStateLabel(f.reportedProjectionState)}
+                #{f.fragmentIndex}: {formatDateTime(f.recordedStartAt)} – {formatDateTime(f.recordedEndAt)} · {projectionStateLabel(f.reportedProjectionState, locale)}
               </li>
             ))}
           </ul>

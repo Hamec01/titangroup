@@ -232,7 +232,7 @@ function OwnerSearchForm({ basePath, rawQuery, periodOptions, siteOptions }: { b
             <label htmlFor="owner-filter-state">{ru ? 'Статус или проблема' : 'Status or issue'}</label>
             <select id="owner-filter-state" name="state" defaultValue={rawQuery.state ?? ''}>
               <option value="">{ru ? 'Все' : 'All'}</option>
-              {OPERATIONAL_STATE_VALUES.map((state) => <option key={state} value={state}>{operationalStateLabel(state)}</option>)}
+              {OPERATIONAL_STATE_VALUES.map((state) => <option key={state} value={state}>{operationalStateLabel(state, ru ? 'RU' : 'EN')}</option>)}
             </select>
           </div>
           <div className="ov-filter-field">
@@ -303,7 +303,7 @@ function OwnerWorkerRow({ item, asOf }: { item: OverviewWorkerItem; asOf: string
         </Link>
         <Link href={statusHref} className="owner-cell-link" aria-label={ru ? `Проверить статус ${item.employee.name}` : `Check status for ${item.employee.name}`}>
           <span className={`owner-status ${statusClass}`}>{statusLabel}</span>
-          {item.timesheet ? <small>{timesheetStatusLabel(item.timesheet.status)}</small> : null}
+          {item.timesheet ? <small>{timesheetStatusLabel(item.timesheet.status, ru ? 'RU' : 'EN')}</small> : null}
         </Link>
         <Link href={assignmentHref} className="owner-cell-link owner-worker-site" aria-label={ru ? `Объекты работника ${item.employee.name}` : `Worker site assignments for ${item.employee.name}`}>
           <strong>{assignment?.site.name ?? (ru ? 'Объект не назначен' : 'No site assigned')}</strong>
@@ -329,36 +329,43 @@ function OwnerWorkerRow({ item, asOf }: { item: OverviewWorkerItem; asOf: string
   );
 }
 
+const PERIOD_STATUS_LABELS: Record<string, { en: string; ru: string }> = {
+  OPEN: { en: 'Open', ru: 'Открыт' },
+  LOCKED: { en: 'Locked', ru: 'Заблокирован' },
+  EXPORTED: { en: 'Exported', ru: 'Выгружен' }
+};
+
 function PeriodBanner({ basePath, isAdmin, period, asOf }: { basePath: string; isAdmin: boolean; period: OverviewResult['period']; asOf: string }) {
+  const ru = useAppLocale() === 'RU';
   const refreshHref = `${basePath}`;
   return (
     <div className="ov-period-banner">
       {period ? (
         <p className="ov-period-line">
           {period.multipleCurrentCycles ? (
-            <>Current submission cycles: <strong>weekly and two-week groups</strong></>
+            <>{ru ? 'Текущие циклы отправки:' : 'Current submission cycles:'} <strong>{ru ? 'еженедельные и двухнедельные группы' : 'weekly and two-week groups'}</strong></>
           ) : (
-            <>Period: <strong>{period.startDate} – {period.endDate}</strong> · {period.status}</>
+            <>{ru ? 'Период:' : 'Period:'} <strong>{period.startDate} – {period.endDate}</strong> · {ru ? (PERIOD_STATUS_LABELS[period.status]?.ru ?? period.status) : (PERIOD_STATUS_LABELS[period.status]?.en ?? period.status)}</>
           )}
           {isAdmin && !period.multipleCurrentCycles && (
             <>
               {' · '}
-              <Link href={`/admin/periods/${period.id}`}>View period</Link>
+              <Link href={`/admin/periods/${period.id}`}>{ru ? 'Посмотреть период' : 'View period'}</Link>
             </>
           )}
         </p>
       ) : (
         <div className="ov-warning" role="status">
-          <p>No open payroll period covers today. Clock-in/out data below is still live; timesheet/review figures are zero without a period.</p>
+          <p>{ru ? 'На сегодня нет открытого расчётного периода. Данные прихода/ухода ниже актуальны в реальном времени; показатели табеля/проверки равны нулю без периода.' : 'No open payroll period covers today. Clock-in/out data below is still live; timesheet/review figures are zero without a period.'}</p>
           {isAdmin && (
             <p className="ov-period-links">
-              <Link href="/admin/periods">Go to periods</Link> · <Link href="/admin/setup">Go to setup</Link>
+              <Link href="/admin/periods">{ru ? 'Перейти к периодам' : 'Go to periods'}</Link> · <Link href="/admin/setup">{ru ? 'Перейти к настройке' : 'Go to setup'}</Link>
             </p>
           )}
         </div>
       )}
       <p className="ov-asof">
-        As of {formatHelsinkiDateTime(asOf)} (Europe/Helsinki) · <Link href={refreshHref}>Refresh</Link>
+        {ru ? 'По состоянию на' : 'As of'} {formatHelsinkiDateTime(asOf)} (Europe/Helsinki) · <Link href={refreshHref}>{ru ? 'Обновить' : 'Refresh'}</Link>
       </p>
     </div>
   );
@@ -375,17 +382,18 @@ function FilterForm({
   periodOptions: PeriodOption[];
   siteOptions: SiteOption[];
 }) {
+  const ru = useAppLocale() === 'RU';
   return (
-    <form method="GET" action={basePath} className="ov-filters" aria-label="Filter overview">
+    <form method="GET" action={basePath} className="ov-filters" aria-label={ru ? 'Фильтр обзора' : 'Filter overview'}>
       {rawQuery.employeeId && <input type="hidden" name="employeeId" value={rawQuery.employeeId} />}
       <div className="ov-filter-field">
-        <label htmlFor="ov-filter-q">Worker or site</label>
-        <input id="ov-filter-q" name="q" type="search" maxLength={100} defaultValue={rawQuery.q ?? ''} placeholder="Name, number, site or work area" />
+        <label htmlFor="ov-filter-q">{ru ? 'Работник или объект' : 'Worker or site'}</label>
+        <input id="ov-filter-q" name="q" type="search" maxLength={100} defaultValue={rawQuery.q ?? ''} placeholder={ru ? 'Имя, номер, объект или рабочая зона' : 'Name, number, site or work area'} />
       </div>
       <div className="ov-filter-field">
-        <label htmlFor="ov-filter-period">Period</label>
+        <label htmlFor="ov-filter-period">{ru ? 'Период' : 'Period'}</label>
         <select id="ov-filter-period" name="periodId" defaultValue={rawQuery.periodId ?? ''}>
-          <option value="">Current open period</option>
+          <option value="">{ru ? 'Текущий открытый период' : 'Current open period'}</option>
           {periodOptions.map((p) => (
             <option key={p.id} value={p.id}>
               {p.label}
@@ -394,9 +402,9 @@ function FilterForm({
         </select>
       </div>
       <div className="ov-filter-field">
-        <label htmlFor="ov-filter-site">Site</label>
+        <label htmlFor="ov-filter-site">{ru ? 'Объект' : 'Site'}</label>
         <select id="ov-filter-site" name="siteId" defaultValue={rawQuery.siteId ?? ''}>
-          <option value="">All sites</option>
+          <option value="">{ru ? 'Все объекты' : 'All sites'}</option>
           {siteOptions.map((s) => (
             <option key={s.id} value={s.id}>
               {s.name}
@@ -405,18 +413,18 @@ function FilterForm({
         </select>
       </div>
       <div className="ov-filter-field">
-        <label htmlFor="ov-filter-state">Operational state</label>
+        <label htmlFor="ov-filter-state">{ru ? 'Операционный статус' : 'Operational state'}</label>
         <select id="ov-filter-state" name="state" defaultValue={rawQuery.state ?? ''}>
-          <option value="">All</option>
+          <option value="">{ru ? 'Все' : 'All'}</option>
           {OPERATIONAL_STATE_VALUES.map((s) => (
             <option key={s} value={s}>
-              {operationalStateLabel(s)}
+              {operationalStateLabel(s, ru ? 'RU' : 'EN')}
             </option>
           ))}
         </select>
       </div>
       <div className="ov-filter-field">
-        <label htmlFor="ov-filter-pagesize">Per page</label>
+        <label htmlFor="ov-filter-pagesize">{ru ? 'На странице' : 'Per page'}</label>
         <select id="ov-filter-pagesize" name="pageSize" defaultValue={rawQuery.pageSize ?? '20'}>
           {[10, 20, 50, 100].map((n) => (
             <option key={n} value={n}>
@@ -427,47 +435,49 @@ function FilterForm({
       </div>
       <div className="ov-filter-actions">
         <button type="submit" className="exc-apply-button">
-          Apply filters
+          {ru ? 'Применить фильтры' : 'Apply filters'}
         </button>
         <Link href={basePath} className="exc-reset-link">
-          Reset
+          {ru ? 'Сбросить' : 'Reset'}
         </Link>
       </div>
     </form>
   );
 }
 
-const SUMMARY_CARDS: { key: keyof OverviewSummary; label: string; state: OperationalState | null; clickable: boolean }[] = [
-  { key: 'totalWorkers', label: 'Total workers', state: null, clickable: true },
-  { key: 'workingNow', label: 'Working now', state: 'WORKING_NOW', clickable: true },
-  { key: 'finishedToday', label: 'Finished today', state: 'FINISHED_TODAY', clickable: true },
-  { key: 'missingCheckout', label: 'Missing checkout', state: 'MISSING_CHECKOUT', clickable: true },
-  { key: 'gpsIssue', label: 'GPS issues', state: 'GPS_ISSUE', clickable: true },
-  { key: 'syncIssue', label: 'Sync issues', state: 'SYNC_ISSUE', clickable: true },
-  { key: 'draft', label: 'Draft', state: 'DRAFT', clickable: true },
-  { key: 'submittedManual', label: 'Submitted manually', state: 'SUBMITTED_MANUAL', clickable: true },
-  { key: 'submittedAuto', label: 'Submitted automatically', state: 'SUBMITTED_AUTO', clickable: true },
-  { key: 'awaitingForeman', label: 'Awaiting foreman', state: 'AWAITING_FOREMAN', clickable: true },
-  { key: 'returned', label: 'Returned', state: 'RETURNED', clickable: true },
-  { key: 'readyForFinalApproval', label: 'Ready for final approval', state: 'READY_FOR_FINAL_APPROVAL', clickable: true },
-  { key: 'finalApproved', label: 'Final approved', state: 'FINAL_APPROVED', clickable: true },
-  { key: 'correctionOpen', label: 'Open corrections', state: 'CORRECTION_OPEN', clickable: true },
+const SUMMARY_CARDS: { key: keyof OverviewSummary; label: { en: string; ru: string }; state: OperationalState | null; clickable: boolean }[] = [
+  { key: 'totalWorkers', label: { en: 'Total workers', ru: 'Всего работников' }, state: null, clickable: true },
+  { key: 'workingNow', label: { en: 'Working now', ru: 'Сейчас работают' }, state: 'WORKING_NOW', clickable: true },
+  { key: 'finishedToday', label: { en: 'Finished today', ru: 'Закончили сегодня' }, state: 'FINISHED_TODAY', clickable: true },
+  { key: 'missingCheckout', label: { en: 'Missing checkout', ru: 'Нет ухода' }, state: 'MISSING_CHECKOUT', clickable: true },
+  { key: 'gpsIssue', label: { en: 'GPS issues', ru: 'Проблемы с GPS' }, state: 'GPS_ISSUE', clickable: true },
+  { key: 'syncIssue', label: { en: 'Sync issues', ru: 'Проблемы синхронизации' }, state: 'SYNC_ISSUE', clickable: true },
+  { key: 'draft', label: { en: 'Draft', ru: 'Черновик' }, state: 'DRAFT', clickable: true },
+  { key: 'submittedManual', label: { en: 'Submitted manually', ru: 'Отправлено вручную' }, state: 'SUBMITTED_MANUAL', clickable: true },
+  { key: 'submittedAuto', label: { en: 'Submitted automatically', ru: 'Отправлено автоматически' }, state: 'SUBMITTED_AUTO', clickable: true },
+  { key: 'awaitingForeman', label: { en: 'Awaiting foreman', ru: 'Ожидает прораба' }, state: 'AWAITING_FOREMAN', clickable: true },
+  { key: 'returned', label: { en: 'Returned', ru: 'Возвращено' }, state: 'RETURNED', clickable: true },
+  { key: 'readyForFinalApproval', label: { en: 'Ready for final approval', ru: 'Готово к окончательному одобрению' }, state: 'READY_FOR_FINAL_APPROVAL', clickable: true },
+  { key: 'finalApproved', label: { en: 'Final approved', ru: 'Окончательно одобрено' }, state: 'FINAL_APPROVED', clickable: true },
+  { key: 'correctionOpen', label: { en: 'Open corrections', ru: 'Открытые корректировки' }, state: 'CORRECTION_OPEN', clickable: true },
   // Not a per-item boolean state (a worker can carry more than one open exception) — informational
   // count only, never a `state=` filter target.
-  { key: 'openAttendanceExceptions', label: 'Open attendance exceptions', state: null, clickable: false }
+  { key: 'openAttendanceExceptions', label: { en: 'Open attendance exceptions', ru: 'Открытые исключения учёта' }, state: null, clickable: false }
 ];
 
 function SummaryCards({ basePath, rawQuery, summary }: { basePath: string; rawQuery: OverviewRawQuery; summary: OverviewSummary }) {
+  const ru = useAppLocale() === 'RU';
   const base = currentFilterBase(rawQuery);
   return (
-    <ul className="ov-summary-grid" aria-label="Operational state filters">
+    <ul className="ov-summary-grid" aria-label={ru ? 'Фильтры операционного статуса' : 'Operational state filters'}>
       {SUMMARY_CARDS.map((card) => {
         const value = summary[card.key];
+        const label = ru ? card.label.ru : card.label.en;
         if (!card.clickable) {
           return (
             <li key={card.key} className="ov-summary-card ov-summary-card-static">
               <span className="ov-summary-value">{value}</span>
-              <span className="ov-summary-label">{card.label}</span>
+              <span className="ov-summary-label">{label}</span>
             </li>
           );
         }
@@ -477,7 +487,7 @@ function SummaryCards({ basePath, rawQuery, summary }: { basePath: string; rawQu
           <li key={card.key}>
             <Link href={href} className={active ? 'ov-summary-card ov-summary-card-active' : 'ov-summary-card'} aria-current={active ? 'true' : undefined}>
               <span className="ov-summary-value">{value}</span>
-              <span className="ov-summary-label">{card.label}</span>
+              <span className="ov-summary-label">{label}</span>
             </Link>
           </li>
         );
@@ -487,18 +497,19 @@ function SummaryCards({ basePath, rawQuery, summary }: { basePath: string; rawQu
 }
 
 function ConflictsSection({ conflicts }: { conflicts: OverviewConflicts }) {
+  const ru = useAppLocale() === 'RU';
   const empty = conflicts.clockEventIdConflicts.length === 0 && conflicts.rejectedTerminalReceipts.length === 0 && conflicts.fifoLedgerInconsistencies.length === 0;
   return (
     <section className="ov-conflicts">
-      <h2 className="wk-section-title">Conflicts &amp; anomalies</h2>
-      <p className="ov-muted">{conflicts.totalOpenOrRecent} total (most recent 20 per category shown)</p>
+      <h2 className="wk-section-title">{ru ? 'Конфликты и аномалии' : 'Conflicts & anomalies'}</h2>
+      <p className="ov-muted">{ru ? `Всего: ${conflicts.totalOpenOrRecent} (показаны последние 20 по каждой категории)` : `${conflicts.totalOpenOrRecent} total (most recent 20 per category shown)`}</p>
       {empty ? (
-        <p className="wk-empty">No recent conflicts.</p>
+        <p className="wk-empty">{ru ? 'Недавних конфликтов нет.' : 'No recent conflicts.'}</p>
       ) : (
         <>
-          <ConflictList title="Clock event ID conflicts" items={conflicts.clockEventIdConflicts.map((c) => ({ id: c.id, tag: c.conflictType ?? '—', employeeName: c.employee?.name ?? '—', createdAt: c.createdAt }))} />
-          <ConflictList title="Rejected terminal offline events" items={conflicts.rejectedTerminalReceipts.map((c) => ({ id: c.id, tag: c.rejectionCode ?? '—', employeeName: c.employee?.name ?? '—', createdAt: c.createdAt }))} />
-          <ConflictList title="FIFO ledger inconsistencies" items={conflicts.fifoLedgerInconsistencies.map((c) => ({ id: c.id, tag: c.eventType ?? '—', employeeName: c.employee?.name ?? '—', createdAt: c.createdAt }))} />
+          <ConflictList title={ru ? 'Конфликты ID событий учёта' : 'Clock event ID conflicts'} items={conflicts.clockEventIdConflicts.map((c) => ({ id: c.id, tag: c.conflictType ?? '—', employeeName: c.employee?.name ?? '—', createdAt: c.createdAt }))} />
+          <ConflictList title={ru ? 'Отклонённые финальные оффлайн-события' : 'Rejected terminal offline events'} items={conflicts.rejectedTerminalReceipts.map((c) => ({ id: c.id, tag: c.rejectionCode ?? '—', employeeName: c.employee?.name ?? '—', createdAt: c.createdAt }))} />
+          <ConflictList title={ru ? 'Несоответствия в журнале FIFO' : 'FIFO ledger inconsistencies'} items={conflicts.fifoLedgerInconsistencies.map((c) => ({ id: c.id, tag: c.eventType ?? '—', employeeName: c.employee?.name ?? '—', createdAt: c.createdAt }))} />
         </>
       )}
     </section>
@@ -524,17 +535,18 @@ function ConflictList({ title, items }: { title: string; items: { id: string; ta
 }
 
 function WorkerList({ role, items, totalWorkers, asOf }: { role: 'admin' | 'foreman'; items: OverviewWorkerItem[]; totalWorkers: number; asOf: string }) {
+  const ru = useAppLocale() === 'RU';
   if (totalWorkers === 0) {
     return (
       <p className="wk-empty" role="status" aria-live="polite">
-        No workers in scope for this period/site.
+        {ru ? 'Нет работников в этой области для данного периода/объекта.' : 'No workers in scope for this period/site.'}
       </p>
     );
   }
   if (items.length === 0) {
     return (
       <p className="wk-empty" role="status" aria-live="polite">
-        No workers match this operational state filter.
+        {ru ? 'Нет работников, соответствующих этому фильтру статуса.' : 'No workers match this operational state filter.'}
       </p>
     );
   }
@@ -550,6 +562,8 @@ function WorkerList({ role, items, totalWorkers, asOf }: { role: 'admin' | 'fore
 
 function WorkerCard({ role, item, asOf }: { role: 'admin' | 'foreman'; item: OverviewWorkerItem; asOf: string }) {
   const isAdmin = role === 'admin';
+  const ru = useAppLocale() === 'RU';
+  const locale = ru ? 'RU' : 'EN';
 
   return (
     <li className="ov-worker-card">
@@ -562,11 +576,11 @@ function WorkerCard({ role, item, asOf }: { role: 'admin' | 'foreman'; item: Ove
         </div>
         <div className="ov-state-badges">
           {item.states.length === 0 ? (
-            <span className="ov-badge ov-badge-neutral">No active state</span>
+            <span className="ov-badge ov-badge-neutral">{ru ? 'Нет активного статуса' : 'No active state'}</span>
           ) : (
             item.states.map((s) => (
               <span key={s} className={operationalStateBadgeClass(s)}>
-                {operationalStateLabel(s)}
+                {operationalStateLabel(s, locale)}
               </span>
             ))
           )}
@@ -575,23 +589,23 @@ function WorkerCard({ role, item, asOf }: { role: 'admin' | 'foreman'; item: Ove
 
       <dl className="ov-worker-grid">
         <div>
-          <dt>Working now</dt>
+          <dt>{ru ? 'Сейчас на смене' : 'Working now'}</dt>
           <dd>
             {item.openShift ? (
               <>
                 {item.openShift.site.name}
-                {item.openShift.workArea ? ` · ${item.openShift.workArea.name}` : ''} — since {formatDateTime(item.openShift.openedAt)} ({channelLabel(item.openShift.channel)})
+                {item.openShift.workArea ? ` · ${item.openShift.workArea.name}` : ''} — {ru ? 'с' : 'since'} {formatDateTime(item.openShift.openedAt)} ({channelLabel(item.openShift.channel, locale)})
                 {' · '}
                 <LiveShiftDuration openedAt={item.openShift.openedAt} initialAsOf={asOf} />
               </>
             ) : (
-              'Not currently clocked in'
+              ru ? 'Сейчас не на смене' : 'Not currently clocked in'
             )}
           </dd>
         </div>
 
         <div>
-          <dt>Latest finished shift today</dt>
+          <dt>{ru ? 'Последняя завершённая смена сегодня' : 'Latest finished shift today'}</dt>
           <dd>
             {item.latestFinishedShiftToday ? (
               <>
@@ -604,26 +618,26 @@ function WorkerCard({ role, item, asOf }: { role: 'admin' | 'foreman'; item: Ove
         </div>
 
         <div>
-          <dt>Timesheet</dt>
+          <dt>{ru ? 'Табель' : 'Timesheet'}</dt>
           <dd>
             {item.timesheet ? (
               isAdmin ? (
-                <Link href={`/admin/timesheets/${item.timesheet.id}`}>{timesheetStatusLabel(item.timesheet.status)}</Link>
+                <Link href={`/admin/timesheets/${item.timesheet.id}`}>{timesheetStatusLabel(item.timesheet.status, locale)}</Link>
               ) : (
-                <Link href={`/foreman/review/${item.timesheet.id}`}>{timesheetStatusLabel(item.timesheet.status)}</Link>
+                <Link href={`/foreman/review/${item.timesheet.id}`}>{timesheetStatusLabel(item.timesheet.status, locale)}</Link>
               )
             ) : (
-              'No timesheet this period'
+              ru ? 'Нет табеля за этот период' : 'No timesheet this period'
             )}
           </dd>
         </div>
 
         <div>
-          <dt>Version</dt>
+          <dt>{ru ? 'Версия' : 'Version'}</dt>
           <dd>
             {item.currentVersion ? (
               <>
-                #{item.currentVersion.versionNumber} · {submissionSourceLabel(item.currentVersion.submissionSource)} · {formatDateTime(item.currentVersion.submittedAt)}
+                #{item.currentVersion.versionNumber} · {submissionSourceLabel(item.currentVersion.submissionSource, locale)} · {formatDateTime(item.currentVersion.submittedAt)}
               </>
             ) : (
               '—'
@@ -632,27 +646,29 @@ function WorkerCard({ role, item, asOf }: { role: 'admin' | 'foreman'; item: Ove
         </div>
 
         <div>
-          <dt>Open exceptions</dt>
+          <dt>{ru ? 'Открытые исключения' : 'Open exceptions'}</dt>
           <dd>
             {item.openExceptionCount === 0 ? (
-              'None'
+              ru ? 'Нет' : 'None'
             ) : (
               <>
-                {item.openExceptionCount} ({item.openExceptionTypes.map(exceptionTypeLabel).join(', ')}){' '}
-                {isAdmin ? <Link href={`/admin/attendance/exceptions?status=OPEN&employeeId=${item.employee.id}`}>View</Link> : <Link href="/foreman/attendance/exceptions">View</Link>}
+                {item.openExceptionCount} ({item.openExceptionTypes.map((t) => exceptionTypeLabel(t, locale)).join(', ')}){' '}
+                {isAdmin ? <Link href={`/admin/attendance/exceptions?status=OPEN&employeeId=${item.employee.id}`}>{ru ? 'Просмотр' : 'View'}</Link> : <Link href="/foreman/attendance/exceptions">{ru ? 'Просмотр' : 'View'}</Link>}
               </>
             )}
           </dd>
         </div>
 
         <div>
-          <dt>Review route</dt>
+          <dt>{ru ? 'Маршрут проверки' : 'Review route'}</dt>
           <dd>
             {item.reviewRoute ? (
               <>
-                {item.reviewRoute.pending} pending / {item.reviewRoute.approved} approved / {item.reviewRoute.returned} returned of {item.reviewRoute.total}
+                {ru
+                  ? `Ожидает: ${item.reviewRoute.pending} / одобрено: ${item.reviewRoute.approved} / возвращено: ${item.reviewRoute.returned} из ${item.reviewRoute.total}`
+                  : `${item.reviewRoute.pending} pending / ${item.reviewRoute.approved} approved / ${item.reviewRoute.returned} returned of ${item.reviewRoute.total}`}
                 {item.reviewRoute.scopes.length > 0 && (
-                  <span className="ov-muted"> — {item.reviewRoute.scopes.map((s) => `${s.siteName ?? 'Non-site'}: ${s.status}`).join(', ')}</span>
+                  <span className="ov-muted"> — {item.reviewRoute.scopes.map((s) => `${s.siteName ?? (ru ? 'Вне объекта' : 'Non-site')}: ${s.status}`).join(', ')}</span>
                 )}
               </>
             ) : (
@@ -662,14 +678,14 @@ function WorkerCard({ role, item, asOf }: { role: 'admin' | 'foreman'; item: Ove
         </div>
 
         <div>
-          <dt>Final approval blockers</dt>
+          <dt>{ru ? 'Блокирует окончательное одобрение' : 'Final approval blockers'}</dt>
           <dd>
             {item.finalApprovalBlockedReasons.length === 0 ? (
-              'None'
+              ru ? 'Нет' : 'None'
             ) : (
               <ul className="ov-blocker-list">
                 {item.finalApprovalBlockedReasons.map((r) => (
-                  <li key={r}>{finalApprovalBlockedReasonLabel(r)}</li>
+                  <li key={r}>{finalApprovalBlockedReasonLabel(r, locale)}</li>
                 ))}
               </ul>
             )}
@@ -677,31 +693,30 @@ function WorkerCard({ role, item, asOf }: { role: 'admin' | 'foreman'; item: Ove
         </div>
 
         <div>
-          <dt>Correction</dt>
+          <dt>{ru ? 'Корректировка' : 'Correction'}</dt>
           <dd>
             {item.correction ? (
               isAdmin ? (
-                <Link href="/admin/corrections">{correctionStatusLabel(item.correction.status)}</Link>
+                <Link href="/admin/corrections">{correctionStatusLabel(item.correction.status, locale)}</Link>
               ) : (
-                correctionStatusLabel(item.correction.status)
+                correctionStatusLabel(item.correction.status, locale)
               )
             ) : (
-              'None'
+              ru ? 'Нет' : 'None'
             )}
           </dd>
         </div>
 
         <div>
-          <dt>Recorded vs reported</dt>
+          <dt>{ru ? 'Зафиксировано и заявлено' : 'Recorded vs reported'}</dt>
           <dd>
             {item.diff ? (
               <>
-                Recorded {formatMinutes(item.diff.recordedMinutes)} · Reported {formatMinutes(item.diff.reportedMinutes)} ·{' '}
-                <span className={deltaClass(item.diff.deltaMinutes)}>Delta {formatSignedMinutes(item.diff.deltaMinutes)}</span> · {item.diff.adjustmentCount} adjustment
-                {item.diff.adjustmentCount === 1 ? '' : 's'}
+                {ru ? 'Зафикс.' : 'Recorded'} {formatMinutes(item.diff.recordedMinutes, locale)} · {ru ? 'Заявл.' : 'Reported'} {formatMinutes(item.diff.reportedMinutes, locale)} ·{' '}
+                <span className={deltaClass(item.diff.deltaMinutes)}>{ru ? 'Разница' : 'Delta'} {formatSignedMinutes(item.diff.deltaMinutes, locale)}</span> · {ru ? `корректировок: ${item.diff.adjustmentCount}` : `${item.diff.adjustmentCount} adjustment${item.diff.adjustmentCount === 1 ? '' : 's'}`}
               </>
             ) : (
-              'Not available'
+              ru ? 'Недоступно' : 'Not available'
             )}
           </dd>
         </div>
@@ -729,6 +744,7 @@ function Pagination({
   totalPages: number;
   totalItems: number;
 }) {
+  const ru = useAppLocale() === 'RU';
   if (totalItems === 0) {
     return null;
   }
@@ -736,12 +752,12 @@ function Pagination({
   const pageHref = (p: number) => `${basePath}${buildOverviewQueryString({ ...base, page: p })}`;
 
   return (
-    <nav className="exc-pagination" aria-label="Pagination">
-      {page > 1 ? <Link href={pageHref(page - 1)}>Previous</Link> : <span className="exc-pagination-disabled">Previous</span>}
+    <nav className="exc-pagination" aria-label={ru ? 'Постраничная навигация' : 'Pagination'}>
+      {page > 1 ? <Link href={pageHref(page - 1)}>{ru ? 'Назад' : 'Previous'}</Link> : <span className="exc-pagination-disabled">{ru ? 'Назад' : 'Previous'}</span>}
       <span>
-        {totalItems} worker{totalItems === 1 ? '' : 's'} · page {page} of {totalPages}
+        {ru ? `Работников: ${totalItems} · страница ${page} из ${totalPages}` : `${totalItems} worker${totalItems === 1 ? '' : 's'} · page ${page} of ${totalPages}`}
       </span>
-      {page < totalPages ? <Link href={pageHref(page + 1)}>Next</Link> : <span className="exc-pagination-disabled">Next</span>}
+      {page < totalPages ? <Link href={pageHref(page + 1)}>{ru ? 'Далее' : 'Next'}</Link> : <span className="exc-pagination-disabled">{ru ? 'Далее' : 'Next'}</span>}
     </nav>
   );
 }

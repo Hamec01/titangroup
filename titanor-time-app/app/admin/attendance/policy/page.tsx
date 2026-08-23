@@ -3,6 +3,8 @@ import { resolveServerSession } from '@/lib/server-session';
 import { hasPermission } from '@/lib/permissions';
 import { getCompanyAttendancePolicy } from '@/lib/attendance-policy';
 import { PolicyForm } from '@/components/attendance-policy/PolicyForm';
+import { resolveAppLocale } from '@/lib/i18n/server';
+import { localeText } from '@/lib/i18n/locale';
 
 export const dynamic = 'force-dynamic';
 
@@ -17,13 +19,14 @@ export default async function AdminAttendancePolicyPage() {
   if (!session) {
     redirect('/login');
   }
+  const locale = await resolveAppLocale();
 
   const canRead = await hasPermission(session.user.roles, 'attendance.policy.read');
   if (!canRead) {
     return (
       <main className="setup-page">
         <p className="login-error" role="alert">
-          Access denied — this page requires the attendance.policy.read permission.
+          {localeText(locale, 'Access denied — this page requires the attendance.policy.read permission.', 'Доступ запрещён — для этой страницы требуется право attendance.policy.read.')}
         </p>
       </main>
     );
@@ -35,15 +38,15 @@ export default async function AdminAttendancePolicyPage() {
   return (
     <main className="setup-page">
       <div className="setup-card policy-card">
-        <h1>Attendance policy</h1>
+        <h1>{localeText(locale, 'Attendance policy', 'Политика учёта времени')}</h1>
         <p className="setup-subtitle">
-          Company-wide settings controlling when an unsubmitted timesheet is automatically submitted, and how long a late-sync reopen waits before retrying.
+          {localeText(locale, 'Company-wide settings controlling when an unsubmitted timesheet is automatically submitted, and how long a late-sync reopen waits before retrying.', 'Общекорпоративные настройки, определяющие, когда неотправленный табель отправляется автоматически, и сколько ждёт повторная попытка при повторном открытии из-за поздней синхронизации.')}
         </p>
         <div className="policy-notice" role="note">
-          Auto-submit is not an approval. An automatically submitted version still goes through the same foreman and admin review route as a manual submission.
+          {localeText(locale, 'Auto-submit is not an approval. An automatically submitted version still goes through the same foreman and admin review route as a manual submission.', 'Автоотправка — это не одобрение. Автоматически отправленная версия всё равно проходит тот же маршрут проверки прорабом и администратором, что и ручная отправка.')}
         </div>
         <div className="policy-notice policy-notice-warning" role="note">
-          Changing this policy never rewrites any existing timesheet version or auto-submission attempt — a new value only applies to candidates not yet processed by the next scheduler tick.
+          {localeText(locale, 'Changing this policy never rewrites any existing timesheet version or auto-submission attempt — a new value only applies to candidates not yet processed by the next scheduler tick.', 'Изменение этой политики никогда не переписывает существующие версии табелей или попытки автоотправки — новое значение применяется только к кандидатам, ещё не обработанным следующим тактом планировщика.')}
         </div>
         <PolicyForm initialPolicy={policy} canUpdate={canUpdate} />
       </div>
