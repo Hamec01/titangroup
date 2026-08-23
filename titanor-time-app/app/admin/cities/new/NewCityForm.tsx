@@ -41,7 +41,7 @@ export function NewCityForm() {
       });
 
       if (response.ok) {
-        router.push('/admin/setup');
+        router.push('/admin/cities');
         router.refresh();
         return;
       }

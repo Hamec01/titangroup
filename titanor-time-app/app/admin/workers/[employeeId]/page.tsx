@@ -21,7 +21,9 @@ export default async function WorkerDetailPage({ params }: { params: Promise<{ e
   if (!session) {
     redirect('/login');
   }
-  const s = adminDailyStrings(await resolveAppLocale());
+  const locale = await resolveAppLocale();
+  const ru = locale === 'RU';
+  const s = adminDailyStrings(locale);
 
   const isAdmin = session.user.roles.includes('ADMIN') || session.user.roles.includes('SUPER_ADMIN');
   if (!isAdmin) {
@@ -58,11 +60,24 @@ export default async function WorkerDetailPage({ params }: { params: Promise<{ e
         <h1>
           {worker.firstName} {worker.lastName}
         </h1>
-        <p className="setup-subtitle">
-          {s.workers.employeeNumber}: {worker.employeeNumber} · {s.workers.login}: {worker.username} ·{' '}
-          {worker.employment?.active ? s.workers.activeEmployment : s.workers.employmentEnded} ·{' '}
-          {s.workers.activation[worker.activationStatus as keyof typeof s.workers.activation]}
-        </p>
+        <section id="worker-status" aria-label="Worker status">
+          <h2>{s.common.status}</h2>
+          <p className="setup-subtitle">
+            {s.workers.employeeNumber}: {worker.employeeNumber} · {s.workers.login}: {worker.username} ·{' '}
+            {worker.employment?.active ? s.workers.activeEmployment : s.workers.employmentEnded} ·{' '}
+            {s.workers.activation[worker.activationStatus as keyof typeof s.workers.activation]}
+          </p>
+        </section>
+        <section className="worker-work-setup" aria-label={ru ? 'Быстрые действия' : 'Quick actions'}>
+          <h2>{ru ? 'Быстрые действия' : 'Quick actions'}</h2>
+          <ul className="setup-list">
+            <li className="setup-item"><Link href={`/admin?employeeId=${employeeId}`}>{ru ? 'Статус работника' : 'Worker status'}</Link></li>
+            <li className="setup-item"><Link href={`#worker-assignments`}>{ru ? 'Объект и назначения' : 'Site and assignments'}</Link></li>
+            <li className="setup-item"><Link href={`/admin/workers/${employeeId}/timeline`}>{ru ? 'Приход/Уход/Сегодня (история по дням)' : 'Check in/out/today (day history)'}</Link></li>
+            <li className="setup-item"><Link href={`/admin/attendance/exceptions?employeeId=${employeeId}`}>{ru ? 'Проблемы работника' : 'Worker issues'}</Link></li>
+            <li className="setup-item"><Link href={`#worker-profile`}>{ru ? 'Открыть редактирование профиля' : 'Open profile edit section'}</Link></li>
+          </ul>
+        </section>
         <p>
           <Link href={`/admin/reports?employeeId=${employeeId}`}>{s.workers.report}</Link>
         </p>
@@ -70,7 +85,7 @@ export default async function WorkerDetailPage({ params }: { params: Promise<{ e
           <Link href={`/admin/workers/${employeeId}/locations`}>{s.workers.locations}</Link>
         </p>
 
-        <h2>{s.workers.currentAssignments}</h2>
+        <h2 id="worker-assignments">{s.workers.currentAssignments}</h2>
         {worker.currentAssignments.length === 0 ? (
           <div className="worker-setup-callout">
             <p>{s.workers.noAssignment}</p>

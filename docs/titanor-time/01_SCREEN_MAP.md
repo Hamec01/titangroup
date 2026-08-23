@@ -271,14 +271,25 @@ touch target ≥ 48px), `/foreman/*` — desktop-first с поддержкой �
   «create new» не было. Добавлена — `docs/titanor-time/T9_INTERNAL_TEST_PLAN.md` §3/§4.
   Поиск/фильтр/сортировка/пагинация по-прежнему не реализованы.
 
+#### `/admin/cities` 🟢
+- Роли: `ADMIN`, `SUPER_ADMIN` (`city.read.all`)
+- Приоритет: desktop
+- Назначение: список optional справочника City, используемого для группировки объектов
+- Данные: `City[]` + количество связанных `WorkSite`
+- Действия: → создать; удалить город только при отсутствии связанных объектов с явным подтверждением
+- Состояния: empty (CTA создать первый город); error удаления (`CITY_IN_USE`)
+- Куда: `/admin/cities/new`
+- API: `GET /api/admin/cities`, `DELETE /api/admin/cities/:cityId`
+- DoD: City с хотя бы одним объектом не удаляется и остаётся доступным для существующих данных
+
 #### `/admin/cities/new` 🟢 **`[2026-08-20] T9.7 feedback fix`**
 - Роли: `ADMIN`, `SUPER_ADMIN` (`city.create`)
 - Приоритет: desktop
 - Назначение: создать optional справочник City до/после создания Site
 - Действия: idempotent submit; network-unknown retry повторяет тот же key/body
 - Состояния: validation, duplicate name, permission/session loss, network unknown
-- Откуда: `/admin/setup`
-- Куда: `/admin/setup`; созданный City появляется в city dropdown Site
+- Откуда: `/admin/setup`, `/admin/cities`
+- Куда: `/admin/cities`; созданный City появляется в city dropdown Site
 - API: `POST /api/admin/cities`
 
 #### `/admin/sites/new` 🟢

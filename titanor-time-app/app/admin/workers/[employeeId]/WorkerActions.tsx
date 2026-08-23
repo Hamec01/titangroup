@@ -278,7 +278,7 @@ export function WorkerActions({ worker }: { worker: WorkerDetail }) {
 
   return (
     <>
-      <h2>{localeText(locale, 'Edit', 'Редактирование')}</h2>
+      <h2 id="worker-profile">{localeText(locale, 'Edit', 'Редактирование')}</h2>
       <form onSubmit={handleEdit} aria-busy={editLoading}>
         <div className="login-field">
           <label htmlFor="edit-first-name">{s.workers.firstName}</label>

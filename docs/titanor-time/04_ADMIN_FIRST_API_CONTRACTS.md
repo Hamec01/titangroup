@@ -132,6 +132,13 @@ relevant query + canonical body)`.
 - Idempotency: поддерживается
 - Audit: `CITY_CREATED`
 
+#### `DELETE /api/admin/cities/:cityId`
+- Permission: `city.delete`
+- Response `200`: `{ "deleted": true }`
+- Ошибки: `404 CITY_NOT_FOUND`, `409 CITY_IN_USE`, `403 CSRF_REJECTED`
+- Удаляет только City без связанных WorkSite; при наличии хотя бы одного объекта город сохраняется.
+- Audit: `CITY_DELETED`
+
 ## 3. Объекты
 
 #### `GET /api/admin/sites`

@@ -2699,27 +2699,34 @@ a.ov-summary-card:focus-visible {
 
 .owner-worker-row {
   min-width: 0;
-  padding: 13px 14px;
+  padding: 6px 8px;
   border: 1px solid var(--border);
   border-radius: 9px;
-  color: var(--text);
-  text-decoration: none;
   background: rgba(5, 12, 22, 0.4);
   transition: border-color 120ms ease, background-color 120ms ease;
 }
 
-.owner-worker-row:hover,
-.owner-worker-row:focus-visible {
-  border-color: var(--accent);
-  background: rgba(62, 139, 184, 0.09);
+.owner-cell-link {
+  min-width: 0;
+  padding: 7px 6px;
+  border-radius: 6px;
+  color: var(--text);
+  text-decoration: none;
+  display: grid;
+  gap: 3px;
 }
 
-.owner-worker-row:focus-visible {
-  outline: 3px solid rgba(125, 211, 252, 0.3);
-  outline-offset: 2px;
+.owner-cell-link:hover,
+.owner-cell-link:focus-visible {
+  background: rgba(62, 139, 184, 0.16);
 }
 
-.owner-worker-row > span,
+.owner-cell-link:focus-visible {
+  outline: 2px solid rgba(125, 211, 252, 0.35);
+  outline-offset: 1px;
+}
+
+.owner-worker-row > *,
 .owner-worker-identity,
 .owner-worker-site {
   min-width: 0;
@@ -2727,7 +2734,7 @@ a.ov-summary-card:focus-visible {
 
 .owner-worker-identity,
 .owner-worker-site,
-.owner-worker-row > span:nth-child(2) {
+.owner-worker-row > :nth-child(2) {
   display: grid;
   gap: 3px;
 }
@@ -2807,9 +2814,9 @@ a.ov-summary-card:focus-visible {
     grid-template-columns: minmax(150px, 1.25fr) minmax(100px, 0.8fr) minmax(140px, 1fr) repeat(2, minmax(70px, 0.55fr));
   }
 
-  .owner-worker-row > span:nth-child(5),
-  .owner-worker-row > span:nth-child(7),
-  .owner-worker-row > span:nth-child(8) {
+  .owner-worker-row > :nth-child(5),
+  .owner-worker-row > :nth-child(7),
+  .owner-worker-row > :nth-child(8) {
     display: none;
   }
 }
@@ -2843,7 +2850,7 @@ a.ov-summary-card:focus-visible {
     gap: 10px 14px;
   }
 
-  .owner-worker-row > span {
+  .owner-worker-row > * {
     display: grid !important;
   }
 
@@ -2852,18 +2859,18 @@ a.ov-summary-card:focus-visible {
     grid-column: 1;
   }
 
-  .owner-worker-row > span:nth-child(2),
-  .owner-worker-row > span:nth-child(4),
-  .owner-worker-row > span:nth-child(5),
-  .owner-worker-row > span:nth-child(6),
-  .owner-worker-row > span:nth-child(7),
+  .owner-worker-row > :nth-child(2),
+  .owner-worker-row > :nth-child(4),
+  .owner-worker-row > :nth-child(5),
+  .owner-worker-row > :nth-child(6),
+  .owner-worker-row > :nth-child(7),
   .owner-worker-open {
     grid-column: 2;
     justify-self: end;
     text-align: right;
   }
 
-  .owner-worker-row > span[data-label]::before {
+  .owner-worker-row > [data-label]::before {
     content: attr(data-label);
     color: var(--text-soft);
     font-size: 0.67rem;

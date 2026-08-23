@@ -280,6 +280,12 @@ function OwnerWorkerList({ items, totalItems, asOf }: { items: OverviewWorkerIte
 
 function OwnerWorkerRow({ item, asOf }: { item: OverviewWorkerItem; asOf: string }) {
   const ru = useAppLocale() === 'RU';
+  const workerHref = `/admin/workers/${item.employee.id}`;
+  const statusHref = `/admin?employeeId=${item.employee.id}`;
+  const assignmentHref = `${workerHref}#worker-assignments`;
+  const timelineHref = `${workerHref}/timeline`;
+  const issuesHref = `/admin/attendance/exceptions?employeeId=${item.employee.id}`;
+  const profileEditHref = `${workerHref}#worker-profile`;
   const assignment = item.openShift
     ? { site: item.openShift.site, workArea: item.openShift.workArea }
     : item.currentAssignments.find((current) => current.isPrimary) ?? item.currentAssignments[0] ?? (item.latestFinishedShiftToday ? { site: item.latestFinishedShiftToday.site, workArea: null } : null);
@@ -290,16 +296,35 @@ function OwnerWorkerRow({ item, asOf }: { item: OverviewWorkerItem; asOf: string
   const issueLabel = item.openExceptionCount > 0 ? (ru ? `Проблем: ${item.openExceptionCount}` : `${item.openExceptionCount} issue${item.openExceptionCount === 1 ? '' : 's'}`) : item.needsAttention ? (ru ? 'Нужна проверка' : 'Review needed') : (ru ? 'Нет проблем' : 'No issues');
   return (
     <li>
-      <Link href={`/admin/workers/${item.employee.id}`} className="owner-worker-row" aria-label={`Open ${item.employee.name}`}>
-        <span className="owner-worker-identity"><strong>{item.employee.name}</strong><small>#{item.employee.employeeNumber}</small></span>
-        <span><span className={`owner-status ${statusClass}`}>{statusLabel}</span>{item.timesheet ? <small>{timesheetStatusLabel(item.timesheet.status)}</small> : null}</span>
-        <span className="owner-worker-site"><strong>{assignment?.site.name ?? (ru ? 'Объект не назначен' : 'No site assigned')}</strong>{assignment?.workArea ? <small>{assignment.workArea.name}</small> : null}</span>
-        <span data-label="Check In">{formatTodayTime(startedAt)}</span>
-        <span data-label="Check Out">{formatTodayTime(endedAt)}</span>
-        <span data-label="Today"><LiveWorkedToday initialMinutes={item.todayWorkedMinutes} initialAsOf={asOf} running={item.todayStatus === 'WORKING'} /></span>
-        <span data-label="Issues" className={item.needsAttention ? 'owner-issue' : 'owner-no-issue'}>{issueLabel}</span>
-        <span className="owner-worker-open">{ru ? 'Открыть →' : 'View →'}</span>
-      </Link>
+      <div className="owner-worker-row" aria-label={`Open ${item.employee.name}`}>
+        <Link href={profileEditHref} className="owner-cell-link owner-worker-identity" aria-label={ru ? `Редактировать профиль ${item.employee.name}` : `Edit profile ${item.employee.name}`}>
+          <strong>{item.employee.name}</strong>
+          <small>#{item.employee.employeeNumber}</small>
+        </Link>
+        <Link href={statusHref} className="owner-cell-link" aria-label={ru ? `Проверить статус ${item.employee.name}` : `Check status for ${item.employee.name}`}>
+          <span className={`owner-status ${statusClass}`}>{statusLabel}</span>
+          {item.timesheet ? <small>{timesheetStatusLabel(item.timesheet.status)}</small> : null}
+        </Link>
+        <Link href={assignmentHref} className="owner-cell-link owner-worker-site" aria-label={ru ? `Объекты работника ${item.employee.name}` : `Worker site assignments for ${item.employee.name}`}>
+          <strong>{assignment?.site.name ?? (ru ? 'Объект не назначен' : 'No site assigned')}</strong>
+          {assignment?.workArea ? <small>{assignment.workArea.name}</small> : null}
+        </Link>
+        <Link href={timelineHref} className="owner-cell-link" data-label="Check In" aria-label={ru ? `История приходов работника ${item.employee.name}` : `Check-in history for ${item.employee.name}`}>
+          {formatTodayTime(startedAt)}
+        </Link>
+        <Link href={timelineHref} className="owner-cell-link" data-label="Check Out" aria-label={ru ? `История уходов работника ${item.employee.name}` : `Check-out history for ${item.employee.name}`}>
+          {formatTodayTime(endedAt)}
+        </Link>
+        <Link href={timelineHref} className="owner-cell-link" data-label="Today" aria-label={ru ? `История времени работника ${item.employee.name}` : `Worked-time history for ${item.employee.name}`}>
+          <LiveWorkedToday initialMinutes={item.todayWorkedMinutes} initialAsOf={asOf} running={item.todayStatus === 'WORKING'} />
+        </Link>
+        <Link href={issuesHref} className={`owner-cell-link ${item.needsAttention ? 'owner-issue' : 'owner-no-issue'}`} data-label="Issues" aria-label={ru ? `Проблемы учёта работника ${item.employee.name}` : `Attendance issues for ${item.employee.name}`}>
+          {issueLabel}
+        </Link>
+        <Link href={workerHref} className="owner-cell-link owner-worker-open" aria-label={ru ? `Открыть полную карточку ${item.employee.name}` : `Open full profile ${item.employee.name}`}>
+          {ru ? 'Открыть →' : 'View →'}
+        </Link>
+      </div>
     </li>
   );
 }

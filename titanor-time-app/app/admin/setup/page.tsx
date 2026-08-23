@@ -28,8 +28,8 @@ const CHECKLIST: ChecklistItem[] = [
     label: 'City',
     description: 'Optional reference for grouping sites. It does not block setup.',
     optional: true,
-    createHref: '/admin/cities/new',
-    doneHref: '/admin/cities/new',
+    createHref: '/admin/cities',
+    doneHref: '/admin/cities',
     doneActionLabel: 'Add another'
   },
   {
