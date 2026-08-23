@@ -2,25 +2,26 @@
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
+import { useAppLocale } from '@/components/i18n/AppLocaleProvider';
 
 const CSRF_HEADER_VALUE = 'titanor-time';
 
-function describeError(code: string | undefined, fieldErrors: Record<string, string[]> | undefined): string {
+function describeError(code: string | undefined, fieldErrors: Record<string, string[]> | undefined, ru: boolean): string {
   switch (code) {
     case 'NO_CORRECTION_CHANGES':
-      return 'The draft is identical to the original — nothing to submit. Edit a day first.';
+      return ru ? 'Черновик идентичен исходному — нечего отправлять. Сначала измените день.' : 'The draft is identical to the original — nothing to submit. Edit a day first.';
     case 'SELF_APPROVAL_FORBIDDEN':
-      return 'A different admin must decide this correction (four-eyes), unless you use the SUPER_ADMIN override below.';
+      return ru ? 'Эту корректировку должен решить другой администратор (принцип «четырёх глаз»), если только вы не используете переопределение SUPER_ADMIN ниже.' : 'A different admin must decide this correction (four-eyes), unless you use the SUPER_ADMIN override below.';
     case 'INVALID_STATE_TRANSITION':
-      return 'This correction is no longer in the expected status — refresh the page.';
+      return ru ? 'Эта корректировка больше не в ожидаемом статусе — обновите страницу.' : 'This correction is no longer in the expected status — refresh the page.';
     case 'VALIDATION_ERROR':
       return fieldErrors
         ? Object.entries(fieldErrors)
             .map(([field, messages]) => `${field}: ${messages.join(', ')}`)
             .join('; ')
-        : 'Invalid input.';
+        : (ru ? 'Некорректные данные.' : 'Invalid input.');
     default:
-      return 'Something went wrong. Please try again.';
+      return ru ? 'Что-то пошло не так. Попробуйте снова.' : 'Something went wrong. Please try again.';
   }
 }
 
@@ -32,6 +33,7 @@ interface CorrectionActionsProps {
 
 export function CorrectionActions({ correctionRequestId, status, isSuperAdmin }: CorrectionActionsProps) {
   const router = useRouter();
+  const ru = useAppLocale() === 'RU';
   const [loading, setLoading] = useState<'open' | 'submit' | 'approve' | 'reject' | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [overrideReason, setOverrideReason] = useState('');
@@ -53,7 +55,7 @@ export function CorrectionActions({ correctionRequestId, status, isSuperAdmin }:
     setError(null);
     const { ok, data } = await post(`/api/admin/corrections/${correctionRequestId}/draft`);
     if (!ok) {
-      setError(describeError((data as { error?: { code?: string } })?.error?.code, undefined));
+      setError(describeError((data as { error?: { code?: string } })?.error?.code, undefined, ru));
       setLoading(null);
       return;
     }
@@ -66,7 +68,7 @@ export function CorrectionActions({ correctionRequestId, status, isSuperAdmin }:
     setError(null);
     const { ok, data } = await post(`/api/admin/corrections/${correctionRequestId}/submit`);
     if (!ok) {
-      setError(describeError((data as { error?: { code?: string } })?.error?.code, undefined));
+      setError(describeError((data as { error?: { code?: string } })?.error?.code, undefined, ru));
       setLoading(null);
       return;
     }
@@ -78,7 +80,7 @@ export function CorrectionActions({ correctionRequestId, status, isSuperAdmin }:
     setLoading(decision === 'APPROVED' ? 'approve' : 'reject');
     setError(null);
     if (useOverride && overrideReason.trim().length === 0) {
-      setError('A reason is required to use the self-decide override.');
+      setError(ru ? 'Для переопределения самостоятельного решения требуется причина.' : 'A reason is required to use the self-decide override.');
       setLoading(null);
       return;
     }
@@ -89,7 +91,7 @@ export function CorrectionActions({ correctionRequestId, status, isSuperAdmin }:
     });
     if (!ok) {
       const errObj = (data as { error?: { code?: string; fieldErrors?: Record<string, string[]> } })?.error;
-      setError(describeError(errObj?.code, errObj?.fieldErrors));
+      setError(describeError(errObj?.code, errObj?.fieldErrors, ru));
       setLoading(null);
       return;
     }
@@ -105,7 +107,7 @@ export function CorrectionActions({ correctionRequestId, status, isSuperAdmin }:
           </p>
         ) : null}
         <button className="login-submit" type="button" disabled={loading !== null} onClick={handleOpenDraft}>
-          {loading === 'open' ? 'Opening…' : 'Open draft'}
+          {loading === 'open' ? (ru ? 'Открытие…' : 'Opening…') : (ru ? 'Открыть черновик' : 'Open draft')}
         </button>
       </div>
     );
@@ -119,9 +121,9 @@ export function CorrectionActions({ correctionRequestId, status, isSuperAdmin }:
             {error}
           </p>
         ) : null}
-        <p className="setup-subtitle">Edit days below, then submit once the content actually differs from the original.</p>
+        <p className="setup-subtitle">{ru ? 'Измените дни ниже, затем отправьте, когда содержимое действительно будет отличаться от исходного.' : 'Edit days below, then submit once the content actually differs from the original.'}</p>
         <button className="login-submit" type="button" disabled={loading !== null} onClick={handleSubmit}>
-          {loading === 'submit' ? 'Submitting…' : 'Submit correction'}
+          {loading === 'submit' ? (ru ? 'Отправка…' : 'Submitting…') : (ru ? 'Отправить корректировку' : 'Submit correction')}
         </button>
       </div>
     );
@@ -138,20 +140,20 @@ export function CorrectionActions({ correctionRequestId, status, isSuperAdmin }:
         {isSuperAdmin ? (
           <label className="wk-checkbox-row">
             <input type="checkbox" checked={useOverride} onChange={(e) => setUseOverride(e.target.checked)} disabled={loading !== null} />
-            Self-decide override (SUPER_ADMIN only, requires a reason)
+            {ru ? 'Переопределение самостоятельного решения (только SUPER_ADMIN, требуется причина)' : 'Self-decide override (SUPER_ADMIN only, requires a reason)'}
           </label>
         ) : null}
         {useOverride ? (
           <div className="login-field">
-            <label htmlFor="override-reason">Override reason</label>
+            <label htmlFor="override-reason">{ru ? 'Причина переопределения' : 'Override reason'}</label>
             <textarea id="override-reason" rows={2} disabled={loading !== null} value={overrideReason} onChange={(e) => setOverrideReason(e.target.value)} />
           </div>
         ) : null}
         <button className="login-submit" type="button" disabled={loading !== null} onClick={() => handleDecide('APPROVED')}>
-          {loading === 'approve' ? 'Approving…' : 'Approve'}
+          {loading === 'approve' ? (ru ? 'Одобрение…' : 'Approving…') : (ru ? 'Одобрить' : 'Approve')}
         </button>
         <button className="login-submit" type="button" disabled={loading !== null} onClick={() => handleDecide('REJECTED')}>
-          {loading === 'reject' ? 'Rejecting…' : 'Reject'}
+          {loading === 'reject' ? (ru ? 'Отклонение…' : 'Rejecting…') : (ru ? 'Отклонить' : 'Reject')}
         </button>
       </div>
     );

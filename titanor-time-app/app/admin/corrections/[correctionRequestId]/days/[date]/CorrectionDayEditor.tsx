@@ -3,6 +3,8 @@
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { helsinkiDateAndTimeToUtcIso as helsinkiTimeToIso, utcIsoToHelsinkiTime as isoToHelsinkiTime } from '@/lib/helsinki-datetime';
+import { useAppLocale } from '@/components/i18n/AppLocaleProvider';
+import { dayTypeLabel } from '@/lib/i18n/worker';
 
 const CSRF_HEADER_VALUE = 'titanor-time';
 
@@ -56,33 +58,35 @@ interface EditableSegment {
 
 let nextKey = 0;
 
-function describeError(code: string | undefined, fieldErrors: Record<string, string[]> | undefined): string {
+function describeError(code: string | undefined, fieldErrors: Record<string, string[]> | undefined, ru: boolean): string {
   switch (code) {
     case 'WORK_SEGMENT_OVERLAP':
-      return 'These time ranges overlap — please adjust them.';
+      return ru ? 'Эти интервалы времени пересекаются — скорректируйте их.' : 'These time ranges overlap — please adjust them.';
     case 'SITE_NOT_ASSIGNED':
-      return 'This employee has no matching site/area assignment on this date.';
+      return ru ? 'У этого работника нет подходящего назначения на объект/зону на эту дату.' : 'This employee has no matching site/area assignment on this date.';
     case 'DAY_TYPE_CONFLICT':
-      return 'Cannot have hours logged and mark the day as absence at the same time.';
+      return ru ? 'Нельзя одновременно указать часы и отметить день как отсутствие.' : 'Cannot have hours logged and mark the day as absence at the same time.';
     case 'DAY_STATE_CONFLICT':
-      return 'Cannot confirm zero hours while hours are logged.';
+      return ru ? 'Нельзя подтвердить ноль часов, пока указаны часы.' : 'Cannot confirm zero hours while hours are logged.';
     case 'DAY_TYPE_REQUIRES_ABSENCE':
-      return 'This day type requires an approved absence request.';
+      return ru ? 'Для этого типа дня требуется одобренный запрос на отсутствие.' : 'This day type requires an approved absence request.';
     case 'INVALID_STATE_TRANSITION':
-      return 'This correction draft is no longer open for editing.';
+      return ru ? 'Этот черновик корректировки больше не открыт для редактирования.' : 'This correction draft is no longer open for editing.';
     case 'VALIDATION_ERROR':
       return fieldErrors
         ? Object.entries(fieldErrors)
             .map(([field, messages]) => `${field}: ${messages.join(', ')}`)
             .join('; ')
-        : 'Invalid input.';
+        : (ru ? 'Некорректные данные.' : 'Invalid input.');
     default:
-      return 'Could not save — please try again.';
+      return ru ? 'Не удалось сохранить — попробуйте снова.' : 'Could not save — please try again.';
   }
 }
 
 export default function CorrectionDayEditor({ correctionRequestId, date, initialDayType, initialConfirmedZero, initialSegments, assignmentOptions }: CorrectionDayEditorProps) {
   const router = useRouter();
+  const locale = useAppLocale();
+  const ru = locale === 'RU';
   const [segments, setSegments] = useState<EditableSegment[]>(() =>
     initialSegments.map((s) => ({
       key: nextKey++,
@@ -153,13 +157,13 @@ export default function CorrectionDayEditor({ correctionRequestId, date, initial
       });
       if (!res.ok) {
         const data = await res.json().catch(() => null);
-        setError(describeError(data?.error?.code, data?.error?.fieldErrors));
+        setError(describeError(data?.error?.code, data?.error?.fieldErrors, ru));
         setSaving(false);
         return;
       }
       router.push(`/admin/corrections/${correctionRequestId}`);
     } catch {
-      setError('Network error — please try again.');
+      setError(ru ? 'Ошибка сети — попробуйте снова.' : 'Network error — please try again.');
       setSaving(false);
     }
   }
@@ -168,18 +172,18 @@ export default function CorrectionDayEditor({ correctionRequestId, date, initial
     <main className="wk-page">
       <div className="wk-card">
         <a href={`/admin/corrections/${correctionRequestId}`} className="wk-back-link">
-          ← Back
+          ← {ru ? 'Назад' : 'Back'}
         </a>
         <h1>{date}</h1>
 
         {isAbsenceDay ? (
-          <p className="wk-readonly-note">This day is marked as {initialDayType.replace('_', ' ').toLowerCase()}.</p>
+          <p className="wk-readonly-note">{ru ? `Этот день отмечен как «${dayTypeLabel(initialDayType, locale)}».` : <>This day is marked as {dayTypeLabel(initialDayType, locale)}.</>}</p>
         ) : (
           <>
             {segments.length === 0 && (
               <label className="wk-checkbox-row">
                 <input type="checkbox" checked={confirmedZero} onChange={(e) => setConfirmedZero(e.target.checked)} disabled={saving} />
-                No hours worked this day
+                {ru ? 'В этот день часов не было' : 'No hours worked this day'}
               </label>
             )}
 
@@ -210,26 +214,26 @@ export default function CorrectionDayEditor({ correctionRequestId, date, initial
                       <input type="time" value={b.endAt} onChange={(e) => updateBreak(segment.key, i, { endAt: e.target.value })} disabled={saving} />
                       <label className="wk-break-paid">
                         <input type="checkbox" checked={b.paid} onChange={(e) => updateBreak(segment.key, i, { paid: e.target.checked })} disabled={saving} />
-                        Paid
+                        {ru ? 'Оплачиваемый' : 'Paid'}
                       </label>
                       <button type="button" className="wk-remove-button" onClick={() => removeBreak(segment.key, i)} disabled={saving}>
-                        Remove break
+                        {ru ? 'Удалить перерыв' : 'Remove break'}
                       </button>
                     </div>
                   ))}
                   <button type="button" className="wk-secondary-button" onClick={() => addBreak(segment.key)} disabled={saving}>
-                    + Add break
+                    {ru ? '+ Добавить перерыв' : '+ Add break'}
                   </button>
 
                   <button type="button" className="wk-remove-button" onClick={() => removeSegment(segment.key)} disabled={saving}>
-                    Remove interval
+                    {ru ? 'Удалить интервал' : 'Remove interval'}
                   </button>
                 </li>
               ))}
             </ul>
 
             <button type="button" className="wk-secondary-button" onClick={addSegment} disabled={saving || assignmentOptions.length === 0}>
-              + Add interval
+              {ru ? '+ Добавить интервал' : '+ Add interval'}
             </button>
           </>
         )}
@@ -242,7 +246,7 @@ export default function CorrectionDayEditor({ correctionRequestId, date, initial
 
         {!isAbsenceDay && (
           <button type="button" className="wk-action-button" onClick={handleSave} disabled={saving}>
-            {saving ? 'Saving…' : 'Save'}
+            {saving ? (ru ? 'Сохранение…' : 'Saving…') : (ru ? 'Сохранить' : 'Save')}
           </button>
         )}
       </div>

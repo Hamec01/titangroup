@@ -2,6 +2,10 @@ import { redirect } from 'next/navigation';
 import Link from 'next/link';
 import { resolveServerSession } from '@/lib/server-session';
 import { listCorrections } from '@/lib/corrections';
+import { correctionStatusLabel } from '@/lib/attendance-overview-ui';
+import { resolveAppLocale } from '@/lib/i18n/server';
+import { adminDailyStrings } from '@/lib/i18n/admin-daily';
+import { localeText } from '@/lib/i18n/locale';
 
 export const dynamic = 'force-dynamic';
 
@@ -13,12 +17,14 @@ export default async function AdminCorrectionsPage() {
   if (!session) {
     redirect('/login');
   }
+  const locale = await resolveAppLocale();
+  const s = adminDailyStrings(locale);
   const isAdmin = session.user.roles.includes('ADMIN') || session.user.roles.includes('SUPER_ADMIN');
   if (!isAdmin) {
     return (
       <main className="setup-page">
         <p className="login-error" role="alert">
-          Access denied — this page requires the ADMIN or SUPER_ADMIN role.
+          {s.accessDenied}
         </p>
       </main>
     );
@@ -29,17 +35,17 @@ export default async function AdminCorrectionsPage() {
   return (
     <main className="setup-page">
       <div className="setup-card worker-card">
-        <h1>Corrections</h1>
-        <p className="setup-subtitle">{items.length} total</p>
+        <h1>{localeText(locale, 'Corrections', 'Корректировки')}</h1>
+        <p className="setup-subtitle">{localeText(locale, `${items.length} total`, `Всего: ${items.length}`)}</p>
         {items.length === 0 ? (
-          <p>No correction requests yet. Start one from a FINAL_APPROVED timesheet&apos;s card.</p>
+          <p>{localeText(locale, "No correction requests yet. Start one from a FINAL_APPROVED timesheet's card.", 'Запросов на корректировку пока нет. Начните с карточки окончательно одобренного табеля.')}</p>
         ) : (
           <table className="worker-table">
             <thead>
               <tr>
-                <th>Employee</th>
-                <th>Status</th>
-                <th>Reason</th>
+                <th>{s.common.name}</th>
+                <th>{s.common.status}</th>
+                <th>{localeText(locale, 'Reason', 'Причина')}</th>
               </tr>
             </thead>
             <tbody>
@@ -47,7 +53,7 @@ export default async function AdminCorrectionsPage() {
                 <tr key={item.id}>
                   <td>{item.employeeName}</td>
                   <td>
-                    <Link href={`/admin/corrections/${item.id}`}>{item.status}</Link>
+                    <Link href={`/admin/corrections/${item.id}`}>{correctionStatusLabel(item.status, locale)}</Link>
                   </td>
                   <td>{item.reason}</td>
                 </tr>

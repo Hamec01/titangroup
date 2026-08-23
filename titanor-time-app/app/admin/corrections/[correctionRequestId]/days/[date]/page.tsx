@@ -3,6 +3,8 @@ import { resolveServerSession } from '@/lib/server-session';
 import { getCorrectionDetail } from '@/lib/corrections';
 import { listWorkerCurrentAssignments } from '@/lib/worker-context';
 import CorrectionDayEditor from './CorrectionDayEditor';
+import { resolveAppLocale } from '@/lib/i18n/server';
+import { adminDailyStrings } from '@/lib/i18n/admin-daily';
 
 export const dynamic = 'force-dynamic';
 
@@ -17,10 +19,11 @@ export default async function CorrectionDayEditorPage({ params }: RouteParams) {
   }
   const isAdmin = session.user.roles.includes('ADMIN') || session.user.roles.includes('SUPER_ADMIN');
   if (!isAdmin) {
+    const s = adminDailyStrings(await resolveAppLocale());
     return (
       <main className="setup-page">
         <p className="login-error" role="alert">
-          Access denied — this page requires the ADMIN or SUPER_ADMIN role.
+          {s.accessDenied}
         </p>
       </main>
     );

@@ -4,13 +4,18 @@ import { resolveServerSession } from '@/lib/server-session';
 import { getCorrectionDetail } from '@/lib/corrections';
 import { CorrectionActions } from './CorrectionActions';
 import { workedMinutesFromIsoSegments } from '@/lib/reporting/report-format';
+import { correctionStatusLabel } from '@/lib/attendance-overview-ui';
+import { dayTypeLabel } from '@/lib/i18n/worker';
+import { resolveAppLocale } from '@/lib/i18n/server';
+import { adminDailyStrings } from '@/lib/i18n/admin-daily';
+import { localeText } from '@/lib/i18n/locale';
 
 export const dynamic = 'force-dynamic';
 
-function formatMinutes(minutes: number): string {
+function formatMinutes(minutes: number, ru: boolean): string {
   const h = Math.floor(minutes / 60);
   const m = Math.round(minutes % 60);
-  return `${h}h${m ? ` ${m}m` : ''}`;
+  return ru ? `${h}ч${m ? ` ${m}м` : ''}` : `${h}h${m ? ` ${m}m` : ''}`;
 }
 
 type RouteParams = { params: Promise<{ correctionRequestId: string }> };
@@ -23,12 +28,15 @@ export default async function AdminCorrectionDetailPage({ params }: RouteParams)
   if (!session) {
     redirect('/login');
   }
+  const locale = await resolveAppLocale();
+  const ru = locale === 'RU';
+  const s = adminDailyStrings(locale);
   const isAdmin = session.user.roles.includes('ADMIN') || session.user.roles.includes('SUPER_ADMIN');
   if (!isAdmin) {
     return (
       <main className="setup-page">
         <p className="login-error" role="alert">
-          Access denied — this page requires the ADMIN or SUPER_ADMIN role.
+          {s.accessDenied}
         </p>
       </main>
     );
@@ -41,8 +49,8 @@ export default async function AdminCorrectionDetailPage({ params }: RouteParams)
     return (
       <main className="setup-page">
         <div className="setup-card">
-          <p>No correction request with this id.</p>
-          <Link href="/admin/corrections">Back to corrections</Link>
+          <p>{localeText(locale, 'No correction request with this id.', 'Запрос на корректировку с таким идентификатором не найден.')}</p>
+          <Link href="/admin/corrections">{localeText(locale, 'Back to corrections', 'К списку корректировок')}</Link>
         </div>
       </main>
     );
@@ -53,18 +61,18 @@ export default async function AdminCorrectionDetailPage({ params }: RouteParams)
       <div className="setup-card">
         <h1>{correction.employeeName}</h1>
         <p className="setup-subtitle">
-          Status: {correction.status} · reason: {correction.reason}
+          {localeText(locale, 'Status:', 'Статус:')} {correctionStatusLabel(correction.status, locale)} · {localeText(locale, 'reason:', 'причина:')} {correction.reason}
         </p>
-        {correction.overrideReason ? <p className="setup-subtitle">Override reason: {correction.overrideReason}</p> : null}
+        {correction.overrideReason ? <p className="setup-subtitle">{localeText(locale, 'Override reason:', 'Причина переопределения:')} {correction.overrideReason}</p> : null}
 
         {correction.days.length === 0 ? (
-          <p>{correction.status === 'PENDING' ? 'Open the draft to start editing.' : 'No days to show.'}</p>
+          <p>{correction.status === 'PENDING' ? localeText(locale, 'Open the draft to start editing.', 'Откройте черновик, чтобы начать редактирование.') : localeText(locale, 'No days to show.', 'Нет дней для отображения.')}</p>
         ) : (
           <table className="worker-table">
             <thead>
               <tr>
-                <th>Date</th>
-                <th>Details</th>
+                <th>{localeText(locale, 'Date', 'Дата')}</th>
+                <th>{localeText(locale, 'Details', 'Детали')}</th>
                 {correction.status === 'DRAFT_OPEN' ? <th></th> : null}
               </tr>
             </thead>
@@ -74,16 +82,16 @@ export default async function AdminCorrectionDetailPage({ params }: RouteParams)
                   <td>{day.date}</td>
                   <td>
                     {day.dayType !== 'WORK'
-                      ? day.dayType.replace('_', ' ').toLowerCase()
+                      ? dayTypeLabel(day.dayType, locale)
                       : day.segments.length === 0
                         ? day.confirmedZero
-                          ? 'Confirmed 0h'
+                          ? localeText(locale, 'Confirmed 0h', 'Подтверждено 0ч')
                           : '—'
-                        : `${formatMinutes(workedMinutesFromIsoSegments(day.segments))} · ${[...new Set(day.segments.map((s) => s.siteId))].length} site(s)`}
+                        : `${formatMinutes(workedMinutesFromIsoSegments(day.segments), ru)} · ${localeText(locale, `${[...new Set(day.segments.map((s) => s.siteId))].length} site(s)`, `объектов: ${[...new Set(day.segments.map((s) => s.siteId))].length}`)}`}
                   </td>
                   {correction.status === 'DRAFT_OPEN' ? (
                     <td>
-                      <Link href={`/admin/corrections/${correction.id}/days/${day.date}`}>Edit</Link>
+                      <Link href={`/admin/corrections/${correction.id}/days/${day.date}`}>{localeText(locale, 'Edit', 'Изменить')}</Link>
                     </td>
                   ) : null}
                 </tr>
@@ -95,7 +103,7 @@ export default async function AdminCorrectionDetailPage({ params }: RouteParams)
         <CorrectionActions correctionRequestId={correction.id} status={correction.status} isSuperAdmin={session.user.roles.includes('SUPER_ADMIN')} />
 
         <p>
-          <Link href="/admin/corrections">Back to corrections</Link>
+          <Link href="/admin/corrections">{localeText(locale, 'Back to corrections', 'К списку корректировок')}</Link>
         </p>
       </div>
     </main>
