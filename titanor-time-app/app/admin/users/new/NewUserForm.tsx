@@ -6,11 +6,13 @@ import type { ForemanSelectableEmployee } from '@/lib/users';
 import { ActivationCodeIssuer } from '../ActivationCodeIssuer';
 import { useAppLocale } from '@/components/i18n/AppLocaleProvider';
 
-// docs/titanor-time/04_ADMIN_FIRST_API_CONTRACTS.md §14 — POST /api/admin/users, both modes.
+// docs/titanor-time/04_ADMIN_FIRST_API_CONTRACTS.md §14 — POST /api/admin/users (FOREMAN, both
+// modes) + POST /api/admin/users/admins (SUPER_ADMIN-only standalone ADMIN, a separate route —
+// see that route's own comment for why it isn't a `role` field on this same endpoint instead).
 const CSRF_HEADER_VALUE = 'titanor-time';
 const LOCALES = ['RU', 'EN'] as const;
 type Locale = (typeof LOCALES)[number];
-type Mode = 'STANDALONE' | 'EXISTING_EMPLOYEE';
+type Mode = 'STANDALONE' | 'STANDALONE_ADMIN' | 'EXISTING_EMPLOYEE';
 
 interface CreatedUser {
   id: string;
@@ -39,13 +41,13 @@ function describeCreateError(code: string | undefined, fieldErrors: Record<strin
     case 'NOT_AUTHENTICATED':
       return ru ? 'Сессия истекла — войдите снова.' : 'Your session expired — please sign in again.';
     case 'FORBIDDEN':
-      return ru ? 'У вас больше нет права создавать учётные записи прорабов.' : 'You no longer have permission to create foreman accounts.';
+      return ru ? 'У вас больше нет права на создание этой учётной записи.' : 'You no longer have permission to create this account.';
     default:
       return ru ? 'Что-то пошло не так. Попробуйте снова.' : 'Something went wrong. Please try again.';
   }
 }
 
-export function NewUserForm({ employees }: { employees: ForemanSelectableEmployee[] }) {
+export function NewUserForm({ employees, canCreateAdmin }: { employees: ForemanSelectableEmployee[]; canCreateAdmin: boolean }) {
   const ru = useAppLocale() === 'RU';
   const [mode, setMode] = useState<Mode>('STANDALONE');
 
@@ -59,6 +61,7 @@ export function NewUserForm({ employees }: { employees: ForemanSelectableEmploye
   const idempotencyKeyRef = useRef<string | null>(null);
 
   const [createdStandalone, setCreatedStandalone] = useState<CreatedUser | null>(null);
+  const [createdAdminRole, setCreatedAdminRole] = useState(false);
   const [createdDualRole, setCreatedDualRole] = useState<{ username: string; status: string } | null>(null);
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>): Promise<void> {
@@ -73,13 +76,16 @@ export function NewUserForm({ employees }: { employees: ForemanSelectableEmploye
       idempotencyKeyRef.current = crypto.randomUUID();
     }
 
+    const endpoint = mode === 'STANDALONE_ADMIN' ? '/api/admin/users/admins' : '/api/admin/users';
     const body =
       mode === 'STANDALONE'
         ? { mode: 'STANDALONE', username, email: email.trim() ? email : undefined, locale }
-        : { mode: 'EXISTING_EMPLOYEE', employeeId };
+        : mode === 'STANDALONE_ADMIN'
+          ? { username, email: email.trim() ? email : undefined, locale }
+          : { mode: 'EXISTING_EMPLOYEE', employeeId };
 
     try {
-      const response = await fetch('/api/admin/users', {
+      const response = await fetch(endpoint, {
         method: 'POST',
         credentials: 'same-origin',
         headers: {
@@ -107,8 +113,9 @@ export function NewUserForm({ employees }: { employees: ForemanSelectableEmploye
       }
 
       const result = (await response.json()) as { id: string; username: string; status: string };
-      if (mode === 'STANDALONE') {
+      if (mode === 'STANDALONE' || mode === 'STANDALONE_ADMIN') {
         setCreatedStandalone({ id: result.id, username: result.username, status: result.status });
+        setCreatedAdminRole(mode === 'STANDALONE_ADMIN');
       } else {
         setCreatedDualRole({ username: result.username, status: result.status });
       }
@@ -124,6 +131,7 @@ export function NewUserForm({ employees }: { employees: ForemanSelectableEmploye
       <div>
         <p>
           {ru ? 'Учётная запись создана:' : 'Account created:'} <strong>{createdStandalone.username}</strong>
+          {createdAdminRole ? ` (${ru ? 'администратор' : 'admin'})` : ''}
         </p>
         <ActivationCodeIssuer userId={createdStandalone.id} autoIssue />
         <p>
@@ -161,6 +169,11 @@ export function NewUserForm({ employees }: { employees: ForemanSelectableEmploye
         <button type="button" aria-pressed={mode === 'STANDALONE'} disabled={loading} onClick={() => setMode('STANDALONE')}>
           {ru ? 'Отдельный прораб' : 'Standalone foreman'}
         </button>
+        {canCreateAdmin ? (
+          <button type="button" aria-pressed={mode === 'STANDALONE_ADMIN'} disabled={loading} onClick={() => setMode('STANDALONE_ADMIN')}>
+            {ru ? 'Администратор' : 'Admin'}
+          </button>
+        ) : null}
         <button
           type="button"
           aria-pressed={mode === 'EXISTING_EMPLOYEE'}
@@ -171,8 +184,15 @@ export function NewUserForm({ employees }: { employees: ForemanSelectableEmploye
         </button>
       </div>
 
-      {mode === 'STANDALONE' ? (
+      {mode === 'STANDALONE' || mode === 'STANDALONE_ADMIN' ? (
         <>
+          {mode === 'STANDALONE_ADMIN' ? (
+            <p className="setup-subtitle">
+              {ru
+                ? 'Полный доступ к панели администратора, включая создание работников, прорабов и настройку объектов. Выдавайте эту роль только доверенным людям.'
+                : 'Full admin panel access, including creating workers, foremen, and site setup. Only grant this to trusted people.'}
+            </p>
+          ) : null}
           <div className="login-field">
             <label htmlFor="user-username">{ru ? 'Логин' : 'Username'}</label>
             <input
@@ -261,7 +281,13 @@ export function NewUserForm({ employees }: { employees: ForemanSelectableEmploye
         type="submit"
         disabled={loading || (mode === 'EXISTING_EMPLOYEE' && employees.length === 0)}
       >
-        {loading ? (ru ? 'Создание…' : 'Creating…') : mode === 'STANDALONE' ? (ru ? 'Создать прораба' : 'Create foreman') : (ru ? 'Предоставить роль прораба' : 'Grant FOREMAN role')}
+        {loading
+          ? (ru ? 'Создание…' : 'Creating…')
+          : mode === 'STANDALONE'
+            ? (ru ? 'Создать прораба' : 'Create foreman')
+            : mode === 'STANDALONE_ADMIN'
+              ? (ru ? 'Создать администратора' : 'Create admin')
+              : (ru ? 'Предоставить роль прораба' : 'Grant FOREMAN role')}
       </button>
     </form>
   );

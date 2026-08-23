@@ -41,6 +41,7 @@ export interface GuideContent {
   tipsTitle: string;
   tips: string[];
   backToLogin: string;
+  backToHome: string;
 }
 
 export const GUIDE_CONTENT: Record<AppLocale, GuideContent> = {
@@ -168,7 +169,8 @@ export const GUIDE_CONTENT: Record<AppLocale, GuideContent> = {
       'Рабочую зону и шаблон графика, которые уже используются, нельзя удалить — только отключить: так сохраняется история по уже отработанному времени, но их больше нельзя выбрать для новых назначений.',
       'Изменение цикла отправки табеля задним числом ограничено, если по текущему периоду уже есть данные — такие изменения обычно применяются с ближайшей будущей границы периода.'
     ],
-    backToLogin: '← Назад ко входу'
+    backToLogin: '← Назад ко входу',
+    backToHome: '← На главную'
   },
   EN: {
     pageTitle: 'Titanor Time — User Guide',
@@ -294,6 +296,7 @@ export const GUIDE_CONTENT: Record<AppLocale, GuideContent> = {
       'A work area or schedule template that\'s already in use can\'t be deleted — only deactivated: this keeps the history of time already logged, while removing it from future assignment choices.',
       'Changing a submission cycle retroactively is limited if the current period already has data — such changes are usually applied from the nearest future period boundary.'
     ],
-    backToLogin: '← Back to sign in'
+    backToLogin: '← Back to sign in',
+    backToHome: '← Back to dashboard'
   }
 };

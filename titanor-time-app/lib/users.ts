@@ -191,6 +191,74 @@ export async function createStandaloneForeman(
   return outcome.code === 'CREATED' ? outcome.result : outcome;
 }
 
+export type CreatedAdminUser = CreatedForemanUser;
+export type CreateStandaloneAdminError = { code: 'DUPLICATE_USERNAME' } | { code: 'DUPLICATE_EMAIL' };
+
+/**
+ * SUPER_ADMIN-only counterpart to createStandaloneForeman() above — identical shape (standalone
+ * User, PENDING_ACTIVATION, no passwordHash, activated through the same ActivationCodeIssuer flow
+ * already used for FOREMAN), one role higher. Gated by the user.create.admin permission
+ * (SUPER_ADMIN only, never ADMIN — see that permission's own seed migration comment) at the route
+ * layer, not here; this function itself trusts its caller the same way createStandaloneForeman does.
+ */
+export async function createStandaloneAdmin(
+  username: string,
+  email: string | null,
+  locale: Locale,
+  actorUserId: string,
+  requestId: string
+): Promise<CreatedAdminUser | CreateStandaloneAdminError> {
+  const outcome = await prisma.$transaction(async (tx) => {
+    const adminRole = await tx.role.findUniqueOrThrow({ where: { name: 'ADMIN' } });
+
+    let user;
+    try {
+      user = await tx.user.create({
+        data: { username, email, status: 'PENDING_ACTIVATION', locale, passwordHash: null, employeeId: null }
+      });
+    } catch (error) {
+      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
+        const target = (error.meta?.target as string[] | undefined) ?? [];
+        if (target.includes('username')) {
+          return { code: 'DUPLICATE_USERNAME' as const };
+        }
+        if (target.includes('email')) {
+          return { code: 'DUPLICATE_EMAIL' as const };
+        }
+      }
+      throw error;
+    }
+
+    await tx.userRole.create({ data: { userId: user.id, roleId: adminRole.id } });
+
+    await createAuditEvent(tx, {
+      actorUserId,
+      eventType: 'USER_CREATED',
+      entityType: 'USER',
+      entityId: user.id,
+      requestId,
+      beforeValue: null,
+      afterValue: { id: user.id, username: user.username, email: user.email, status: user.status, roles: ['ADMIN'] }
+    });
+
+    return {
+      code: 'CREATED' as const,
+      result: {
+        id: user.id,
+        username: user.username,
+        email: user.email,
+        status: user.status,
+        locale: user.locale,
+        roles: ['ADMIN'],
+        employee: null,
+        createdAt: user.createdAt.toISOString()
+      }
+    };
+  });
+
+  return outcome.code === 'CREATED' ? outcome.result : outcome;
+}
+
 export type GrantForemanError =
   | { code: 'EMPLOYEE_NOT_FOUND' }
   | { code: 'EMPLOYEE_USER_MISSING' }

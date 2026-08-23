@@ -1,6 +1,7 @@
 import { redirect } from 'next/navigation';
 import { resolveServerSession } from '@/lib/server-session';
 import { listEmployeesForForemanSelect } from '@/lib/users';
+import { hasPermission } from '@/lib/permissions';
 import { NewUserForm } from './NewUserForm';
 import { resolveAppLocale } from '@/lib/i18n/server';
 import { adminDailyStrings } from '@/lib/i18n/admin-daily';
@@ -29,16 +30,25 @@ export default async function NewUserPage() {
     );
   }
 
-  const employees = await listEmployeesForForemanSelect();
+  const [employees, canCreateAdmin] = await Promise.all([
+    listEmployeesForForemanSelect(),
+    hasPermission(session.user.roles, 'user.create.admin')
+  ]);
 
   return (
     <main className="setup-page">
       <div className="setup-card">
-        <h1>{localeText(locale, 'Add foreman', 'Добавить прораба')}</h1>
+        <h1>{canCreateAdmin ? localeText(locale, 'Add user', 'Добавить пользователя') : localeText(locale, 'Add foreman', 'Добавить прораба')}</h1>
         <p className="setup-subtitle">
-          {localeText(locale, 'Create a standalone FOREMAN account, or grant the FOREMAN role to an existing worker (dual-role).', 'Создайте отдельную учётную запись прораба или предоставьте роль прораба существующему работнику (двойная роль).')}
+          {canCreateAdmin
+            ? localeText(
+                locale,
+                'Create a standalone FOREMAN or ADMIN account, or grant the FOREMAN role to an existing worker (dual-role).',
+                'Создайте отдельную учётную запись прораба или администратора, либо предоставьте роль прораба существующему работнику (двойная роль).'
+              )
+            : localeText(locale, 'Create a standalone FOREMAN account, or grant the FOREMAN role to an existing worker (dual-role).', 'Создайте отдельную учётную запись прораба или предоставьте роль прораба существующему работнику (двойная роль).')}
         </p>
-        <NewUserForm employees={employees} />
+        <NewUserForm employees={employees} canCreateAdmin={canCreateAdmin} />
       </div>
     </main>
   );

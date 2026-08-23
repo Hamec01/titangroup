@@ -10,17 +10,18 @@ import type { AppLocale } from '@/lib/i18n/locale';
 // of the login page or an already-authenticated admin session just from reading this page) — this
 // toggle is local component state only, seeded once from the server-resolved locale so the initial
 // render already matches the visitor's likely language.
-export function GuideView({ initialLocale }: { initialLocale: AppLocale }) {
+export function GuideView({ initialLocale, homeHref }: { initialLocale: AppLocale; homeHref: string }) {
   const [locale, setLocale] = useState<AppLocale>(initialLocale);
   const t = GUIDE_CONTENT[locale];
   const ru = locale === 'RU';
+  const backLabel = homeHref === '/login' ? t.backToLogin : t.backToHome;
 
   return (
     <main className="setup-page guide-page">
       <div className="guide-card">
         <div className="guide-topbar">
-          <Link href="/login" className="guide-back-link">
-            {t.backToLogin}
+          <Link href={homeHref} className="guide-back-link">
+            {backLabel}
           </Link>
           <div className="login-locale-switch" role="group" aria-label={ru ? 'Язык' : 'Language'}>
             <button type="button" aria-pressed={locale === 'RU'} onClick={() => setLocale('RU')}>
@@ -110,8 +111,8 @@ export function GuideView({ initialLocale }: { initialLocale: AppLocale }) {
         </section>
 
         <p>
-          <Link href="/login" className="guide-back-link">
-            {t.backToLogin}
+          <Link href={homeHref} className="guide-back-link">
+            {backLabel}
           </Link>
         </p>
       </div>
