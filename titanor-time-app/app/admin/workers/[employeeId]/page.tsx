@@ -116,7 +116,7 @@ export default async function WorkerDetailPage({ params }: { params: Promise<{ e
         </section>
 
         {submissionSchedule ? (
-          <section className="worker-work-setup">
+          <section id="worker-submission" className="worker-work-setup">
             <h2>{s.workers.submission}</h2>
             <p className="setup-subtitle">{s.workers.submissionHelp}</p>
             <WorkerSubmissionScheduleForm employeeId={worker.id} view={submissionSchedule} />

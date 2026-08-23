@@ -311,7 +311,7 @@ touch target ≥ 48px), `/foreman/*` — desktop-first с поддержкой �
 - Данные: `WorkSite`, `WorkArea[]`, `SiteAssignment[]`, `ForemanAssignment[]`, список кандидатов на
   роль прораба (`listAssignableForemen()`), текущая версия геозоны + история версий
   (`getGeofenceHistory()`, `GeofenceSection` — **[2026-08-13] реализовано (T7A.2)**)
-- Действия: редактировать, закрыть объект, добавить рабочую область; назначить прораба через
+- Действия: редактировать, закрыть объект с явным подтверждением, добавить рабочую область; назначить прораба через
   `<select>` (username/имя+`employeeNumber`, **без** UUID в видимом тексте) — только `User` с
   текущей активной ролью `FOREMAN` (`validFrom <= now AND (validTo IS NULL OR validTo > now)`) и
   `status IN (PENDING_ACTIVATION, ACTIVE)`; `PENDING_ACTIVATION` разрешён с явной подсказкой, что
@@ -336,12 +336,24 @@ touch target ≥ 48px), `/foreman/*` — desktop-first с поддержкой �
   «Foremen» получила кнопку `End` на каждую строку — `POST /api/admin/foreman-assignments/:id/end`
   (`foreman_assignment.end`) уже был полностью реализован, но не вызывался нигде в UI.
 
+#### `/admin/work-areas` 🟢
+- Роли: `ADMIN`, `SUPER_ADMIN`
+- Приоритет: desktop
+- Назначение: общий список рабочих зон всех объектов
+- Данные: `WorkArea[]` + объект, статус и version
+- Действия: перейти к объекту; деактивировать/активировать с явным подтверждением деактивации
+- Состояния: empty с пояснением, что зона создаётся на странице объекта; error
+- Откуда: `/admin/setup`
+- Куда: `/admin/sites/[siteId]`
+- API: `GET /api/admin/sites/:siteId/work-areas`, `PATCH .../work-areas/:workAreaId`
+- DoD: деактивация не удаляет назначения или историю времени
+
 #### `/admin/sites/[siteId]/work-areas` 🟢
 - Роли: `ADMIN`, `SUPER_ADMIN`
 - Приоритет: desktop
 - Назначение: рабочие области конкретного объекта
 - Данные: `WorkArea[]` объекта
-- Действия: создать, редактировать, деактивировать
+- Действия: создать, редактировать, деактивировать с явным подтверждением
 - Состояния: loading; empty (CTA создать); error
 - Откуда: `/admin/sites/[siteId]`
 - API: `GET/POST /api/admin/sites/:siteId/work-areas`, `PATCH .../work-areas/:workAreaId`
@@ -438,8 +450,9 @@ touch target ≥ 48px), `/foreman/*` — desktop-first с поддержкой �
 - Данные: `days[7]` текущей версии, `name`/`description`/`active`/`currentVersionNumber`
 - Действия: «Edit schedule» → предзаполненная форма (те же 7 строк, что `NewTemplateForm`,
   переиспользуемый `TemplateDaysEditor`) → submit отправляет `expectedVersionNumber` текущей
-  версии → создаёт версию N+1 → показывает новый номер версии. Поле `active` **read-only** в этом
-  срезе (deactivate/reactivate — нет утверждённого контракта, не реализовано)
+  версии → создаёт версию N+1 → показывает новый номер версии; отдельно деактивировать/активировать
+  шаблон. Деактивация требует явного подтверждения и не меняет версию, существующие назначения и
+  историю времени.
 - Состояния: loading; empty/error (`404 TEMPLATE_NOT_FOUND`, в т.ч. malformed UUID — без `500`);
   `409 VERSION_CONFLICT` — понятное сообщение + кнопка «Reload» (не автоматический refresh —
   черновик правок пользователя не должен тихо потеряться); inline field-level ошибки валидации;
@@ -450,6 +463,18 @@ touch target ≥ 48px), `/foreman/*` — desktop-first с поддержкой �
 - DoD: сохранение не переписывает данные уже прошедших периодов — старые назначения продолжают
   ссылаться на прежнюю версию шаблона (snapshot semantics, §4.5); переход уже начавшегося
   назначения на новую версию — через `assignment.split`, не через эту форму
+
+#### `/admin/submission-cycles` 🟢
+- Роли: `ADMIN`, `SUPER_ADMIN` (`timesheet.schedule.read`)
+- Приоритет: desktop
+- Назначение: показать цикл отправки каждого активного работника и его текущий период
+- Данные: active `Employee[]`, effective `EmployeeTimesheetSchedule` или company default, границы
+  текущего периода
+- Действия: → настройка цикла в карточке конкретного работника
+- Состояния: no active workers; missing company default; access denied
+- Откуда: `/admin/setup`
+- Куда: `/admin/workers/[employeeId]#worker-submission`
+- DoD: Setup не ведёт на общий список работников без информации о цикле
 
 #### `/admin/periods` 🟢
 - Роли: `ADMIN`, `SUPER_ADMIN`

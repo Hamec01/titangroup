@@ -4,6 +4,7 @@ import { resolveServerSession } from '@/lib/server-session';
 import { getTemplateDetail } from '@/lib/templates';
 import { WEEKDAY_LABELS } from '../TemplateDaysEditor';
 import { EditTemplateForm } from './EditTemplateForm';
+import { TemplateActivationAction } from './TemplateActivationAction';
 import { resolveAppLocale } from '@/lib/i18n/server';
 import { adminDailyStrings } from '@/lib/i18n/admin-daily';
 
@@ -85,6 +86,7 @@ export default async function AdminTemplateDetailPage({ params }: RouteParams) {
           </table>
         </div>
 
+        <TemplateActivationAction template={template} />
         <EditTemplateForm template={template} />
 
         <p>

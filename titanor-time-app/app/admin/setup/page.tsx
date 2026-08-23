@@ -44,9 +44,9 @@ const CHECKLIST: ChecklistItem[] = [
     label: 'Work area',
     description: 'Optional subdivision inside a site. Skip it when the whole site is one work area.',
     optional: true,
-    createHref: '/admin/sites',
-    doneHref: '/admin/sites',
-    createActionLabel: 'Manage sites'
+    createHref: '/admin/work-areas',
+    doneHref: '/admin/work-areas',
+    createActionLabel: 'Manage work areas'
   },
   {
     key: 'hasTemplate',
@@ -73,9 +73,9 @@ const CHECKLIST: ChecklistItem[] = [
     key: 'hasSubmissionScheduleConfigured',
     label: 'Timesheet submission cycle',
     description: 'Choose Weekly or Every two weeks on each active worker. Payroll periods are then created automatically.',
-    createHref: '/admin/workers',
-    doneHref: '/admin/workers',
-    createActionLabel: 'Configure workers'
+    createHref: '/admin/submission-cycles',
+    doneHref: '/admin/submission-cycles',
+    createActionLabel: 'Configure cycles'
   }
 ];
 
@@ -119,7 +119,7 @@ export default async function AdminSetupPage() {
               hasAssignment: ['Назначение', 'Связывает работника с объектом и графиком на выбранный срок.'],
               hasSubmissionScheduleConfigured: ['Цикл отправки табеля', 'Выберите для каждого активного работника: еженедельно или раз в две недели. Периоды будут создаваться автоматически.']
             } as Partial<Record<keyof SetupStatus, [string, string]>>)[item.key] : null;
-            const actionLabel = done ? (ru ? (item.doneActionLabel === 'Add another' ? 'Добавить ещё' : 'Управлять') : (item.doneActionLabel ?? 'Manage')) : (ru ? (item.createActionLabel === 'Manage sites' ? 'Управлять объектами' : item.createActionLabel === 'Configure workers' ? 'Настроить работников' : 'Создать') : (item.createActionLabel ?? 'Create'));
+            const actionLabel = done ? (ru ? (item.doneActionLabel === 'Add another' ? 'Добавить ещё' : 'Управлять') : (item.doneActionLabel ?? 'Manage')) : (ru ? (item.createActionLabel === 'Manage work areas' ? 'Управлять зонами' : item.createActionLabel === 'Configure cycles' ? 'Настроить циклы' : 'Создать') : (item.createActionLabel ?? 'Create'));
             return (
               <li key={item.key} className="setup-item">
                 <span

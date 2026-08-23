@@ -82,10 +82,11 @@ export async function PATCH(request: NextRequest, { params }: RouteParams): Prom
     return jsonError(400, { code: 'VALIDATION_ERROR', message: 'Request body must be valid JSON.' }, requestId);
   }
   const bodyObject = rawBody && typeof rawBody === 'object' ? (rawBody as Record<string, unknown>) : {};
-  const { expectedVersionNumber, name, description, days: rawDays } = bodyObject as {
+  const { expectedVersionNumber, name, description, active, days: rawDays } = bodyObject as {
     expectedVersionNumber?: unknown;
     name?: unknown;
     description?: unknown;
+    active?: unknown;
     days?: unknown;
   };
 
@@ -95,8 +96,8 @@ export async function PATCH(request: NextRequest, { params }: RouteParams): Prom
     fieldErrors.expectedVersionNumber = ['required'];
   }
 
-  if (name === undefined && description === undefined && rawDays === undefined) {
-    fieldErrors.fields = ['at least one of name, description, days is required'];
+  if (name === undefined && description === undefined && active === undefined && rawDays === undefined) {
+    fieldErrors.fields = ['at least one of name, description, active, days is required'];
   }
 
   let normalizedName: string | undefined;
@@ -114,6 +115,15 @@ export async function PATCH(request: NextRequest, { params }: RouteParams): Prom
       fieldErrors.description = ['invalid'];
     } else {
       normalizedDescription = description as string | null;
+    }
+  }
+
+  let normalizedActive: boolean | undefined;
+  if (active !== undefined) {
+    if (typeof active !== 'boolean') {
+      fieldErrors.active = ['must be a boolean'];
+    } else {
+      normalizedActive = active;
     }
   }
 
@@ -139,6 +149,7 @@ export async function PATCH(request: NextRequest, { params }: RouteParams): Prom
     expectedVersionNumber: expectedVersionNumber as number,
     name: normalizedName,
     description: normalizedDescription,
+    active: normalizedActive,
     days: normalizedDays,
     actorUserId: authenticated.user.id,
     requestId

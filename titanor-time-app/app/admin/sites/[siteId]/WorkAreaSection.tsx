@@ -41,6 +41,9 @@ function ToggleActiveButton({ siteId, area, disabled }: { siteId: string; area: 
     if (loading || disabled) {
       return;
     }
+    if (area.active && !window.confirm(localeText(locale, `Deactivate work area “${area.name}”? Existing assignments and time history will be kept.`, `Отключить рабочую зону «${area.name}»? Существующие назначения и история времени сохранятся.`))) {
+      return;
+    }
     setLoading(true);
     try {
       const response = await fetch(`/api/admin/sites/${siteId}/work-areas/${area.id}`, {

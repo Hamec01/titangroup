@@ -49,6 +49,9 @@ export function SiteEditForm({ site }: { site: SiteDetail }) {
     if (loading) {
       return;
     }
+    if (site.active && !active && !window.confirm(localeText(locale, `Close site “${site.name}”? Existing assignments and time history will be kept.`, `Закрыть объект «${site.name}»? Существующие назначения и история времени сохранятся.`))) {
+      return;
+    }
     setErrorMessage(null);
     setLoading(true);
 

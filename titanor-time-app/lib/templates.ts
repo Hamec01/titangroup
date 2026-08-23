@@ -262,6 +262,8 @@ export interface UpdateTemplateInput {
   name?: string;
   /** undefined = leave the description unchanged; null = clear it; string = set it. */
   description?: string | null;
+  /** undefined = leave the template active state unchanged. */
+  active?: boolean;
   /** undefined = copy the previous version's 7 days verbatim into the new version. */
   days?: TemplateDayInput[];
   actorUserId: string;
@@ -311,7 +313,9 @@ export async function updateTemplate(input: UpdateTemplateInput): Promise<Update
 
     const newName = input.name !== undefined ? input.name : template.name;
     const newDescription = input.description !== undefined ? input.description : template.description;
+    const newActive = input.active !== undefined ? input.active : template.active;
     const metadataChanged = newName !== template.name || newDescription !== template.description;
+    const activeChanged = newActive !== template.active;
     const daysChanged = input.days !== undefined && !daysEqual(currentVersion.days, input.days);
 
     const daysToPersist: TemplateDayInput[] =
@@ -326,7 +330,7 @@ export async function updateTemplate(input: UpdateTemplateInput): Promise<Update
           }));
     const sortedDays = daysToPersist.slice().sort((a, b) => a.weekday - b.weekday);
 
-    if (!metadataChanged && !daysChanged) {
+    if (!metadataChanged && !activeChanged && !daysChanged) {
       return {
         changed: false,
         detail: {
@@ -341,8 +345,32 @@ export async function updateTemplate(input: UpdateTemplateInput): Promise<Update
       };
     }
 
-    if (metadataChanged) {
-      await tx.workScheduleTemplate.update({ where: { id: template.id }, data: { name: newName, description: newDescription } });
+    if (metadataChanged || activeChanged) {
+      await tx.workScheduleTemplate.update({ where: { id: template.id }, data: { name: newName, description: newDescription, active: newActive } });
+    }
+
+    if (!metadataChanged && !daysChanged) {
+      await createAuditEvent(tx, {
+        actorUserId: input.actorUserId,
+        eventType: 'TEMPLATE_UPDATED',
+        entityType: 'WORK_SCHEDULE_TEMPLATE',
+        entityId: template.id,
+        requestId: input.requestId,
+        beforeValue: { versionNumber: currentVersion.versionNumber, active: template.active },
+        afterValue: { versionNumber: currentVersion.versionNumber, active: newActive, activeChanged: true }
+      });
+      return {
+        changed: true,
+        detail: {
+          id: template.id,
+          name: template.name,
+          description: template.description,
+          active: newActive,
+          currentVersionId: currentVersion.id,
+          currentVersionNumber: currentVersion.versionNumber,
+          days: sortedDays
+        }
+      };
     }
 
     const newVersionNumber = currentVersion.versionNumber + 1;
@@ -367,8 +395,8 @@ export async function updateTemplate(input: UpdateTemplateInput): Promise<Update
       entityType: 'WORK_SCHEDULE_TEMPLATE',
       entityId: template.id,
       requestId: input.requestId,
-      beforeValue: { versionNumber: currentVersion.versionNumber, name: template.name, description: template.description },
-      afterValue: { versionNumber: newVersionNumber, name: newName, description: newDescription, metadataChanged, daysChanged }
+      beforeValue: { versionNumber: currentVersion.versionNumber, name: template.name, description: template.description, active: template.active },
+      afterValue: { versionNumber: newVersionNumber, name: newName, description: newDescription, active: newActive, metadataChanged, activeChanged, daysChanged }
     });
 
     return {
@@ -377,7 +405,7 @@ export async function updateTemplate(input: UpdateTemplateInput): Promise<Update
         id: template.id,
         name: newName,
         description: newDescription,
-        active: template.active,
+        active: newActive,
         currentVersionId: newVersion.id,
         currentVersionNumber: newVersionNumber,
         days: sortedDays

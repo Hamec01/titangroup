@@ -288,8 +288,8 @@ relevant query + canonical body)`.
 - Permission: `template.update`
 - CSRF обязателен (как везде в §0)
 - Request: `{ "expectedVersionNumber": 1, "name"?: "Standard schedule", "description"?: "text"|null,
-  "days"?: [7 × {weekday, isWorkingDay, plannedStartTime?, plannedEndTime?, plannedBreakMinutes}] }`
-  — `expectedVersionNumber` обязателен; хотя бы одно из `name`/`description`/`days` обязательно
+  "active"?: boolean, "days"?: [7 × {weekday, isWorkingDay, plannedStartTime?, plannedEndTime?, plannedBreakMinutes}] }`
+  — `expectedVersionNumber` обязателен; хотя бы одно из `name`/`description`/`active`/`days` обязательно
   присутствовать в теле; `days`, если передан, — те же 7-day инварианты, что `POST` (общая
   валидация/formatting — `validateTemplateDays`/`parseTemplateTimeToDate` в `lib/templates.ts`,
   не дублируется между `POST` и `PATCH`)
@@ -306,7 +306,8 @@ relevant query + canonical body)`.
   `name`/`description` шаблона, создаёт новую `WorkScheduleTemplateVersion` (`versionNumber+1`),
   создаёт её 7 `WorkScheduleTemplateVersionDay` (из `days`, если переданы, иначе — точная копия
   дней предыдущей версии), пишет `TEMPLATE_UPDATED` — одной атомарной транзакцией, всё откатывается
-  при любой ошибке
+  при любой ошибке. Изменение только `active` обновляет parent template и audit, но не создаёт новую
+  immutable версию: это lifecycle-флаг, а не изменение графика.
 - **No-op**: если после разрешения (`name`/`description`/`days`, не переданные в запросе, берутся
   из текущего состояния) итоговые metadata и все 7 дней совпадают с текущей версией байт-в-байт —
   новая версия и `AuditEvent` **не создаются**, ответ `200` с текущими (неизменными) данными
@@ -314,7 +315,8 @@ relevant query + canonical body)`.
   эндпоинтом никогда; новая версия становится «текущей» только для *новых* назначений/периодов;
   перевод уже начавшегося назначения на новую версию — `POST
   /api/admin/assignments/:assignmentId/split`, не эта операция
-- `active` — read-only в этом срезе, `PATCH` его не принимает
+- `active=false` исключает шаблон из новых назначений; существующие `SiteAssignment` продолжают
+  ссылаться на записанную immutable версию. UI требует явного подтверждения перед деактивацией.
 - Audit: `TEMPLATE_UPDATED` (`beforeValue`/`afterValue` содержат `versionNumber`/`name`/
   `description`; никогда cookies/passwords/session/token) — только для реально изменившего запроса;
   отклонённый (`400`/`403`/`404`/`409`) и проигравший конкурентный запрос не создают audit

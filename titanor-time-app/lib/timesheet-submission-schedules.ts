@@ -42,6 +42,48 @@ export interface WorkerSubmissionScheduleView {
   periods: Array<{ startDate: string; endDate: string }>;
 }
 
+export interface WorkerSubmissionScheduleListItem {
+  employeeId: string;
+  employeeName: string;
+  employeeNumber: string;
+  scheduleName: string | null;
+  cadence: TimesheetSubmissionCadence | null;
+  inheritedCompanyDefault: boolean;
+  currentPeriod: { startDate: string; endDate: string } | null;
+}
+
+export async function listActiveWorkerSubmissionSchedules(): Promise<WorkerSubmissionScheduleListItem[]> {
+  const today = helsinkiToday();
+  const [defaultSchedule, employees, assignments] = await Promise.all([
+    prisma.timesheetSubmissionSchedule.findFirst({ where: { active: true, isCompanyDefault: true }, select: { id: true, name: true, cadence: true, anchorDate: true } }),
+    prisma.employee.findMany({
+      where: { employments: { some: { active: true, startDate: { lte: today }, OR: [{ endDate: null }, { endDate: { gte: today } }] } } },
+      orderBy: [{ lastName: 'asc' }, { firstName: 'asc' }],
+      select: { id: true, firstName: true, lastName: true, employeeNumber: true }
+    }),
+    prisma.employeeTimesheetSchedule.findMany({
+      where: { effectiveFrom: { lte: today }, OR: [{ effectiveTo: null }, { effectiveTo: { gte: today } }] },
+      select: { employeeId: true, schedule: { select: { id: true, name: true, cadence: true, anchorDate: true } } }
+    })
+  ]);
+  const assignmentByEmployeeId = new Map(assignments.map((assignment) => [assignment.employeeId, assignment.schedule]));
+
+  return employees.map((employee) => {
+    const assigned = assignmentByEmployeeId.get(employee.id);
+    const schedule = assigned ?? defaultSchedule;
+    const period = schedule ? submissionPeriodForDate(schedule, today) : null;
+    return {
+      employeeId: employee.id,
+      employeeName: `${employee.firstName} ${employee.lastName}`,
+      employeeNumber: employee.employeeNumber,
+      scheduleName: schedule?.name ?? null,
+      cadence: schedule?.cadence ?? null,
+      inheritedCompanyDefault: !assigned,
+      currentPeriod: period ? { startDate: dateKey(period.startDate), endDate: dateKey(period.endDate) } : null
+    };
+  });
+}
+
 export async function getWorkerSubmissionScheduleView(employeeId: string): Promise<WorkerSubmissionScheduleView | null> {
   const today = helsinkiToday();
   const [employee, options, assignment] = await Promise.all([
