@@ -4,14 +4,18 @@ import { resolveServerSession } from '@/lib/server-session';
 import { getTimesheetCard } from '@/lib/admin-timesheets';
 import { FinalApprovalActions } from './FinalApprovalActions';
 import { RequestCorrectionForm } from './RequestCorrectionForm';
-import { workedMinutesFromIsoSegments } from '@/lib/reporting/report-format';
+import { workedMinutesFromIsoSegments, timesheetStatusLabel } from '@/lib/reporting/report-format';
+import { dayTypeLabel } from '@/lib/i18n/worker';
+import { resolveAppLocale } from '@/lib/i18n/server';
+import { adminDailyStrings } from '@/lib/i18n/admin-daily';
+import { localeText } from '@/lib/i18n/locale';
 
 export const dynamic = 'force-dynamic';
 
-function formatMinutes(minutes: number): string {
+function formatMinutes(minutes: number, ru: boolean): string {
   const h = Math.floor(minutes / 60);
   const m = Math.round(minutes % 60);
-  return `${h}h${m ? ` ${m}m` : ''}`;
+  return ru ? `${h}ч${m ? ` ${m}м` : ''}` : `${h}h${m ? ` ${m}m` : ''}`;
 }
 
 type RouteParams = { params: Promise<{ timesheetId: string }> };
@@ -25,13 +29,16 @@ export default async function AdminTimesheetCardPage({ params }: RouteParams) {
   if (!session) {
     redirect('/login');
   }
+  const locale = await resolveAppLocale();
+  const ru = locale === 'RU';
+  const s = adminDailyStrings(locale);
 
   const isAdmin = session.user.roles.includes('ADMIN') || session.user.roles.includes('SUPER_ADMIN');
   if (!isAdmin) {
     return (
       <main className="setup-page">
         <p className="login-error" role="alert">
-          Access denied — this page requires the ADMIN or SUPER_ADMIN role.
+          {s.accessDenied}
         </p>
       </main>
     );
@@ -44,8 +51,8 @@ export default async function AdminTimesheetCardPage({ params }: RouteParams) {
     return (
       <main className="setup-page">
         <div className="setup-card">
-          <p>No timesheet with this id.</p>
-          <Link href="/admin/timesheets">Back to timesheets</Link>
+          <p>{localeText(locale, 'No timesheet with this id.', 'Табель с таким идентификатором не найден.')}</p>
+          <Link href="/admin/timesheets">{localeText(locale, 'Back to timesheets', 'К табелям')}</Link>
         </div>
       </main>
     );
@@ -56,17 +63,17 @@ export default async function AdminTimesheetCardPage({ params }: RouteParams) {
       <div className="setup-card">
         <h1>{card.employeeName}</h1>
         <p className="setup-subtitle">
-          Status: {card.status} {card.versionNumber ? `· version ${card.versionNumber}` : ''}
+          {localeText(locale, 'Status:', 'Статус:')} {timesheetStatusLabel(card.status, locale)} {card.versionNumber ? localeText(locale, `· version ${card.versionNumber}`, `· версия ${card.versionNumber}`) : ''}
         </p>
 
         {card.days.length === 0 ? (
-          <p>No submitted version yet.</p>
+          <p>{localeText(locale, 'No submitted version yet.', 'Отправленной версии пока нет.')}</p>
         ) : (
           <table className="worker-table">
             <thead>
               <tr>
-                <th>Date</th>
-                <th>Details</th>
+                <th>{localeText(locale, 'Date', 'Дата')}</th>
+                <th>{localeText(locale, 'Details', 'Детали')}</th>
               </tr>
             </thead>
             <tbody>
@@ -75,12 +82,12 @@ export default async function AdminTimesheetCardPage({ params }: RouteParams) {
                   <td>{day.date}</td>
                   <td>
                     {day.dayType !== 'WORK'
-                      ? day.dayType.replace('_', ' ').toLowerCase()
+                      ? dayTypeLabel(day.dayType, locale)
                       : day.segments.length === 0
                         ? day.confirmedZero
-                          ? 'Confirmed 0h'
+                          ? localeText(locale, 'Confirmed 0h', 'Подтверждено 0ч')
                           : '—'
-                        : `${formatMinutes(workedMinutesFromIsoSegments(day.segments))} · ${day.segments.map((s) => s.siteName).join(', ')}`}
+                        : `${formatMinutes(workedMinutesFromIsoSegments(day.segments), ru)} · ${day.segments.map((s) => s.siteName).join(', ')}`}
                   </td>
                 </tr>
               ))}
@@ -93,11 +100,11 @@ export default async function AdminTimesheetCardPage({ params }: RouteParams) {
         ) : card.status === 'FINAL_APPROVED' ? (
           <RequestCorrectionForm timesheetId={card.timesheetId} />
         ) : (
-          <p className="setup-subtitle">Not awaiting final approval (status: {card.status}).</p>
+          <p className="setup-subtitle">{localeText(locale, `Not awaiting final approval (status: ${timesheetStatusLabel(card.status, locale)}).`, `Не ожидает окончательного одобрения (статус: ${timesheetStatusLabel(card.status, locale)}).`)}</p>
         )}
 
         <p>
-          <Link href="/admin/timesheets">Back to timesheets</Link>
+          <Link href="/admin/timesheets">{localeText(locale, 'Back to timesheets', 'К табелям')}</Link>
         </p>
       </div>
     </main>

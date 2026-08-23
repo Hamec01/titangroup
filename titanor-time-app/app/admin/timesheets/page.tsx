@@ -2,6 +2,9 @@ import { redirect } from 'next/navigation';
 import Link from 'next/link';
 import { resolveServerSession } from '@/lib/server-session';
 import { listTimesheets } from '@/lib/admin-timesheets';
+import { resolveAppLocale } from '@/lib/i18n/server';
+import { adminDailyStrings } from '@/lib/i18n/admin-daily';
+import { localeText } from '@/lib/i18n/locale';
 
 export const dynamic = 'force-dynamic';
 
@@ -18,13 +21,15 @@ export default async function AdminTimesheetsPage({ searchParams }: RouteParams)
   if (!session) {
     redirect('/login');
   }
+  const locale = await resolveAppLocale();
+  const s = adminDailyStrings(locale);
 
   const isAdmin = session.user.roles.includes('ADMIN') || session.user.roles.includes('SUPER_ADMIN');
   if (!isAdmin) {
     return (
       <main className="setup-page">
         <p className="login-error" role="alert">
-          Access denied — this page requires the ADMIN or SUPER_ADMIN role.
+          {s.accessDenied}
         </p>
       </main>
     );
@@ -37,23 +42,23 @@ export default async function AdminTimesheetsPage({ searchParams }: RouteParams)
   return (
     <main className="setup-page">
       <div className="setup-card worker-card">
-        <h1>{status === 'FINAL_APPROVED' ? 'Finalized timesheets' : 'Timesheets ready for final approval'}</h1>
+        <h1>{status === 'FINAL_APPROVED' ? localeText(locale, 'Finalized timesheets', 'Окончательно одобренные табели') : localeText(locale, 'Timesheets ready for final approval', 'Табели, готовые к окончательному одобрению')}</h1>
         <p className="setup-subtitle">
           {status === 'FINAL_APPROVED' ? (
-            <Link href="/admin/timesheets">Awaiting final approval</Link>
+            <Link href="/admin/timesheets">{localeText(locale, 'Awaiting final approval', 'Ожидают окончательного одобрения')}</Link>
           ) : (
-            <Link href="/admin/timesheets?status=FINAL_APPROVED">Finalized (start a correction)</Link>
+            <Link href="/admin/timesheets?status=FINAL_APPROVED">{localeText(locale, 'Finalized (start a correction)', 'Окончательно одобрено (начать корректировку)')}</Link>
           )}
         </p>
-        <p className="setup-subtitle">{totalItems} {status === 'FINAL_APPROVED' ? 'finalized' : 'awaiting final approval'}</p>
+        <p className="setup-subtitle">{localeText(locale, `${totalItems} ${status === 'FINAL_APPROVED' ? 'finalized' : 'awaiting final approval'}`, `${status === 'FINAL_APPROVED' ? 'Окончательно одобрено' : 'Ожидает окончательного одобрения'}: ${totalItems}`)}</p>
         {items.length === 0 ? (
-          <p>Nothing awaiting final approval.</p>
+          <p>{localeText(locale, 'Nothing awaiting final approval.', 'Нет табелей, ожидающих окончательного одобрения.')}</p>
         ) : (
           <table className="worker-table">
             <thead>
               <tr>
-                <th>Employee</th>
-                <th>Period</th>
+                <th>{s.common.name}</th>
+                <th>{localeText(locale, 'Period', 'Период')}</th>
               </tr>
             </thead>
             <tbody>

@@ -2,22 +2,24 @@
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
+import { useAppLocale } from '@/components/i18n/AppLocaleProvider';
 
 const CSRF_HEADER_VALUE = 'titanor-time';
 
-function describeError(code: string | undefined): string {
+function describeError(code: string | undefined, ru: boolean): string {
   switch (code) {
     case 'INVALID_STATE_TRANSITION':
-      return 'This timesheet is no longer in FOREMAN_APPROVED status.';
+      return ru ? 'Этот табель больше не в статусе «Одобрен прорабом».' : 'This timesheet is no longer in FOREMAN_APPROVED status.';
     case 'TIMESHEET_NOT_FOUND':
-      return 'This timesheet no longer exists.';
+      return ru ? 'Этот табель больше не существует.' : 'This timesheet no longer exists.';
     default:
-      return 'Something went wrong. Please try again.';
+      return ru ? 'Что-то пошло не так. Попробуйте снова.' : 'Something went wrong. Please try again.';
   }
 }
 
 export function FinalApprovalActions({ timesheetId }: { timesheetId: string }) {
   const router = useRouter();
+  const ru = useAppLocale() === 'RU';
   const [returnReason, setReturnReason] = useState('');
   const [loading, setLoading] = useState<'approve' | 'return' | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -33,20 +35,20 @@ export function FinalApprovalActions({ timesheetId }: { timesheetId: string }) {
       });
       if (!response.ok) {
         const body = await response.json().catch(() => null);
-        setError(describeError(body?.error?.code));
+        setError(describeError(body?.error?.code, ru));
         setLoading(null);
         return;
       }
       router.push('/admin/timesheets');
     } catch {
-      setError('Network error. Please try again.');
+      setError(ru ? 'Ошибка сети. Попробуйте снова.' : 'Network error. Please try again.');
       setLoading(null);
     }
   }
 
   async function handleReturn(): Promise<void> {
     if (returnReason.trim().length === 0) {
-      setError('A reason is required to return a timesheet.');
+      setError(ru ? 'Для возврата табеля требуется указать причину.' : 'A reason is required to return a timesheet.');
       return;
     }
     setLoading('return');
@@ -60,20 +62,20 @@ export function FinalApprovalActions({ timesheetId }: { timesheetId: string }) {
       });
       if (!response.ok) {
         const body = await response.json().catch(() => null);
-        setError(describeError(body?.error?.code));
+        setError(describeError(body?.error?.code, ru));
         setLoading(null);
         return;
       }
       router.push('/admin/timesheets');
     } catch {
-      setError('Network error. Please try again.');
+      setError(ru ? 'Ошибка сети. Попробуйте снова.' : 'Network error. Please try again.');
       setLoading(null);
     }
   }
 
   return (
     <div className="setup-card form">
-      <p className="setup-subtitle">No hours can be edited from this screen — final approval never changes data. Disagree? Return the whole timesheet instead.</p>
+      <p className="setup-subtitle">{ru ? 'На этом экране нельзя редактировать часы — окончательное одобрение никогда не меняет данные. Не согласны? Верните весь табель целиком.' : 'No hours can be edited from this screen — final approval never changes data. Disagree? Return the whole timesheet instead.'}</p>
 
       {error ? (
         <p className="login-error" role="alert">
@@ -82,15 +84,15 @@ export function FinalApprovalActions({ timesheetId }: { timesheetId: string }) {
       ) : null}
 
       <button className="login-submit" type="button" disabled={loading !== null} onClick={handleFinalApprove}>
-        {loading === 'approve' ? 'Approving…' : 'Final approve'}
+        {loading === 'approve' ? (ru ? 'Одобрение…' : 'Approving…') : (ru ? 'Окончательно одобрить' : 'Final approve')}
       </button>
 
       <div className="login-field">
-        <label htmlFor="override-return-reason">Return reason (whole timesheet)</label>
+        <label htmlFor="override-return-reason">{ru ? 'Причина возврата (весь табель)' : 'Return reason (whole timesheet)'}</label>
         <textarea id="override-return-reason" rows={3} disabled={loading !== null} value={returnReason} onChange={(event) => setReturnReason(event.target.value)} />
       </div>
       <button className="login-submit" type="button" disabled={loading !== null} onClick={handleReturn}>
-        {loading === 'return' ? 'Returning…' : 'Return whole timesheet'}
+        {loading === 'return' ? (ru ? 'Возврат…' : 'Returning…') : (ru ? 'Вернуть весь табель' : 'Return whole timesheet')}
       </button>
     </div>
   );

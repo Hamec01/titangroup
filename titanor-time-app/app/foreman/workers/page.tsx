@@ -3,6 +3,8 @@ import Link from 'next/link';
 import { resolveServerSession } from '@/lib/server-session';
 import { listForemanWorkers } from '@/lib/foreman-review';
 import { helsinkiToday } from '@/lib/workers';
+import { resolveAppLocale } from '@/lib/i18n/server';
+import { localeText } from '@/lib/i18n/locale';
 
 export const dynamic = 'force-dynamic';
 
@@ -13,12 +15,13 @@ export default async function ForemanWorkersPage() {
   if (!session) {
     redirect('/login');
   }
+  const locale = await resolveAppLocale();
 
   if (!session.user.roles.includes('FOREMAN')) {
     return (
       <main className="setup-page">
         <p className="login-error" role="alert">
-          Access denied — this page requires the FOREMAN role.
+          {localeText(locale, 'Access denied — this page requires the FOREMAN role.', 'Доступ запрещён — эта страница доступна только прорабу.')}
         </p>
       </main>
     );
@@ -29,9 +32,9 @@ export default async function ForemanWorkersPage() {
   return (
     <main className="wk-page">
       <div className="wk-card">
-        <h1>Your workers</h1>
+        <h1>{localeText(locale, 'Your workers', 'Ваши работники')}</h1>
         {workers.length === 0 ? (
-          <p className="wk-empty">No one is currently assigned to your sites.</p>
+          <p className="wk-empty">{localeText(locale, 'No one is currently assigned to your sites.', 'На ваших объектах пока никто не назначен.')}</p>
         ) : (
           <ul className="setup-list">
             {workers.map((w) => (
@@ -43,7 +46,7 @@ export default async function ForemanWorkersPage() {
           </ul>
         )}
         <p>
-          <Link href="/foreman">Back to overview</Link>
+          <Link href="/foreman">{localeText(locale, 'Back to overview', 'К обзору')}</Link>
         </p>
       </div>
     </main>
