@@ -5,6 +5,8 @@ import { helsinkiToday } from '@/lib/workers';
 import { getAdminOperationalOverview, parseOverviewQuery } from '@/lib/attendance-overview';
 import { listPeriodOptions, listSiteOptionsForAdmin } from '@/lib/attendance-overview-lookups';
 import { OverviewView, type OverviewOutcome } from '@/components/overview/OverviewView';
+import { resolveAppLocale } from '@/lib/i18n/server';
+import { localeText } from '@/lib/i18n/locale';
 
 export const dynamic = 'force-dynamic';
 
@@ -30,6 +32,8 @@ export default async function AdminOverviewPage({ searchParams }: RouteParams) {
     redirect('/login');
   }
 
+  const locale = await resolveAppLocale();
+
   // Permission-checked, not role-checked (task §3) — a role membership without all three
   // underlying grants must not see this page, and the overview service is never called in that case.
   for (const permissionCode of REQUIRED_PERMISSIONS) {
@@ -37,7 +41,7 @@ export default async function AdminOverviewPage({ searchParams }: RouteParams) {
       return (
         <main className="setup-page">
           <p className="login-error" role="alert">
-            Access denied — this page requires the {permissionCode} permission.
+            {localeText(locale, `Access denied — this page requires the ${permissionCode} permission.`, `Доступ запрещён — для этой страницы требуется право ${permissionCode}.`)}
           </p>
         </main>
       );
