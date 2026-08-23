@@ -29,6 +29,18 @@ function formatMinutes(minutes: number): string {
   return `${h}h${m ? ` ${m}m` : ''}`;
 }
 
+function localeTag(locale: 'EN' | 'RU'): string {
+  return locale === 'RU' ? 'ru-RU' : 'en-GB';
+}
+
+function formatDayLabel(date: string, locale: 'EN' | 'RU'): string {
+  return new Intl.DateTimeFormat(localeTag(locale), { timeZone: 'Europe/Helsinki', weekday: 'short', day: '2-digit', month: 'short' }).format(new Date(`${date}T00:00:00.000Z`));
+}
+
+function formatClock(iso: string): string {
+  return new Intl.DateTimeFormat('en-GB', { timeZone: 'Europe/Helsinki', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).format(new Date(iso));
+}
+
 type RouteParams = { params: Promise<{ periodId: string }> };
 
 export default async function WorkerHoursListPage({ params }: RouteParams) {
@@ -61,6 +73,7 @@ export default async function WorkerHoursListPage({ params }: RouteParams) {
   }
 
   const editable = EDITABLE_STATUSES.has(period.timesheetStatus);
+  const periodStatus = period.timesheetStatus;
 
   let days: { date: string; dayType: string; confirmedZero: boolean; segments: SegmentView[] }[];
   if (editable) {
@@ -102,25 +115,52 @@ export default async function WorkerHoursListPage({ params }: RouteParams) {
 
   function renderDay(day: (typeof days)[number]) {
     const minutes = workedMinutesFromIsoSegments(day.segments);
+    const siteNames = [...new Set(day.segments.map((s) => siteNameById.get(s.siteId) ?? s.siteId))];
+    const isToday = day.date === todayKey;
+    const stateLabel = day.dayType !== 'WORK'
+      ? dayTypeLabel(day.dayType, locale)
+      : day.confirmedZero
+        ? t.confirmedZeroShort
+          : periodStatus === 'RETURNED'
+          ? t.needsCorrection
+          : editable
+            ? t.draftState
+            : t.readOnly;
     const content = (
-      <>
-        <span className="wk-day-date">{day.date}</span>
-        <span className="wk-day-summary">
-          {day.dayType !== 'WORK'
-            ? dayTypeLabel(day.dayType, locale)
-            : day.confirmedZero
-              ? t.confirmedZeroShort
-              : day.segments.length === 0
-                ? '—'
-                : `${formatMinutes(minutes)} · ${[...new Set(day.segments.map((s) => siteNameById.get(s.siteId) ?? s.siteId))].join(', ')}`}
-        </span>
-      </>
+      <article className={`wk-day-card${isToday ? ' is-today' : ''}`}>
+        <div className="wk-day-card-top">
+          <div>
+            {isToday ? <span className="wk-day-today-badge">{t.today}</span> : null}
+            <p className="wk-day-date">{formatDayLabel(day.date, locale)}</p>
+            <p className="wk-day-iso">{day.date}</p>
+          </div>
+          <span className="wk-day-state">{stateLabel}</span>
+        </div>
+
+        {day.segments.length > 0 ? (
+          <div className="wk-day-intervals">
+            {day.segments.map((segment) => (
+              <p key={segment.id} className="wk-day-interval-row">
+                {formatClock(segment.startAt)} — {formatClock(segment.endAt)}
+              </p>
+            ))}
+          </div>
+        ) : (
+          <p className="wk-day-summary">{day.dayType === 'WORK' ? t.dayEmptyDash : dayTypeLabel(day.dayType, locale)}</p>
+        )}
+
+        <div className="wk-day-card-bottom">
+          <p className="wk-day-sites">{siteNames.length > 0 ? siteNames.join(' · ') : t.dayEmptyDash}</p>
+          <strong>{formatMinutes(minutes)}</strong>
+        </div>
+      </article>
     );
     return (
       <li key={day.date}>
         {editable ? (
           <WorkerLink href={`/worker/periods/${periodId}/hours/${day.date}`} className="wk-day-item">
             {content}
+            <span className="wk-day-chevron" aria-hidden="true">›</span>
           </WorkerLink>
         ) : (
           <div className="wk-day-item wk-day-item-readonly">{content}</div>
@@ -155,7 +195,7 @@ export default async function WorkerHoursListPage({ params }: RouteParams) {
         )}
 
         {editable && (
-          <WorkerLink href={`/worker/periods/${periodId}/submit`} className="wk-action-button">
+          <WorkerLink href={`/worker/periods/${periodId}/submit`} className="wk-action-button wk-submit-sticky-action">
             {t.reviewAndSubmit}
           </WorkerLink>
         )}

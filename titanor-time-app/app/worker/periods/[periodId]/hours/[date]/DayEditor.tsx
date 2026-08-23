@@ -67,6 +67,23 @@ interface EditableSegment {
 
 let nextKey = 0;
 
+function dayLabel(date: string, locale: 'EN' | 'RU'): string {
+  return new Intl.DateTimeFormat(locale === 'RU' ? 'ru-RU' : 'en-GB', { timeZone: 'Europe/Helsinki', weekday: 'long', day: 'numeric', month: 'long' }).format(new Date(`${date}T00:00:00.000Z`));
+}
+
+function hasClockGeneratedChange(initialSegments: InitialSegment[], currentSegments: EditableSegment[]): boolean {
+  const clockOriginSegments = initialSegments.filter((segment) => segment.originClockShiftFragmentId !== null);
+  return clockOriginSegments.some((initial) => {
+    const current = currentSegments.find((segment) => segment.originClockShiftFragmentId === initial.originClockShiftFragmentId);
+    return (
+      !current ||
+      current.assignmentKey !== assignmentKeyOf(initial.siteId, initial.workAreaId) ||
+      current.startAt !== isoToHelsinkiTime(initial.startAt) ||
+      current.endAt !== isoToHelsinkiTime(initial.endAt)
+    );
+  });
+}
+
 function describeError(code: string | undefined, fieldErrors: Record<string, string[]> | undefined, t: WorkerStrings): string {
   switch (code) {
     case 'WORK_SEGMENT_OVERLAP':
@@ -123,6 +140,7 @@ export default function DayEditor({
   const [error, setError] = useState<string | null>(null);
 
   const isAbsenceDay = initialDayType !== 'WORK';
+  const clockOriginChanged = hasClockGeneratedChange(initialSegments, segments);
 
   function addSegment() {
     if (assignmentOptions.length === 0) {
@@ -160,15 +178,6 @@ export default function DayEditor({
     setError(null);
 
     const clockOriginSegments = initialSegments.filter((segment) => segment.originClockShiftFragmentId !== null);
-    const clockOriginChanged = clockOriginSegments.some((initial) => {
-      const current = segments.find((segment) => segment.originClockShiftFragmentId === initial.originClockShiftFragmentId);
-      return (
-        !current ||
-        current.assignmentKey !== assignmentKeyOf(initial.siteId, initial.workAreaId) ||
-        current.startAt !== isoToHelsinkiTime(initial.startAt) ||
-        current.endAt !== isoToHelsinkiTime(initial.endAt)
-      );
-    });
     const normalizedReason = clockAdjustmentReason.trim();
     if (clockOriginChanged && normalizedReason.length === 0) {
       setError(t.clockAdjustmentReasonRequired);
@@ -220,9 +229,10 @@ export default function DayEditor({
     <main className="wk-page">
       <div className="wk-card">
         <a href={`/worker/periods/${periodId}/hours`} className="wk-back-link">
-          {t.backArrow}
+          ← {t.hours}
         </a>
-        <h1>{date}</h1>
+        <h1>{dayLabel(date, locale)}</h1>
+        <p className="wk-readonly-note">{date}</p>
 
         <ReturnReasonsNotice status={timesheetStatus} reasons={returnReasons} />
 
@@ -240,6 +250,7 @@ export default function DayEditor({
             <ul className="wk-segment-list">
               {segments.map((segment) => (
                 <li key={segment.key} className="wk-segment-card">
+                  <p className="wk-section-title">{t.workplaceLabel}</p>
                   <select value={segment.assignmentKey} onChange={(e) => updateSegment(segment.key, { assignmentKey: e.target.value })} disabled={saving}>
                     {assignmentOptions.map((option) => {
                       const key = assignmentKeyOf(option.siteId, option.workAreaId);
@@ -251,6 +262,11 @@ export default function DayEditor({
                       );
                     })}
                   </select>
+
+                  <div className="wk-segment-time-headings">
+                    <span>{t.startLabel}</span>
+                    <span>{t.endLabel}</span>
+                  </div>
                   <div className="wk-time-row">
                     <input type="time" value={segment.startAt} onChange={(e) => updateSegment(segment.key, { startAt: e.target.value })} disabled={saving} />
                     <span>–</span>
@@ -259,6 +275,7 @@ export default function DayEditor({
 
                   {segment.breaks.map((b, i) => (
                     <div key={i} className="wk-break-row">
+                      <span className="wk-break-label">{t.breakLabel}</span>
                       <input type="time" value={b.startAt} onChange={(e) => updateBreak(segment.key, i, { startAt: e.target.value })} disabled={saving} />
                       <span>–</span>
                       <input type="time" value={b.endAt} onChange={(e) => updateBreak(segment.key, i, { endAt: e.target.value })} disabled={saving} />
@@ -286,7 +303,7 @@ export default function DayEditor({
               {t.addInterval}
             </button>
 
-            {initialSegments.some((segment) => segment.originClockShiftFragmentId !== null) ? (
+            {initialSegments.some((segment) => segment.originClockShiftFragmentId !== null) && clockOriginChanged ? (
               <div className="wk-field">
                 <label htmlFor="clock-adjustment-reason">{t.clockAdjustmentReasonLabel}</label>
                 <textarea
@@ -313,7 +330,7 @@ export default function DayEditor({
         )}
 
         {!isAbsenceDay && (
-          <button type="button" className="wk-action-button" onClick={handleSave} disabled={saving}>
+          <button type="button" className="wk-action-button wk-save-sticky-action" onClick={handleSave} disabled={saving}>
             {saving ? common.saving : common.save}
           </button>
         )}

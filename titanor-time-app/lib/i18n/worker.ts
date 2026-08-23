@@ -35,6 +35,36 @@ export interface WorkerStrings {
   retry: string;
   nothingLost: string;
   clockedOut: string;
+  checkInUpper: string;
+  checkOutUpper: string;
+  startWork: string;
+  endWork: string;
+  gpsCheckedAtAction: string;
+  worker: string;
+  workplaceLabel: string;
+  workAreaLabel: string;
+  noWorkplaceAssigned: string;
+  changeWorkplace: string;
+  switchWorkplace: string;
+  close: string;
+  statusInternet: string;
+  statusSync: string;
+  statusGps: string;
+  statusSynced: string;
+  statusWaitingCount: (n: number) => string;
+  statusNeedsAttention: string;
+  statusGpsChecking: string;
+  statusGpsReady: string;
+  statusGpsPermission: string;
+  statusGpsUnavailable: string;
+  statusGpsWillCheck: string;
+  workStatus: string;
+  clockStateLabel: string;
+  startedAtLabel: string;
+  elapsedLabel: string;
+  statusPendingActions: string;
+  currentWorkplacePrefix: string;
+  actionNeedsAttention: string;
   noSiteAssignedYet: string;
   primarySuffix: string;
   checkIn: string;
@@ -55,6 +85,10 @@ export interface WorkerStrings {
   needsAttention: string;
   todaysTime: string;
   recentTime: string;
+  timeCardTitle: string;
+  today: string;
+  recent: string;
+  viewAndEditHours: string;
   noCompletedTimeEntries: string;
   myPeriods: string;
   historyLink: string;
@@ -77,6 +111,9 @@ export interface WorkerStrings {
   addBreak: string;
   removeInterval: string;
   addInterval: string;
+  startLabel: string;
+  endLabel: string;
+  breakLabel: string;
   clockAdjustmentReasonLabel: string;
   clockAdjustmentReasonHelp: string;
   // -- SubmitButton.tsx --
@@ -102,6 +139,9 @@ export interface WorkerStrings {
   reviewAndSubmit: string;
   confirmedZeroShort: string;
   dayEmptyDash: string;
+  needsCorrection: string;
+  draftState: string;
+  readOnly: string;
   // -- periods/[periodId]/submit/page.tsx --
   submitTimesheetTitle: string;
   backToHours: string;
@@ -186,6 +226,36 @@ export const WORKER_STRINGS: Record<AppLocale, WorkerStrings> = {
     retry: 'Retry',
     nothingLost: 'Nothing saved on this device has been lost.',
     clockedOut: 'Clocked out',
+    checkInUpper: 'CHECK IN',
+    checkOutUpper: 'CHECK OUT',
+    startWork: 'Start work',
+    endWork: 'End work',
+    gpsCheckedAtAction: 'GPS checked when you clock in/out',
+    worker: 'Worker',
+    workplaceLabel: 'Workplace',
+    workAreaLabel: 'Work area',
+    noWorkplaceAssigned: 'No workplace assigned yet',
+    changeWorkplace: 'Change workplace',
+    switchWorkplace: 'Switch workplace',
+    close: 'Close',
+    statusInternet: 'Internet',
+    statusSync: 'Sync',
+    statusGps: 'GPS',
+    statusSynced: 'Synced',
+    statusWaitingCount: (n) => `${n} waiting`,
+    statusNeedsAttention: 'Needs attention',
+    statusGpsChecking: 'Checking…',
+    statusGpsReady: 'Ready',
+    statusGpsPermission: 'Permission needed',
+    statusGpsUnavailable: 'Unavailable',
+    statusGpsWillCheck: 'Checked at clock action',
+    workStatus: 'Work status',
+    clockStateLabel: 'Clock state',
+    startedAtLabel: 'Started at',
+    elapsedLabel: 'Elapsed',
+    statusPendingActions: 'Pending actions',
+    currentWorkplacePrefix: 'Current',
+    actionNeedsAttention: 'Action needs attention',
     noSiteAssignedYet: 'Your manager has not assigned a site to you yet. You can use the app, but Check In will become available after a site is assigned.',
     primarySuffix: ' · Primary',
     checkIn: 'Check in',
@@ -206,6 +276,10 @@ export const WORKER_STRINGS: Record<AppLocale, WorkerStrings> = {
     needsAttention: 'Needs attention',
     todaysTime: "Today's time",
     recentTime: 'Recent time',
+    timeCardTitle: 'Time',
+    today: 'Today',
+    recent: 'Recent',
+    viewAndEditHours: 'View and edit hours',
     noCompletedTimeEntries: 'No completed time entries yet.',
     myPeriods: 'My periods →',
     historyLink: 'History →',
@@ -227,6 +301,9 @@ export const WORKER_STRINGS: Record<AppLocale, WorkerStrings> = {
     addBreak: '+ Add break',
     removeInterval: 'Remove interval',
     addInterval: '+ Add interval',
+    startLabel: 'Start',
+    endLabel: 'End',
+    breakLabel: 'Break',
     clockAdjustmentReasonLabel: 'Reason for changing recorded Check In/Out time',
     clockAdjustmentReasonHelp: 'Required only when a recorded interval is changed or removed. The reason is kept in the audit history.',
     errSubmitAlreadySubmitted: 'This timesheet can no longer be submitted (it may already be submitted).',
@@ -248,6 +325,9 @@ export const WORKER_STRINGS: Record<AppLocale, WorkerStrings> = {
     reviewAndSubmit: 'Review and submit',
     confirmedZeroShort: 'Confirmed 0h',
     dayEmptyDash: '—',
+    needsCorrection: 'Needs correction',
+    draftState: 'Draft',
+    readOnly: 'Read only',
     submitTimesheetTitle: 'Submit timesheet',
     backToHours: '← Back to hours',
     daysFilledIn: (worked, total, duration) => `${worked} of ${total} days filled in · ${duration} total`,
@@ -326,6 +406,36 @@ export const WORKER_STRINGS: Record<AppLocale, WorkerStrings> = {
     retry: 'Повторить',
     nothingLost: 'Ничего из сохранённого на этом устройстве не потеряно.',
     clockedOut: 'Не на смене',
+    checkInUpper: 'CHECK IN',
+    checkOutUpper: 'CHECK OUT',
+    startWork: 'Начать работу',
+    endWork: 'Завершить работу',
+    gpsCheckedAtAction: 'GPS проверяется при отметке прихода/ухода',
+    worker: 'Работник',
+    workplaceLabel: 'Объект',
+    workAreaLabel: 'Участок',
+    noWorkplaceAssigned: 'Объект ещё не назначен',
+    changeWorkplace: 'Сменить объект',
+    switchWorkplace: 'Переключить объект',
+    close: 'Закрыть',
+    statusInternet: 'Интернет',
+    statusSync: 'Синхронизация',
+    statusGps: 'GPS',
+    statusSynced: 'Синхронизировано',
+    statusWaitingCount: (n) => `Ожидает: ${n}`,
+    statusNeedsAttention: 'Требует внимания',
+    statusGpsChecking: 'Проверка…',
+    statusGpsReady: 'Готово',
+    statusGpsPermission: 'Нужен доступ',
+    statusGpsUnavailable: 'Недоступно',
+    statusGpsWillCheck: 'Проверяется при отметке',
+    workStatus: 'Статус работы',
+    clockStateLabel: 'Состояние',
+    startedAtLabel: 'Начато в',
+    elapsedLabel: 'Прошло',
+    statusPendingActions: 'Ожидающие действия',
+    currentWorkplacePrefix: 'Текущий объект:',
+    actionNeedsAttention: 'Действие требует внимания',
     noSiteAssignedYet: 'Руководитель ещё не назначил вам объект. Вы можете пользоваться приложением, но отметка прихода станет доступна после назначения объекта.',
     primarySuffix: ' · Основной',
     checkIn: 'Отметить приход',
@@ -346,6 +456,10 @@ export const WORKER_STRINGS: Record<AppLocale, WorkerStrings> = {
     needsAttention: 'Требует внимания',
     todaysTime: 'Время за сегодня',
     recentTime: 'Недавнее время',
+    timeCardTitle: 'Время',
+    today: 'Сегодня',
+    recent: 'Недавно',
+    viewAndEditHours: 'Смотреть и редактировать часы',
     noCompletedTimeEntries: 'Завершённых записей времени пока нет.',
     myPeriods: 'Мои периоды →',
     historyLink: 'История →',
@@ -367,6 +481,9 @@ export const WORKER_STRINGS: Record<AppLocale, WorkerStrings> = {
     addBreak: '+ Добавить перерыв',
     removeInterval: 'Удалить интервал',
     addInterval: '+ Добавить интервал',
+    startLabel: 'Начало',
+    endLabel: 'Конец',
+    breakLabel: 'Перерыв',
     clockAdjustmentReasonLabel: 'Причина изменения зафиксированного времени прихода/ухода',
     clockAdjustmentReasonHelp: 'Требуется, только если зафиксированный интервал изменён или удалён. Причина сохраняется в истории аудита.',
     errSubmitAlreadySubmitted: 'Этот табель больше нельзя отправить (возможно, он уже отправлен).',
@@ -388,6 +505,9 @@ export const WORKER_STRINGS: Record<AppLocale, WorkerStrings> = {
     reviewAndSubmit: 'Проверить и отправить',
     confirmedZeroShort: 'Подтверждено 0ч',
     dayEmptyDash: '—',
+    needsCorrection: 'Нужно исправить',
+    draftState: 'Черновик',
+    readOnly: 'Только просмотр',
     submitTimesheetTitle: 'Отправить табель',
     backToHours: '← К часам',
     daysFilledIn: (worked, total, duration) => `Заполнено ${worked} из ${total} дней · всего ${duration}`,

@@ -1,7 +1,6 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { captureGpsSnapshot, type GpsSnapshot } from '@/lib/worker-gps';
 import { ensureDeviceBootstrapped, retryBootstrap, type BootstrapOutcome } from '@/lib/offline-outbox/device';
@@ -29,6 +28,8 @@ interface StatusMessage {
   text: string;
   code?: string;
 }
+
+type GpsUiState = 'IDLE' | 'CHECKING' | 'READY' | 'PERMISSION' | 'UNAVAILABLE';
 
 function assignmentKey(siteId: string, workAreaId: string | null): string {
   return `${siteId}::${workAreaId ?? ''}`;
@@ -115,9 +116,10 @@ export interface WorkerClockPanelProps {
    * shell passes `null` for the same reason: /worker/install is not a service-worker-handled
    * route, so a real offline navigation there would hit a plain browser network error. */
   installHref: string | null;
+  timeCardHref?: string | null;
 }
 
-export function WorkerClockPanel({ initialClockState, assignments, workerName, todayLabel, recentActivity, periodsHref, historyHref, installHref }: WorkerClockPanelProps) {
+export function WorkerClockPanel({ initialClockState, assignments, workerName, todayLabel, recentActivity, periodsHref, historyHref, installHref, timeCardHref = null }: WorkerClockPanelProps) {
   const t = WORKER_STRINGS[useAppLocale()];
   const router = useRouter();
   const [bootstrap, setBootstrap] = useState<BootstrapOutcome | null>(null);
@@ -134,6 +136,7 @@ export function WorkerClockPanel({ initialClockState, assignments, workerName, t
   const [syncing, setSyncing] = useState(false);
   const [locating, setLocating] = useState(false);
   const [statusMessage, setStatusMessage] = useState<StatusMessage | null>(null);
+  const [gpsStatus, setGpsStatus] = useState<GpsUiState>('IDLE');
   const [selectedAssignmentId, setSelectedAssignmentId] = useState<string | null>(() => {
     if (assignments.length === 0) return null;
     const primary = assignments.find((a) => a.isPrimary);
@@ -141,6 +144,8 @@ export function WorkerClockPanel({ initialClockState, assignments, workerName, t
   });
   const [switchPanelOpen, setSwitchPanelOpen] = useState(false);
   const [switchTargetId, setSwitchTargetId] = useState<string | null>(null);
+  const [assignmentSheetOpen, setAssignmentSheetOpen] = useState(false);
+  const [statusSheetOpen, setStatusSheetOpen] = useState(false);
 
   const busyRef = useRef(false); // synchronous double-click guard — checked BEFORE any await.
 
@@ -259,6 +264,21 @@ export function WorkerClockPanel({ initialClockState, assignments, workerName, t
     });
   }, [refreshOutboxSnapshot]);
 
+  useEffect(() => {
+    if (!assignmentSheetOpen && !switchPanelOpen && !statusSheetOpen) {
+      return;
+    }
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        setAssignmentSheetOpen(false);
+        setSwitchPanelOpen(false);
+        setStatusSheetOpen(false);
+      }
+    };
+    document.addEventListener('keydown', closeOnEscape);
+    return () => document.removeEventListener('keydown', closeOnEscape);
+  }, [assignmentSheetOpen, statusSheetOpen, switchPanelOpen]);
+
   // Live shift duration tick while (projected) clocked in.
   const pendingSorted = useMemo(() => outboxRecords.filter((r) => r.state === 'PENDING' || r.state === 'SENDING').sort((a, b) => a.deviceSequence - b.deviceSequence), [outboxRecords]);
   const failedRecords = useMemo(() => outboxRecords.filter((r) => r.state === 'FAILED_TERMINAL'), [outboxRecords]);
@@ -308,9 +328,11 @@ export function WorkerClockPanel({ initialClockState, assignments, workerName, t
     }
     busyRef.current = true;
     setLocating(true);
+    setGpsStatus('CHECKING');
     setStatusMessage({ kind: 'info', text: t.gettingLocation });
     try {
       const gpsSnapshot: GpsSnapshot = await captureGpsSnapshot();
+      setGpsStatus(resolveGpsUiState(gpsSnapshot));
       setLocating(false);
       await enqueueCheckIn({
         siteId: assignment.siteId,
@@ -339,9 +361,11 @@ export function WorkerClockPanel({ initialClockState, assignments, workerName, t
     }
     busyRef.current = true;
     setLocating(true);
+    setGpsStatus('CHECKING');
     setStatusMessage({ kind: 'info', text: t.gettingLocation });
     try {
       const gpsSnapshot: GpsSnapshot = await captureGpsSnapshot();
+      setGpsStatus(resolveGpsUiState(gpsSnapshot));
       setLocating(false);
       // §5.4 — Check Out is never blocked by a missing/failed GPS reading.
       await enqueueCheckOut({
@@ -391,9 +415,11 @@ export function WorkerClockPanel({ initialClockState, assignments, workerName, t
     }
     busyRef.current = true;
     setLocating(true);
+    setGpsStatus('CHECKING');
     setStatusMessage({ kind: 'info', text: t.gettingLocation });
     try {
       const gpsSnapshot: GpsSnapshot = await captureGpsSnapshot();
+      setGpsStatus(resolveGpsUiState(gpsSnapshot));
       setLocating(false);
       await enqueueSwitchSite({
         oldAssumedSiteId: projected.siteId,
@@ -467,19 +493,102 @@ export function WorkerClockPanel({ initialClockState, assignments, workerName, t
   const setupNotReady = bootstrap === null || bootstrap.kind === 'NOT_READY_OFFLINE';
   const paused = bootstrap?.kind === 'PAUSED' ? bootstrap.reason : bootstrap?.kind === 'AUTH_EXPIRED' ? 'AUTH_EXPIRED' : null;
 
-  return (
-    <div className="wk-card wk-clock-card">
-      <div className="wk-clock-header">
-        {workerName && <p className="wk-clock-worker-name">{workerName}</p>}
-        <p className="wk-clock-today">{todayLabel}</p>
-      </div>
+  const currentHelsinki = useMemo(() => {
+    const formatter = new Intl.DateTimeFormat('en-GB', { timeZone: 'Europe/Helsinki', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' });
+    return formatter.format(nowTick + offsetMs);
+  }, [nowTick, offsetMs]);
 
-      <div className="wk-offline-bar" role="status" aria-live="polite">
-        <span className={`wk-connectivity-dot${isOnline ? ' online' : ' offline'}`} aria-hidden="true" />
-        <span>{isOnline ? t.online : t.offline}</span>
-        {pendingCount > 0 && <span className="wk-pending-count">{t.pendingCount(pendingCount)}</span>}
-        <button type="button" className="wk-sync-now-button" onClick={handleManualSync} disabled={syncing || setupNotReady}>
-          {syncing ? t.syncing : t.syncNow}
+  const selectedAssignment = assignments.find((a) => a.id === selectedAssignmentId) ?? assignments[0] ?? null;
+  const activeSiteName = projected.state === 'CLOCKED_IN' ? projected.siteName : selectedAssignment?.siteName ?? null;
+  const activeWorkAreaName = projected.state === 'CLOCKED_IN' ? projected.workAreaName : selectedAssignment?.workAreaName ?? null;
+
+  const syncSummary = syncing
+    ? t.syncing
+    : failedRecords.length > 0
+      ? t.statusNeedsAttention
+      : pendingCount > 0
+        ? t.statusWaitingCount(pendingCount)
+        : t.statusSynced;
+
+  const gpsSummary = gpsStatus === 'CHECKING'
+    ? t.statusGpsChecking
+    : gpsStatus === 'READY'
+      ? t.statusGpsReady
+      : gpsStatus === 'PERMISSION'
+        ? t.statusGpsPermission
+        : gpsStatus === 'UNAVAILABLE'
+          ? t.statusGpsUnavailable
+          : t.statusGpsWillCheck;
+
+  const canOpenAssignmentSheet = projected.state === 'CLOCKED_OUT' && assignments.length > 1;
+
+  const isClockedIn = projected.state === 'CLOCKED_IN';
+
+  const actionLabel = isClockedIn ? t.checkOutUpper : t.checkInUpper;
+  const actionHint = isClockedIn ? t.endWork : t.startWork;
+  const actionHelper = locating ? t.statusGpsChecking : t.gpsCheckedAtAction;
+
+  return (
+    <div className="wk-card wk-clock-home-card">
+      <button type="button" className="wk-status-card" onClick={() => setStatusSheetOpen(true)}>
+        <div className="wk-status-card-head">
+          <div>
+            <p className="wk-status-card-name">{workerName ?? t.worker}</p>
+            <p className="wk-status-card-date">{todayLabel}</p>
+          </div>
+          <div className="wk-status-card-time">{currentHelsinki}</div>
+        </div>
+
+        <div className="wk-status-workplace">
+          <span className="wk-status-label">{t.workplaceLabel}</span>
+          {activeSiteName ? <p className="wk-status-site">{activeSiteName}</p> : <p className="wk-status-site">{t.noWorkplaceAssigned}</p>}
+          {activeWorkAreaName ? <p className="wk-status-workarea">{activeWorkAreaName}</p> : null}
+        </div>
+
+        <div className="wk-status-grid" role="status" aria-live="polite">
+          <p>
+            <span className={`wk-status-dot ${isOnline ? 'online' : 'offline'}`} aria-hidden="true" />
+            <span>{t.statusInternet}</span>
+            <strong>{isOnline ? t.online : t.offline}</strong>
+          </p>
+          <p>
+            <span className={`wk-status-dot ${failedRecords.length > 0 ? 'warn' : pendingCount > 0 ? 'amber' : 'online'}`} aria-hidden="true" />
+            <span>{t.statusSync}</span>
+            <strong>{syncSummary}</strong>
+          </p>
+          <p>
+            <span className={`wk-status-dot ${gpsStatus === 'READY' ? 'online' : gpsStatus === 'CHECKING' ? 'amber' : gpsStatus === 'IDLE' ? 'offline' : 'warn'}`} aria-hidden="true" />
+            <span>{t.statusGps}</span>
+            <strong>{gpsSummary}</strong>
+          </p>
+        </div>
+      </button>
+
+      {canOpenAssignmentSheet && (
+        <button type="button" className="wk-inline-secondary" onClick={() => setAssignmentSheetOpen(true)} disabled={busy}>
+          {t.changeWorkplace}
+        </button>
+      )}
+
+      <div className={`wk-main-action-wrap ${isClockedIn ? 'in' : 'out'}`}>
+        {isClockedIn && projected.openedAt && (
+          <p className="wk-main-action-timer" aria-label={`Elapsed time ${formatDuration(durationMs)}`}>
+            {formatDuration(durationMs)}
+          </p>
+        )}
+        {isClockedIn && projected.openedAt ? <p className="wk-main-action-since">{t.sinceTime(formatHelsinkiTime(projected.openedAt))}</p> : null}
+
+        <button
+          type="button"
+          className={`wk-main-action ${isClockedIn ? 'out' : 'in'}`}
+          onClick={isClockedIn ? handleCheckOut : handleCheckIn}
+          disabled={busy || setupNotReady || (projected.state === 'CLOCKED_OUT' && (!selectedAssignmentId || assignments.length === 0))}
+          aria-live="polite"
+          aria-label={isClockedIn ? t.checkOut : t.checkIn}
+        >
+          <span className="wk-main-action-title">{actionLabel}</span>
+          <span className="wk-main-action-subtitle">{actionHint}</span>
+          <span className="wk-main-action-helper">{actionHelper}</span>
         </button>
       </div>
 
@@ -497,9 +606,9 @@ export function WorkerClockPanel({ initialClockState, assignments, workerName, t
             {paused === 'AUTH_EXPIRED' && t.sessionExpiredTitle}
           </p>
           {paused === 'AUTH_EXPIRED' ? (
-            <Link href="/login" className="wk-back-link">
+            <a href="/login" className="wk-back-link">
               {t.logInAgain}
-            </Link>
+            </a>
           ) : (
             <button type="button" className="wk-clock-secondary-button" onClick={handleRetryBootstrap}>
               {t.retry}
@@ -509,94 +618,10 @@ export function WorkerClockPanel({ initialClockState, assignments, workerName, t
         </div>
       )}
 
-      {!setupNotReady && (
-        <>
-          {projected.state === 'CLOCKED_OUT' ? (
-            <>
-              <p className="wk-clock-status-label wk-clock-status-out">{t.clockedOut}</p>
-
-              {assignments.length === 0 ? (
-                <p className="wk-empty">{t.noSiteAssignedYet}</p>
-              ) : (
-                <div role="radiogroup" aria-label="Select site to check in" className="wk-assignment-options">
-                  {assignments.map((a) => (
-                    <label key={a.id} className={`wk-assignment-option${selectedAssignmentId === a.id ? ' selected' : ''}`}>
-                      <input
-                        type="radio"
-                        name="checkin-assignment"
-                        value={a.id}
-                        checked={selectedAssignmentId === a.id}
-                        onChange={() => setSelectedAssignmentId(a.id)}
-                        disabled={busy}
-                      />
-                      <span className="wk-assignment-option-body">
-                        <span className="wk-assignment-site">
-                          {a.siteName}
-                          {a.isPrimary ? t.primarySuffix : ''}
-                        </span>
-                        {a.workAreaName && <span className="wk-assignment-detail">{a.workAreaName}</span>}
-                      </span>
-                    </label>
-                  ))}
-                </div>
-              )}
-
-              <button type="button" className="wk-action-button" onClick={handleCheckIn} disabled={busy || assignments.length === 0 || !selectedAssignmentId}>
-                {t.checkIn}
-              </button>
-            </>
-          ) : (
-            <>
-              <p className="wk-clock-status-label wk-clock-status-in">{t.clockedIn}{projected.isProjected ? t.waitingForSync : ''}</p>
-              {projected.siteName && <p className="wk-clock-site">{projected.siteName}</p>}
-              {projected.workAreaName && <p className="wk-clock-workarea">{projected.workAreaName}</p>}
-              {projected.openedAt && <p className="wk-clock-since">{t.sinceTime(formatHelsinkiTime(projected.openedAt))}</p>}
-              <p className="wk-clock-timer" aria-label={`Elapsed time ${formatDuration(durationMs)}`}>
-                {formatDuration(durationMs)}
-              </p>
-
-              <button type="button" className="wk-action-button" onClick={handleCheckOut} disabled={busy}>
-                {t.checkOut}
-              </button>
-
-              {alternateAssignments.length > 0 && !switchPanelOpen && (
-                <button type="button" className="wk-clock-secondary-button" onClick={openSwitchPanel} disabled={busy}>
-                  {t.switchSite}
-                </button>
-              )}
-
-              {switchPanelOpen && (
-                <div className="wk-switch-panel">
-                  <p className="wk-section-title">{t.switchToDifferentSite}</p>
-                  <div role="radiogroup" aria-label="Select new site" className="wk-assignment-options">
-                    {alternateAssignments.map((a) => (
-                      <label key={a.id} className={`wk-assignment-option${switchTargetId === a.id ? ' selected' : ''}`}>
-                        <input type="radio" name="switch-assignment" checked={switchTargetId === a.id} onChange={() => setSwitchTargetId(a.id)} disabled={busy} />
-                        <span className="wk-assignment-option-body">
-                          <span className="wk-assignment-site">{a.siteName}</span>
-                          {a.workAreaName && <span className="wk-assignment-detail">{a.workAreaName}</span>}
-                        </span>
-                      </label>
-                    ))}
-                  </div>
-                  {switchTarget && (
-                    <p className="wk-switch-summary">
-                      {t.switchFromTo(projected.siteName ?? '', switchTarget.siteName)}
-                    </p>
-                  )}
-                  <div className="wk-switch-actions">
-                    <button type="button" className="wk-clock-secondary-button" onClick={handleConfirmSwitch} disabled={busy || !switchTargetId}>
-                      {t.confirmSwitch}
-                    </button>
-                    <button type="button" className="wk-clock-cancel-button" onClick={closeSwitchPanel} disabled={busy}>
-                      {t.cancel}
-                    </button>
-                  </div>
-                </div>
-              )}
-            </>
-          )}
-        </>
+      {!setupNotReady && isClockedIn && alternateAssignments.length > 0 && !switchPanelOpen && (
+        <button type="button" className="wk-clock-secondary-button" onClick={openSwitchPanel} disabled={busy}>
+          {t.switchWorkplace}
+        </button>
       )}
 
       {statusMessage && (
@@ -611,7 +636,7 @@ export function WorkerClockPanel({ initialClockState, assignments, workerName, t
 
       {failedRecords.length > 0 && (
         <div className="wk-return-notice" aria-live="polite">
-          <p className="wk-return-notice-title">{t.needsAttention}</p>
+          <p className="wk-return-notice-title">{t.actionNeedsAttention}</p>
           <ul className="wk-return-reason-list">
             {failedRecords.map((r) => (
               <li key={r.clientEventId} className="wk-return-reason-item">
@@ -623,14 +648,23 @@ export function WorkerClockPanel({ initialClockState, assignments, workerName, t
         </div>
       )}
 
-      <section className="wk-recent-activity" aria-labelledby="wk-recent-activity-title">
-        <div className="wk-recent-activity-heading">
-          <h2 id="wk-recent-activity-title">{recentActivity?.isToday ? t.todaysTime : t.recentTime}</h2>
-          {recentActivity && <span>{recentActivity.date}</span>}
+      <section className="wk-time-preview" aria-labelledby="wk-time-preview-title">
+        <div className="wk-time-preview-heading">
+          <h2 id="wk-time-preview-title">{t.timeCardTitle}</h2>
+          <span>{recentActivity?.isToday ? t.today : t.recent}</span>
         </div>
+
+        {timeCardHref ? (
+          <WorkerLink href={timeCardHref} className="wk-time-preview-link">
+            <span>{t.viewAndEditHours}</span>
+            <span aria-hidden="true">→</span>
+          </WorkerLink>
+        ) : null}
+
         {recentActivity ? (
-          <WorkerLink href={recentActivity.href} className="wk-recent-activity-link">
+          <WorkerLink href={recentActivity.href} className="wk-time-preview-day-link">
             <strong>{formatWorkedDuration(recentActivity.totalMinutes)}</strong>
+            <span>{recentActivity.date}</span>
             <span>{recentActivity.siteNames.join(', ')}</span>
             <span aria-hidden="true">→</span>
           </WorkerLink>
@@ -639,25 +673,103 @@ export function WorkerClockPanel({ initialClockState, assignments, workerName, t
         )}
       </section>
 
-      {(periodsHref || historyHref || installHref) && (
-        <div className="wk-clock-nav">
-          {periodsHref && (
-            <WorkerLink href={periodsHref} className="wk-back-link">
-              {t.myPeriods}
-            </WorkerLink>
-          )}
-          {historyHref && (
-            <WorkerLink href={historyHref} className="wk-back-link">
-              {t.historyLink}
-            </WorkerLink>
-          )}
-          {installHref && (
-            <WorkerLink href={installHref} className="wk-back-link">
-              {t.installAppLink}
-            </WorkerLink>
-          )}
-        </div>
+      {assignmentSheetOpen && (
+        <>
+          <button type="button" className="wk-overlay-backdrop" aria-hidden="true" tabIndex={-1} onClick={() => setAssignmentSheetOpen(false)} />
+          <div className="wk-overlay-sheet" role="dialog" aria-modal="true" aria-label={t.changeWorkplace}>
+            <p className="wk-overlay-title">{t.changeWorkplace}</p>
+            <div role="radiogroup" aria-label="Select site to check in" className="wk-assignment-options">
+              {assignments.map((a) => (
+                <label key={a.id} className={`wk-assignment-option${selectedAssignmentId === a.id ? ' selected' : ''}`}>
+                  <input type="radio" name="checkin-assignment" value={a.id} checked={selectedAssignmentId === a.id} onChange={() => setSelectedAssignmentId(a.id)} disabled={busy} />
+                  <span className="wk-assignment-option-body">
+                    <span className="wk-assignment-site">
+                      {a.siteName}
+                      {a.isPrimary ? t.primarySuffix : ''}
+                    </span>
+                    {a.workAreaName && <span className="wk-assignment-detail">{a.workAreaName}</span>}
+                  </span>
+                </label>
+              ))}
+            </div>
+            <button type="button" className="wk-clock-cancel-button" onClick={() => setAssignmentSheetOpen(false)}>
+              {t.close}
+            </button>
+          </div>
+        </>
       )}
+
+      {switchPanelOpen && (
+        <>
+          <button type="button" className="wk-overlay-backdrop" aria-hidden="true" tabIndex={-1} onClick={closeSwitchPanel} />
+          <div className="wk-overlay-sheet" role="dialog" aria-modal="true" aria-label={t.switchWorkplace}>
+            <p className="wk-overlay-title">{t.switchWorkplace}</p>
+            {projected.siteName ? (
+              <p className="wk-switch-summary">
+                {t.currentWorkplacePrefix} {projected.siteName}
+              </p>
+            ) : null}
+            <div role="radiogroup" aria-label="Select new site" className="wk-assignment-options">
+              {alternateAssignments.map((a) => (
+                <label key={a.id} className={`wk-assignment-option${switchTargetId === a.id ? ' selected' : ''}`}>
+                  <input type="radio" name="switch-assignment" checked={switchTargetId === a.id} onChange={() => setSwitchTargetId(a.id)} disabled={busy} />
+                  <span className="wk-assignment-option-body">
+                    <span className="wk-assignment-site">{a.siteName}</span>
+                    {a.workAreaName && <span className="wk-assignment-detail">{a.workAreaName}</span>}
+                  </span>
+                </label>
+              ))}
+            </div>
+            {switchTarget ? <p className="wk-switch-summary">{t.switchFromTo(projected.siteName ?? '', switchTarget.siteName)}</p> : null}
+            <div className="wk-switch-actions">
+              <button type="button" className="wk-clock-secondary-button" onClick={handleConfirmSwitch} disabled={busy || !switchTargetId}>
+                {t.confirmSwitch}
+              </button>
+              <button type="button" className="wk-clock-cancel-button" onClick={closeSwitchPanel} disabled={busy}>
+                {t.cancel}
+              </button>
+            </div>
+          </div>
+        </>
+      )}
+
+      {statusSheetOpen && (
+        <>
+          <button type="button" className="wk-overlay-backdrop" aria-hidden="true" tabIndex={-1} onClick={() => setStatusSheetOpen(false)} />
+          <div className="wk-overlay-sheet wk-status-sheet" role="dialog" aria-modal="true" aria-label={t.workStatus}>
+            <p className="wk-overlay-title">{t.workStatus}</p>
+            <p className="wk-status-sheet-name">{workerName ?? t.worker}</p>
+            <p className="wk-status-sheet-line">{todayLabel}</p>
+            <p className="wk-status-sheet-line">{currentHelsinki} · Europe/Helsinki</p>
+            <p className="wk-status-sheet-line">{t.clockStateLabel}: {isClockedIn ? t.clockedIn : t.clockedOut}</p>
+            {projected.openedAt ? <p className="wk-status-sheet-line">{t.startedAtLabel}: {formatHelsinkiTime(projected.openedAt)}</p> : null}
+            {isClockedIn && projected.openedAt ? <p className="wk-status-sheet-line">{t.elapsedLabel}: {formatDuration(durationMs)}</p> : null}
+            <p className="wk-status-sheet-line">{t.workplaceLabel}: {activeSiteName ?? t.noWorkplaceAssigned}</p>
+            {activeWorkAreaName ? <p className="wk-status-sheet-line">{t.workAreaLabel}: {activeWorkAreaName}</p> : null}
+            <p className="wk-status-sheet-line">{t.statusInternet}: {isOnline ? t.online : t.offline}</p>
+            <p className="wk-status-sheet-line">{t.statusSync}: {syncSummary}</p>
+            <p className="wk-status-sheet-line">{t.statusPendingActions}: {pendingCount}</p>
+            <p className="wk-status-sheet-line">{t.statusGps}: {gpsSummary}</p>
+            <button type="button" className="wk-clock-secondary-button" onClick={handleManualSync} disabled={syncing || setupNotReady}>
+              {syncing ? t.syncing : t.syncNow}
+            </button>
+            <button type="button" className="wk-clock-cancel-button" onClick={() => setStatusSheetOpen(false)}>
+              {t.close}
+            </button>
+          </div>
+        </>
+      )}
+
     </div>
   );
+}
+
+function resolveGpsUiState(snapshot: GpsSnapshot): GpsUiState {
+  if (snapshot.location) {
+    return 'READY';
+  }
+  if (snapshot.gpsUnavailableReason === 'PERMISSION_DENIED') {
+    return 'PERMISSION';
+  }
+  return 'UNAVAILABLE';
 }

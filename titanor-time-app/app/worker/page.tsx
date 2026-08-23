@@ -52,6 +52,7 @@ export default async function WorkerHomePage() {
   ]);
 
   const periodsHref = periods.length === 1 ? `/worker/periods/${periods[0].id}` : '/worker/periods';
+  const timeCardHref = periods.length === 1 ? `/worker/periods/${periods[0].id}/hours` : '/worker/periods';
   const todayLabel = new Intl.DateTimeFormat(locale === 'RU' ? 'ru-RU' : 'en-GB', { timeZone: 'Europe/Helsinki', weekday: 'long', day: 'numeric', month: 'long' }).format(today);
   const workerName = context ? `${context.employee.firstName} ${context.employee.lastName}` : null;
   const todayKey = today.toISOString().slice(0, 10);
@@ -69,7 +70,17 @@ export default async function WorkerHomePage() {
 
   return (
     <main className="wk-page">
-      <WorkerClockPanel initialClockState={clockState} assignments={assignments} workerName={workerName} todayLabel={todayLabel} recentActivity={recentActivity} periodsHref={periodsHref} historyHref="/worker/history" installHref="/worker/install" />
+      <WorkerClockPanel
+        initialClockState={clockState}
+        assignments={assignments}
+        workerName={workerName}
+        todayLabel={todayLabel}
+        recentActivity={recentActivity}
+        periodsHref={periodsHref}
+        historyHref="/worker/history"
+        installHref="/worker/install"
+        timeCardHref={timeCardHref}
+      />
     </main>
   );
 }

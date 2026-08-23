@@ -32,6 +32,15 @@ export function WorkerAppNavigation({ username }: { username: string }) {
     return () => document.removeEventListener('keydown', closeOnEscape);
   }, [open]);
 
+  useEffect(() => {
+    if (!open) return;
+    const originalOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => {
+      document.body.style.overflow = originalOverflow;
+    };
+  }, [open]);
+
   async function logout() {
     if (pendingRef.current) return;
     pendingRef.current = true;
@@ -56,7 +65,8 @@ export function WorkerAppNavigation({ username }: { username: string }) {
     <header className="wk-app-header">
       <div className="wk-app-header-inner">
         <WorkerLink href="/worker" className="wk-app-brand" aria-label={`Titanor Time — ${t.navHome}`}>
-          Titanor Time
+          <img src="/titanor-logo.png" alt="Titanor" className="wk-app-brand-logo" width={112} height={28} />
+          <span className="wk-app-brand-time">TIME</span>
         </WorkerLink>
         <div className="wk-app-header-actions">
           {pathname !== '/worker' ? (
@@ -73,7 +83,9 @@ export function WorkerAppNavigation({ username }: { username: string }) {
             aria-label={open ? t.navCloseMenu : t.navOpenMenu}
             onClick={() => setOpen((value) => !value)}
           >
-            <span aria-hidden="true">{open ? '×' : '☰'}</span>
+            <span className="wk-menu-icon" aria-hidden="true">
+              {open ? '✕' : '☰'}
+            </span>
           </button>
         </div>
       </div>
@@ -82,32 +94,53 @@ export function WorkerAppNavigation({ username }: { username: string }) {
         <>
           <button type="button" className="wk-menu-backdrop" aria-hidden="true" tabIndex={-1} onClick={() => setOpen(false)} />
           <nav id="worker-app-menu" className="wk-app-menu" aria-label={locale === 'RU' ? 'Навигация работника' : 'Worker navigation'}>
-            <p className="wk-menu-account">
-              {t.navSignedInAs} <strong>{username}</strong>
-            </p>
-            <WorkerLink href="/worker" className="wk-menu-link" aria-current={pathname === '/worker' ? 'page' : undefined}>
-              {t.navHome}
-            </WorkerLink>
-            <WorkerLink
-              href="/worker/periods"
-              className="wk-menu-link"
-              aria-current={pathname.startsWith('/worker/periods') ? 'page' : undefined}
-            >
-              {t.navCalendarAndHours}
-            </WorkerLink>
-            <WorkerLink href="/worker/history" className="wk-menu-link" aria-current={pathname === '/worker/history' ? 'page' : undefined}>
-              {t.navHistory}
-            </WorkerLink>
-            <WorkerLink href="/worker/install" className="wk-menu-link" aria-current={pathname === '/worker/install' ? 'page' : undefined}>
-              {t.navInstallApp}
-            </WorkerLink>
-            <div className="wk-menu-language">
-              <span>{t.navLanguage}</span>
-              <LanguageSwitcher compact />
+            <div className="wk-menu-top">
+              <p className="wk-menu-account-label">{t.navWorkerAccount}</p>
+              <p className="wk-menu-account">
+                {t.navSignedInAs} <strong>{username}</strong>
+              </p>
             </div>
-            <button type="button" className="wk-menu-logout" disabled={logoutPending} onClick={logout}>
-              {logoutPending ? t.navSigningOut : t.navSignOut}
-            </button>
+
+            <div className="wk-menu-primary-links">
+              <WorkerLink href="/worker" className="wk-menu-link" aria-current={pathname === '/worker' ? 'page' : undefined}>
+                <span className="wk-menu-link-icon" aria-hidden="true">
+                  ⌂
+                </span>
+                <span>{t.navHome}</span>
+              </WorkerLink>
+              <WorkerLink
+                href="/worker/periods"
+                className="wk-menu-link"
+                aria-current={pathname.startsWith('/worker/periods') ? 'page' : undefined}
+              >
+                <span className="wk-menu-link-icon" aria-hidden="true">
+                  ◫
+                </span>
+                <span>{t.navCalendarAndHours}</span>
+              </WorkerLink>
+              <WorkerLink href="/worker/history" className="wk-menu-link" aria-current={pathname === '/worker/history' ? 'page' : undefined}>
+                <span className="wk-menu-link-icon" aria-hidden="true">
+                  ⟳
+                </span>
+                <span>{t.navHistory}</span>
+              </WorkerLink>
+            </div>
+
+            <div className="wk-menu-footer">
+              <WorkerLink href="/worker/install" className="wk-menu-link" aria-current={pathname === '/worker/install' ? 'page' : undefined}>
+                <span className="wk-menu-link-icon" aria-hidden="true">
+                  ↓
+                </span>
+                <span>{t.navInstallApp}</span>
+              </WorkerLink>
+              <div className="wk-menu-language">
+                <span>{t.navLanguage}</span>
+                <LanguageSwitcher compact />
+              </div>
+              <button type="button" className="wk-menu-logout" disabled={logoutPending} onClick={logout}>
+                {logoutPending ? t.navSigningOut : t.navSignOut}
+              </button>
+            </div>
             {logoutError ? (
               <p className="wk-menu-error" role="alert">
                 {logoutError}
