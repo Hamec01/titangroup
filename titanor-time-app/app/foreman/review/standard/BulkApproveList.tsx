@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
+import { useAppLocale } from '@/components/i18n/AppLocaleProvider';
 
 const CSRF_HEADER_VALUE = 'titanor-time';
 
@@ -15,6 +16,7 @@ interface Item {
 
 export function BulkApproveList({ items }: { items: Item[] }) {
   const router = useRouter();
+  const ru = useAppLocale() === 'RU';
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -50,9 +52,9 @@ export function BulkApproveList({ items }: { items: Item[] }) {
         const body = await response.json().catch(() => null);
         if (body?.error?.code === 'INVALID_SCOPES' && Array.isArray(body.error.invalidScopeIds)) {
           setInvalidIds(new Set(body.error.invalidScopeIds));
-          setError('Some selected timesheets are no longer eligible — nothing was approved. Unselect the highlighted rows and try again.');
+          setError(ru ? 'Некоторые выбранные табели больше не подходят — ничего не одобрено. Снимите выделение с отмеченных строк и попробуйте снова.' : 'Some selected timesheets are no longer eligible — nothing was approved. Unselect the highlighted rows and try again.');
         } else {
-          setError('Something went wrong. Please try again.');
+          setError(ru ? 'Что-то пошло не так. Попробуйте снова.' : 'Something went wrong. Please try again.');
         }
         setLoading(false);
         return;
@@ -61,7 +63,7 @@ export function BulkApproveList({ items }: { items: Item[] }) {
       setSelected(new Set());
       setLoading(false);
     } catch {
-      setError('Network error. Please try again.');
+      setError(ru ? 'Ошибка сети. Попробуйте снова.' : 'Network error. Please try again.');
       setLoading(false);
     }
   }
@@ -88,7 +90,7 @@ export function BulkApproveList({ items }: { items: Item[] }) {
       </ul>
 
       <button className="login-submit" type="button" disabled={loading || selected.size === 0} onClick={handleBulkApprove}>
-        {loading ? 'Approving…' : `Approve selected (${selected.size})`}
+        {loading ? (ru ? 'Одобрение…' : 'Approving…') : (ru ? `Одобрить выбранные (${selected.size})` : `Approve selected (${selected.size})`)}
       </button>
     </div>
   );

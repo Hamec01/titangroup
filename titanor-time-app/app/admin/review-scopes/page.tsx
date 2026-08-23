@@ -2,6 +2,9 @@ import { redirect } from 'next/navigation';
 import Link from 'next/link';
 import { resolveServerSession } from '@/lib/server-session';
 import { listReviewScopes } from '@/lib/review-scopes';
+import { resolveAppLocale } from '@/lib/i18n/server';
+import { adminDailyStrings } from '@/lib/i18n/admin-daily';
+import { localeText } from '@/lib/i18n/locale';
 
 export const dynamic = 'force-dynamic';
 
@@ -14,13 +17,15 @@ export default async function AdminReviewScopesPage() {
   if (!session) {
     redirect('/login');
   }
+  const locale = await resolveAppLocale();
+  const s = adminDailyStrings(locale);
 
   const isAdmin = session.user.roles.includes('ADMIN') || session.user.roles.includes('SUPER_ADMIN');
   if (!isAdmin) {
     return (
       <main className="setup-page">
         <p className="login-error" role="alert">
-          Access denied — this page requires the ADMIN or SUPER_ADMIN role.
+          {s.accessDenied}
         </p>
       </main>
     );
@@ -31,19 +36,19 @@ export default async function AdminReviewScopesPage() {
   return (
     <main className="setup-page">
       <div className="setup-card worker-card">
-        <h1>Timesheets to review</h1>
+        <h1>{localeText(locale, 'Timesheets to review', 'Табели на проверку')}</h1>
         <p className="setup-subtitle">
-          {totalItems} pending scope{totalItems === 1 ? '' : 's'}
+          {localeText(locale, `${totalItems} pending scope${totalItems === 1 ? '' : 's'}`, `Ожидает проверки: ${totalItems}`)}
         </p>
         {items.length === 0 ? (
-          <p>Nothing pending review.</p>
+          <p>{localeText(locale, 'Nothing pending review.', 'Нет табелей, ожидающих проверки.')}</p>
         ) : (
           <table className="worker-table">
             <thead>
               <tr>
-                <th>Employee</th>
-                <th>Scope</th>
-                <th>Exception?</th>
+                <th>{s.common.name}</th>
+                <th>{localeText(locale, 'Scope', 'Раздел')}</th>
+                <th>{localeText(locale, 'Exception?', 'Исключение?')}</th>
               </tr>
             </thead>
             <tbody>
@@ -52,10 +57,14 @@ export default async function AdminReviewScopesPage() {
                   <td>{item.employeeName}</td>
                   <td>
                     <Link href={`/admin/review-scopes/${item.id}`}>
-                      {item.scopeType === 'SITE' ? item.siteName : item.scopePurpose === 'EMPTY_FALLBACK' ? 'Empty timesheet confirmation' : 'Non-site data'}
+                      {item.scopeType === 'SITE'
+                        ? item.siteName
+                        : item.scopePurpose === 'EMPTY_FALLBACK'
+                          ? localeText(locale, 'Empty timesheet confirmation', 'Подтверждение пустого табеля')
+                          : localeText(locale, 'Non-site data', 'Данные вне объекта')}
                     </Link>
                   </td>
-                  <td>{item.hasException ? 'Yes' : '—'}</td>
+                  <td>{item.hasException ? s.common.yes : '—'}</td>
                 </tr>
               ))}
             </tbody>

@@ -4,6 +4,8 @@ import { resolveServerSession } from '@/lib/server-session';
 import { listForemanReviewScopes } from '@/lib/foreman-review';
 import { helsinkiToday } from '@/lib/workers';
 import { BulkApproveList } from './BulkApproveList';
+import { resolveAppLocale } from '@/lib/i18n/server';
+import { localeText } from '@/lib/i18n/locale';
 
 export const dynamic = 'force-dynamic';
 
@@ -17,11 +19,12 @@ export default async function ForemanReviewStandardPage() {
     redirect('/login');
   }
 
+  const locale = await resolveAppLocale();
   if (!session.user.roles.includes('FOREMAN')) {
     return (
       <main className="setup-page">
         <p className="login-error" role="alert">
-          Access denied — this page requires the FOREMAN role.
+          {localeText(locale, 'Access denied — this page requires the FOREMAN role.', 'Доступ запрещён — эта страница доступна только прорабу.')}
         </p>
       </main>
     );
@@ -39,11 +42,11 @@ export default async function ForemanReviewStandardPage() {
   return (
     <main className="wk-page">
       <div className="wk-card">
-        <h1>Standard</h1>
-        <p className="setup-subtitle">{totalItems} without exceptions</p>
-        {items.length === 0 ? <p className="wk-empty">Nothing here.</p> : <BulkApproveList items={items} />}
+        <h1>{localeText(locale, 'Standard', 'Обычные')}</h1>
+        <p className="setup-subtitle">{localeText(locale, `${totalItems} without exceptions`, `Без исключений: ${totalItems}`)}</p>
+        {items.length === 0 ? <p className="wk-empty">{localeText(locale, 'Nothing here.', 'Здесь пусто.')}</p> : <BulkApproveList items={items} />}
         <p>
-          <Link href="/foreman/review">Back to review queue</Link>
+          <Link href="/foreman/review">{localeText(locale, 'Back to review queue', 'К очереди проверки')}</Link>
         </p>
       </div>
     </main>

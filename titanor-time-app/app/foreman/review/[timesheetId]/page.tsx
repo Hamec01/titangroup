@@ -4,14 +4,23 @@ import { resolveServerSession } from '@/lib/server-session';
 import { getForemanTimesheetDetail } from '@/lib/foreman-review';
 import { helsinkiToday } from '@/lib/workers';
 import { ForemanReviewActions } from './ForemanReviewActions';
-import { workedMinutesFromIsoSegments } from '@/lib/reporting/report-format';
+import { workedMinutesFromIsoSegments, timesheetStatusLabel } from '@/lib/reporting/report-format';
+import { dayTypeLabel } from '@/lib/i18n/worker';
+import { resolveAppLocale } from '@/lib/i18n/server';
+import { localeText } from '@/lib/i18n/locale';
 
 export const dynamic = 'force-dynamic';
 
-function formatMinutes(minutes: number): string {
+const SCOPE_STATUS_LABELS: Record<string, { en: string; ru: string }> = {
+  PENDING: { en: 'pending', ru: 'ожидает' },
+  APPROVED: { en: 'approved', ru: 'одобрено' },
+  RETURNED: { en: 'returned', ru: 'возвращено' }
+};
+
+function formatMinutes(minutes: number, ru: boolean): string {
   const h = Math.floor(minutes / 60);
   const m = Math.round(minutes % 60);
-  return `${h}h${m ? ` ${m}m` : ''}`;
+  return ru ? `${h}ч${m ? ` ${m}м` : ''}` : `${h}h${m ? ` ${m}m` : ''}`;
 }
 
 type RouteParams = { params: Promise<{ timesheetId: string }> };
@@ -26,12 +35,14 @@ export default async function ForemanReviewDetailPage({ params }: RouteParams) {
   if (!session) {
     redirect('/login');
   }
+  const locale = await resolveAppLocale();
+  const ru = locale === 'RU';
 
   if (!session.user.roles.includes('FOREMAN')) {
     return (
       <main className="setup-page">
         <p className="login-error" role="alert">
-          Access denied — this page requires the FOREMAN role.
+          {localeText(locale, 'Access denied — this page requires the FOREMAN role.', 'Доступ запрещён — эта страница доступна только прорабу.')}
         </p>
       </main>
     );
@@ -44,20 +55,22 @@ export default async function ForemanReviewDetailPage({ params }: RouteParams) {
     return (
       <main className="setup-page">
         <div className="setup-card">
-          <p>No timesheet with this id on your own sites.</p>
-          <Link href="/foreman/review">Back to review queue</Link>
+          <p>{localeText(locale, 'No timesheet with this id on your own sites.', 'На ваших объектах нет табеля с таким идентификатором.')}</p>
+          <Link href="/foreman/review">{localeText(locale, 'Back to review queue', 'К очереди проверки')}</Link>
         </div>
       </main>
     );
   }
+
+  const scopeStatusLabel = ru ? (SCOPE_STATUS_LABELS[detail.reviewScopeStatus]?.ru ?? detail.reviewScopeStatus) : (SCOPE_STATUS_LABELS[detail.reviewScopeStatus]?.en ?? detail.reviewScopeStatus);
 
   return (
     <main className="setup-page">
       <div className="setup-card">
         <h1>{detail.employeeName}</h1>
         <p className="setup-subtitle">
-          Status: {detail.status} · version {detail.versionNumber}
-          {detail.hasException ? ' · has exception' : ''}
+          {localeText(locale, 'Status:', 'Статус:')} {timesheetStatusLabel(detail.status, locale)} · {localeText(locale, `version ${detail.versionNumber}`, `версия ${detail.versionNumber}`)}
+          {detail.hasException ? localeText(locale, ' · has exception', ' · есть исключение') : ''}
         </p>
 
         <ul className="setup-list">
@@ -66,14 +79,14 @@ export default async function ForemanReviewDetailPage({ params }: RouteParams) {
               <span className="setup-label">
                 {day.date} —{' '}
                 {day.collapsed
-                  ? 'other site'
+                  ? localeText(locale, 'other site', 'другой объект')
                   : day.dayType !== 'WORK'
-                    ? day.dayType.replace('_', ' ').toLowerCase()
+                    ? dayTypeLabel(day.dayType, locale)
                     : day.segments.length === 0
                       ? day.confirmedZero
-                        ? 'Confirmed 0h'
+                        ? localeText(locale, 'Confirmed 0h', 'Подтверждено 0ч')
                         : '—'
-                      : formatMinutes(workedMinutesFromIsoSegments(day.segments))}
+                      : formatMinutes(workedMinutesFromIsoSegments(day.segments), ru)}
               </span>
             </li>
           ))}
@@ -82,11 +95,11 @@ export default async function ForemanReviewDetailPage({ params }: RouteParams) {
         {detail.reviewScopeStatus === 'PENDING' ? (
           <ForemanReviewActions reviewScopeId={detail.reviewScopeId} />
         ) : (
-          <p className="setup-subtitle">Already {detail.reviewScopeStatus.toLowerCase()}.</p>
+          <p className="setup-subtitle">{localeText(locale, `Already ${detail.reviewScopeStatus.toLowerCase()}.`, `Уже ${scopeStatusLabel}.`)}</p>
         )}
 
         <p>
-          <Link href="/foreman/review">Back to review queue</Link>
+          <Link href="/foreman/review">{localeText(locale, 'Back to review queue', 'К очереди проверки')}</Link>
         </p>
       </div>
     </main>

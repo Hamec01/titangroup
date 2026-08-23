@@ -2,24 +2,26 @@
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
+import { useAppLocale } from '@/components/i18n/AppLocaleProvider';
 
 const CSRF_HEADER_VALUE = 'titanor-time';
 
-function describeError(code: string | undefined): string {
+function describeError(code: string | undefined, ru: boolean): string {
   switch (code) {
     case 'STALE_REVIEW_SCOPE':
-      return 'This scope is no longer pending against the current version (it may have already been reviewed, or the worker resubmitted).';
+      return ru ? 'Этот раздел больше не ожидает проверки для текущей версии (возможно, он уже был проверен, или работник отправил табель повторно).' : 'This scope is no longer pending against the current version (it may have already been reviewed, or the worker resubmitted).';
     case 'SELF_APPROVAL_FORBIDDEN':
-      return 'You cannot review your own timesheet.';
+      return ru ? 'Вы не можете проверять собственный табель.' : 'You cannot review your own timesheet.';
     case 'REVIEW_SCOPE_NOT_FOUND':
-      return 'This scope no longer exists on your sites.';
+      return ru ? 'Этот раздел больше не существует на ваших объектах.' : 'This scope no longer exists on your sites.';
     default:
-      return 'Something went wrong. Please try again.';
+      return ru ? 'Что-то пошло не так. Попробуйте снова.' : 'Something went wrong. Please try again.';
   }
 }
 
 export function ForemanReviewActions({ reviewScopeId }: { reviewScopeId: string }) {
   const router = useRouter();
+  const ru = useAppLocale() === 'RU';
   const [returnReason, setReturnReason] = useState('');
   const [loading, setLoading] = useState<'approve' | 'return' | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -35,20 +37,20 @@ export function ForemanReviewActions({ reviewScopeId }: { reviewScopeId: string 
       });
       if (!response.ok) {
         const body = await response.json().catch(() => null);
-        setError(describeError(body?.error?.code));
+        setError(describeError(body?.error?.code, ru));
         setLoading(null);
         return;
       }
       router.push('/foreman/review');
     } catch {
-      setError('Network error. Please try again.');
+      setError(ru ? 'Ошибка сети. Попробуйте снова.' : 'Network error. Please try again.');
       setLoading(null);
     }
   }
 
   async function handleReturn(): Promise<void> {
     if (returnReason.trim().length === 0) {
-      setError('A reason is required to return a timesheet.');
+      setError(ru ? 'Для возврата табеля требуется указать причину.' : 'A reason is required to return a timesheet.');
       return;
     }
     setLoading('return');
@@ -62,13 +64,13 @@ export function ForemanReviewActions({ reviewScopeId }: { reviewScopeId: string 
       });
       if (!response.ok) {
         const body = await response.json().catch(() => null);
-        setError(describeError(body?.error?.code));
+        setError(describeError(body?.error?.code, ru));
         setLoading(null);
         return;
       }
       router.push('/foreman/review');
     } catch {
-      setError('Network error. Please try again.');
+      setError(ru ? 'Ошибка сети. Попробуйте снова.' : 'Network error. Please try again.');
       setLoading(null);
     }
   }
@@ -82,15 +84,15 @@ export function ForemanReviewActions({ reviewScopeId }: { reviewScopeId: string 
       ) : null}
 
       <button className="login-submit" type="button" disabled={loading !== null} onClick={handleApprove}>
-        {loading === 'approve' ? 'Approving…' : 'Approve'}
+        {loading === 'approve' ? (ru ? 'Одобрение…' : 'Approving…') : (ru ? 'Одобрить' : 'Approve')}
       </button>
 
       <div className="login-field">
-        <label htmlFor="foreman-return-reason">Return reason</label>
+        <label htmlFor="foreman-return-reason">{ru ? 'Причина возврата' : 'Return reason'}</label>
         <textarea id="foreman-return-reason" rows={3} disabled={loading !== null} value={returnReason} onChange={(event) => setReturnReason(event.target.value)} />
       </div>
       <button className="login-submit" type="button" disabled={loading !== null} onClick={handleReturn}>
-        {loading === 'return' ? 'Returning…' : 'Return to worker'}
+        {loading === 'return' ? (ru ? 'Возврат…' : 'Returning…') : (ru ? 'Вернуть работнику' : 'Return to worker')}
       </button>
     </div>
   );
