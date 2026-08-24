@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState, type FormEvent } from 'react';
+import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { useRouter } from 'next/navigation';
 import type { GeofenceHistoryResult } from '@/lib/geofences';
 import { GeofenceMapPicker } from './GeofenceMapPicker';
@@ -45,7 +45,7 @@ function genericErrorMessageFor(locale: AppLocale, code: string | undefined): st
  * /api/admin/sites/:siteId/geofence-versions. `history` is fetched server-side (SiteDetailPage)
  * and refreshed via `router.refresh()` after a successful save — no client-side GET.
  */
-export function GeofenceSection({ siteId, history }: { siteId: string; history: GeofenceHistoryResult }) {
+export function GeofenceSection({ siteId, history, siteAddress }: { siteId: string; history: GeofenceHistoryResult; siteAddress: string | null }) {
   const router = useRouter();
   const locale = useAppLocale();
   const { current, items } = history;
@@ -56,7 +56,7 @@ export function GeofenceSection({ siteId, history }: { siteId: string; history: 
   const [loading, setLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [fieldErrors, setFieldErrors] = useState<Record<string, string[]>>({});
-  const [address, setAddress] = useState('');
+  const [address, setAddress] = useState(siteAddress ?? '');
   const [addressLoading, setAddressLoading] = useState(false);
   const [addressMessage, setAddressMessage] = useState<string | null>(null);
   const [addressResults, setAddressResults] = useState<AddressSearchResult[]>([]);
@@ -69,6 +69,44 @@ export function GeofenceSection({ siteId, history }: { siteId: string; history: 
     setRadiusMeters(current ? String(current.radiusMeters) : String(DEFAULT_RADIUS_METERS));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [current?.id]);
+
+  // One-shot, mount-only auto-suggestion: a site that has never had a geofence version yet (no
+  // "current") gets its pin pre-filled by geocoding its stored address, so the admin isn't forced
+  // to retype the same address into "Find address" below. This never runs again once the site
+  // already has a geofence version — an admin editing the address on an already-located site must
+  // never have its live geofence silently moved out from under active workers.
+  const autoGeocodeRanRef = useRef(false);
+  useEffect(() => {
+    if (autoGeocodeRanRef.current || current) {
+      return;
+    }
+    const trimmed = (siteAddress ?? '').trim();
+    if (trimmed.length < 3) {
+      return;
+    }
+    autoGeocodeRanRef.current = true;
+
+    void (async () => {
+      try {
+        const response = await fetch(`/api/admin/geocoding/search?q=${encodeURIComponent(trimmed)}`, { credentials: 'same-origin', cache: 'no-store' });
+        if (!response.ok) {
+          return;
+        }
+        const body = (await response.json().catch(() => null)) as { items?: AddressSearchResult[] } | null;
+        const top = body?.items?.[0];
+        if (!top) {
+          return;
+        }
+        // Only apply if the admin hasn't already placed a pin themselves while this was in flight.
+        setLatitude((prev) => (prev === '' ? top.latitude : prev));
+        setLongitude((prev) => (prev === '' ? top.longitude : prev));
+        setAddressMessage((prev) => (prev !== null ? prev : localeText(locale, 'Location suggested from the site address. Check the marker and radius, then save.', 'Точка подобрана по адресу объекта. Проверьте маркер и радиус, затем сохраните.')));
+      } catch {
+        // Silent — the admin can still search or click the map manually.
+      }
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>): Promise<void> {
     event.preventDefault();

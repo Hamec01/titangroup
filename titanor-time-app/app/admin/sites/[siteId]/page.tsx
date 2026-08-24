@@ -70,7 +70,7 @@ export default async function SiteDetailPage({ params }: { params: Promise<{ sit
 
         <ForemanAssignmentSection siteId={site.id} foremanAssignments={site.foremanAssignments} assignableForemen={assignableForemen} />
 
-        <GeofenceSection siteId={site.id} history={geofence} />
+        <GeofenceSection siteId={site.id} history={geofence} siteAddress={site.address} />
 
         <h2>{s.sites.assignments}</h2>
         {site.activeAssignments.length === 0 ? (
