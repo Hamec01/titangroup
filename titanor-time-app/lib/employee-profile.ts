@@ -7,6 +7,13 @@ import {
   EmployeeUploadError,
   type EmployeeImageKind
 } from '@/lib/employee-files';
+import { getQualificationDefinitionById } from '@/lib/qualification-catalog';
+import {
+  computeQualificationExpiryStatus,
+  type QualificationExpiryStatus,
+  type QualificationStatusColor
+} from '@/lib/qualification-expiry';
+import { helsinkiCalendarDateAsUtcMidnight } from '@/lib/attendance-clock';
 
 // Worker Profile feature (2026-08-24 plan) — docs/titanor-time/02_ROLE_PERMISSION_MATRIX.md
 // §2.2 worker.profile.* rows. Shared core between the worker self-service routes
@@ -20,9 +27,23 @@ const MIN_BIRTH_DATE = new Date(Date.UTC(new Date().getUTCFullYear() - 100, 0, 1
 
 export interface EmployeeQualificationView {
   id: string;
+  definitionId: string | null;
+  definitionCode: string | null;
+  category: string | null;
+  /** Custom name (legacy/"Other" entries) or a snapshot of the catalog's English name. */
   name: string;
+  /** Catalog Russian name, present only when definitionId is set — null for custom entries. */
+  nameRu: string | null;
+  certificateNumber: string | null;
+  issuer: string | null;
+  issuedOn: string | null;
   expiresOn: string | null;
   hasPhoto: boolean;
+  verificationState: 'SELF_REPORTED' | 'VERIFIED';
+  verifiedAt: string | null;
+  verifiedByUsername: string | null;
+  expiryStatus: QualificationExpiryStatus;
+  expiryColor: QualificationStatusColor;
   createdAt: string;
 }
 
@@ -65,9 +86,25 @@ export async function getEmployeeProfileView(employeeId: string, includeContract
     prisma.employeeQualification.findMany({
       where: { employeeId },
       orderBy: { createdAt: 'desc' },
-      select: { id: true, name: true, expiresOn: true, photoPath: true, createdAt: true }
+      select: {
+        id: true,
+        name: true,
+        certificateNumber: true,
+        issuer: true,
+        issuedOn: true,
+        expiresOn: true,
+        photoPath: true,
+        createdAt: true,
+        verificationState: true,
+        verifiedAt: true,
+        verifiedByUser: { select: { username: true } },
+        definitionId: true,
+        definition: { select: { code: true, category: true, nameRu: true, expiryMode: true } }
+      }
     })
   ]);
+
+  const today = helsinkiCalendarDateAsUtcMidnight(new Date());
 
   return {
     employeeId,
@@ -80,13 +117,29 @@ export async function getEmployeeProfileView(employeeId: string, includeContract
       includeContract && profile?.contractPath && profile.contractUploadedAt
         ? { uploadedAt: profile.contractUploadedAt.toISOString(), uploadedByUsername: profile.contractUploadedByUser?.username ?? null }
         : null,
-    qualifications: qualifications.map((q) => ({
-      id: q.id,
-      name: q.name,
-      expiresOn: q.expiresOn ? formatDate(q.expiresOn) : null,
-      hasPhoto: Boolean(q.photoPath),
-      createdAt: q.createdAt.toISOString()
-    }))
+    qualifications: qualifications.map((q) => {
+      const expiryMode = q.definition?.expiryMode ?? (q.expiresOn ? 'OPTIONAL' : 'NONE');
+      const expiry = computeQualificationExpiryStatus(expiryMode, q.expiresOn, today);
+      return {
+        id: q.id,
+        definitionId: q.definitionId,
+        definitionCode: q.definition?.code ?? null,
+        category: q.definition?.category ?? null,
+        name: q.name,
+        nameRu: q.definition?.nameRu ?? null,
+        certificateNumber: q.certificateNumber,
+        issuer: q.issuer,
+        issuedOn: q.issuedOn ? formatDate(q.issuedOn) : null,
+        expiresOn: q.expiresOn ? formatDate(q.expiresOn) : null,
+        hasPhoto: Boolean(q.photoPath),
+        verificationState: q.verificationState,
+        verifiedAt: q.verifiedAt ? q.verifiedAt.toISOString() : null,
+        verifiedByUsername: q.verifiedByUser?.username ?? null,
+        expiryStatus: expiry.status,
+        expiryColor: expiry.color,
+        createdAt: q.createdAt.toISOString()
+      };
+    })
   };
 }
 
@@ -262,24 +315,58 @@ export async function getEmployeeContractPath(employeeId: string): Promise<strin
 
 export interface CreateQualificationInput {
   employeeId: string;
-  name: string;
+  /** Catalog entry id, or null for a custom ("Other") qualification. */
+  definitionId: string | null;
+  /** Required when definitionId is null (custom name); ignored (snapshot from the catalog is used instead) when definitionId is set. */
+  name: string | null;
+  certificateNumber: string | null;
+  issuer: string | null;
+  issuedOn: Date | null;
   expiresOn: Date | null;
   photoFile: File | null;
   actorUserId: string;
   requestId: string;
+  /** True for admin-authored routes: sets verificationState=VERIFIED immediately (§12 of the task spec — an admin creating a card is itself a verification act). False for worker self-service: SELF_REPORTED, and workers can never set VERIFIED. */
+  isAdminActor: boolean;
 }
 
 export type CreateQualificationResult =
   | { ok: true; id: string }
   | { ok: false; code: 'VALIDATION_ERROR'; fieldErrors: Record<string, string[]> }
+  | { ok: false; code: 'DEFINITION_NOT_FOUND' | 'DEFINITION_NOT_SELECTABLE' }
   | { ok: false; code: 'UNSUPPORTED_TYPE' | 'TOO_LARGE' | 'EMPLOYEE_NOT_FOUND' };
 
 export async function createEmployeeQualification(input: CreateQualificationInput): Promise<CreateQualificationResult> {
   const fieldErrors: Record<string, string[]> = {};
-  if (input.name.trim().length === 0) {
+  let resolvedName = input.name?.trim() ?? '';
+  let expiryMode: 'REQUIRED' | 'OPTIONAL' | 'NONE' = 'OPTIONAL';
+
+  if (input.definitionId) {
+    const definition = await getQualificationDefinitionById(input.definitionId);
+    if (!definition) {
+      return { ok: false, code: 'DEFINITION_NOT_FOUND' };
+    }
+    if (definition.scope !== 'EMPLOYEE') {
+      // Company reference standards (EN ISO 3834, EN 1090, EN 15085, PED 2014/68/EU) are never
+      // a personal employee certificate — §9/§13 of the task spec.
+      return { ok: false, code: 'DEFINITION_NOT_SELECTABLE' };
+    }
+    resolvedName = definition.nameEn;
+    expiryMode = definition.expiryMode;
+  } else if (resolvedName.length === 0) {
     fieldErrors.name = ['required'];
-  } else if (input.name.length > 120) {
+  } else if (resolvedName.length > 120) {
     fieldErrors.name = ['must be 120 characters or fewer'];
+  }
+
+  if (input.certificateNumber && input.certificateNumber.length > 80) {
+    fieldErrors.certificateNumber = ['must be 80 characters or fewer'];
+  }
+  if (input.issuer && input.issuer.length > 160) {
+    fieldErrors.issuer = ['must be 160 characters or fewer'];
+  }
+  if (expiryMode === 'REQUIRED' && !input.expiresOn) {
+    fieldErrors.expiresOn = ['required for this qualification'];
   }
   if (Object.keys(fieldErrors).length > 0) {
     return { ok: false, code: 'VALIDATION_ERROR', fieldErrors };
@@ -290,8 +377,20 @@ export async function createEmployeeQualification(input: CreateQualificationInpu
     return { ok: false, code: 'EMPLOYEE_NOT_FOUND' };
   }
 
+  const verificationState = input.isAdminActor ? 'VERIFIED' : 'SELF_REPORTED';
   const created = await prisma.employeeQualification.create({
-    data: { employeeId: input.employeeId, name: input.name.trim(), expiresOn: input.expiresOn }
+    data: {
+      employeeId: input.employeeId,
+      definitionId: input.definitionId,
+      name: resolvedName,
+      certificateNumber: input.certificateNumber?.trim() || null,
+      issuer: input.issuer?.trim() || null,
+      issuedOn: input.issuedOn,
+      expiresOn: input.expiresOn,
+      verificationState,
+      verifiedAt: input.isAdminActor ? new Date() : null,
+      verifiedByUserId: input.isAdminActor ? input.actorUserId : null
+    }
   });
 
   if (input.photoFile) {
@@ -316,11 +415,135 @@ export async function createEmployeeQualification(input: CreateQualificationInpu
       entityId: created.id,
       requestId: input.requestId,
       beforeValue: null,
-      afterValue: { name: input.name.trim(), expiresOn: input.expiresOn ? formatDate(input.expiresOn) : null }
+      afterValue: {
+        definitionId: input.definitionId,
+        name: resolvedName,
+        expiresOn: input.expiresOn ? formatDate(input.expiresOn) : null,
+        verificationState
+      }
     });
   });
 
   return { ok: true, id: created.id };
+}
+
+export interface UpdateQualificationInput {
+  qualificationId: string;
+  employeeId: string;
+  certificateNumber: string | null;
+  issuer: string | null;
+  issuedOn: Date | null;
+  expiresOn: Date | null;
+  actorUserId: string;
+  requestId: string;
+}
+
+export type UpdateQualificationResult =
+  | { ok: true }
+  | { ok: false; code: 'VALIDATION_ERROR'; fieldErrors: Record<string, string[]> }
+  | { ok: false; code: 'NOT_FOUND' | 'FORBIDDEN' };
+
+/** Admin-only metadata edit (certificate number/issuer/issued/expires) — never touches `name`/
+ * `definitionId` (re-pick by deleting and re-adding) or `verificationState` (see
+ * setQualificationVerification). */
+export async function updateEmployeeQualification(input: UpdateQualificationInput): Promise<UpdateQualificationResult> {
+  const existing = await prisma.employeeQualification.findUnique({
+    where: { id: input.qualificationId },
+    select: { id: true, employeeId: true, definitionId: true, certificateNumber: true, issuer: true, issuedOn: true, expiresOn: true, definition: { select: { expiryMode: true } } }
+  });
+  if (!existing) {
+    return { ok: false, code: 'NOT_FOUND' };
+  }
+  if (existing.employeeId !== input.employeeId) {
+    return { ok: false, code: 'FORBIDDEN' };
+  }
+
+  const fieldErrors: Record<string, string[]> = {};
+  if (input.certificateNumber && input.certificateNumber.length > 80) {
+    fieldErrors.certificateNumber = ['must be 80 characters or fewer'];
+  }
+  if (input.issuer && input.issuer.length > 160) {
+    fieldErrors.issuer = ['must be 160 characters or fewer'];
+  }
+  if (existing.definition?.expiryMode === 'REQUIRED' && !input.expiresOn) {
+    fieldErrors.expiresOn = ['required for this qualification'];
+  }
+  if (Object.keys(fieldErrors).length > 0) {
+    return { ok: false, code: 'VALIDATION_ERROR', fieldErrors };
+  }
+
+  await prisma.$transaction(async (tx) => {
+    await tx.employeeQualification.update({
+      where: { id: existing.id },
+      data: {
+        certificateNumber: input.certificateNumber?.trim() || null,
+        issuer: input.issuer?.trim() || null,
+        issuedOn: input.issuedOn,
+        expiresOn: input.expiresOn
+      }
+    });
+    await createAuditEvent(tx, {
+      actorUserId: input.actorUserId,
+      eventType: 'EMPLOYEE_QUALIFICATION_UPDATED',
+      entityType: 'EMPLOYEE_QUALIFICATION',
+      entityId: existing.id,
+      requestId: input.requestId,
+      beforeValue: {
+        certificateNumber: existing.certificateNumber,
+        issuer: existing.issuer,
+        issuedOn: existing.issuedOn ? formatDate(existing.issuedOn) : null,
+        expiresOn: existing.expiresOn ? formatDate(existing.expiresOn) : null
+      },
+      afterValue: {
+        certificateNumber: input.certificateNumber?.trim() || null,
+        issuer: input.issuer?.trim() || null,
+        issuedOn: input.issuedOn ? formatDate(input.issuedOn) : null,
+        expiresOn: input.expiresOn ? formatDate(input.expiresOn) : null
+      }
+    });
+  });
+
+  return { ok: true };
+}
+
+export type SetVerificationResult = { ok: true } | { ok: false; code: 'NOT_FOUND' };
+
+/** Admin-only (§12 — workers can never self-verify; routes must never call this from a worker
+ * session). `verify=false` clears verification back to SELF_REPORTED. */
+export async function setEmployeeQualificationVerification(input: {
+  qualificationId: string;
+  employeeId: string;
+  verify: boolean;
+  actorUserId: string;
+  requestId: string;
+}): Promise<SetVerificationResult> {
+  const existing = await prisma.employeeQualification.findUnique({
+    where: { id: input.qualificationId },
+    select: { id: true, employeeId: true, verificationState: true }
+  });
+  if (!existing || existing.employeeId !== input.employeeId) {
+    return { ok: false, code: 'NOT_FOUND' };
+  }
+
+  await prisma.$transaction(async (tx) => {
+    await tx.employeeQualification.update({
+      where: { id: existing.id },
+      data: input.verify
+        ? { verificationState: 'VERIFIED', verifiedAt: new Date(), verifiedByUserId: input.actorUserId }
+        : { verificationState: 'SELF_REPORTED', verifiedAt: null, verifiedByUserId: null }
+    });
+    await createAuditEvent(tx, {
+      actorUserId: input.actorUserId,
+      eventType: input.verify ? 'EMPLOYEE_QUALIFICATION_VERIFIED' : 'EMPLOYEE_QUALIFICATION_UNVERIFIED',
+      entityType: 'EMPLOYEE_QUALIFICATION',
+      entityId: existing.id,
+      requestId: input.requestId,
+      beforeValue: { verificationState: existing.verificationState },
+      afterValue: { verificationState: input.verify ? 'VERIFIED' : 'SELF_REPORTED' }
+    });
+  });
+
+  return { ok: true };
 }
 
 export type DeleteQualificationResult = { ok: true } | { ok: false; code: 'NOT_FOUND' | 'FORBIDDEN' };

@@ -32,7 +32,7 @@ function formatDate(date: Date): string {
 // §BG-BJ — CSV_V1 exact byte contract. Pure functions, no I/O.
 // ============================================================================
 
-const CSV_BOM = Buffer.from([0xef, 0xbb, 0xbf]);
+export const CSV_BOM = Buffer.from([0xef, 0xbb, 0xbf]);
 const CRLF = '\r\n';
 
 export const CSV_V1_COLUMNS = [
@@ -73,10 +73,13 @@ function escapeCell(value: string): string {
   return `"${value.replace(/"/g, '""')}"`;
 }
 
-function buildCsvRow(cells: readonly (string | number)[]): string {
+/** Same BOM+CRLF+quote-every-cell+formula-injection-guard primitive CSV_V1 uses (§BG-BJ), with
+ * the human-text column set passed in — reused as-is by lib/reporting/custom-report-csv.ts
+ * (task spec Part A) instead of a second CSV-building implementation. */
+export function buildCsvRow(cells: readonly (string | number)[], humanTextColumnIndices: ReadonlySet<number> = HUMAN_TEXT_COLUMN_INDICES): string {
   const escaped = cells.map((cell, index) => {
     const raw = String(cell);
-    const sanitized = HUMAN_TEXT_COLUMN_INDICES.has(index) ? sanitizeHumanTextCell(raw) : raw;
+    const sanitized = humanTextColumnIndices.has(index) ? sanitizeHumanTextCell(raw) : raw;
     return escapeCell(sanitized);
   });
   return escaped.join(',') + CRLF;

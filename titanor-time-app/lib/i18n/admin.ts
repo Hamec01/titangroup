@@ -7,6 +7,16 @@ export interface AdminStrings {
   signOut: string;
   signingOut: string;
   signOutError: string;
+  notificationBellLabel: string;
+  notificationDrawerTitle: string;
+  notificationDrawerEmpty: string;
+  notificationViewWorker: string;
+  notificationDismiss: string;
+  notificationClose: string;
+  notificationSeverityWarning: string;
+  notificationSeverityCritical: string;
+  notificationToastView: string;
+  notificationToastClose: string;
 }
 
 export const ADMIN_STRINGS: Record<AppLocale, AdminStrings> = {
@@ -16,7 +26,17 @@ export const ADMIN_STRINGS: Record<AppLocale, AdminStrings> = {
     guideLink: 'User guide',
     signOut: 'Sign out',
     signingOut: 'Signing out…',
-    signOutError: 'Could not sign out. Check your connection and try again.'
+    signOutError: 'Could not sign out. Check your connection and try again.',
+    notificationBellLabel: 'Notifications',
+    notificationDrawerTitle: 'Notifications',
+    notificationDrawerEmpty: 'No active notifications.',
+    notificationViewWorker: 'View worker',
+    notificationDismiss: 'Dismiss',
+    notificationClose: 'Close',
+    notificationSeverityWarning: 'Warning',
+    notificationSeverityCritical: 'Critical',
+    notificationToastView: 'View',
+    notificationToastClose: 'Close'
   },
   RU: {
     accessDenied: 'Доступ запрещён — этот раздел доступен только администратору.',
@@ -24,7 +44,17 @@ export const ADMIN_STRINGS: Record<AppLocale, AdminStrings> = {
     guideLink: 'Инструкция',
     signOut: 'Выйти',
     signingOut: 'Выполняется выход…',
-    signOutError: 'Не удалось выйти. Проверьте соединение и попробуйте ещё раз.'
+    signOutError: 'Не удалось выйти. Проверьте соединение и попробуйте ещё раз.',
+    notificationBellLabel: 'Уведомления',
+    notificationDrawerTitle: 'Уведомления',
+    notificationDrawerEmpty: 'Активных уведомлений нет.',
+    notificationViewWorker: 'Открыть работника',
+    notificationDismiss: 'Скрыть',
+    notificationClose: 'Закрыть',
+    notificationSeverityWarning: 'Предупреждение',
+    notificationSeverityCritical: 'Критично',
+    notificationToastView: 'Открыть',
+    notificationToastClose: 'Закрыть'
   }
 };
 
@@ -70,6 +100,7 @@ export const ADMIN_NAV: Record<AppLocale, AdminNavStrings> = {
         label: 'People',
         items: [
           { href: '/admin/workers', label: 'Workers' },
+          { href: '/admin/qualifications', label: 'Qualifications' },
           { href: '/admin/assignments', label: 'Assignments' },
           { href: '/admin/users', label: 'Users' }
         ]
@@ -122,6 +153,7 @@ export const ADMIN_NAV: Record<AppLocale, AdminNavStrings> = {
         label: 'Работники',
         items: [
           { href: '/admin/workers', label: 'Работники' },
+          { href: '/admin/qualifications', label: 'Допуски и сертификаты' },
           { href: '/admin/assignments', label: 'Назначения' },
           { href: '/admin/users', label: 'Пользователи' }
         ]

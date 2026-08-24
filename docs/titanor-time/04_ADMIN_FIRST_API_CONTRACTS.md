@@ -1,6 +1,7 @@
 # Titanor Time — API-контракты первого Admin-first вертикального сценария
 
-Версия: **5.4.1** (2026-07-23). Статус: **proposed architecture**. Покрывает эндпоинты, нужные для
+Версия: **5.5.0** (2026-08-24, +§25 Qualifications Matrix + Admin Notification Center + Custom
+Report). Статус: **proposed architecture**. Покрывает эндпоинты, нужные для
 сценария:
 
 ```text
@@ -2267,3 +2268,83 @@ permission requirement или CSV byte contract этим коммитом не �
 - `GET /api/admin/attendance/workers/:employeeId/locations?from=&to=`:
   `attendance.gps.read.raw` + `worker.read.all`, максимум 31 день/200 строк, private no-store.
   Каждый success пишет sanitized `ATTENDANCE_RAW_GPS_VIEWED`, никогда сами координаты.
+
+## 25. Qualifications Matrix + Admin Notification Center + Custom Report (2026-08-24)
+
+Три связанные фичи поверх существующей архитектуры — переиспользуют существующие permission-
+комбинации и reporting core, где возможно (`02_ROLE_PERMISSION_MATRIX.md` §2.10a). Ни один
+существующий endpoint этого документа не изменён.
+
+#### `GET /api/qualification-definitions`
+- Permission: `worker.profile.read.own` **или** `worker.profile.read.all` (покрывает WORKER/ADMIN/
+  SUPER_ADMIN; FOREMAN не имеет ни одного из двух)
+- Response `200`: `{ "items": [{ "id", "code", "category", "scope", "nameEn", "nameRu",
+  "descriptionEn", "descriptionRu", "expiryMode", "sortOrder" }] }` — только `scope=EMPLOYEE`
+  (company-reference standards никогда не в этом списке)
+- Read-only, ноль CSRF/idempotency
+
+#### `POST /api/worker/profile/qualifications` (расширен, не заменён)
+- Тот же route/permission/CSRF/idempotency, что и до этой задачи (`worker.profile.update.own`)
+- Новые multipart-поля (все опциональны кроме одного из `definitionId`/`name`):
+  `definitionId?`, `certificateNumber?`, `issuer?`, `issuedOn?` — `name` теперь опционален, если
+  `definitionId` задан (snapshot имени берётся из каталога)
+- Новые ошибки: `400 DEFINITION_NOT_FOUND`, `400 DEFINITION_NOT_SELECTABLE` (выбран
+  `COMPANY_REFERENCE` definition)
+- `verificationState` всегда `SELF_REPORTED` на этом route — worker не может передать иное
+
+#### `POST /api/admin/workers/:employeeId/profile/qualifications` (расширен)
+- Тот же route/permission/CSRF/idempotency (`worker.profile.update.all`); те же новые поля, что
+  выше; `verificationState` всегда `VERIFIED` при создании ADMIN'ом
+
+#### `PATCH /api/admin/workers/:employeeId/profile/qualifications/:qualificationId` (новый метод на существующем route)
+- Permission: `worker.profile.update.all`; CSRF обязателен
+- Body вариант A (verify/unverify): `{ "verify": true|false }`
+- Body вариант B (metadata edit): `{ "certificateNumber"?, "issuer"?, "issuedOn"?, "expiresOn"? }`
+  — никогда не меняет `name`/`definitionId` (для смены — удалить и добавить заново)
+- Ошибки: `404 NOT_FOUND`, `400 VALIDATION_ERROR` (напр. `expiryMode=REQUIRED` без `expiresOn`)
+- Audit: `EMPLOYEE_QUALIFICATION_VERIFIED` / `EMPLOYEE_QUALIFICATION_UNVERIFIED` /
+  `EMPLOYEE_QUALIFICATION_UPDATED`
+
+#### `GET /api/admin/qualifications`
+- Permission: `worker.profile.read.all` **и** `worker.read.all` вместе
+- Query: `search`, `qualification` (definition code), `status`
+  (`ALL|VALID|EXPIRING_SOON|CRITICAL|EXPIRED|MISSING_EXPIRY|MISSING`), `siteId`, `verification`
+  (`ALL|VERIFIED|SELF_REPORTED`), `sort` (`ATTENTION|NAME|EXPIRY`), `page` — все server-side,
+  никогда весь список работников в browser для client-side фильтрации
+- Response `200`: `{ "items": [...worker rows с safety/hotwork indicators + chips...], "page",
+  "pageSize", "totalItems", "totalPages" }` — ноль UUID кроме внутренних id полей, используемых
+  только как React key/link target, никогда отображаемых как текст
+- Read-only, ноль CSRF/idempotency
+
+#### `GET /api/admin/notifications`
+- Permission: `admin.notification.read`
+- Вызывает `ensureQualificationNotifications()` перед чтением (idempotent generation, §4.8a)
+- Response `200`: `{ "items": [...активные, не dismissed текущим админом...], "total" }`
+- Read-only, ноль CSRF/idempotency
+
+#### `POST /api/admin/notifications/:notificationId/dismiss`
+- Permission: `admin.notification.dismiss`; CSRF обязателен
+- `userId` всегда из session — тело запроса не может указать другого пользователя
+- Naturally idempotent (upsert на unique `(notificationId, userId)`) — без `Idempotency-Key`
+  (в отличие от `POST .../periods/:periodId/export`, здесь повтор — безопасный no-op, не
+  дублирующий необратимый side effect, поэтому тяжёлая idempotency-ceremony не нужна)
+- Ошибки: `404 NOT_FOUND` (malformed или несуществующий `notificationId`)
+
+#### `GET /api/admin/reports/custom/export`
+- Permission: `worker.read.all` + `site.read.all` + `timesheet.read.all` + `export.read` вместе
+- Query: `dateFrom`, `dateTo` (`YYYY-MM-DD`, оба обязательны, `dateFrom<=dateTo`, диапазон ≤366
+  дней), `employeeIds[]`/`siteIds[]` (repeated params или comma-separated; пусто = все),
+  `dataMode` (`FINAL_APPROVED_ONLY` default | `CURRENT_CANONICAL`), `detail` (`SUMMARY` default |
+  `DETAILED`), `format` (`CSV` default | `PDF`)
+- Response: файл напрямую (`Content-Disposition: attachment`), никогда JSON-обёртка — та же
+  browser-native-download конвенция, что `/admin/export`'а `<a href>`
+- CSV headers: `Content-Type: text/csv; charset=utf-8`, `X-Content-Type-Options: nosniff`,
+  `Cache-Control: private, no-store`. PDF headers: `Content-Type: application/pdf`, те же
+  остальные. Filename: `titanor-time-report_<dateFrom>_<dateTo>.csv|pdf`
+- Ошибки: `400 VALIDATION_ERROR` (невалидная дата/диапазон/id/enum значение) — JSON error envelope
+  как обычно, только в failure-случае (успех — файл)
+- Stateless — ноль `ExportBatch`/`ExportItem` строк создаётся; canonical-расчёт полностью
+  переиспользует `lib/reporting/worked-time.ts`/`canonical-source.ts`/`canonical-daily-buckets.ts`
+  (T8.1-T8.4B ядро), см. `T8_REPORTS_DESIGN.md` Addendum "Custom Report". Read-only относительно
+  БД (никаких mutation-эффектов) — ноль CSRF/idempotency, тот же посыл, что и у трёх существующих
+  T8 report GET'ов

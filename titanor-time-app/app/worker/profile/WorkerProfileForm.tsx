@@ -1,19 +1,24 @@
 'use client';
 
-import { useState, type FormEvent } from 'react';
+import { useEffect, useState, type FormEvent } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAppLocale } from '@/components/i18n/AppLocaleProvider';
 import { WORKER_STRINGS } from '@/lib/i18n/worker';
 import type { EmployeeProfileView } from '@/lib/employee-profile';
+import { QualificationBadge, VerificationBadge } from '@/components/qualifications/QualificationBadge';
 
 const CSRF_HEADER_VALUE = 'titanor-time';
 
-export interface WorkerProfileFormProps {
-  initialProfile: EmployeeProfileView;
+interface CatalogEntry {
+  id: string;
+  code: string;
+  nameEn: string;
+  nameRu: string;
+  expiryMode: 'REQUIRED' | 'OPTIONAL' | 'NONE';
 }
 
-function todayKey(): string {
-  return new Date().toISOString().slice(0, 10);
+export interface WorkerProfileFormProps {
+  initialProfile: EmployeeProfileView;
 }
 
 export function WorkerProfileForm({ initialProfile }: WorkerProfileFormProps) {
@@ -35,12 +40,35 @@ export function WorkerProfileForm({ initialProfile }: WorkerProfileFormProps) {
   const [fieldErrors, setFieldErrors] = useState<Record<string, string[]>>({});
   const [photoBusy, setPhotoBusy] = useState(false);
 
+  const [catalog, setCatalog] = useState<CatalogEntry[] | null>(null);
   const [addingQualification, setAddingQualification] = useState(false);
+  const [qDefinitionId, setQDefinitionId] = useState('');
   const [qName, setQName] = useState('');
+  const [qCertificateNumber, setQCertificateNumber] = useState('');
+  const [qIssuer, setQIssuer] = useState('');
+  const [qIssuedOn, setQIssuedOn] = useState('');
   const [qExpiresOn, setQExpiresOn] = useState('');
   const [qPhoto, setQPhoto] = useState<File | null>(null);
   const [qBusy, setQBusy] = useState(false);
   const [qError, setQError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!addingQualification || catalog !== null) return;
+    fetch('/api/qualification-definitions', { credentials: 'same-origin' })
+      .then((r) => (r.ok ? r.json() : { items: [] }))
+      .then((body) => setCatalog(body.items ?? []))
+      .catch(() => setCatalog([]));
+  }, [addingQualification, catalog]);
+
+  const selectedDefinition = catalog?.find((c) => c.id === qDefinitionId) ?? null;
+  const expiresOnRequired = selectedDefinition ? selectedDefinition.expiryMode === 'REQUIRED' : false;
+
+  async function refetchQualifications(): Promise<void> {
+    const response = await fetch('/api/worker/profile', { credentials: 'same-origin' });
+    if (!response.ok) return;
+    const body = await response.json();
+    setQualifications(body.qualifications ?? []);
+  }
 
   async function handleSave(event: FormEvent<HTMLFormElement>): Promise<void> {
     event.preventDefault();
@@ -125,12 +153,21 @@ export function WorkerProfileForm({ initialProfile }: WorkerProfileFormProps) {
 
   async function handleAddQualification(event: FormEvent<HTMLFormElement>): Promise<void> {
     event.preventDefault();
-    if (qBusy || qName.trim().length === 0) return;
+    const isOther = qDefinitionId === '';
+    if (qBusy || (isOther && qName.trim().length === 0)) return;
+    if (expiresOnRequired && !qExpiresOn) {
+      setQError(t.qualificationExpiresOnRequired);
+      return;
+    }
     setQBusy(true);
     setQError(null);
     try {
       const formData = new FormData();
-      formData.set('name', qName.trim());
+      if (!isOther) formData.set('definitionId', qDefinitionId);
+      if (isOther) formData.set('name', qName.trim());
+      if (qCertificateNumber.trim()) formData.set('certificateNumber', qCertificateNumber.trim());
+      if (qIssuer.trim()) formData.set('issuer', qIssuer.trim());
+      if (qIssuedOn) formData.set('issuedOn', qIssuedOn);
       if (qExpiresOn) formData.set('expiresOn', qExpiresOn);
       if (qPhoto) formData.set('photo', qPhoto);
       const response = await fetch('/api/worker/profile/qualifications', {
@@ -144,8 +181,12 @@ export function WorkerProfileForm({ initialProfile }: WorkerProfileFormProps) {
         setQError(body?.error?.code === 'UNSUPPORTED_TYPE' ? t.profileUnsupportedPhotoType : body?.error?.code === 'TOO_LARGE' ? t.profilePhotoTooLarge : t.errActionNeedsAttention);
         return;
       }
-      setQualifications((prev) => [{ id: body.id, name: qName.trim(), expiresOn: qExpiresOn || null, hasPhoto: Boolean(qPhoto), createdAt: new Date().toISOString() }, ...prev]);
+      await refetchQualifications();
+      setQDefinitionId('');
       setQName('');
+      setQCertificateNumber('');
+      setQIssuer('');
+      setQIssuedOn('');
       setQExpiresOn('');
       setQPhoto(null);
       setAddingQualification(false);
@@ -160,8 +201,6 @@ export function WorkerProfileForm({ initialProfile }: WorkerProfileFormProps) {
     setQualifications((prev) => prev.filter((q) => q.id !== id));
     await fetch(`/api/worker/profile/qualifications/${id}`, { method: 'DELETE', credentials: 'same-origin', headers: { 'X-Requested-With': CSRF_HEADER_VALUE } });
   }
-
-  const today = todayKey();
 
   return (
     <div>
@@ -235,35 +274,60 @@ export function WorkerProfileForm({ initialProfile }: WorkerProfileFormProps) {
           <p className="wk-empty">{t.qualificationsEmpty}</p>
         ) : (
           <ul className="setup-list">
-            {qualifications.map((q) => {
-              const expired = q.expiresOn !== null && q.expiresOn < today;
-              const expiringSoon = !expired && q.expiresOn !== null && q.expiresOn <= new Date(Date.now() + 30 * 86400000).toISOString().slice(0, 10);
-              return (
-                <li key={q.id} className="setup-item">
-                  <span className="setup-label">
-                    {q.name}
-                    {q.expiresOn ? (
-                      <span className={expired || expiringSoon ? 'field-error' : 'setup-subtitle'}> — {q.expiresOn}{expired ? ` (${t.qualificationExpired})` : expiringSoon ? ` (${t.qualificationExpiringSoon})` : ''}</span>
-                    ) : null}
-                  </span>
-                  <button type="button" className="wk-clock-cancel-button" onClick={() => handleDeleteQualification(q.id)}>
-                    {t.qualificationDeleteButton}
-                  </button>
-                </li>
-              );
-            })}
+            {qualifications.map((q) => (
+              <li key={q.id} className="setup-item">
+                <span className="setup-label">
+                  {locale === 'RU' && q.nameRu ? q.nameRu : q.name}
+                  {q.certificateNumber ? <span className="setup-subtitle"> · {q.certificateNumber}</span> : null}
+                  {q.expiresOn ? <span className="setup-subtitle"> · {q.expiresOn}</span> : null}
+                  <QualificationBadge status={q.expiryStatus} color={q.expiryColor} locale={locale} />
+                  <VerificationBadge verified={q.verificationState === 'VERIFIED'} locale={locale} />
+                </span>
+                <button type="button" className="wk-clock-cancel-button" onClick={() => handleDeleteQualification(q.id)}>
+                  {t.qualificationDeleteButton}
+                </button>
+              </li>
+            ))}
           </ul>
         )}
 
         {addingQualification ? (
           <form onSubmit={handleAddQualification} aria-busy={qBusy}>
             <div className="login-field">
-              <label htmlFor="qualification-name">{t.qualificationNameLabel}</label>
-              <input id="qualification-name" type="text" maxLength={120} placeholder={t.qualificationNamePlaceholder} value={qName} onChange={(e) => setQName(e.target.value)} disabled={qBusy} />
+              <label htmlFor="qualification-catalog">{t.qualificationCatalogLabel}</label>
+              <select id="qualification-catalog" value={qDefinitionId} onChange={(e) => setQDefinitionId(e.target.value)} disabled={qBusy || catalog === null}>
+                <option value="">{catalog === null ? t.qualificationCatalogLoading : t.qualificationCatalogOther}</option>
+                {catalog?.map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {locale === 'RU' ? c.nameRu : c.nameEn}
+                  </option>
+                ))}
+              </select>
+            </div>
+            {qDefinitionId === '' ? (
+              <div className="login-field">
+                <label htmlFor="qualification-name">{t.qualificationNameLabel}</label>
+                <input id="qualification-name" type="text" maxLength={120} placeholder={t.qualificationNamePlaceholder} value={qName} onChange={(e) => setQName(e.target.value)} disabled={qBusy} />
+              </div>
+            ) : null}
+            <div className="login-field">
+              <label htmlFor="qualification-certificate-number">{t.qualificationCertificateNumberLabel}</label>
+              <input id="qualification-certificate-number" type="text" maxLength={80} value={qCertificateNumber} onChange={(e) => setQCertificateNumber(e.target.value)} disabled={qBusy} />
             </div>
             <div className="login-field">
-              <label htmlFor="qualification-expiry">{t.qualificationExpiryLabel}</label>
-              <input id="qualification-expiry" type="date" value={qExpiresOn} onChange={(e) => setQExpiresOn(e.target.value)} disabled={qBusy} />
+              <label htmlFor="qualification-issuer">{t.qualificationIssuerLabel}</label>
+              <input id="qualification-issuer" type="text" maxLength={160} value={qIssuer} onChange={(e) => setQIssuer(e.target.value)} disabled={qBusy} />
+            </div>
+            <div className="login-field">
+              <label htmlFor="qualification-issued-on">{t.qualificationIssuedOnLabel}</label>
+              <input id="qualification-issued-on" type="date" value={qIssuedOn} onChange={(e) => setQIssuedOn(e.target.value)} disabled={qBusy} />
+            </div>
+            <div className="login-field">
+              <label htmlFor="qualification-expiry">
+                {t.qualificationExpiryLabel}
+                {expiresOnRequired ? ' *' : ''}
+              </label>
+              <input id="qualification-expiry" type="date" value={qExpiresOn} onChange={(e) => setQExpiresOn(e.target.value)} disabled={qBusy} required={expiresOnRequired} />
             </div>
             <div className="login-field">
               <label htmlFor="qualification-photo">{t.qualificationPhotoLabel}</label>
@@ -275,7 +339,7 @@ export function WorkerProfileForm({ initialProfile }: WorkerProfileFormProps) {
               </p>
             ) : null}
             <div className="wk-switch-actions">
-              <button type="submit" className="login-submit" disabled={qBusy || qName.trim().length === 0}>
+              <button type="submit" className="login-submit" disabled={qBusy || (qDefinitionId === '' && qName.trim().length === 0)}>
                 {qBusy ? t.qualificationAdding : t.qualificationAddButton}
               </button>
               <button type="button" className="wk-clock-cancel-button" onClick={() => setAddingQualification(false)} disabled={qBusy}>

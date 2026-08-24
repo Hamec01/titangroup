@@ -236,6 +236,40 @@ enum ExportBatchKind {
   CORRECTION
 }
 
+// Qualifications Matrix (2026-08-24). EMPLOYEE = selectable as a personal worker credential;
+// COMPANY_REFERENCE = a company/industry standard (e.g. EN ISO 3834) shown as reference only,
+// never offered in the employee qualification picker.
+enum QualificationScope {
+  EMPLOYEE
+  COMPANY_REFERENCE
+}
+
+enum QualificationExpiryMode {
+  REQUIRED
+  OPTIONAL
+  NONE
+}
+
+enum QualificationVerificationState {
+  SELF_REPORTED
+  VERIFIED
+}
+
+// Admin Notification Center (2026-08-24). Only qualification-expiry types exist today; the
+// type enum is deliberately flat so future types (SYSTEM_WARNING, ATTENDANCE_ERROR, ...) can
+// be added without redesigning AdminNotification/AdminNotificationDismissal.
+enum AdminNotificationType {
+  QUALIFICATION_EXPIRING_SOON
+  QUALIFICATION_CRITICAL
+  QUALIFICATION_EXPIRED
+  QUALIFICATION_MISSING_EXPIRY
+}
+
+enum AdminNotificationSeverity {
+  WARNING
+  CRITICAL
+}
+
 model User {
   id                             String                        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   username                       String                        @unique @db.VarChar(64)
@@ -283,6 +317,8 @@ model User {
   updatedSubmissionSchedules     TimesheetSubmissionSchedule[] @relation("TimesheetSubmissionScheduleUpdatedBy")
   assignedSubmissionSchedules    EmployeeTimesheetSchedule[]   @relation("EmployeeTimesheetScheduleAssignedBy")
   uploadedEmployeeContracts      EmployeeProfile[]             @relation("EmployeeProfileContractUploadedBy")
+  verifiedEmployeeQualifications EmployeeQualification[]       @relation("EmployeeQualificationVerifiedBy")
+  adminNotificationDismissals    AdminNotificationDismissal[]
 }
 
 model Role {
@@ -417,6 +453,7 @@ model Employee {
   submissionSchedules   EmployeeTimesheetSchedule[]
   profile               EmployeeProfile?
   qualifications        EmployeeQualification[]
+  adminNotifications    AdminNotification[]
 }
 
 // Worker Profile feature (2026-08-24 plan) — optional, self-service worker info plus an
@@ -443,17 +480,95 @@ model EmployeeProfile {
 
 // FK directly to Employee (not nested under EmployeeProfile) so a worker can add a card
 // before any EmployeeProfile row exists yet.
+// Additive upgrade (2026-08-24, Qualifications Matrix): definitionId links a row to the new
+// QualificationDefinition catalog. Nullable — legacy rows and worker/admin "Other" custom
+// entries keep working with definitionId=null, exactly as before. `name` stays required and
+// keeps holding the display name (catalog nameEn/nameRu snapshot, or free text for custom
+// entries) so every existing reader of `.name` keeps working unchanged.
 model EmployeeQualification {
-  id         String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  employeeId String    @db.Uuid
-  name       String    @db.VarChar(120)
-  expiresOn  DateTime? @db.Date
-  photoPath  String?
-  createdAt  DateTime  @default(now()) @db.Timestamptz(6)
-  updatedAt  DateTime  @updatedAt @db.Timestamptz(6)
-  employee   Employee  @relation(fields: [employeeId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  id                 String                          @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  employeeId         String                          @db.Uuid
+  definitionId       String?                         @db.Uuid
+  name               String                          @db.VarChar(120)
+  certificateNumber  String?                         @db.VarChar(80)
+  issuer             String?                         @db.VarChar(160)
+  issuedOn           DateTime?                       @db.Date
+  expiresOn          DateTime?                       @db.Date
+  photoPath          String?
+  verificationState  QualificationVerificationState @default(SELF_REPORTED)
+  verifiedAt         DateTime?                       @db.Timestamptz(6)
+  verifiedByUserId   String?                         @db.Uuid
+  createdAt          DateTime                        @default(now()) @db.Timestamptz(6)
+  updatedAt          DateTime                        @updatedAt @db.Timestamptz(6)
+  employee           Employee                        @relation(fields: [employeeId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  definition         QualificationDefinition?        @relation(fields: [definitionId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  verifiedByUser     User?                           @relation("EmployeeQualificationVerifiedBy", fields: [verifiedByUserId], references: [id], onDelete: SetNull, onUpdate: Cascade)
+  adminNotifications AdminNotification[]
 
   @@index([employeeId])
+  @@index([definitionId])
+}
+
+// Centralized qualification catalog (2026-08-24). `code` is the stable identifier used by the
+// idempotent seed migration and by report/matrix filters — never reuse a retired code for a
+// different qualification. FI has no translated catalog yet (§10 of the owner spec): UI must
+// fall back to nameEn/descriptionEn for locale=FI rather than inventing a translation.
+model QualificationDefinition {
+  id                     String                   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  code                   String                   @unique @db.VarChar(64)
+  category               String                   @db.VarChar(64)
+  scope                  QualificationScope
+  nameEn                 String                   @db.VarChar(160)
+  nameRu                 String                   @db.VarChar(160)
+  descriptionEn          String?                  @db.Text
+  descriptionRu          String?                  @db.Text
+  expiryMode             QualificationExpiryMode
+  isActive               Boolean                  @default(true)
+  sortOrder              Int                      @default(0)
+  createdAt              DateTime                 @default(now()) @db.Timestamptz(6)
+  updatedAt              DateTime                 @updatedAt @db.Timestamptz(6)
+  employeeQualifications EmployeeQualification[]
+
+  @@index([scope, isActive, sortOrder])
+}
+
+// Admin Notification Center (2026-08-24). Structured event, not a pre-rendered message string,
+// so future non-qualification types (SYSTEM_WARNING, ATTENDANCE_ERROR, ...) reuse this table.
+// `resolvedAt` = the system-level condition cleared (e.g. expiry extended past the threshold);
+// distinct from per-admin dismissal, which lives entirely in AdminNotificationDismissal so
+// admin A dismissing a notification never hides it for admin B. Active-notification dedup
+// (one active row per employeeQualificationId+type+threshold) is enforced by a partial unique
+// index added via raw SQL in this feature's migration (Prisma schema can't express a WHERE
+// clause on an index) — see prisma/migrations/*_add_qualifications_and_notifications.
+model AdminNotification {
+  id                      String                       @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  type                    AdminNotificationType
+  severity                AdminNotificationSeverity
+  employeeId              String?                      @db.Uuid
+  employeeQualificationId String?                      @db.Uuid
+  threshold               Int?
+  createdAt               DateTime                     @default(now()) @db.Timestamptz(6)
+  resolvedAt              DateTime?                    @db.Timestamptz(6)
+  employee                Employee?                    @relation(fields: [employeeId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  employeeQualification   EmployeeQualification?       @relation(fields: [employeeQualificationId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  dismissals              AdminNotificationDismissal[]
+
+  @@index([resolvedAt, createdAt(sort: Desc)])
+  @@index([employeeQualificationId])
+  @@index([employeeId])
+}
+
+// Per-admin dismissal state, normalized out of AdminNotification so it's naturally per-user.
+model AdminNotificationDismissal {
+  id             String            @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  notificationId String            @db.Uuid
+  userId         String            @db.Uuid
+  dismissedAt    DateTime          @default(now()) @db.Timestamptz(6)
+  notification   AdminNotification @relation(fields: [notificationId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  user           User              @relation(fields: [userId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+
+  @@unique([notificationId, userId])
+  @@index([userId])
 }
 
 model TimesheetSubmissionSchedule {

@@ -1691,3 +1691,61 @@ concurrency-доказательства (прямые запросы к БД, �
 app`'s typecheck не требовал Playwright как production-зависимость (см. `IMPLEMENTATION_STATUS.md`
 `[2026-08-20]` записи за подробностями). **T8.4 полностью завершён** (T8.4A schema + T8.4B backend +
 T8.4C admin UI). PDF export и payroll/TES-категории этим коммитом по-прежнему не начаты.
+
+## Addendum "Custom Report" (Qualifications Matrix + Custom Report task, 2026-08-24)
+
+Реализует PDF, но не через `ExportFormat.PDF_V1`, предсказанный выше — этот PDF намеренно
+stateless (прямой download, ноль `ExportBatch` строки), в то время как `ExportFormat` enum целиком
+принадлежит immutable `ExportBatch`-моделированию (T8.4A). `PDF_V1` как значение `ExportFormat`
+остаётся не начатым — если будущая задача захочет persisted/immutable PDF export batch (аналог
+CSV_V1's `ExportBatch`), это по-прежнему отдельная additive-миграция, не затронутая этим
+addendum'ом.
+
+**Новый модуль**: `lib/reporting/custom-time-report.ts`'s `getCustomTimeReport()` — не четвёртый
+независимый report engine. Переиспользует ровно те же примитивы, что T8.1-T8.4:
+`resolveCanonicalSource()` для DRAFT vs CURRENT_VERSION per-timesheet, `computeSegmentMs`/
+`sumWorkedTimeMs`/`msToMinutes` для per-segment расчёта, и `buildCanonicalDailyBuckets()` (shared
+`(employeeId, siteId, date)` bucket) для Summary-агрегации — те же правила округления ("round once
+at the bucket, sum only already-rounded numbers above"), никакой второй формулы.
+
+**Что генуинно новое** (не было ни у одного из T8.1-T8.4): запрос по произвольному диапазону дат,
+не привязанному к одному `PayrollPeriod` — резолвится через все `PayrollPeriod`, пересекающие
+диапазон, затем сегменты дополнительно фильтруются по собственной `date` в пределах запрошенного
+диапазона (шире period). Максимум диапазона — 366 календарных дней включительно. Два data-mode:
+`FINAL_APPROVED_ONLY` (только `Timesheet.status=FINAL_APPROVED`, источник всегда
+`CURRENT_VERSION`) и `CURRENT_CANONICAL` (любой статус, источник per-timesheet через
+`resolveCanonicalSource()`, тот же canonical rule, что и везде).
+
+**Detailed vs Summary — единственное намеренное отклонение от "round once" правила.** Summary-строки
+(группировка по работнику и объекту) — сумма уже округлённых bucket-минут, как и весь T8. Detailed
+report показывает один ряд на сырой сегмент (не bucket) — Date/Employee/Site/Work area/Start/End/
+Paid break/Unpaid break/Worked time/Timesheet status, каждый со своим собственным
+`computeSegmentMs`→`msToMinutes` round. Для типичного случая (один сегмент на bucket-день)
+Detailed-сумма и Summary-bucket совпадают побитово (проверено
+`scripts/_test-custom-report-canonical.ts`); при нескольких сегментах в один bucket-день
+Detailed-строки могут разойтись с Summary на до плюс-минус минуты каждая (сумма-до-округления
+против округления-каждого-сегмента отдельно) — та же, неизбежная для любой dual-granularity
+бухгалтерской системы разница, что между построчным журналом и агрегированной сводкой; сам T8
+никогда не показывал detail-уровень ниже bucket'а, так что прямого прецедента для сравнения нет.
+Cross-check против существующих T8.1/T8.2/T8.3 отчётов (для эквивалентного scope, всегда
+bucket-уровень) — точное побитовое совпадение totals, не приближение.
+
+**CSV**: человекочитаемые значения (`formatWorkedDuration()`, не сырые целые минуты как в CSV_V1),
+ноль UUID (в отличие от CSV_V1, которая включает `employee_id`/`site_id`). Переиспользует CSV_V1's
+byte-level примитивы (`CSV_BOM`, обобщённый `buildCsvRow()` — экспортирован из
+`lib/csv-export.ts` этим addendum'ом, набор human-text колонок теперь параметр, не константа;
+default-параметр сохраняет CSV_V1's собственное поведение без изменений), но собственный,
+отдельный column set (Summary/Detailed) и собственный formula-injection guard scope — не
+`CSV_V1_COLUMNS`.
+
+**PDF**: одна новая server-side зависимость — `pdfkit` (production dependency, никакого
+headless-Chromium). DejaVu Sans embedded (`titanor-time-app/assets/fonts/DejaVuSans*.ttf`,
+Bitstream Vera License, свободно распространяем) — pdfkit's built-in Helvetica не имеет кириллицы
+вовсе, без embedded Unicode-шрифта русские имена рендерились бы пустыми прямоугольниками.
+`Dockerfile` явно копирует `assets/` в runner stage — Next's output-file tracing не отслеживает
+пути, построенные через `path.join(process.cwd(), ...)` (та же категория пробела, что и Prisma
+query engine binary, уже решённая через `outputFileTracingIncludes` в `next.config.mjs`),
+проверено реальной сборкой образа. Summary — A4 portrait; Detailed — A4 landscape; repeatable
+table header на новых страницах, page numbers через `bufferPages`+`switchToPage` (footer-запись
+поверх temporarily-обнулённого `page.margins.bottom` — иначе pdfkit's auto-flow молча создаёт
+лишнюю пустую страницу, найдено визуальной проверкой сгенерированного PDF).

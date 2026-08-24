@@ -44,20 +44,31 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
   } catch {
     return jsonError(400, { code: 'VALIDATION_ERROR', message: 'Request body must be multipart/form-data.' }, requestId);
   }
+  const definitionIdRaw = formData.get('definitionId');
   const name = formData.get('name');
+  const certificateNumberRaw = formData.get('certificateNumber');
+  const issuerRaw = formData.get('issuer');
+  const issuedOnRaw = formData.get('issuedOn');
   const expiresOnRaw = formData.get('expiresOn');
   const photo = formData.get('photo');
 
-  if (typeof name !== 'string' || name.trim().length === 0) {
+  const definitionId = typeof definitionIdRaw === 'string' && definitionIdRaw.length > 0 ? definitionIdRaw : null;
+  if (!definitionId && (typeof name !== 'string' || name.trim().length === 0)) {
     return jsonError(400, { code: 'VALIDATION_ERROR', message: 'name is required.', fieldErrors: { name: ['required'] } }, requestId);
   }
-  let expiresOn: Date | null = null;
-  if (typeof expiresOnRaw === 'string' && expiresOnRaw.length > 0) {
-    if (!DATE_PATTERN.test(expiresOnRaw)) {
-      return jsonError(400, { code: 'VALIDATION_ERROR', message: 'Invalid expiresOn.', fieldErrors: { expiresOn: ['invalid'] } }, requestId);
+  const parseDate = (raw: FormDataEntryValue | null, field: string): Date | null | { error: NextResponse } => {
+    if (typeof raw !== 'string' || raw.length === 0) return null;
+    if (!DATE_PATTERN.test(raw)) {
+      return { error: jsonError(400, { code: 'VALIDATION_ERROR', message: `Invalid ${field}.`, fieldErrors: { [field]: ['invalid'] } }, requestId) };
     }
-    expiresOn = new Date(`${expiresOnRaw}T00:00:00.000Z`);
-  }
+    return new Date(`${raw}T00:00:00.000Z`);
+  };
+  const issuedOnParsed = parseDate(issuedOnRaw, 'issuedOn');
+  if (issuedOnParsed && typeof issuedOnParsed === 'object' && 'error' in issuedOnParsed) return issuedOnParsed.error;
+  const expiresOnParsed = parseDate(expiresOnRaw, 'expiresOn');
+  if (expiresOnParsed && typeof expiresOnParsed === 'object' && 'error' in expiresOnParsed) return expiresOnParsed.error;
+  const issuedOn = issuedOnParsed as Date | null;
+  const expiresOn = expiresOnParsed as Date | null;
   const photoFile = photo instanceof File ? photo : null;
 
   const identity: IdempotencyIdentity = {
@@ -66,7 +77,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     routeTemplate: ROUTE_TEMPLATE,
     idempotencyKey: idempotencyKeyHeader
   };
-  const requestHash = computeRequestHash({ pathParams: { employeeId }, body: { name: name.trim(), expiresOn: expiresOnRaw ?? null, hasPhoto: Boolean(photoFile) } });
+  const requestHash = computeRequestHash({ pathParams: { employeeId }, body: { definitionId, name: typeof name === 'string' ? name.trim() : null, expiresOn: expiresOnRaw ?? null, hasPhoto: Boolean(photoFile) } });
   const begin = await beginIdempotentRequest(identity, requestHash);
   if (begin.kind === 'CACHED') {
     return NextResponse.json(begin.body, { status: begin.statusCode, headers: successHeaders(requestId) });
@@ -83,13 +94,28 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     return NextResponse.json(body, { status: statusCode, headers: successHeaders(requestId) });
   };
 
-  const result = await createEmployeeQualification({ employeeId, name, expiresOn, photoFile, actorUserId: authenticated.user.id, requestId });
+  const result = await createEmployeeQualification({
+    employeeId,
+    definitionId,
+    name: typeof name === 'string' ? name : null,
+    certificateNumber: typeof certificateNumberRaw === 'string' ? certificateNumberRaw : null,
+    issuer: typeof issuerRaw === 'string' ? issuerRaw : null,
+    issuedOn,
+    expiresOn,
+    photoFile,
+    actorUserId: authenticated.user.id,
+    requestId,
+    isAdminActor: true
+  });
   if (!result.ok) {
     if (result.code === 'VALIDATION_ERROR') {
       return respond(400, { error: { code: 'VALIDATION_ERROR', message: 'Invalid request body.', fieldErrors: result.fieldErrors, requestId } });
     }
     if (result.code === 'EMPLOYEE_NOT_FOUND') {
       return respond(404, { error: { code: 'EMPLOYEE_NOT_FOUND', message: 'Employee not found.', requestId } });
+    }
+    if (result.code === 'DEFINITION_NOT_FOUND' || result.code === 'DEFINITION_NOT_SELECTABLE') {
+      return respond(400, { error: { code: result.code, message: 'Invalid qualification selection.', requestId } });
     }
     return respond(400, { error: { code: result.code, message: result.code === 'TOO_LARGE' ? 'Photo is too large.' : 'Unsupported photo type.', requestId } });
   }

@@ -64,6 +64,12 @@ COPY --from=builder --chown=node:node /app/lib ./lib
 COPY --from=builder --chown=node:node /app/package.json ./package.json
 COPY --from=builder --chown=node:node /app/tsconfig.json ./tsconfig.json
 
+# Qualifications Matrix custom report PDF export (lib/reporting/custom-report-pdf.ts) loads these
+# fonts via path.join(process.cwd(), 'assets/fonts/...') at request time, not a static import — so
+# Next's own output-file tracing never picks them up (same class of gap as the Prisma engine
+# binary above), and they must be copied explicitly.
+COPY --from=builder --chown=node:node /app/assets ./assets
+
 USER node
 
 EXPOSE 3000

@@ -231,6 +231,15 @@ export interface WorkerStrings {
   qualificationDeleteButton: string;
   qualificationExpired: string;
   qualificationExpiringSoon: string;
+  qualificationCatalogLabel: string;
+  qualificationCatalogOther: string;
+  qualificationCatalogLoading: string;
+  qualificationCertificateNumberLabel: string;
+  qualificationIssuerLabel: string;
+  qualificationIssuedOnLabel: string;
+  qualificationVerifiedBadge: string;
+  qualificationSelfReportedBadge: string;
+  qualificationExpiresOnRequired: string;
   contractTitle: string;
   contractDownload: string;
   contractNone: string;
@@ -451,6 +460,15 @@ export const WORKER_STRINGS: Record<AppLocale, WorkerStrings> = {
     qualificationDeleteButton: 'Delete',
     qualificationExpired: 'Expired',
     qualificationExpiringSoon: 'Expiring soon',
+    qualificationCatalogLabel: 'Qualification',
+    qualificationCatalogOther: 'Other (custom)',
+    qualificationCatalogLoading: 'Loading…',
+    qualificationCertificateNumberLabel: 'Certificate number',
+    qualificationIssuerLabel: 'Issuer',
+    qualificationIssuedOnLabel: 'Issued on',
+    qualificationVerifiedBadge: 'Verified',
+    qualificationSelfReportedBadge: 'Self-reported',
+    qualificationExpiresOnRequired: 'This qualification requires an expiry date.',
     contractTitle: 'Contract',
     contractDownload: 'Download contract',
     contractNone: 'No contract attached yet.'
@@ -669,6 +687,15 @@ export const WORKER_STRINGS: Record<AppLocale, WorkerStrings> = {
     qualificationDeleteButton: 'Удалить',
     qualificationExpired: 'Истекло',
     qualificationExpiringSoon: 'Скоро истекает',
+    qualificationCatalogLabel: 'Квалификация',
+    qualificationCatalogOther: 'Другое (свой вариант)',
+    qualificationCatalogLoading: 'Загрузка…',
+    qualificationCertificateNumberLabel: 'Номер сертификата',
+    qualificationIssuerLabel: 'Кем выдано',
+    qualificationIssuedOnLabel: 'Дата выдачи',
+    qualificationVerifiedBadge: 'Подтверждено',
+    qualificationSelfReportedBadge: 'Указано самостоятельно',
+    qualificationExpiresOnRequired: 'Для этой квалификации нужно указать срок действия.',
     contractTitle: 'Договор',
     contractDownload: 'Скачать договор',
     contractNone: 'Договор ещё не прикреплён.'

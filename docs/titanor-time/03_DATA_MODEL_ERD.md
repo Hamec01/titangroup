@@ -1,7 +1,10 @@
 # Titanor Time — модель данных
 
-Версия: **5.4.1** (2026-07-23). Статус: **proposed architecture**. Ничего не реализовано, ни одна
-миграция не создана. Источник истины для имён сущностей, полей, статусов и ограничений для
+Версия: **5.5.0** (2026-08-24, +§4.2a Квалификации и допуски, +§4.8a Admin Notification Center).
+Статус: **proposed architecture** (общая пометка "ничего не реализовано" в этой версии устарела —
+многое, включая обе новые секции, уже реализовано и промигрировано; см. `01_SCREEN_MAP.md`/
+`IMPLEMENTATION_STATUS.md` за фактическим статусом). Источник истины для имён сущностей, полей,
+статусов и ограничений для
 `01_SCREEN_MAP.md`, `02_ROLE_PERMISSION_MATRIX.md` и `04_ADMIN_FIRST_API_CONTRACTS.md`. Документ
 самодостаточен: полные поля всех сущностей приведены ниже, читатель не обязан открывать более
 ранние версии этого документа.
@@ -497,6 +500,44 @@ SELECT id FROM "Employee" WHERE id = :employeeId FOR UPDATE;
 (`CorrectionDraftDay.sourceAbsenceId` фиксирует источник, та же валидация `sourceAbsenceId` выше).
 Payroll-семантика (какие типы отсутствия оплачиваются и как) не зашита в схему — конфигурация сервиса
 расчёта на этапе `ExportItem`.
+
+### 4.2a Квалификации и допуски — **`[2026-08-24] реализовано`, Qualifications Matrix**
+
+Дополняет `worker.profile.*` permission-строки из `02_ROLE_PERMISSION_MATRIX.md` §2.2, которые
+раньше не имели ни одной задокументированной сущности — `EmployeeQualification` теперь
+задокументирован здесь впервые (существовал с worker-profile-слайса `[2026-08-24]`), с additive
+upgrade этой задачи поверх.
+
+**QualificationDefinition** (mutable, централизованный каталог) — `id`, `code varchar(64) unique`
+(стабильный, seed-идемпотентный ключ, никогда не переиспользуется для другого значения), `category
+varchar(64)`, `scope enum (EMPLOYEE, COMPANY_REFERENCE)`, `nameEn`/`nameRu varchar(160)`,
+`descriptionEn`/`descriptionRu text?`, `expiryMode enum (REQUIRED, OPTIONAL, NONE)`, `isActive
+boolean default true`, `sortOrder int`, `createdAt`, `updatedAt`. `scope=COMPANY_REFERENCE` (EN ISO
+3834, EN 1090, EN 15085, PED 2014/68/EU) — никогда не предлагается как personal employee
+certificate в selector'е, только `EMPLOYEE`-scope. FI перевод каталога не существует — UI обязан
+fallback на `nameEn`/`descriptionEn` для locale `FI`, не выдумывать перевод. Seed —
+`prisma/migrations/20260824221000_seed_qualification_catalog_and_notification_permissions`
+(idempotent, `ON CONFLICT ("code") DO NOTHING`).
+
+**EmployeeQualification** (mutable) — `id`, `employeeId FK` (CASCADE), `definitionId FK →
+QualificationDefinition?` (RESTRICT, nullable — null = legacy/custom "Other" запись, сохраняет
+обратную совместимость с worker-profile-слайсом), `name varchar(120)` (обязателен всегда — либо
+custom-название, либо snapshot `definition.nameEn`, чтобы существующий код, читающий `.name`,
+продолжал работать без изменений), `certificateNumber varchar(80)?`, `issuer varchar(160)?`,
+`issuedOn date?`, `expiresOn date?`, `photoPath?`, `verificationState enum (SELF_REPORTED,
+VERIFIED) default SELF_REPORTED`, `verifiedAt timestamptz?`, `verifiedByUserId FK → User?`
+(SET NULL), `createdAt`, `updatedAt`. Создание работником → всегда `SELF_REPORTED`; создание
+ADMIN'ом → сразу `VERIFIED` (акт создания администратором сам по себе — подтверждение). Верифицирует/
+снимает верификацию только ADMIN/SUPER_ADMIN (`worker.profile.update.all`) — worker никогда не
+может выставить себе `VERIFIED`.
+
+**Единый expiry-status helper** — `lib/qualification-expiry.ts`'s `computeQualificationExpiryStatus`
+(чистая функция, без Prisma/I-O), реализует ровно табличную границу владельца:
+`> today+60` → `VALID`/green; `15–60 дней` → `EXPIRING_SOON`/yellow; `1–14 дней` → `CRITICAL`/orange;
+`= today` → `CRITICAL`/red (`isExpiringToday`); `<= yesterday` → `EXPIRED`/red;
+`expiryMode=NONE` без даты → `VALID`; `expiryMode=REQUIRED` без даты → `MISSING_EXPIRY`/red. Все UI
+поверхности (worker profile, admin worker profile, `/admin/qualifications` matrix, notification
+generation) обязаны вызывать эту функцию — ни одна не считает цвета независимо.
 
 ### 4.3 Локации
 
@@ -1765,6 +1806,35 @@ semantics as `lib/reporting/worked-time.ts` (`grossMs - unpaidBreakMs`, paid bre
 worked time) and T8.1–T8.3 — no separate formula for T8.4B to reproduce. See `T8_REPORTS_DESIGN.md`
 Addendum "T8.4A FOLLOW-UP" and `05_RAW_SQL_REGISTER.md` §12 (CK-43 marked REMOVED, CK-44 added) for
 the full writeup.
+
+### 4.8a Admin Notification Center — **`[2026-08-24] реализовано`**
+
+**AdminNotification** (mutable — только `resolvedAt` меняется после создания) — `id`, `type enum
+(QUALIFICATION_EXPIRING_SOON, QUALIFICATION_CRITICAL, QUALIFICATION_EXPIRED,
+QUALIFICATION_MISSING_EXPIRY)` (плоский enum, специально не завязан на qualification-домен в
+названии структуры — будущие типы вроде `SYSTEM_WARNING`/`ATTENDANCE_ERROR` добавляются в этот же
+enum без redesign таблицы), `severity enum (WARNING, CRITICAL)`, `employeeId FK → Employee?`
+(RESTRICT, nullable), `employeeQualificationId FK → EmployeeQualification?` (CASCADE, nullable),
+`threshold int?` (60/14/0 для трёх qualification-типов; `NULL` для `MISSING_EXPIRY`), `createdAt`,
+`resolvedAt timestamptz?` (`NULL` = активно; условие устранено system-side, напр. срок продлён за
+threshold — не путать с per-admin dismissal ниже).
+
+Дедупликация: ровно одна активная (`resolvedAt IS NULL`) запись на
+`(employeeQualificationId, type, threshold)` — raw-SQL partial unique index
+(`ux_admin_notification_active_dedup`, `COALESCE(threshold, -1)` чтобы `MISSING_EXPIRY`'s `NULL`
+threshold тоже дедуплицировался; Prisma schema DSL не выражает `WHERE`-индекс, добавлен вручную в
+`prisma/migrations/20260824220000_add_qualification_catalog_and_admin_notifications`, тот же
+паттерн ручных raw-SQL constraint'ов, что и в остальной схеме). Генерация —
+`ensureQualificationNotifications()` (`lib/qualification-notifications.ts`): idempotent,
+transaction-safe, вызывается перед каждым чтением notification center (не на cron в этом слайсе;
+опциональный `scripts/qualification-notifications-tick.ts` — тот же вызов, для будущего
+scheduler'а). Если срок продлён за все threshold'ы — активная запись resolves (сохраняется для
+истории, не удаляется); повторный заход в threshold позже создаёт новый цикл.
+
+**AdminNotificationDismissal** — `id`, `notificationId FK` (CASCADE), `userId FK` (CASCADE),
+`dismissedAt`, unique `(notificationId, userId)`. Нормализовано отдельно от `AdminNotification`
+специально, чтобы dismiss одним админом никогда не скрывал уведомление для другого — `userId`
+всегда из session, никогда из request body.
 
 ### 4.9 Attendance Clock (T7A) — schema, geofence admin, online clock and materialization implemented
 

@@ -119,6 +119,292 @@ button:disabled {
   outline: none;
 }
 
+/* Admin Notification Center — bell + badge (header), drawer (fixed panel), toast stack.
+   Fixed positioning (not absolute under the header) so the drawer/toasts never get clipped by
+   header overflow and behave the same while the page is scrolled. */
+.notif-bell-wrap {
+  position: relative;
+}
+
+.notif-bell-button {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: rgba(7, 11, 17, 0.6);
+  color: var(--text-soft);
+  cursor: pointer;
+}
+
+.notif-bell-button:hover,
+.notif-bell-button:focus-visible {
+  color: var(--white);
+  border-color: var(--accent-light);
+  outline: none;
+}
+
+.notif-badge {
+  position: absolute;
+  top: -6px;
+  right: -6px;
+  min-width: 17px;
+  height: 17px;
+  padding: 0 4px;
+  border-radius: 999px;
+  font-size: 0.65rem;
+  font-weight: 700;
+  line-height: 17px;
+  text-align: center;
+  color: #1a1206;
+}
+
+.notif-badge-warning {
+  background: #fcd34d;
+}
+
+.notif-badge-critical {
+  background: #fb7185;
+  color: #2a0a0e;
+}
+
+.notif-drawer {
+  position: fixed;
+  top: 64px;
+  right: 16px;
+  width: min(360px, calc(100vw - 32px));
+  max-height: calc(100vh - 96px);
+  overflow-y: auto;
+  background: #0e1420;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.45);
+  z-index: 70;
+  padding: 12px;
+}
+
+.notif-drawer-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+
+.notif-drawer-head h2 {
+  font-size: 0.95rem;
+  margin: 0;
+}
+
+.notif-drawer-close {
+  background: none;
+  border: none;
+  color: var(--text-soft);
+  font-size: 1.3rem;
+  line-height: 1;
+  cursor: pointer;
+  padding: 2px 6px;
+}
+
+.notif-drawer-close:hover,
+.notif-drawer-close:focus-visible {
+  color: var(--white);
+  outline: none;
+}
+
+.notif-drawer-empty {
+  color: var(--text-soft);
+  font-size: 0.85rem;
+  padding: 12px 4px;
+}
+
+.notif-drawer-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.notif-drawer-item {
+  border-radius: 8px;
+  padding: 10px 12px;
+  border-left: 3px solid var(--text-soft);
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.notif-drawer-item-warning {
+  border-left-color: #fcd34d;
+}
+
+.notif-drawer-item-critical {
+  border-left-color: #fb7185;
+}
+
+.notif-drawer-item-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.notif-severity-tag {
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-soft);
+}
+
+.notif-drawer-item-dismiss {
+  background: none;
+  border: none;
+  color: var(--text-soft);
+  font-size: 1.1rem;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0 4px;
+}
+
+.notif-drawer-item-dismiss:hover,
+.notif-drawer-item-dismiss:focus-visible {
+  color: var(--white);
+  outline: none;
+}
+
+.notif-drawer-item-name {
+  font-weight: 600;
+  margin: 4px 0 2px;
+}
+
+.notif-drawer-item-detail {
+  font-size: 0.85rem;
+  color: var(--text-soft);
+  margin: 0 0 2px;
+}
+
+.notif-drawer-item-date {
+  font-size: 0.78rem;
+  color: var(--text-soft);
+  margin: 0 0 6px;
+}
+
+.notif-drawer-item-link {
+  background: none;
+  border: none;
+  color: var(--accent-light);
+  font-size: 0.82rem;
+  cursor: pointer;
+  padding: 0;
+}
+
+.notif-drawer-item-link:hover,
+.notif-drawer-item-link:focus-visible {
+  color: var(--white);
+  outline: none;
+}
+
+.notif-toast-stack {
+  position: fixed;
+  top: 16px;
+  right: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  z-index: 80;
+  width: min(340px, calc(100vw - 32px));
+}
+
+.notif-toast {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: #14192a;
+  border: 1px solid var(--border);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+}
+
+.notif-toast-warning {
+  border-left: 3px solid #fcd34d;
+}
+
+.notif-toast-critical {
+  border-left: 3px solid #fb7185;
+}
+
+.notif-toast-icon {
+  flex-shrink: 0;
+  width: 20px;
+  height: 20px;
+  border-radius: 999px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 700;
+  font-size: 0.8rem;
+  background: rgba(252, 211, 77, 0.18);
+  color: #fcd34d;
+}
+
+.notif-toast-body {
+  flex: 1;
+  min-width: 0;
+}
+
+.notif-toast-name {
+  font-weight: 600;
+  margin: 0;
+  font-size: 0.85rem;
+}
+
+.notif-toast-detail {
+  margin: 2px 0 0;
+  font-size: 0.8rem;
+  color: var(--text-soft);
+}
+
+.notif-toast-actions {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 4px;
+}
+
+.notif-toast-actions button {
+  background: none;
+  border: none;
+  color: var(--accent-light);
+  font-size: 0.78rem;
+  cursor: pointer;
+  padding: 0;
+}
+
+.notif-toast-actions button:hover,
+.notif-toast-actions button:focus-visible {
+  color: var(--white);
+  outline: none;
+}
+
+@media (max-width: 640px) {
+  .notif-drawer {
+    top: 96px;
+    right: 8px;
+    left: 8px;
+    width: auto;
+  }
+
+  .notif-toast-stack {
+    top: 96px;
+    right: 8px;
+    left: 8px;
+    width: auto;
+  }
+}
+
 /* Grouped dropdown nav — a top row of "Today" + 5 group buttons (was a flat 15-link row).
    Groups open a positioned menu below their trigger; see components/admin/AdminNav.tsx for the
    open/close interaction (click-to-toggle, closes on outside click / Escape / route change). */
@@ -1661,6 +1947,214 @@ button:disabled {
 .exc-badge-dismissed {
   color: var(--text-soft);
   background: rgba(255, 255, 255, 0.06);
+}
+
+/* Qualifications Matrix — reusable expiry-status chip (lib/qualification-expiry.ts colors).
+   Same pill shape as .exc-badge; adds an ORANGE tier (1-14 days) that no earlier badge needed. */
+.qual-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--text-soft);
+}
+
+.qual-badge-valid {
+  color: #86efac;
+  background: rgba(134, 239, 172, 0.12);
+}
+
+.qual-badge-expiring {
+  color: #fcd34d;
+  background: rgba(252, 211, 77, 0.14);
+}
+
+.qual-badge-critical {
+  color: #fb923c;
+  background: rgba(251, 146, 60, 0.16);
+}
+
+.qual-badge-expired {
+  color: var(--error);
+  background: rgba(253, 164, 175, 0.14);
+}
+
+.qual-verify-badge {
+  display: inline-block;
+  flex-shrink: 0;
+  font-size: 0.68rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  padding: 3px 8px;
+  border-radius: 999px;
+}
+
+.qual-verify-badge-verified {
+  color: #86efac;
+  background: rgba(134, 239, 172, 0.1);
+}
+
+.qual-verify-badge-self {
+  color: var(--text-soft);
+  background: rgba(255, 255, 255, 0.05);
+}
+
+/* /admin/qualifications matrix — compact worker rows with chip badges (task spec §16-18). */
+.qual-matrix-list {
+  list-style: none;
+  margin: 16px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.qual-matrix-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.qual-matrix-identity {
+  display: flex;
+  flex-direction: column;
+  min-width: 180px;
+  flex-shrink: 0;
+}
+
+.qual-matrix-name {
+  font-weight: 600;
+  color: var(--white);
+  text-decoration: none;
+}
+
+.qual-matrix-name:hover,
+.qual-matrix-name:focus-visible {
+  text-decoration: underline;
+}
+
+.qual-matrix-meta {
+  font-size: 0.78rem;
+  color: var(--text-soft);
+}
+
+.qual-matrix-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  flex: 1;
+}
+
+.qual-chip-wrap {
+  position: relative;
+}
+
+.qual-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.qual-chip-button {
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 4px 10px;
+  font-size: 0.76rem;
+  font-weight: 600;
+  cursor: pointer;
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--text-soft);
+}
+
+.qual-chip-green {
+  border-color: rgba(134, 239, 172, 0.4);
+  color: #86efac;
+}
+
+.qual-chip-yellow {
+  border-color: rgba(252, 211, 77, 0.4);
+  color: #fcd34d;
+}
+
+.qual-chip-orange {
+  border-color: rgba(251, 146, 60, 0.45);
+  color: #fb923c;
+}
+
+.qual-chip-red {
+  border-color: rgba(253, 164, 175, 0.45);
+  color: var(--error);
+}
+
+.qual-chip-button:hover,
+.qual-chip-button:focus-visible {
+  background: rgba(255, 255, 255, 0.08);
+  outline: none;
+}
+
+.qual-chip-missing {
+  padding: 4px 10px 4px 4px;
+  border-radius: 999px;
+  border: 1px solid rgba(253, 164, 175, 0.45);
+}
+
+.qual-chip-popover {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  z-index: 30;
+  width: 260px;
+  background: #0e1420;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px 12px;
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.4);
+  font-size: 0.8rem;
+}
+
+.qual-chip-popover p {
+  margin: 4px 0;
+  color: var(--text-soft);
+}
+
+.qual-chip-popover-title {
+  font-weight: 700;
+  color: var(--white) !important;
+  margin-top: 0 !important;
+}
+
+.qual-chip-popover-code {
+  font-size: 0.72rem;
+  letter-spacing: 0.02em;
+  opacity: 0.8;
+}
+
+.qual-chip-popover-desc {
+  font-style: italic;
+}
+
+@media (max-width: 640px) {
+  .qual-matrix-row {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .qual-chip-popover {
+    left: auto;
+    right: 0;
+    width: min(260px, calc(100vw - 60px));
+  }
 }
 
 .exc-row-head {

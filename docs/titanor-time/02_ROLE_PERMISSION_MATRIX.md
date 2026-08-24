@@ -1,6 +1,7 @@
 # Titanor Time — роли и разрешения
 
-Версия: **5.4.1** (2026-07-23). Статус: **proposed architecture**. Источник истины для имён ролей,
+Версия: **5.5.0** (2026-08-24, +§2.10a Admin Notification Center). Статус: **proposed
+architecture**. Источник истины для имён ролей,
 permission-строк, route-доступа и endpoint-доступа для `01_SCREEN_MAP.md`, `03_DATA_MODEL_ERD.md`,
 `04_ADMIN_FIRST_API_CONTRACTS.md`. Документ самодостаточен — все permission перечислены полными
 таблицами.
@@ -384,6 +385,27 @@ doc) — все проверены `scripts/_test-csv-export.ts` (171/171).
 | `export.create` | `ADMIN`, `SUPER_ADMIN` | вся компания | только для `LOCKED`/`EXPORTED` периодов; для `EXPORTED` создаёт корректирующий `ExportBatch(correctsBatchId=...)`, покрывающий накопленные `pendingExport=true` (scoped к `expected=true` участникам, `T8_REPORTS_DESIGN.md` §BC); `EXPORTED` без накопленных → `409 NOTHING_TO_EXPORT`; `Idempotency-Key` обязателен | нет | да (`EXPORT_CREATED`, только whitelisted поля — §BL) | нет |
 | `export.read` | `ADMIN`, `SUPER_ADMIN` | вся компания | доступ к `ExportBatch`/`ExportItem` (list/detail/download); download отдаёт точные сохранённые bytes, никогда не реконструирует | нет | нет | — |
 | `audit.read` | `ADMIN`, `SUPER_ADMIN` | вся компания | `AuditEvent` — append-only, недоступен для записи через API вовсе | нет | нет (само чтение аудита не аудируется) | — |
+
+### 2.10a Admin Notification Center — **`[2026-08-24] реализовано`**
+
+Только два новых permission code для всей задачи (Qualifications Matrix + Admin Notification
+Center + Custom Report) — новые экраны/эндпоинты сознательно переиспользуют существующие
+`worker.profile.read.all`/`worker.read.all`/`site.read.all`/`timesheet.read.all`/`export.read`
+комбинациями (§2.4g/h/i-стиль `for permission of REQUIRED_PERMISSIONS`, не новые строки), кроме
+этих двух — у уведомлений нет существующего эквивалента. Миграция
+`20260824221000_seed_qualification_catalog_and_notification_permissions` (DML, `ON CONFLICT DO
+NOTHING`).
+
+| Permission | Держатели | Область | Ограничения | Причина | Аудит | Массовое |
+|---|---|---|---|---|---|---|
+| `admin.notification.read` | `ADMIN`, `SUPER_ADMIN` | вся компания | чтение notification center (badge/drawer) | нет | нет | — |
+| `admin.notification.dismiss` | `ADMIN`, `SUPER_ADMIN` | только собственное per-admin dismissal state | `userId` всегда из session, никогда из тела запроса — dismiss нельзя направить от имени другого админа | нет | нет (dismiss — не критичное admin mutation, не требует audit по существующей политике) | нет |
+
+`WORKER`/`FOREMAN` — ноль грантов. `/admin/qualifications` matrix использует `worker.profile.read.all`
+**и** `worker.read.all` вместе (уже существующие строки, §2.2). `GET
+/api/admin/reports/custom/export` (Custom Report, task Part A) использует `worker.read.all` +
+`site.read.all` + `timesheet.read.all` + `export.read` вместе — GET-only, stateless, ноль
+`ExportBatch`, поэтому без `Idempotency-Key`/CSRF (тот же паттерн, что T8.1-T8.3 report GET'ы).
 
 ### 2.11 GPS (зарезервировано, не реализуется в первом срезе)
 

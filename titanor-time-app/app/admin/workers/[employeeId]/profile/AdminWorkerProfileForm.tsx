@@ -1,20 +1,25 @@
 'use client';
 
-import { useState, type FormEvent, type ChangeEvent } from 'react';
+import { useEffect, useState, type FormEvent, type ChangeEvent } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAppLocale } from '@/components/i18n/AppLocaleProvider';
 import { localeText } from '@/lib/i18n/locale';
 import type { EmployeeProfileView } from '@/lib/employee-profile';
+import { QualificationBadge, VerificationBadge } from '@/components/qualifications/QualificationBadge';
 
 const CSRF_HEADER_VALUE = 'titanor-time';
+
+interface CatalogEntry {
+  id: string;
+  code: string;
+  nameEn: string;
+  nameRu: string;
+  expiryMode: 'REQUIRED' | 'OPTIONAL' | 'NONE';
+}
 
 export interface AdminWorkerProfileFormProps {
   employeeId: string;
   initialProfile: EmployeeProfileView;
-}
-
-function todayKey(): string {
-  return new Date().toISOString().slice(0, 10);
 }
 
 export function AdminWorkerProfileForm({ employeeId, initialProfile }: AdminWorkerProfileFormProps) {
@@ -37,12 +42,52 @@ export function AdminWorkerProfileForm({ employeeId, initialProfile }: AdminWork
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [fieldErrors, setFieldErrors] = useState<Record<string, string[]>>({});
 
+  const [catalog, setCatalog] = useState<CatalogEntry[] | null>(null);
   const [addingQualification, setAddingQualification] = useState(false);
+  const [qDefinitionId, setQDefinitionId] = useState('');
   const [qName, setQName] = useState('');
+  const [qCertificateNumber, setQCertificateNumber] = useState('');
+  const [qIssuer, setQIssuer] = useState('');
+  const [qIssuedOn, setQIssuedOn] = useState('');
   const [qExpiresOn, setQExpiresOn] = useState('');
   const [qPhoto, setQPhoto] = useState<File | null>(null);
   const [qBusy, setQBusy] = useState(false);
   const [qError, setQError] = useState<string | null>(null);
+  const [verifyBusyId, setVerifyBusyId] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!addingQualification || catalog !== null) return;
+    fetch('/api/qualification-definitions', { credentials: 'same-origin' })
+      .then((r) => (r.ok ? r.json() : { items: [] }))
+      .then((body) => setCatalog(body.items ?? []))
+      .catch(() => setCatalog([]));
+  }, [addingQualification, catalog]);
+
+  const selectedDefinition = catalog?.find((c) => c.id === qDefinitionId) ?? null;
+  const expiresOnRequired = selectedDefinition ? selectedDefinition.expiryMode === 'REQUIRED' : false;
+
+  async function refetchQualifications(): Promise<void> {
+    const response = await fetch(`/api/admin/workers/${employeeId}/profile`, { credentials: 'same-origin' });
+    if (!response.ok) return;
+    const body = await response.json();
+    setQualifications(body.qualifications ?? []);
+  }
+
+  async function handleToggleVerification(id: string, verify: boolean): Promise<void> {
+    if (verifyBusyId) return;
+    setVerifyBusyId(id);
+    try {
+      const response = await fetch(`/api/admin/workers/${employeeId}/profile/qualifications/${id}`, {
+        method: 'PATCH',
+        credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json', 'X-Requested-With': CSRF_HEADER_VALUE },
+        body: JSON.stringify({ verify })
+      });
+      if (response.ok) await refetchQualifications();
+    } finally {
+      setVerifyBusyId(null);
+    }
+  }
 
   async function handleSave(event: FormEvent<HTMLFormElement>): Promise<void> {
     event.preventDefault();
@@ -160,12 +205,21 @@ export function AdminWorkerProfileForm({ employeeId, initialProfile }: AdminWork
 
   async function handleAddQualification(event: FormEvent<HTMLFormElement>): Promise<void> {
     event.preventDefault();
-    if (qBusy || qName.trim().length === 0) return;
+    const isOther = qDefinitionId === '';
+    if (qBusy || (isOther && qName.trim().length === 0)) return;
+    if (expiresOnRequired && !qExpiresOn) {
+      setQError(localeText(locale, 'This qualification requires an expiry date.', 'Для этой квалификации нужно указать срок действия.'));
+      return;
+    }
     setQBusy(true);
     setQError(null);
     try {
       const formData = new FormData();
-      formData.set('name', qName.trim());
+      if (!isOther) formData.set('definitionId', qDefinitionId);
+      if (isOther) formData.set('name', qName.trim());
+      if (qCertificateNumber.trim()) formData.set('certificateNumber', qCertificateNumber.trim());
+      if (qIssuer.trim()) formData.set('issuer', qIssuer.trim());
+      if (qIssuedOn) formData.set('issuedOn', qIssuedOn);
       if (qExpiresOn) formData.set('expiresOn', qExpiresOn);
       if (qPhoto) formData.set('photo', qPhoto);
       const response = await fetch(`/api/admin/workers/${employeeId}/profile/qualifications`, {
@@ -174,13 +228,16 @@ export function AdminWorkerProfileForm({ employeeId, initialProfile }: AdminWork
         headers: { 'X-Requested-With': CSRF_HEADER_VALUE, 'Idempotency-Key': crypto.randomUUID() },
         body: formData
       });
-      const body = await response.json().catch(() => null);
       if (!response.ok) {
         setQError(localeText(locale, 'Something went wrong. Please try again.', 'Произошла ошибка. Попробуйте ещё раз.'));
         return;
       }
-      setQualifications((prev) => [{ id: body.id, name: qName.trim(), expiresOn: qExpiresOn || null, hasPhoto: Boolean(qPhoto), createdAt: new Date().toISOString() }, ...prev]);
+      await refetchQualifications();
+      setQDefinitionId('');
       setQName('');
+      setQCertificateNumber('');
+      setQIssuer('');
+      setQIssuedOn('');
       setQExpiresOn('');
       setQPhoto(null);
       setAddingQualification(false);
@@ -195,9 +252,6 @@ export function AdminWorkerProfileForm({ employeeId, initialProfile }: AdminWork
     setQualifications((prev) => prev.filter((q) => q.id !== id));
     await fetch(`/api/admin/workers/${employeeId}/profile/qualifications/${id}`, { method: 'DELETE', credentials: 'same-origin', headers: { 'X-Requested-With': CSRF_HEADER_VALUE } });
   }
-
-  const today = todayKey();
-  const soonCutoff = new Date(Date.now() + 30 * 86400000).toISOString().slice(0, 10);
 
   return (
     <div>
@@ -276,45 +330,78 @@ export function AdminWorkerProfileForm({ employeeId, initialProfile }: AdminWork
         </label>
       </section>
 
-      <section className="worker-work-setup">
+      <section id="qualifications" className="worker-work-setup">
         <h2>{localeText(locale, 'Qualification cards', 'Карточки квалификации')}</h2>
         {qualifications.length === 0 ? (
           <p className="wk-empty">{localeText(locale, 'No cards yet.', 'Карточек пока нет.')}</p>
         ) : (
           <ul className="setup-list">
-            {qualifications.map((q) => {
-              const expired = q.expiresOn !== null && q.expiresOn < today;
-              const expiringSoon = !expired && q.expiresOn !== null && q.expiresOn <= soonCutoff;
-              return (
-                <li key={q.id} className="setup-item">
-                  <span className="setup-label">
-                    {q.name}
-                    {q.expiresOn ? (
-                      <span className={expired || expiringSoon ? 'field-error' : 'setup-subtitle'}>
-                        {' '}
-                        — {q.expiresOn}
-                        {expired ? ` (${localeText(locale, 'Expired', 'Истекло')})` : expiringSoon ? ` (${localeText(locale, 'Expiring soon', 'Скоро истекает')})` : ''}
-                      </span>
-                    ) : null}
-                  </span>
+            {qualifications.map((q) => (
+              <li key={q.id} className="setup-item">
+                <span className="setup-label">
+                  {locale === 'RU' && q.nameRu ? q.nameRu : q.name}
+                  {q.certificateNumber ? <span className="setup-subtitle"> · {q.certificateNumber}</span> : null}
+                  {q.issuer ? <span className="setup-subtitle"> · {q.issuer}</span> : null}
+                  {q.expiresOn ? <span className="setup-subtitle"> · {q.expiresOn}</span> : null}
+                  <QualificationBadge status={q.expiryStatus} color={q.expiryColor} locale={locale} />
+                  <VerificationBadge verified={q.verificationState === 'VERIFIED'} locale={locale} />
+                </span>
+                <span style={{ display: 'inline-flex', gap: 8 }}>
+                  {q.verificationState === 'VERIFIED' ? (
+                    <button type="button" className="wk-clock-cancel-button" onClick={() => handleToggleVerification(q.id, false)} disabled={verifyBusyId === q.id}>
+                      {localeText(locale, 'Remove verification', 'Снять подтверждение')}
+                    </button>
+                  ) : (
+                    <button type="button" className="setup-action" onClick={() => handleToggleVerification(q.id, true)} disabled={verifyBusyId === q.id}>
+                      {localeText(locale, 'Verify', 'Подтвердить')}
+                    </button>
+                  )}
                   <button type="button" className="wk-clock-cancel-button" onClick={() => handleDeleteQualification(q.id)}>
                     {localeText(locale, 'Delete', 'Удалить')}
                   </button>
-                </li>
-              );
-            })}
+                </span>
+              </li>
+            ))}
           </ul>
         )}
 
         {addingQualification ? (
           <form onSubmit={handleAddQualification} aria-busy={qBusy}>
             <div className="login-field">
-              <label htmlFor="admin-qualification-name">{localeText(locale, 'Name', 'Название')}</label>
-              <input id="admin-qualification-name" type="text" maxLength={120} value={qName} onChange={(e) => setQName(e.target.value)} disabled={qBusy} />
+              <label htmlFor="admin-qualification-catalog">{localeText(locale, 'Qualification', 'Квалификация')}</label>
+              <select id="admin-qualification-catalog" value={qDefinitionId} onChange={(e) => setQDefinitionId(e.target.value)} disabled={qBusy || catalog === null}>
+                <option value="">{catalog === null ? localeText(locale, 'Loading…', 'Загрузка…') : localeText(locale, 'Other (custom)', 'Другое (свой вариант)')}</option>
+                {catalog?.map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {locale === 'RU' ? c.nameRu : c.nameEn}
+                  </option>
+                ))}
+              </select>
+            </div>
+            {qDefinitionId === '' ? (
+              <div className="login-field">
+                <label htmlFor="admin-qualification-name">{localeText(locale, 'Name', 'Название')}</label>
+                <input id="admin-qualification-name" type="text" maxLength={120} value={qName} onChange={(e) => setQName(e.target.value)} disabled={qBusy} />
+              </div>
+            ) : null}
+            <div className="login-field">
+              <label htmlFor="admin-qualification-certificate-number">{localeText(locale, 'Certificate number', 'Номер сертификата')}</label>
+              <input id="admin-qualification-certificate-number" type="text" maxLength={80} value={qCertificateNumber} onChange={(e) => setQCertificateNumber(e.target.value)} disabled={qBusy} />
             </div>
             <div className="login-field">
-              <label htmlFor="admin-qualification-expiry">{localeText(locale, 'Valid until', 'Действует до')}</label>
-              <input id="admin-qualification-expiry" type="date" value={qExpiresOn} onChange={(e) => setQExpiresOn(e.target.value)} disabled={qBusy} />
+              <label htmlFor="admin-qualification-issuer">{localeText(locale, 'Issuer', 'Кем выдано')}</label>
+              <input id="admin-qualification-issuer" type="text" maxLength={160} value={qIssuer} onChange={(e) => setQIssuer(e.target.value)} disabled={qBusy} />
+            </div>
+            <div className="login-field">
+              <label htmlFor="admin-qualification-issued-on">{localeText(locale, 'Issued on', 'Дата выдачи')}</label>
+              <input id="admin-qualification-issued-on" type="date" value={qIssuedOn} onChange={(e) => setQIssuedOn(e.target.value)} disabled={qBusy} />
+            </div>
+            <div className="login-field">
+              <label htmlFor="admin-qualification-expiry">
+                {localeText(locale, 'Valid until', 'Действует до')}
+                {expiresOnRequired ? ' *' : ''}
+              </label>
+              <input id="admin-qualification-expiry" type="date" value={qExpiresOn} onChange={(e) => setQExpiresOn(e.target.value)} disabled={qBusy} required={expiresOnRequired} />
             </div>
             <div className="login-field">
               <label htmlFor="admin-qualification-photo">{localeText(locale, 'Photo (optional)', 'Фото (необязательно)')}</label>
@@ -326,7 +413,7 @@ export function AdminWorkerProfileForm({ employeeId, initialProfile }: AdminWork
               </p>
             ) : null}
             <div className="wk-switch-actions">
-              <button type="submit" className="login-submit" disabled={qBusy || qName.trim().length === 0}>
+              <button type="submit" className="login-submit" disabled={qBusy || (qDefinitionId === '' && qName.trim().length === 0)}>
                 {qBusy ? localeText(locale, 'Adding…', 'Добавление…') : localeText(locale, 'Add card', 'Добавить карточку')}
               </button>
               <button type="button" className="wk-clock-cancel-button" onClick={() => setAddingQualification(false)} disabled={qBusy}>

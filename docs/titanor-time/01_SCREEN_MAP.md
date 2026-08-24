@@ -1,6 +1,7 @@
 # Titanor Time — карта экранов
 
-Версия: **5.5.0** (2026-08-06). Статус: **proposed architecture**. Источник истины для route-имён
+Версия: **5.6.0** (2026-08-24, Qualifications Matrix + Admin Notification Center + Custom Report
+addendum). Статус: **proposed architecture**. Источник истины для route-имён
 (используются в `02_ROLE_PERMISSION_MATRIX.md` и `04_ADMIN_FIRST_API_CONTRACTS.md`). Документ
 самодостаточен — каждый экран описан полностью.
 
@@ -128,6 +129,18 @@ touch target ≥ 48px), `/foreman/*` — desktop-first с поддержкой �
 - DoD: `403` ≠ `404` (роль видит «нет доступа», не «страница не существует»)
 
 ## 2. Администратор (`/admin/*`, desktop-first)
+
+**Admin Notification Center `[2026-08-24]`** — cross-cutting UI element (`components/admin/
+NotificationCenter.tsx`), не отдельный route, рендерится в `app/admin/layout.tsx` (`.admin-header-
+actions`) на каждой `/admin/*` странице. Bell-иконка с badge (счётчик активных qualification-
+уведомлений) → правый drawer (список, per-admin dismiss через `×`) + top-right toast для новых
+уведомлений (не для starting backlog при первой загрузке сессии). Роли: `ADMIN`, `SUPER_ADMIN`;
+`admin.notification.read`/`admin.notification.dismiss`. Данные:
+`listActiveNotificationsForAdmin()`/`ensureQualificationNotifications()`
+(`lib/qualification-notifications.ts`) — вызывается перед каждым чтением, idempotent, dedup по
+`(employeeQualificationId, type, threshold)`. API: `GET /api/admin/notifications`, `POST
+/api/admin/notifications/:notificationId/dismiss`. Poll на фокус окна + не чаще раз в 5 минут,
+никакого WebSocket/push/email в этом слайсе.
 
 #### `/admin/setup` 🟢
 - Роли: `ADMIN`, `SUPER_ADMIN`
@@ -693,6 +706,62 @@ touch target ≥ 48px), `/foreman/*` — desktop-first с поддержкой �
 - DoD: старый FULL batch скачивается byte-identically даже после более позднего CORRECTION того же
   period (immutability); ноль forbidden fields в HTML/props; Unicode (финский+русский) без
   mojibake; входит в общий 46/46 сценарный набор `/admin/export`'а (см. выше)
+
+#### `/admin/qualifications` 🟢 **`[2026-08-24] Qualifications Matrix`**
+- Роли: `ADMIN`, `SUPER_ADMIN`; `worker.profile.read.all` **и** `worker.read.all` вместе (та же
+  комбинация, что использует export route ниже — не новый permission code, кроме
+  `admin.notification.*`, см. `02_ROLE_PERMISSION_MATRIX.md`)
+- Приоритет: desktop-first, работает без horizontal overflow от 390×844 (собственная карточка
+  контента — не весь layout: см. известный pre-existing overflow `.admin-nav-inner` ниже в §"Known
+  issues")
+- Назначение: одна строка на работника — Occupational Safety/Hot Work индикаторы (всегда видны,
+  "Missing" красным если карты нет) + компактные chip'ы остальных имеющихся квалификаций (не 20
+  красных "missing" badges — см. DoD)
+- Данные: `getQualificationMatrix()` (`lib/qualification-matrix.ts`) — worker identity (без UUID),
+  chip'ы с `status`/`color` из единого `lib/qualification-expiry.ts`
+- Фильтры: `<form method="GET">`, `search`/`qualification`/`status`/`siteId`/`verification`/`sort`
+  в URL, `page` только в pagination; server-side (не client-side filter поверх полного списка);
+  default `sort=ATTENTION`, `pageSize=20`
+- Действия: клик/фокус на chip → keyboard-accessible popover (код/название, description,
+  сертификат/issuer/даты, статус, verified/self-reported); клик на имя работника →
+  `/admin/workers/:employeeId`
+- Состояния: пусто по фильтрам; malformed query параметры falls back на default, не 500
+- Откуда: admin nav ("People" → "Qualifications" / RU "Допуски и сертификаты")
+- Куда: `/admin/workers/:employeeId`
+- API: `GET /api/admin/qualifications`, `GET /api/qualification-definitions` (каталог для фильтра)
+- DoD: ноль UUID в HTML/props; company-reference standards (EN ISO 3834 и т.д.) никогда не в
+  employee-picker; attention-sort — EXPIRED/MISSING сначала, дальше ближайший expiresOn, дальше
+  lastName/firstName; 25/25 browser QA (`scripts/_test-qualifications-browser-qa.ts`)
+
+#### `/admin/reports/custom` 🟢 **`[2026-08-24] Custom Report`**
+- Роли: `ADMIN`, `SUPER_ADMIN`; `worker.read.all` + `site.read.all` + `timesheet.read.all` +
+  `export.read` вместе (GET-only, stateless — ни `export.create`, ни `Idempotency-Key`, ни
+  `ExportBatch` не создаются, см. `T8_REPORTS_DESIGN.md` Addendum "Custom Report")
+- Приоритет: desktop
+- Назначение: 5-я вкладка `AdminReportTabs` ("Custom report" / RU "Произвольный отчёт") —
+  бухгалтерский экспорт рабочего времени за произвольный диапазон дат (не привязан к одному
+  `PayrollPeriod`) в PDF или CSV, с выбором работников/объектов, `FINAL_APPROVED_ONLY` vs
+  `CURRENT_CANONICAL`, Summary vs Detailed
+- Данные: `listEmployeesForReportSelect()`/`listSiteOptionsForAdmin()` (не менялись) для селектов
+- Действия: `<form method="GET" action="/api/admin/reports/custom/export">` — обычная навигация
+  browser'а, `Content-Disposition: attachment` скачивает без ухода со страницы (тот же принцип, что
+  `/admin/export`'а `<a href>`, никогда `fetch()`+`Blob()`); client-side проверка диапазона (≤366
+  дней, from≤to) до отправки, server-side — авторитетная
+- Состояния: невалидный диапазон → inline ошибка, форма не отправляется
+- Откуда: `AdminReportTabs` (любая из 5 вкладок Reports/Export области)
+- Куда: —
+- API: `GET /api/admin/reports/custom/export` (`dateFrom`, `dateTo`, `employeeIds[]`, `siteIds[]`,
+  `dataMode`, `detail`, `format`)
+- DoD: totals совпадают с существующими T8.1/T8.2/T8.3 отчётами для эквивалентного scope
+  (`scripts/_test-custom-report-canonical.ts`); PDF корректно рендерит кириллицу/финские диакритики
+  (embedded DejaVu Sans, `titanor-time-app/assets/fonts/`); CSV — BOM, CRLF, ноль UUID
+
+**Known issue обнаружен при browser QA (не введён этой задачей)**: `.admin-nav-inner`
+(`app/globals.css`, `width: max-content`) переполняет 390px viewport уже на пустом `/admin` без
+какого-либо контента этой задачи — подтверждено прямым замером (единственные "wide elements" на
+странице — `.admin-shell`/`.admin-nav`/`.admin-nav-inner`, ни один класс из этой задачи). Не
+исправлено в рамках этой задачи (не относится к Qualifications/Notifications/Custom Report,
+"не рефактори посторонний код") — оставлено как известная pre-existing проблема для будущего слайса.
 
 #### `/admin/review-fallback` ⚪
 

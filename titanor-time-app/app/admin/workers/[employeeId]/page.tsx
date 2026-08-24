@@ -8,6 +8,8 @@ import { WorkerSubmissionScheduleForm } from './WorkerSubmissionScheduleForm';
 import { getWorkerSubmissionScheduleView } from '@/lib/timesheet-submission-schedules';
 import { resolveAppLocale } from '@/lib/i18n/server';
 import { adminDailyStrings } from '@/lib/i18n/admin-daily';
+import { getEmployeeProfileView } from '@/lib/employee-profile';
+import { QualificationBadge } from '@/components/qualifications/QualificationBadge';
 
 export const dynamic = 'force-dynamic';
 
@@ -51,7 +53,14 @@ export default async function WorkerDetailPage({ params }: { params: Promise<{ e
     );
   }
 
-  const submissionSchedule = await getWorkerSubmissionScheduleView(employeeId);
+  const [submissionSchedule, profile] = await Promise.all([
+    getWorkerSubmissionScheduleView(employeeId),
+    getEmployeeProfileView(employeeId, false)
+  ]);
+  const safetyCard = profile?.qualifications.find((q) => q.definitionCode === 'OCCUPATIONAL_SAFETY_CARD') ?? null;
+  const hotWorkCard = profile?.qualifications.find((q) => q.definitionCode === 'HOT_WORK_CARD') ?? null;
+  const expiryDates = (profile?.qualifications ?? []).filter((q) => q.expiresOn !== null).sort((a, b) => (a.expiresOn! < b.expiresOn! ? -1 : 1));
+  const nearestExpiry = expiryDates[0] ?? null;
 
   return (
     <main className="setup-page">
@@ -66,6 +75,32 @@ export default async function WorkerDetailPage({ params }: { params: Promise<{ e
             {s.workers.employeeNumber}: {worker.employeeNumber} · {s.workers.login}: {worker.username} ·{' '}
             {worker.employment?.active ? s.workers.activeEmployment : s.workers.employmentEnded} ·{' '}
             {s.workers.activation[worker.activationStatus as keyof typeof s.workers.activation]}
+          </p>
+        </section>
+        <section className="worker-work-setup" aria-label={ru ? 'Допуски и сертификаты' : 'Qualifications'}>
+          <h2>{ru ? 'Допуски и сертификаты' : 'Qualifications'}</h2>
+          <p className="setup-subtitle">
+            <Link href={`/admin/workers/${employeeId}/profile#qualifications`}>
+              {ru ? 'Карта техники безопасности' : 'Occupational safety'}:{' '}
+            </Link>
+            {safetyCard ? <QualificationBadge status={safetyCard.expiryStatus} color={safetyCard.expiryColor} locale={locale} /> : <QualificationBadge status="MISSING_EXPIRY" color="RED" locale={locale} missingCard />}
+          </p>
+          <p className="setup-subtitle">
+            <Link href={`/admin/workers/${employeeId}/profile#qualifications`}>
+              {ru ? 'Карта огневых работ' : 'Hot work'}:{' '}
+            </Link>
+            {hotWorkCard ? <QualificationBadge status={hotWorkCard.expiryStatus} color={hotWorkCard.expiryColor} locale={locale} /> : <QualificationBadge status="MISSING_EXPIRY" color="RED" locale={locale} missingCard />}
+          </p>
+          <p className="setup-subtitle">
+            {ru ? 'Сертификаты' : 'Certificates'}: {profile?.qualifications.length ?? 0}
+            {nearestExpiry ? (
+              <>
+                {' · '}
+                <Link href={`/admin/workers/${employeeId}/profile#qualifications`}>
+                  {ru ? 'Ближайшее истечение' : 'Next expiry'}: {locale === 'RU' && nearestExpiry.nameRu ? nearestExpiry.nameRu : nearestExpiry.name} · {nearestExpiry.expiresOn}
+                </Link>
+              </>
+            ) : null}
           </p>
         </section>
         <section className="worker-work-setup" aria-label={ru ? 'Быстрые действия' : 'Quick actions'}>
