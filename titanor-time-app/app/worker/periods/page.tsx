@@ -1,6 +1,7 @@
 import { redirect } from 'next/navigation';
 import { resolveServerSession } from '@/lib/server-session';
-import { listActionablePeriods } from '@/lib/worker-context';
+import { listActionablePeriods, listWorkerCurrentAssignments } from '@/lib/worker-context';
+import { helsinkiToday } from '@/lib/workers';
 import { SnapshotWriter } from '@/components/worker-pwa/SnapshotWriter';
 import { ConnectivityBanner } from '@/components/worker-pwa/ConnectivityBanner';
 import { WorkerLink } from '@/components/worker-pwa/WorkerLink';
@@ -43,7 +44,12 @@ export default async function WorkerPeriodsPage() {
     );
   }
 
-  const periods = await listActionablePeriods(session.user.employeeId);
+  const employeeId = session.user.employeeId;
+  const periods = await listActionablePeriods(employeeId);
+  // A SiteAssignment doesn't by itself guarantee an open-period Timesheet/Participant row exists
+  // (that also needs a matching TimesheetSubmissionSchedule) — so an empty `periods` list has two
+  // very different causes. Only queried in the empty case, purely to pick the right message below.
+  const currentAssignments = periods.length === 0 ? await listWorkerCurrentAssignments(employeeId, helsinkiToday()) : [];
 
   const snapshotPayload: PeriodsListPayload = {
     periods: periods.map((p) => ({ id: p.id, startDate: p.startDate, endDate: p.endDate, timesheetId: p.timesheetId, timesheetStatus: p.timesheetStatus, totalMinutes: p.totalMinutes, workedDayCount: p.workedDayCount }))
@@ -58,7 +64,7 @@ export default async function WorkerPeriodsPage() {
           {t.viewHistory}
         </WorkerLink>
         {periods.length === 0 ? (
-          <p className="wk-empty">{t.notAssignedToSiteYet}</p>
+          <p className="wk-empty">{currentAssignments.length > 0 ? t.noOpenPeriodYet : t.notAssignedToSiteYet}</p>
         ) : (
           <ul className="wk-period-list">
             {periods.map((period) => (

@@ -2,6 +2,7 @@ import { Prisma } from '@prisma/client';
 import { prisma } from '@/lib/prisma';
 import { createAuditEvent } from '@/lib/audit';
 import { enumerateDates, toTemplateWeekday, computePlannedShiftForAssignmentDate } from '@/lib/periods';
+import { assignWorkerSubmissionSchedule, submissionPeriodForDate } from '@/lib/timesheet-submission-schedules';
 
 // docs/titanor-time/04_ADMIN_FIRST_API_CONTRACTS.md §6 (Назначения) — shared
 // by POST /api/admin/assignments/validate-overlap and POST /api/admin/assignments.
@@ -285,6 +286,40 @@ export async function createAssignment(
 
     return assignment;
   });
+
+  // A worker with a SiteAssignment but no EmployeeTimesheetSchedule ever gets a Timesheet: neither
+  // this function's own OPEN-period upsert above (scoped to periods whose submissionScheduleId
+  // already matches an existing schedule window) nor the horizon scheduler (which only ever looks
+  // at employees who already have a schedule row) will ever produce one. This silently stranded a
+  // real worker on the "Ваши периоды" screen (confirmed against a live pilot). First-ever site
+  // assignment for someone with zero schedule history — past, present, or future — auto-enrolls
+  // them on the company default (same cadence shown pre-selected in the admin's own "Цикл отправки
+  // табеля" form), aligned to that cadence's own cycle boundary so it satisfies
+  // assignWorkerSubmissionSchedule's own EFFECTIVE_FROM_NOT_BOUNDARY check. Best-effort: this only
+  // ever supplements the assignment that already succeeded above, so any failure here is swallowed
+  // rather than surfaced as a failure of the assignment itself. An admin who has ever made an
+  // explicit schedule decision for this worker (even one since ended) is never overridden.
+  const hasScheduleHistory = await prisma.employeeTimesheetSchedule.findFirst({ where: { employeeId: input.employeeId }, select: { id: true } });
+  if (!hasScheduleHistory) {
+    const companyDefault = await prisma.timesheetSubmissionSchedule.findFirst({
+      where: { active: true, isCompanyDefault: true },
+      select: { id: true, cadence: true, anchorDate: true }
+    });
+    if (companyDefault) {
+      try {
+        await assignWorkerSubmissionSchedule({
+          employeeId: input.employeeId,
+          scheduleId: companyDefault.id,
+          effectiveFrom: submissionPeriodForDate(companyDefault, input.validFrom).startDate,
+          actorUserId: input.assignedByUserId,
+          requestId: input.requestId
+        });
+      } catch {
+        // Swallowed — see comment above. The admin can still assign a schedule explicitly via
+        // WorkerSubmissionScheduleForm exactly as before this change.
+      }
+    }
+  }
 
   return {
     id: created.id,
