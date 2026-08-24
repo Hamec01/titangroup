@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { captureGpsSnapshot, type GpsSnapshot } from '@/lib/worker-gps';
+import { captureGpsSnapshot, evaluateZoneProximity, type GpsSnapshot } from '@/lib/worker-gps';
 import { ensureDeviceBootstrapped, retryBootstrap, type BootstrapOutcome } from '@/lib/offline-outbox/device';
 import { enqueueCheckIn, enqueueCheckOut, enqueueSwitchSite, EnqueueError } from '@/lib/offline-outbox/outbox';
 import { runSyncOnce, tryRefreshClockState, type ClockStateWire, type SyncRunOutcome } from '@/lib/offline-outbox/sync-runner';
@@ -22,6 +22,11 @@ import { WORKER_STRINGS, type WorkerStrings } from '@/lib/i18n/worker';
 // /switch-site any more. Those three online endpoints and their service logic are untouched and
 // remain the supported, separately-tested API surface (regression, not deprecated).
 const BOUNDED_SYNC_TIMER_MS = 25000;
+// Deliberately a periodic one-shot getCurrentPosition, not watchPosition — same privacy posture
+// as the button-press capture above (no persistence, no logging), just repeated on a timer so the
+// "in zone" badge below updates without the worker having to press anything. Paused while the tab
+// is hidden (see the visibility gate on the interval below).
+const ZONE_CHECK_INTERVAL_MS = 30000;
 
 interface StatusMessage {
   kind: 'info' | 'error';
@@ -30,6 +35,7 @@ interface StatusMessage {
 }
 
 type GpsUiState = 'IDLE' | 'CHECKING' | 'READY' | 'PERMISSION' | 'UNAVAILABLE';
+type ZoneStatus = 'UNKNOWN' | 'CHECKING' | 'INSIDE' | 'OUTSIDE' | 'LOW_ACCURACY' | 'NO_GEOFENCE' | 'UNAVAILABLE';
 
 function assignmentKey(siteId: string, workAreaId: string | null): string {
   return `${siteId}::${workAreaId ?? ''}`;
@@ -94,18 +100,25 @@ export interface ClockPanelAssignment {
   isPrimary: boolean;
 }
 
+export interface WorkerWeekDayActivity {
+  date: string;
+  label: string;
+  totalMinutes: number;
+  isToday: boolean;
+  href: string | null;
+}
+
+export interface WorkerWeekActivity {
+  days: WorkerWeekDayActivity[];
+  totalMinutes: number;
+}
+
 export interface WorkerClockPanelProps {
   initialClockState: ClockStateWire;
   assignments: ClockPanelAssignment[];
   workerName: string | null;
   todayLabel: string;
-  recentActivity: {
-    date: string;
-    totalMinutes: number;
-    siteNames: string[];
-    href: string;
-    isToday: boolean;
-  } | null;
+  weekActivity: WorkerWeekActivity | null;
   /** `null` hides the corresponding nav link entirely — the offline shell passes `null` for both,
    * since /worker/periods and /worker/history need server data this slice does not cache and a
    * real navigation there while genuinely offline is left to fail the ordinary way, never silently
@@ -119,8 +132,9 @@ export interface WorkerClockPanelProps {
   timeCardHref?: string | null;
 }
 
-export function WorkerClockPanel({ initialClockState, assignments, workerName, todayLabel, recentActivity, periodsHref, historyHref, installHref, timeCardHref = null }: WorkerClockPanelProps) {
-  const t = WORKER_STRINGS[useAppLocale()];
+export function WorkerClockPanel({ initialClockState, assignments, workerName, todayLabel, weekActivity, periodsHref, historyHref, installHref, timeCardHref = null }: WorkerClockPanelProps) {
+  const locale = useAppLocale();
+  const t = WORKER_STRINGS[locale];
   const router = useRouter();
   const [bootstrap, setBootstrap] = useState<BootstrapOutcome | null>(null);
   const [clockState, setClockState] = useState<ClockStateWire>(initialClockState);
@@ -137,6 +151,7 @@ export function WorkerClockPanel({ initialClockState, assignments, workerName, t
   const [locating, setLocating] = useState(false);
   const [statusMessage, setStatusMessage] = useState<StatusMessage | null>(null);
   const [gpsStatus, setGpsStatus] = useState<GpsUiState>('IDLE');
+  const [zoneStatus, setZoneStatus] = useState<ZoneStatus>('UNKNOWN');
   const [selectedAssignmentId, setSelectedAssignmentId] = useState<string | null>(() => {
     if (assignments.length === 0) return null;
     const primary = assignments.find((a) => a.isPrimary);
@@ -315,6 +330,54 @@ export function WorkerClockPanel({ initialClockState, assignments, workerName, t
   function cachedGeofenceVersionIdFor(siteId: string): string | null {
     return cachedAssignments.find((a) => a.siteId === siteId)?.geofenceVersionId ?? null;
   }
+
+  function cachedGeofenceFor(siteId: string): { latitude: number; longitude: number; radiusMeters: number } | null {
+    const cached = cachedAssignments.find((a) => a.siteId === siteId);
+    if (!cached || cached.geofenceLatitude == null || cached.geofenceLongitude == null || cached.geofenceRadiusMeters == null) {
+      return null;
+    }
+    return { latitude: cached.geofenceLatitude, longitude: cached.geofenceLongitude, radiusMeters: cached.geofenceRadiusMeters };
+  }
+
+  // The site the "in zone" badge below checks against: the open shift's site while clocked in
+  // (matches what Check Out will validate), otherwise whichever site is currently selected for the
+  // next Check In.
+  const zoneCheckSiteId = projected.state === 'CLOCKED_IN' ? projected.siteId : (assignments.find((a) => a.id === selectedAssignmentId)?.siteId ?? null);
+
+  useEffect(() => {
+    if (!zoneCheckSiteId) {
+      setZoneStatus('UNKNOWN');
+      return;
+    }
+    const geofence = cachedGeofenceFor(zoneCheckSiteId);
+    if (!geofence) {
+      setZoneStatus('NO_GEOFENCE');
+      return;
+    }
+    let cancelled = false;
+    async function check() {
+      setZoneStatus((prev) => (prev === 'INSIDE' || prev === 'OUTSIDE' || prev === 'LOW_ACCURACY' || prev === 'UNAVAILABLE' ? prev : 'CHECKING'));
+      const snapshot = await captureGpsSnapshot();
+      if (cancelled) {
+        return;
+      }
+      // Narrowed non-null just above — TS doesn't carry that narrowing into a nested function
+      // declaration invoked later, since `geofence` could in principle be reassigned by then (it
+      // can't; it's `const`).
+      setZoneStatus(snapshot.location ? evaluateZoneProximity(snapshot.location, geofence!) : 'UNAVAILABLE');
+    }
+    void check();
+    const interval = window.setInterval(() => {
+      if (document.visibilityState === 'visible') {
+        void check();
+      }
+    }, ZONE_CHECK_INTERVAL_MS);
+    return () => {
+      cancelled = true;
+      window.clearInterval(interval);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [zoneCheckSiteId, cachedAssignments]);
 
   const deviceReady = bootstrap?.kind === 'READY';
 
@@ -520,6 +583,19 @@ export function WorkerClockPanel({ initialClockState, assignments, workerName, t
           ? t.statusGpsUnavailable
           : t.statusGpsWillCheck;
 
+  const zoneSummary = zoneStatus === 'CHECKING'
+    ? t.statusZoneChecking
+    : zoneStatus === 'INSIDE'
+      ? t.statusZoneInside
+      : zoneStatus === 'OUTSIDE'
+        ? t.statusZoneOutside
+        : zoneStatus === 'LOW_ACCURACY'
+          ? t.statusZoneLowAccuracy
+          : t.statusZoneUnavailable;
+  // Hidden when there's nothing to check yet (no site selected) or the site has no geofence
+  // configured — a badge with nothing meaningful to report would just be noise.
+  const showZoneStatus = zoneStatus !== 'UNKNOWN' && zoneStatus !== 'NO_GEOFENCE';
+
   const canOpenAssignmentSheet = projected.state === 'CLOCKED_OUT' && assignments.length > 1;
 
   const isClockedIn = projected.state === 'CLOCKED_IN';
@@ -527,6 +603,22 @@ export function WorkerClockPanel({ initialClockState, assignments, workerName, t
   const actionLabel = isClockedIn ? t.checkOutUpper : t.checkInUpper;
   const actionHint = isClockedIn ? t.endWork : t.startWork;
   const actionHelper = locating ? t.statusGpsChecking : t.gpsCheckedAtAction;
+
+  // weekActivity's per-day totals come from materialized (checked-out) segments only — the
+  // currently open shift isn't one of those until Check Out, so today's cell would otherwise sit
+  // at its pre-shift total while the big timer above ticks up, reading as if today wasn't counted
+  // at all. Folding the same live duration the timer already shows into today's cell (and the
+  // period total) keeps both numbers consistent without waiting for Check Out.
+  const liveElapsedMinutes = isClockedIn && projected.openedAt ? Math.floor(durationMs / 60000) : 0;
+  const displayWeekActivity = useMemo(() => {
+    if (!weekActivity || liveElapsedMinutes === 0) {
+      return weekActivity;
+    }
+    return {
+      totalMinutes: weekActivity.totalMinutes + liveElapsedMinutes,
+      days: weekActivity.days.map((day) => (day.isToday ? { ...day, totalMinutes: day.totalMinutes + liveElapsedMinutes } : day))
+    };
+  }, [weekActivity, liveElapsedMinutes]);
 
   return (
     <div className="wk-card wk-clock-home-card">
@@ -561,6 +653,13 @@ export function WorkerClockPanel({ initialClockState, assignments, workerName, t
             <span>{t.statusGps}</span>
             <strong>{gpsSummary}</strong>
           </p>
+          {showZoneStatus && (
+            <p>
+              <span className={`wk-status-dot ${zoneStatus === 'INSIDE' ? 'online' : zoneStatus === 'OUTSIDE' ? 'warn' : zoneStatus === 'CHECKING' ? 'amber' : 'offline'}`} aria-hidden="true" />
+              <span>{t.statusZone}</span>
+              <strong>{zoneSummary}</strong>
+            </p>
+          )}
         </div>
       </button>
 
@@ -651,7 +750,7 @@ export function WorkerClockPanel({ initialClockState, assignments, workerName, t
       <section className="wk-time-preview" aria-labelledby="wk-time-preview-title">
         <div className="wk-time-preview-heading">
           <h2 id="wk-time-preview-title">{t.timeCardTitle}</h2>
-          <span>{recentActivity?.isToday ? t.today : t.recent}</span>
+          {displayWeekActivity ? <span>{formatWorkedDuration(displayWeekActivity.totalMinutes, locale)}</span> : null}
         </div>
 
         {timeCardHref ? (
@@ -661,13 +760,28 @@ export function WorkerClockPanel({ initialClockState, assignments, workerName, t
           </WorkerLink>
         ) : null}
 
-        {recentActivity ? (
-          <WorkerLink href={recentActivity.href} className="wk-time-preview-day-link">
-            <strong>{formatWorkedDuration(recentActivity.totalMinutes)}</strong>
-            <span>{recentActivity.date}</span>
-            <span>{recentActivity.siteNames.join(', ')}</span>
-            <span aria-hidden="true">→</span>
-          </WorkerLink>
+        {displayWeekActivity ? (
+          <ol className="wk-week-grid">
+            {displayWeekActivity.days.map((day) => {
+              const body = (
+                <>
+                  <span className="wk-week-day-label">{day.label}</span>
+                  <span className="wk-week-day-hours">{day.totalMinutes > 0 ? formatWorkedDuration(day.totalMinutes, locale) : '—'}</span>
+                </>
+              );
+              return (
+                <li key={day.date} className={`wk-week-day${day.isToday ? ' today' : ''}`}>
+                  {day.href ? (
+                    <WorkerLink href={day.href} className="wk-week-day-link">
+                      {body}
+                    </WorkerLink>
+                  ) : (
+                    <span className="wk-week-day-link wk-week-day-link-disabled">{body}</span>
+                  )}
+                </li>
+              );
+            })}
+          </ol>
         ) : (
           <p className="wk-empty">{t.noCompletedTimeEntries}</p>
         )}
@@ -750,6 +864,7 @@ export function WorkerClockPanel({ initialClockState, assignments, workerName, t
             <p className="wk-status-sheet-line">{t.statusSync}: {syncSummary}</p>
             <p className="wk-status-sheet-line">{t.statusPendingActions}: {pendingCount}</p>
             <p className="wk-status-sheet-line">{t.statusGps}: {gpsSummary}</p>
+            {showZoneStatus && <p className="wk-status-sheet-line">{t.statusZone}: {zoneSummary}</p>}
             <button type="button" className="wk-clock-secondary-button" onClick={handleManualSync} disabled={syncing || setupNotReady}>
               {syncing ? t.syncing : t.syncNow}
             </button>

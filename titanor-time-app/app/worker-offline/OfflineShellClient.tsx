@@ -144,7 +144,7 @@ function OfflineShellContent() {
       assignments={state.assignments}
       workerName={null}
       todayLabel={todayLabelNow(locale)}
-      recentActivity={null}
+      weekActivity={null}
       periodsHref={null}
       historyHref={null}
       installHref={null}

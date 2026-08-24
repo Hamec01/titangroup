@@ -7,6 +7,35 @@
 
 export type ClientGpsUnavailableReason = 'PERMISSION_DENIED' | 'TIMEOUT' | 'POSITION_UNAVAILABLE';
 
+// Mirrors lib/attendance-clock.ts's evaluateGpsReading tolerance rule (radius + accuracy, same
+// MAX_ACCEPTABLE_ACCURACY_METERS gate) so the client-side "in zone" badge below never disagrees
+// with what the server will actually decide at Check In/Out — purely informational here, never
+// itself enforced or sent to the server.
+const EARTH_RADIUS_METERS = 6371000;
+const MAX_ACCEPTABLE_ACCURACY_METERS = 75;
+
+export function haversineDistanceMeters(lat1: number, lon1: number, lat2: number, lon2: number): number {
+  const toRad = (deg: number): number => (deg * Math.PI) / 180;
+  const dLat = toRad(lat2 - lat1);
+  const dLon = toRad(lon2 - lon1);
+  const a = Math.sin(dLat / 2) ** 2 + Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLon / 2) ** 2;
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  return EARTH_RADIUS_METERS * c;
+}
+
+export type ZoneProximity = 'INSIDE' | 'OUTSIDE' | 'LOW_ACCURACY';
+
+export function evaluateZoneProximity(
+  location: { latitude: number; longitude: number; accuracyMeters: number },
+  geofence: { latitude: number; longitude: number; radiusMeters: number }
+): ZoneProximity {
+  if (location.accuracyMeters > MAX_ACCEPTABLE_ACCURACY_METERS) {
+    return 'LOW_ACCURACY';
+  }
+  const distanceMeters = haversineDistanceMeters(location.latitude, location.longitude, geofence.latitude, geofence.longitude);
+  return distanceMeters <= geofence.radiusMeters + location.accuracyMeters ? 'INSIDE' : 'OUTSIDE';
+}
+
 export interface GpsSnapshot {
   location: { latitude: number; longitude: number; accuracyMeters: number } | null;
   gpsUnavailableReason: ClientGpsUnavailableReason | null;

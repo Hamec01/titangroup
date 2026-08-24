@@ -3597,6 +3597,50 @@ a.ov-summary-card:focus-visible {
   color: #9db3c5;
 }
 
+.wk-week-grid {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.wk-week-day-link {
+  display: grid;
+  justify-items: center;
+  gap: 4px;
+  min-height: 56px;
+  padding: 8px 2px;
+  border-radius: 10px;
+  border: 1px solid rgba(138, 185, 225, 0.16);
+  background: rgba(17, 28, 41, 0.52);
+  color: inherit;
+  text-decoration: none;
+  text-align: center;
+}
+
+.wk-week-day.today .wk-week-day-link {
+  border-color: rgba(106, 232, 173, 0.7);
+  background: rgba(74, 154, 122, 0.22);
+}
+
+.wk-week-day-link-disabled {
+  opacity: 0.5;
+}
+
+.wk-week-day-label {
+  font-size: 0.72rem;
+  color: #9db3c5;
+  text-transform: uppercase;
+}
+
+.wk-week-day-hours {
+  font-size: 0.86rem;
+  font-weight: 700;
+  color: #edf7ff;
+}
+
 .wk-day-item,
 .wk-day-item-readonly {
   position: relative;

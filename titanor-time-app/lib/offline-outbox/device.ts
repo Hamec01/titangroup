@@ -58,7 +58,10 @@ function mapAssignments(wire: ContextAssignmentWire[]): CachedAssignment[] {
     workAreaId: a.workAreaId,
     workAreaName: a.workAreaName,
     isPrimary: a.isPrimary,
-    geofenceVersionId: a.geofence?.geofenceVersionId ?? null
+    geofenceVersionId: a.geofence?.geofenceVersionId ?? null,
+    geofenceLatitude: a.geofence ? Number(a.geofence.latitude) : null,
+    geofenceLongitude: a.geofence ? Number(a.geofence.longitude) : null,
+    geofenceRadiusMeters: a.geofence?.radiusMeters ?? null
   }));
 }
 

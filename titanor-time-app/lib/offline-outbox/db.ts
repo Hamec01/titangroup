@@ -57,6 +57,15 @@ export interface CachedAssignment {
   workAreaName: string | null;
   isPrimary: boolean;
   geofenceVersionId: string | null;
+  /** Same geofence version's center/radius, kept alongside the id so the worker screen's "in
+   * zone" badge (WorkerClockPanel.tsx) can compare a GPS reading against it without a network
+   * round-trip. Informational only — never sent back to the server, which always re-derives the
+   * site's authoritative current geofence itself. `null` for a site with no geofence configured;
+   * optional (like DeviceStateRecord's ownerUserId below) so a row cached before this field
+   * existed reads as `undefined` until its next bootstrap refresh. */
+  geofenceLatitude?: number | null;
+  geofenceLongitude?: number | null;
+  geofenceRadiusMeters?: number | null;
 }
 
 export type DevicePausedReason = 'DEVICE_NOT_OWNED' | 'DEVICE_REVOKED';

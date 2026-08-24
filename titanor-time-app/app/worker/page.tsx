@@ -57,16 +57,31 @@ export default async function WorkerHomePage() {
   const workerName = context ? `${context.employee.firstName} ${context.employee.lastName}` : null;
   const todayKey = today.toISOString().slice(0, 10);
   const activityDays = periods.flatMap((period) => period.activityDays.map((day) => ({ ...day, periodId: period.id })));
-  const recentDay = activityDays.find((day) => day.date === todayKey) ?? activityDays.sort((a, b) => b.date.localeCompare(a.date))[0] ?? null;
-  const recentActivity = recentDay
-    ? {
-        date: recentDay.date,
-        totalMinutes: recentDay.totalMinutes,
-        siteNames: recentDay.siteNames,
-        href: `/worker/periods/${recentDay.periodId}/hours/${recentDay.date}`,
-        isToday: recentDay.date === todayKey
-      }
-    : null;
+
+  // Rolling 7-calendar-day strip ending today, each day linking to its own hours page when an
+  // actionable period's [startDate, endDate] covers that date — lets the worker see (and jump
+  // into) a whole week of worked time from the clock screen itself, not just today's single entry.
+  const WEEK_WINDOW_DAYS = 7;
+  const DAY_MS = 24 * 60 * 60 * 1000;
+  const activityByDate = new Map(activityDays.map((day) => [day.date, day]));
+  const dayLabelFormatter = new Intl.DateTimeFormat(locale === 'RU' ? 'ru-RU' : 'en-GB', { timeZone: 'Europe/Helsinki', weekday: 'short', day: 'numeric' });
+  const weekActivity =
+    periods.length > 0
+      ? {
+          days: Array.from({ length: WEEK_WINDOW_DAYS }, (_, i) => {
+            const date = new Date(today.getTime() - (WEEK_WINDOW_DAYS - 1 - i) * DAY_MS).toISOString().slice(0, 10);
+            const period = periods.find((p) => p.startDate <= date && date <= p.endDate) ?? null;
+            return {
+              date,
+              label: dayLabelFormatter.format(new Date(`${date}T00:00:00.000Z`)),
+              totalMinutes: activityByDate.get(date)?.totalMinutes ?? 0,
+              isToday: date === todayKey,
+              href: period ? `/worker/periods/${period.id}/hours/${date}` : null
+            };
+          }),
+          totalMinutes: periods.reduce((sum, p) => sum + p.totalMinutes, 0)
+        }
+      : null;
 
   return (
     <main className="wk-page">
@@ -75,7 +90,7 @@ export default async function WorkerHomePage() {
         assignments={assignments}
         workerName={workerName}
         todayLabel={todayLabel}
-        recentActivity={recentActivity}
+        weekActivity={weekActivity}
         periodsHref={periodsHref}
         historyHref="/worker/history"
         installHref="/worker/install"
