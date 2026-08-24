@@ -124,6 +124,12 @@ export function WorkerAppNavigation({ username }: { username: string }) {
                 </span>
                 <span>{t.navHistory}</span>
               </WorkerLink>
+              <WorkerLink href="/worker/profile" className="wk-menu-link" aria-current={pathname === '/worker/profile' ? 'page' : undefined}>
+                <span className="wk-menu-link-icon" aria-hidden="true">
+                  ☺
+                </span>
+                <span>{t.navProfile}</span>
+              </WorkerLink>
             </div>
 
             <div className="wk-menu-footer">

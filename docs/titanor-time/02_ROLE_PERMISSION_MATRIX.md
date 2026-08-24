@@ -58,6 +58,10 @@ permission с более чем одним держателем разной о�
 | `worker.update` | `ADMIN`, `SUPER_ADMIN` | вся компания | требует `version` | нет | да | нет |
 | `worker.deactivate` | `ADMIN`, `SUPER_ADMIN` | вся компания | `Employment.active=false`; `User.status → OFFBOARDING` либо `DEACTIVATED` по правилу `03_...`, §4.2; не трогает `PayrollPeriodParticipant` | да | да | да, для группы |
 | `worker.activation.generate` | `ADMIN`, `SUPER_ADMIN` | вся компания | требует `PENDING_ACTIVATION` + активный Employment; Site/period не блокируют activation | нет | да | нет |
+| `worker.profile.read.own` | `WORKER` | собственный `EmployeeProfile`/`EmployeeQualification` | — | нет | нет | — |
+| `worker.profile.update.own` | `WORKER` | собственные поля профиля/фото + свои карточки квалификации | требует `version` на `EmployeeProfile`; не даёт доступ к договору | нет | нет | нет |
+| `worker.profile.read.all` | `ADMIN`, `SUPER_ADMIN` | любой работник, включая договор | — | нет | нет | — |
+| `worker.profile.update.all` | `ADMIN`, `SUPER_ADMIN` | любой работник: поля профиля/фото/карточки + прикрепление/замена договора | требует `version` на `EmployeeProfile` | нет | да, для договора | нет |
 
 ### 2.3 Отсутствия (`Absence`)
 

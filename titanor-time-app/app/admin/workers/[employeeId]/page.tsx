@@ -76,6 +76,7 @@ export default async function WorkerDetailPage({ params }: { params: Promise<{ e
             <li className="setup-item"><Link href={`/admin/workers/${employeeId}/timeline`}>{ru ? 'Приход/Уход/Сегодня (история по дням)' : 'Check in/out/today (day history)'}</Link></li>
             <li className="setup-item"><Link href={`/admin/attendance/exceptions?employeeId=${employeeId}`}>{ru ? 'Проблемы работника' : 'Worker issues'}</Link></li>
             <li className="setup-item"><Link href={`#worker-profile`}>{ru ? 'Открыть редактирование профиля' : 'Open profile edit section'}</Link></li>
+            <li className="setup-item"><Link href={`/admin/workers/${employeeId}/profile`}>{ru ? 'Профиль и документы работника' : 'Worker profile & documents'}</Link></li>
           </ul>
         </section>
         <p>

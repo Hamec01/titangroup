@@ -282,6 +282,7 @@ model User {
   createdSubmissionSchedules     TimesheetSubmissionSchedule[] @relation("TimesheetSubmissionScheduleCreatedBy")
   updatedSubmissionSchedules     TimesheetSubmissionSchedule[] @relation("TimesheetSubmissionScheduleUpdatedBy")
   assignedSubmissionSchedules    EmployeeTimesheetSchedule[]   @relation("EmployeeTimesheetScheduleAssignedBy")
+  uploadedEmployeeContracts      EmployeeProfile[]             @relation("EmployeeProfileContractUploadedBy")
 }
 
 model Role {
@@ -414,6 +415,45 @@ model Employee {
   clockEventIdConflicts ClockEventIdConflict[]
   exportItems           ExportItem[]
   submissionSchedules   EmployeeTimesheetSchedule[]
+  profile               EmployeeProfile?
+  qualifications        EmployeeQualification[]
+}
+
+// Worker Profile feature (2026-08-24 plan) — optional, self-service worker info plus an
+// admin-attached contract. 1:1 with Employee, kept as its own table (rather than columns on
+// Employee) so this still-evolving, non-required feature stays isolated from the core
+// Employee row everything else joins against. onDelete: Cascade is a safety net, not an
+// expected path — Employee is never hard-deleted in this system (deactivation only).
+model EmployeeProfile {
+  id                       String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  employeeId               String    @unique @db.Uuid
+  dateOfBirth              DateTime? @db.Date
+  specialty                String?   @db.VarChar(120)
+  skills                   String?   @db.Text
+  photoPath                String?
+  contractPath             String?
+  contractUploadedByUserId String?   @db.Uuid
+  contractUploadedAt       DateTime? @db.Timestamptz(6)
+  version                  Int       @default(1)
+  createdAt                DateTime  @default(now()) @db.Timestamptz(6)
+  updatedAt                DateTime  @updatedAt @db.Timestamptz(6)
+  employee                 Employee  @relation(fields: [employeeId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  contractUploadedByUser   User?     @relation("EmployeeProfileContractUploadedBy", fields: [contractUploadedByUserId], references: [id], onDelete: SetNull, onUpdate: Cascade)
+}
+
+// FK directly to Employee (not nested under EmployeeProfile) so a worker can add a card
+// before any EmployeeProfile row exists yet.
+model EmployeeQualification {
+  id         String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  employeeId String    @db.Uuid
+  name       String    @db.VarChar(120)
+  expiresOn  DateTime? @db.Date
+  photoPath  String?
+  createdAt  DateTime  @default(now()) @db.Timestamptz(6)
+  updatedAt  DateTime  @updatedAt @db.Timestamptz(6)
+  employee   Employee  @relation(fields: [employeeId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+
+  @@index([employeeId])
 }
 
 model TimesheetSubmissionSchedule {

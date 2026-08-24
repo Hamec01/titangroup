@@ -58,6 +58,12 @@ export interface WorkerStrings {
   statusGpsPermission: string;
   statusGpsUnavailable: string;
   statusGpsWillCheck: string;
+  statusZone: string;
+  statusZoneChecking: string;
+  statusZoneInside: string;
+  statusZoneOutside: string;
+  statusZoneLowAccuracy: string;
+  statusZoneUnavailable: string;
   workStatus: string;
   clockStateLabel: string;
   startedAtLabel: string;
@@ -126,6 +132,7 @@ export interface WorkerStrings {
   yourPeriods: string;
   viewHistory: string;
   notAssignedToSiteYet: string;
+  noOpenPeriodYet: string;
   // -- periods/[periodId]/page.tsx --
   periodNotAvailable: string;
   yourAssignments: string;
@@ -195,6 +202,38 @@ export interface WorkerStrings {
   offlineShellNotReady: string;
   // -- Day type labels (SICK_LEAVE/VACATION/UNPAID_LEAVE/OTHER, shared by DayEditor/hours-list/snapshot) --
   dayTypeLabels: Record<string, string>;
+  // -- worker/profile/page.tsx + ProfileForm.tsx --
+  profileTitle: string;
+  profilePhotoLabel: string;
+  profileUploadPhoto: string;
+  profileRemovePhoto: string;
+  profileNoPhoto: string;
+  profileDateOfBirthLabel: string;
+  profileSpecialtyLabel: string;
+  profileSpecialtyPlaceholder: string;
+  profileSkillsLabel: string;
+  profileSkillsPlaceholder: string;
+  profileSaveButton: string;
+  profileSaving: string;
+  profileSaved: string;
+  profileSaveErrorConflict: string;
+  profileUnsupportedPhotoType: string;
+  profilePhotoTooLarge: string;
+  qualificationsTitle: string;
+  qualificationsIntro: string;
+  qualificationsEmpty: string;
+  qualificationNameLabel: string;
+  qualificationNamePlaceholder: string;
+  qualificationExpiryLabel: string;
+  qualificationPhotoLabel: string;
+  qualificationAddButton: string;
+  qualificationAdding: string;
+  qualificationDeleteButton: string;
+  qualificationExpired: string;
+  qualificationExpiringSoon: string;
+  contractTitle: string;
+  contractDownload: string;
+  contractNone: string;
 }
 
 export const WORKER_STRINGS: Record<AppLocale, WorkerStrings> = {
@@ -249,6 +288,12 @@ export const WORKER_STRINGS: Record<AppLocale, WorkerStrings> = {
     statusGpsPermission: 'Permission needed',
     statusGpsUnavailable: 'Unavailable',
     statusGpsWillCheck: 'Checked at clock action',
+    statusZone: 'Zone',
+    statusZoneChecking: 'Checking…',
+    statusZoneInside: 'In work zone',
+    statusZoneOutside: 'Outside work zone',
+    statusZoneLowAccuracy: 'Location too imprecise',
+    statusZoneUnavailable: 'Unavailable',
     workStatus: 'Work status',
     clockStateLabel: 'Clock state',
     startedAtLabel: 'Started at',
@@ -314,6 +359,7 @@ export const WORKER_STRINGS: Record<AppLocale, WorkerStrings> = {
     yourPeriods: 'Your periods',
     viewHistory: 'View history →',
     notAssignedToSiteYet: "You haven't been assigned to a site yet.",
+    noOpenPeriodYet: "You're assigned to a site, but no timesheet period is open for you yet. Please contact your administrator.",
     periodNotAvailable: 'This period is not available to you.',
     yourAssignments: 'Your assignments',
     enterHours: 'Enter hours',
@@ -376,7 +422,38 @@ export const WORKER_STRINGS: Record<AppLocale, WorkerStrings> = {
       VACATION: 'vacation',
       UNPAID_LEAVE: 'unpaid leave',
       OTHER: 'other'
-    }
+    },
+    profileTitle: 'Profile',
+    profilePhotoLabel: 'Photo',
+    profileUploadPhoto: 'Upload photo',
+    profileRemovePhoto: 'Remove photo',
+    profileNoPhoto: 'No photo uploaded.',
+    profileDateOfBirthLabel: 'Date of birth',
+    profileSpecialtyLabel: 'Specialty',
+    profileSpecialtyPlaceholder: 'e.g. welder',
+    profileSkillsLabel: 'Skills',
+    profileSkillsPlaceholder: 'e.g. TIG, MAG, interior work',
+    profileSaveButton: 'Save',
+    profileSaving: 'Saving…',
+    profileSaved: 'Saved.',
+    profileSaveErrorConflict: 'This profile changed elsewhere — reload the page and try again.',
+    profileUnsupportedPhotoType: 'Only JPG and PNG photos are supported.',
+    profilePhotoTooLarge: 'This file is too large.',
+    qualificationsTitle: 'Qualification cards',
+    qualificationsIntro: 'E.g. a hot-work permit or safety card — with an expiry date if there is one.',
+    qualificationsEmpty: 'No cards yet.',
+    qualificationNameLabel: 'Name',
+    qualificationNamePlaceholder: 'e.g. Hot-work permit',
+    qualificationExpiryLabel: 'Valid until',
+    qualificationPhotoLabel: 'Photo (optional)',
+    qualificationAddButton: 'Add card',
+    qualificationAdding: 'Adding…',
+    qualificationDeleteButton: 'Delete',
+    qualificationExpired: 'Expired',
+    qualificationExpiringSoon: 'Expiring soon',
+    contractTitle: 'Contract',
+    contractDownload: 'Download contract',
+    contractNone: 'No contract attached yet.'
   },
   RU: {
     errOutsideGeofence: 'Вы находитесь за пределами рабочей зоны объекта. Подойдите ближе и синхронизируйте снова.',
@@ -429,6 +506,12 @@ export const WORKER_STRINGS: Record<AppLocale, WorkerStrings> = {
     statusGpsPermission: 'Нужен доступ',
     statusGpsUnavailable: 'Недоступно',
     statusGpsWillCheck: 'Проверяется при отметке',
+    statusZone: 'Зона',
+    statusZoneChecking: 'Проверяем…',
+    statusZoneInside: 'В рабочей зоне',
+    statusZoneOutside: 'Вне рабочей зоны',
+    statusZoneLowAccuracy: 'Слишком неточно',
+    statusZoneUnavailable: 'Недоступно',
     workStatus: 'Статус работы',
     clockStateLabel: 'Состояние',
     startedAtLabel: 'Начато в',
@@ -494,6 +577,7 @@ export const WORKER_STRINGS: Record<AppLocale, WorkerStrings> = {
     yourPeriods: 'Ваши периоды',
     viewHistory: 'Смотреть историю →',
     notAssignedToSiteYet: 'Вы ещё не назначены на объект.',
+    noOpenPeriodYet: 'Вы назначены на объект, но период учёта времени для вас пока не открыт. Обратитесь к администратору.',
     periodNotAvailable: 'Этот период вам недоступен.',
     yourAssignments: 'Ваши назначения',
     enterHours: 'Внести часы',
@@ -556,7 +640,38 @@ export const WORKER_STRINGS: Record<AppLocale, WorkerStrings> = {
       VACATION: 'отпуск',
       UNPAID_LEAVE: 'отпуск без содержания',
       OTHER: 'другое'
-    }
+    },
+    profileTitle: 'Профиль',
+    profilePhotoLabel: 'Фото',
+    profileUploadPhoto: 'Загрузить фото',
+    profileRemovePhoto: 'Удалить фото',
+    profileNoPhoto: 'Фото не загружено.',
+    profileDateOfBirthLabel: 'Дата рождения',
+    profileSpecialtyLabel: 'Специальность',
+    profileSpecialtyPlaceholder: 'например, сварщик',
+    profileSkillsLabel: 'Навыки',
+    profileSkillsPlaceholder: 'например, TIG, MAG, работа по интерьеру',
+    profileSaveButton: 'Сохранить',
+    profileSaving: 'Сохранение…',
+    profileSaved: 'Сохранено.',
+    profileSaveErrorConflict: 'Профиль изменён в другом месте — обновите страницу и попробуйте снова.',
+    profileUnsupportedPhotoType: 'Поддерживаются только фото JPG и PNG.',
+    profilePhotoTooLarge: 'Файл слишком большой.',
+    qualificationsTitle: 'Карточки квалификации',
+    qualificationsIntro: 'Например, огненные работы или карта безопасности труда — с датой окончания, если есть.',
+    qualificationsEmpty: 'Карточек пока нет.',
+    qualificationNameLabel: 'Название',
+    qualificationNamePlaceholder: 'например, Огненные работы',
+    qualificationExpiryLabel: 'Действует до',
+    qualificationPhotoLabel: 'Фото (необязательно)',
+    qualificationAddButton: 'Добавить карточку',
+    qualificationAdding: 'Добавление…',
+    qualificationDeleteButton: 'Удалить',
+    qualificationExpired: 'Истекло',
+    qualificationExpiringSoon: 'Скоро истекает',
+    contractTitle: 'Договор',
+    contractDownload: 'Скачать договор',
+    contractNone: 'Договор ещё не прикреплён.'
   }
 };
 

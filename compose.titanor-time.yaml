@@ -50,8 +50,12 @@ services:
     ports:
       - "127.0.0.1:3200:3000"
 
+    # Worker Profile feature (2026-08-24 plan) — /home/deploy/app-data/titanor-time/uploads
+    # is itself a symlink into /mnt/250gb/titanor-time-foundation/uploads (same pattern
+    # collab-studio already uses), not a direct bind onto the s3fs mount — a direct bind
+    # onto that FUSE path failed outright when tried against the t97 pilot container.
     volumes:
-      - /mnt/250gb/titanor-time-foundation/uploads:/app/public/uploads
+      - /home/deploy/app-data/titanor-time/uploads:/app/uploads
 
     networks:
       - internal

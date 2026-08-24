@@ -20,6 +20,7 @@ export interface CommonStrings {
   navHome: string;
   navCalendarAndHours: string;
   navHistory: string;
+  navProfile: string;
   navInstallApp: string;
   navWorkerAccount: string;
   navSignedInAs: string;
@@ -59,6 +60,7 @@ export const COMMON_STRINGS: Record<AppLocale, CommonStrings> = {
     navHome: 'Home',
     navCalendarAndHours: 'Calendar and hours',
     navHistory: 'History',
+    navProfile: 'Profile',
     navInstallApp: 'Install app',
     navWorkerAccount: 'Worker account',
     navSignedInAs: 'Signed in as',
@@ -94,6 +96,7 @@ export const COMMON_STRINGS: Record<AppLocale, CommonStrings> = {
     navHome: 'Главная',
     navCalendarAndHours: 'Календарь и часы',
     navHistory: 'История',
+    navProfile: 'Профиль',
     navInstallApp: 'Установить приложение',
     navWorkerAccount: 'Аккаунт работника',
     navSignedInAs: 'Вы вошли как',
