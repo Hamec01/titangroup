@@ -1,5 +1,6 @@
 import type { ReactNode } from 'react';
 import Link from 'next/link';
+import { redirect } from 'next/navigation';
 import { resolveServerSession } from '@/lib/server-session';
 import { resolveAppLocale } from '@/lib/i18n/server';
 import { AppLocaleProvider } from '@/components/i18n/AppLocaleProvider';
@@ -8,6 +9,20 @@ import { LogoutButton } from '@/components/admin/LogoutButton';
 
 export default async function ForemanLayout({ children }: { children: ReactNode }) {
   const [session, locale] = await Promise.all([resolveServerSession(), resolveAppLocale()]);
+
+  // An ADMIN/SUPER_ADMIN with no FOREMAN role and no ForemanAssignment who lands on any
+  // /foreman/* route (bookmark, shared link, typed URL) hits every child page's own "access
+  // denied" text, styled identically to a login failure — confusing for a non-technical admin
+  // who reads it as "I can't get into the site." They already have the same functionality,
+  // company-wide rather than site-scoped, under /admin — send them there instead of showing an
+  // error they can't act on. Scoped to ADMIN/SUPER_ADMIN only: a WORKER, or a dual-role
+  // FOREMAN+WORKER whose FOREMAN permissions were revoked, must still see each page's existing
+  // access-denied text unchanged (task §3 contract — session.user.roles already reflects only
+  // currently active UserRole rows, per lib/auth.ts).
+  if (session && !session.user.roles.includes('FOREMAN') && (session.user.roles.includes('ADMIN') || session.user.roles.includes('SUPER_ADMIN'))) {
+    redirect('/admin');
+  }
+
   const ru = locale === 'RU';
   return (
     <AppLocaleProvider locale={locale}>
