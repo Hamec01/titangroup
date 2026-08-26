@@ -85,7 +85,7 @@ export function QualificationCard({ qualification: q, locale, isAdmin, apiBase, 
       const response = await fetch(`${apiBase}/photo`, {
         method: 'POST',
         credentials: 'same-origin',
-        headers: { 'X-Requested-With': CSRF_HEADER_VALUE },
+        headers: { 'X-Requested-With': CSRF_HEADER_VALUE, 'Idempotency-Key': crypto.randomUUID() },
         body: formData
       });
       if (response.ok) {

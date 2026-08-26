@@ -758,9 +758,21 @@ export async function setEmployeeQualificationPhoto(qualificationId: string, emp
     }
     throw error;
   }
-  await prisma.employeeQualification.update({ where: { id: existing.id }, data: { photoPath: saved.relativePath } });
+  try {
+    await prisma.employeeQualification.update({ where: { id: existing.id }, data: { photoPath: saved.relativePath } });
+  } catch (error) {
+    // Orphan prevention: the new file is already on disk but the DB never learned about it —
+    // remove it best-effort before propagating the original error. The old photoPath (still
+    // current in the DB) and its file are untouched.
+    await deleteEmployeeUpload(saved.relativePath).catch(() => {});
+    throw error;
+  }
   if (existing.photoPath && existing.photoPath !== saved.relativePath) {
-    await deleteEmployeeUpload(existing.photoPath);
+    // Old file cleanup runs only after the DB update has already committed — a failure here must
+    // never undo that already-successful update, just get logged and left for manual cleanup.
+    await deleteEmployeeUpload(existing.photoPath).catch((cleanupError) => {
+      console.error('failed to delete replaced qualification photo', { qualificationId: existing.id, path: existing.photoPath, error: cleanupError });
+    });
   }
   return { ok: true };
 }
