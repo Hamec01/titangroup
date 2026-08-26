@@ -8,7 +8,6 @@ import { prisma } from '@/lib/prisma';
 import { createAuditEvent } from '@/lib/audit';
 import { getWorkerDossierData } from '@/lib/worker-dossier';
 import { buildWorkerDossierPdf, workerDossierPdfFileName } from '@/lib/reporting/worker-dossier-pdf';
-import { resolveAppLocale } from '@/lib/i18n/server';
 
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
@@ -39,7 +38,10 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
     return jsonError(404, { code: 'EMPLOYEE_NOT_FOUND', message: 'Employee not found.' }, requestId);
   }
 
-  const locale = await resolveAppLocale();
+  // Deliberately NOT the admin's own UI locale (resolveAppLocale()) — data entry stays in
+  // Russian for worker accessibility, but exported official documents (dossier, accounting/
+  // report exports) are always English, independent of the admin's display language.
+  const locale = 'EN' as const;
   const generatedAtHelsinki = new Intl.DateTimeFormat('en-GB', { timeZone: 'Europe/Helsinki', day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).format(new Date());
   const fileDateHelsinki = new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Helsinki', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
 

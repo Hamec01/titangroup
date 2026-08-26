@@ -90,7 +90,9 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     return jsonError(400, { code: 'VALIDATION_ERROR', message: 'Invalid format.', fieldErrors: { format: ['must be CSV or PDF'] } }, requestId);
   }
 
-  const locale: AppLocale = authenticated.user.locale === 'RU' ? 'RU' : 'EN';
+  // Deliberately NOT the admin's own UI locale — accounting/report exports always render in
+  // English, independent of the admin's display language (data entry stays Russian-friendly).
+  const locale: AppLocale = 'EN';
   const report = await getCustomTimeReport({ dateFrom, dateTo, employeeIds, siteIds, dataMode });
 
   if (formatRaw === 'CSV') {
@@ -107,9 +109,9 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     });
   }
 
-  const workersLabel = employeeIds === null ? (locale === 'RU' ? 'Все' : 'All') : report.employees.length > 0 ? report.employees.map((e) => `${e.lastName} ${e.firstName}`).join(', ') : (locale === 'RU' ? 'Не выбраны' : 'None');
-  const sitesLabel = siteIds === null ? (locale === 'RU' ? 'Все' : 'All') : report.sites.length > 0 ? report.sites.map((s) => s.name).join(', ') : (locale === 'RU' ? 'Не выбраны' : 'None');
-  const dataModeLabel = dataMode === 'FINAL_APPROVED_ONLY' ? (locale === 'RU' ? 'Только окончательно одобренные' : 'Final approved only') : (locale === 'RU' ? 'Текущие канонические данные' : 'Current canonical data');
+  const workersLabel = employeeIds === null ? 'All' : report.employees.length > 0 ? report.employees.map((e) => `${e.lastName} ${e.firstName}`).join(', ') : 'None';
+  const sitesLabel = siteIds === null ? 'All' : report.sites.length > 0 ? report.sites.map((s) => s.name).join(', ') : 'None';
+  const dataModeLabel = dataMode === 'FINAL_APPROVED_ONLY' ? 'Final approved only' : 'Current canonical data';
   const generatedAtHelsinki = new Intl.DateTimeFormat('en-GB', { timeZone: 'Europe/Helsinki', day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).format(new Date());
 
   const pdfBuffer = detailRaw === 'SUMMARY'
