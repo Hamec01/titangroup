@@ -407,6 +407,24 @@ NOTHING`).
 `site.read.all` + `timesheet.read.all` + `export.read` вместе — GET-only, stateless, ноль
 `ExportBatch`, поэтому без `Idempotency-Key`/CSRF (тот же паттерн, что T8.1-T8.3 report GET'ы).
 
+### 2.10b Worker Dossier — **`[2026-08-26] реализовано`**
+
+Ноль новых permission code. Каждый новый route переиспользует ровно тот же permission, что уже
+покрывает эквивалентное существующее действие на том же ресурсе:
+
+| Route | Method | Permission | Комментарий |
+|---|---|---|---|
+| `/api/admin/workers/:employeeId/dossier` | GET | `worker.profile.read.all` | тот же permission, что admin `.../profile` GET — dossier PDF не более чувствителен, чем сам просмотр профиля |
+| `/api/admin/workers/:employeeId/profile/personal-identity-code` | GET | `worker.profile.read.all` | explicit reveal-эндпоинт (§2.10b ниже), плейнтекст никогда не в основном profile-ответе |
+| `/api/worker/profile/personal-identity-code` | GET | `worker.profile.read.own` | `employeeId` всегда из session, никогда из query/body |
+| `.../profile/qualifications/:id/photo` | POST, DELETE | `worker.profile.update.all` (admin) / `worker.profile.update.own` (worker) | те же коды, что уже покрывали POST/DELETE профильного фото |
+| `/api/worker/profile/qualifications/:id` | PATCH (новый метод) | `worker.profile.update.own` | ранее у этого route был только DELETE; PATCH переиспользует тот же permission |
+
+`WORKER`/`FOREMAN` — ноль грантов на `.read.all`/`.update.all`, значит henkilötunnus чужого
+работника недостижим ни через dossier, ни через reveal-эндпоинт, ни через основной profile GET
+(там всегда только `personalIdentityCodeLast4`, никогда plaintext). `FOREMAN` не имеет и
+`.read.own`/`.update.own` (это WORKER-only область), так что доступа к henkilötуннус нет вовсе.
+
 ### 2.11 GPS (зарезервировано, не реализуется в первом срезе)
 
 | Permission | Держатели | Область | Ограничения | Причина | Аудит | Массовое |

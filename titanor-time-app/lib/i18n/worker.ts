@@ -219,6 +219,23 @@ export interface WorkerStrings {
   profileSaveErrorConflict: string;
   profileUnsupportedPhotoType: string;
   profilePhotoTooLarge: string;
+  // -- Worker Dossier feature (2026-08-26): contact/address + henkilötunnus, own profile --
+  profileContactEmailLabel: string;
+  profileAddressStreetLabel: string;
+  profileAddressPostalCodeLabel: string;
+  profileAddressCityLabel: string;
+  profileAddressCountryLabel: string;
+  profilePersonalIdentityCodeLabel: string;
+  profilePersonalIdentityCodeShow: string;
+  profilePersonalIdentityCodeHide: string;
+  profilePersonalIdentityCodeNotSet: string;
+  profilePersonalIdentityCodeInvalid: string;
+  qualificationEditButton: string;
+  qualificationSaveButton: string;
+  qualificationCancelEdit: string;
+  qualificationUploadPhotoButton: string;
+  qualificationReplacePhotoButton: string;
+  qualificationRemovePhotoButton: string;
   qualificationsTitle: string;
   qualificationsIntro: string;
   qualificationsEmpty: string;
@@ -448,6 +465,22 @@ export const WORKER_STRINGS: Record<AppLocale, WorkerStrings> = {
     profileSaveErrorConflict: 'This profile changed elsewhere — reload the page and try again.',
     profileUnsupportedPhotoType: 'Only JPG and PNG photos are supported.',
     profilePhotoTooLarge: 'This file is too large.',
+    profileContactEmailLabel: 'Contact email',
+    profileAddressStreetLabel: 'Street address',
+    profileAddressPostalCodeLabel: 'Postal code',
+    profileAddressCityLabel: 'City',
+    profileAddressCountryLabel: 'Country',
+    profilePersonalIdentityCodeLabel: 'Personal identity code',
+    profilePersonalIdentityCodeShow: 'Show',
+    profilePersonalIdentityCodeHide: 'Hide',
+    profilePersonalIdentityCodeNotSet: 'Not set',
+    profilePersonalIdentityCodeInvalid: 'Invalid personal identity code',
+    qualificationEditButton: 'Edit',
+    qualificationSaveButton: 'Save',
+    qualificationCancelEdit: 'Cancel',
+    qualificationUploadPhotoButton: 'Upload image',
+    qualificationReplacePhotoButton: 'Replace image',
+    qualificationRemovePhotoButton: 'Remove image',
     qualificationsTitle: 'Qualification cards',
     qualificationsIntro: 'E.g. a hot-work permit or safety card — with an expiry date if there is one.',
     qualificationsEmpty: 'No cards yet.',
@@ -675,6 +708,22 @@ export const WORKER_STRINGS: Record<AppLocale, WorkerStrings> = {
     profileSaveErrorConflict: 'Профиль изменён в другом месте — обновите страницу и попробуйте снова.',
     profileUnsupportedPhotoType: 'Поддерживаются только фото JPG и PNG.',
     profilePhotoTooLarge: 'Файл слишком большой.',
+    profileContactEmailLabel: 'Контактный email',
+    profileAddressStreetLabel: 'Улица, дом',
+    profileAddressPostalCodeLabel: 'Почтовый индекс',
+    profileAddressCityLabel: 'Город',
+    profileAddressCountryLabel: 'Страна',
+    profilePersonalIdentityCodeLabel: 'Личный идентификационный код',
+    profilePersonalIdentityCodeShow: 'Показать',
+    profilePersonalIdentityCodeHide: 'Скрыть',
+    profilePersonalIdentityCodeNotSet: 'Не указан',
+    profilePersonalIdentityCodeInvalid: 'Некорректный личный идентификационный код',
+    qualificationEditButton: 'Изменить',
+    qualificationSaveButton: 'Сохранить',
+    qualificationCancelEdit: 'Отмена',
+    qualificationUploadPhotoButton: 'Загрузить изображение',
+    qualificationReplacePhotoButton: 'Заменить изображение',
+    qualificationRemovePhotoButton: 'Удалить изображение',
     qualificationsTitle: 'Карточки квалификации',
     qualificationsIntro: 'Например, огненные работы или карта безопасности труда — с датой окончания, если есть.',
     qualificationsEmpty: 'Карточек пока нет.',

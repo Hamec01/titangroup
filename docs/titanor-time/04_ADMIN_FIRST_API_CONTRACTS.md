@@ -2348,3 +2348,66 @@ permission requirement или CSV byte contract этим коммитом не �
   (T8.1-T8.4B ядро), см. `T8_REPORTS_DESIGN.md` Addendum "Custom Report". Read-only относительно
   БД (никаких mutation-эффектов) — ноль CSRF/idempotency, тот же посыл, что и у трёх существующих
   T8 report GET'ов
+
+## 26. Worker Dossier (2026-08-26)
+
+Ноль новых permission code (`02_ROLE_PERMISSION_MATRIX.md` §2.10b) — каждый route переиспользует
+существующую комбинацию.
+
+#### `PATCH /api/admin/workers/:employeeId/profile` и `PATCH /api/worker/profile` (расширены)
+- Тот же route/permission/CSRF/version-CAS, что и до этой задачи
+- Новые опциональные body-поля: `personalIdentityCode?` (нормализованная строка или `null` —
+  очистить), `contactEmail?`, `addressStreet?`, `addressPostalCode?`, `addressCity?`,
+  `addressCountry?`
+- Новая ошибка: `400 VALIDATION_ERROR` с `fieldErrors.personalIdentityCode: ["Invalid personal
+  identity code"]` — сообщение никогда не отражает отправленное значение
+- Audit (`EMPLOYEE_PROFILE_UPDATED`): `personalIdentityCodePresent`/`contactEmailPresent`/
+  `addressUpdated` (booleans) вместо значений — единственные поля этого route, которые не
+  логируются как есть (`dateOfBirth`/`specialty`/`skills` — без изменений, полное значение, как и
+  раньше)
+
+#### `GET /api/admin/workers/:employeeId/profile/personal-identity-code` и `GET /api/worker/profile/personal-identity-code`
+- Permission: `worker.profile.read.all` (admin) / `worker.profile.read.own` (worker, `employeeId`
+  только из session)
+- Response `200`: `{ "value": "<decrypted henkilötunnus>" }`; `404 NOT_FOUND`, если не задан
+- Headers: `Cache-Control: private, no-store`, `Pragma: no-cache`, `X-Content-Type-Options:
+  nosniff` — единственный route, отдающий plaintext; основной profile-response всегда только
+  `hasPersonalIdentityCode`/`personalIdentityCodeLast4`
+- Read-only, ноль CSRF/audit (только `WORKER_DOSSIER_DOWNLOADED` ниже трактуется как auditable
+  sensitive read — этот reveal-клик таким не считается по этой задаче)
+
+#### `POST` / `DELETE .../profile/qualifications/:qualificationId/photo` (новые методы на существующем GET-only route, admin и worker-own)
+- Permission: та же пара, что уже была у POST/DELETE профильного фото (`worker.profile.update.all`
+  / `.own`); CSRF обязателен
+- `POST`: `multipart/form-data`, поле `photo` — заменяет существующее изображение (старый файл
+  удаляется после успешного обновления БД), либо создаёт первое для карточки, ранее созданной без
+  фото
+- `DELETE`: убирает только фото — сама карточка/её метаданные/verification state не меняются;
+  повторный `DELETE` безопасен (`200`, no-op)
+- Ошибки: `404 NOT_FOUND` (карточка не найдена **или** принадлежит другому работнику — не
+  различимо снаружи), `400 UNSUPPORTED_TYPE`/`TOO_LARGE`
+
+#### `PATCH /api/worker/profile/qualifications/:qualificationId` (новый метод — ранее только `DELETE`)
+- Permission: `worker.profile.update.own`; CSRF обязателен
+- Body: `{ "certificateNumber"?, "issuer"?, "issuedOn"?, "expiresOn"? }` — без `verify` (worker
+  никогда не подтверждает сам себя)
+- Побочный эффект: если карточка была `VERIFIED`, любое содержательное изменение сбрасывает её в
+  `SELF_REPORTED` (`verifiedAt`/`verifiedByUserId` → `null`) — тот же endpoint, что и admin-версия
+  (`updateEmployeeQualification`), различие только в флаге `resetVerificationOnEdit`
+- Ошибки: те же, что у admin-версии, плюс `404 NOT_FOUND` для чужой карточки (не отличимо от
+  несуществующей)
+
+#### `GET /api/admin/workers/:employeeId/dossier`
+- Permission: `worker.profile.read.all`
+- Response `200`: PDF-файл (`Content-Type: application/pdf`, `Content-Disposition: attachment;
+  filename="titanor-worker-dossier_<employeeNumber>_<YYYY-MM-DD>.pdf"`) — henkilötunnus никогда в
+  filename
+- Headers: `Cache-Control: private, no-store`, `Pragma: no-cache`, `X-Content-Type-Options:
+  nosniff`
+- Генерируется on-demand в памяти (`lib/reporting/worker-dossier-pdf.ts`, тот же pdfkit + DejaVu
+  Sans, что `custom-report-pdf.ts` — ноль Puppeteer/Chromium), нигде не сохраняется (ни `public/`,
+  ни `uploads/`, ни БД)
+- Audit: `AuditEvent(eventType="WORKER_DOSSIER_DOWNLOADED", entityType="EMPLOYEE",
+  entityId=employeeId, afterValue={"documentType":"WORKER_DOSSIER"})` — без единого
+  sensitive-поля (это единственная запись audit-метаданных, никогда не PII)
+- Ошибки: `404 EMPLOYEE_NOT_FOUND`, `401`/`403` как у остальных admin-only routes

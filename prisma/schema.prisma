@@ -471,6 +471,21 @@ model EmployeeProfile {
   contractPath             String?
   contractUploadedByUserId String?   @db.Uuid
   contractUploadedAt       DateTime? @db.Timestamptz(6)
+  // Worker Dossier feature (2026-08-26 plan). henkilötunnus is sensitive personal data — never
+  // stored in plaintext. personalIdentityCodeEncrypted holds an AES-256-GCM ciphertext (base64,
+  // lib/personal-data-encryption.ts); personalIdentityCodeLast4 is a display-only cache of the
+  // final 4 characters (individual number + checksum) so masked UI ("••••••-••••1234") never
+  // needs to decrypt just to render a list. Both are set/cleared together — never one without
+  // the other.
+  personalIdentityCodeEncrypted String? @db.Text
+  personalIdentityCodeLast4     String? @db.VarChar(4)
+  // Distinct from User.email (the login/account field) — this is the worker's HR/contact email
+  // for the dossier, never written to automatically from account email.
+  contactEmail             String?   @db.VarChar(255)
+  addressStreet            String?   @db.VarChar(255)
+  addressPostalCode        String?   @db.VarChar(32)
+  addressCity              String?   @db.VarChar(120)
+  addressCountry           String?   @db.VarChar(120)
   version                  Int       @default(1)
   createdAt                DateTime  @default(now()) @db.Timestamptz(6)
   updatedAt                DateTime  @updatedAt @db.Timestamptz(6)

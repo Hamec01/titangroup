@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation';
 import { useAppLocale } from '@/components/i18n/AppLocaleProvider';
 import { localeText } from '@/lib/i18n/locale';
 import type { EmployeeProfileView } from '@/lib/employee-profile';
-import { QualificationBadge, VerificationBadge } from '@/components/qualifications/QualificationBadge';
+import { QualificationCard } from '@/components/qualifications/QualificationCard';
 
 const CSRF_HEADER_VALUE = 'titanor-time';
 
@@ -30,6 +30,17 @@ export function AdminWorkerProfileForm({ employeeId, initialProfile }: AdminWork
   const [dateOfBirth, setDateOfBirth] = useState(initialProfile.dateOfBirth ?? '');
   const [specialty, setSpecialty] = useState(initialProfile.specialty ?? '');
   const [skills, setSkills] = useState(initialProfile.skills ?? '');
+  const [contactEmail, setContactEmail] = useState(initialProfile.contactEmail ?? '');
+  const [addressStreet, setAddressStreet] = useState(initialProfile.addressStreet ?? '');
+  const [addressPostalCode, setAddressPostalCode] = useState(initialProfile.addressPostalCode ?? '');
+  const [addressCity, setAddressCity] = useState(initialProfile.addressCity ?? '');
+  const [addressCountry, setAddressCountry] = useState(initialProfile.addressCountry ?? '');
+  const [hasPersonalIdentityCode, setHasPersonalIdentityCode] = useState(initialProfile.hasPersonalIdentityCode);
+  const [personalIdentityCodeLast4] = useState(initialProfile.personalIdentityCodeLast4);
+  const [personalIdentityCodeInput, setPersonalIdentityCodeInput] = useState('');
+  const [personalIdentityCodeEditing, setPersonalIdentityCodeEditing] = useState(false);
+  const [personalIdentityCodeRevealed, setPersonalIdentityCodeRevealed] = useState<string | null>(null);
+  const [personalIdentityCodeRevealBusy, setPersonalIdentityCodeRevealBusy] = useState(false);
   const [hasPhoto, setHasPhoto] = useState(initialProfile.hasPhoto);
   const [photoVersion, setPhotoVersion] = useState(0);
   const [photoBusy, setPhotoBusy] = useState(false);
@@ -53,7 +64,6 @@ export function AdminWorkerProfileForm({ employeeId, initialProfile }: AdminWork
   const [qPhoto, setQPhoto] = useState<File | null>(null);
   const [qBusy, setQBusy] = useState(false);
   const [qError, setQError] = useState<string | null>(null);
-  const [verifyBusyId, setVerifyBusyId] = useState<string | null>(null);
 
   useEffect(() => {
     if (!addingQualification || catalog !== null) return;
@@ -73,22 +83,6 @@ export function AdminWorkerProfileForm({ employeeId, initialProfile }: AdminWork
     setQualifications(body.qualifications ?? []);
   }
 
-  async function handleToggleVerification(id: string, verify: boolean): Promise<void> {
-    if (verifyBusyId) return;
-    setVerifyBusyId(id);
-    try {
-      const response = await fetch(`/api/admin/workers/${employeeId}/profile/qualifications/${id}`, {
-        method: 'PATCH',
-        credentials: 'same-origin',
-        headers: { 'Content-Type': 'application/json', 'X-Requested-With': CSRF_HEADER_VALUE },
-        body: JSON.stringify({ verify })
-      });
-      if (response.ok) await refetchQualifications();
-    } finally {
-      setVerifyBusyId(null);
-    }
-  }
-
   async function handleSave(event: FormEvent<HTMLFormElement>): Promise<void> {
     event.preventDefault();
     if (saving) return;
@@ -105,7 +99,13 @@ export function AdminWorkerProfileForm({ employeeId, initialProfile }: AdminWork
           version,
           dateOfBirth: dateOfBirth === '' ? null : dateOfBirth,
           specialty: specialty.trim() === '' ? null : specialty.trim(),
-          skills: skills.trim() === '' ? null : skills.trim()
+          skills: skills.trim() === '' ? null : skills.trim(),
+          contactEmail: contactEmail.trim() === '' ? null : contactEmail.trim(),
+          addressStreet: addressStreet.trim() === '' ? null : addressStreet.trim(),
+          addressPostalCode: addressPostalCode.trim() === '' ? null : addressPostalCode.trim(),
+          addressCity: addressCity.trim() === '' ? null : addressCity.trim(),
+          addressCountry: addressCountry.trim() === '' ? null : addressCountry.trim(),
+          ...(personalIdentityCodeEditing ? { personalIdentityCode: personalIdentityCodeInput.trim() === '' ? null : personalIdentityCodeInput.trim() } : {})
         })
       });
       const body = await response.json().catch(() => null);
@@ -120,12 +120,36 @@ export function AdminWorkerProfileForm({ employeeId, initialProfile }: AdminWork
         return;
       }
       setVersion(body.version);
+      if (personalIdentityCodeEditing) {
+        setHasPersonalIdentityCode(personalIdentityCodeInput.trim() !== '');
+        setPersonalIdentityCodeEditing(false);
+        setPersonalIdentityCodeInput('');
+        setPersonalIdentityCodeRevealed(null);
+      }
       setSavedMessage(localeText(locale, 'Saved.', 'Сохранено.'));
       router.refresh();
     } catch {
       setErrorMessage(localeText(locale, 'Network error. Please try again.', 'Ошибка сети. Попробуйте ещё раз.'));
     } finally {
       setSaving(false);
+    }
+  }
+
+  async function handleRevealPersonalIdentityCode(): Promise<void> {
+    if (personalIdentityCodeRevealBusy) return;
+    if (personalIdentityCodeRevealed !== null) {
+      setPersonalIdentityCodeRevealed(null);
+      return;
+    }
+    setPersonalIdentityCodeRevealBusy(true);
+    try {
+      const response = await fetch(`/api/admin/workers/${employeeId}/profile/personal-identity-code`, { credentials: 'same-origin' });
+      if (response.ok) {
+        const body = await response.json();
+        setPersonalIdentityCodeRevealed(body.value);
+      }
+    } finally {
+      setPersonalIdentityCodeRevealBusy(false);
     }
   }
 
@@ -291,6 +315,53 @@ export function AdminWorkerProfileForm({ employeeId, initialProfile }: AdminWork
           <input id="admin-profile-date-of-birth" type="date" value={dateOfBirth} onChange={(e) => setDateOfBirth(e.target.value)} disabled={saving} />
           {fieldErrors.dateOfBirth ? <p className="field-error">{fieldErrors.dateOfBirth.join(', ')}</p> : null}
         </div>
+        <div className="login-field" id="admin-profile-personal-identity-code-field">
+          <label htmlFor="admin-profile-personal-identity-code">{localeText(locale, 'Personal identity code', 'Личный идентификационный код')}</label>
+          {personalIdentityCodeEditing ? (
+            <input
+              id="admin-profile-personal-identity-code"
+              type="text"
+              placeholder={hasPersonalIdentityCode ? `••••••-••••${personalIdentityCodeLast4 ?? ''}` : ''}
+              value={personalIdentityCodeInput}
+              onChange={(e) => setPersonalIdentityCodeInput(e.target.value)}
+              disabled={saving}
+            />
+          ) : (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <span>{hasPersonalIdentityCode ? (personalIdentityCodeRevealed ?? `••••••-••••${personalIdentityCodeLast4 ?? ''}`) : localeText(locale, 'Not set', 'Не указан')}</span>
+              {hasPersonalIdentityCode ? (
+                <button type="button" className="wk-inline-secondary" onClick={handleRevealPersonalIdentityCode} disabled={personalIdentityCodeRevealBusy}>
+                  {personalIdentityCodeRevealed !== null ? localeText(locale, 'Hide', 'Скрыть') : localeText(locale, 'Show', 'Показать')}
+                </button>
+              ) : null}
+              <button type="button" className="wk-inline-secondary" onClick={() => setPersonalIdentityCodeEditing(true)}>
+                {hasPersonalIdentityCode ? localeText(locale, 'Change', 'Изменить') : localeText(locale, 'Set', 'Указать')}
+              </button>
+            </div>
+          )}
+          {fieldErrors.personalIdentityCode ? <p className="field-error">{localeText(locale, 'Invalid personal identity code', 'Некорректный личный идентификационный код')}</p> : null}
+        </div>
+        <div className="login-field">
+          <label htmlFor="admin-profile-contact-email">{localeText(locale, 'Contact email', 'Контактный email')}</label>
+          <input id="admin-profile-contact-email" type="email" maxLength={255} value={contactEmail} onChange={(e) => setContactEmail(e.target.value)} disabled={saving} />
+          {fieldErrors.contactEmail ? <p className="field-error">{localeText(locale, 'Invalid email', 'Некорректный email')}</p> : null}
+        </div>
+        <div className="login-field">
+          <label htmlFor="admin-profile-address-street">{localeText(locale, 'Street address', 'Улица, дом')}</label>
+          <input id="admin-profile-address-street" type="text" maxLength={255} value={addressStreet} onChange={(e) => setAddressStreet(e.target.value)} disabled={saving} />
+        </div>
+        <div className="login-field">
+          <label htmlFor="admin-profile-address-postal-code">{localeText(locale, 'Postal code', 'Почтовый индекс')}</label>
+          <input id="admin-profile-address-postal-code" type="text" maxLength={32} value={addressPostalCode} onChange={(e) => setAddressPostalCode(e.target.value)} disabled={saving} />
+        </div>
+        <div className="login-field">
+          <label htmlFor="admin-profile-address-city">{localeText(locale, 'City', 'Город')}</label>
+          <input id="admin-profile-address-city" type="text" maxLength={120} value={addressCity} onChange={(e) => setAddressCity(e.target.value)} disabled={saving} />
+        </div>
+        <div className="login-field">
+          <label htmlFor="admin-profile-address-country">{localeText(locale, 'Country', 'Страна')}</label>
+          <input id="admin-profile-address-country" type="text" maxLength={120} value={addressCountry} onChange={(e) => setAddressCountry(e.target.value)} disabled={saving} />
+        </div>
         {errorMessage ? (
           <p className="login-error" role="alert">
             {errorMessage}
@@ -337,30 +408,15 @@ export function AdminWorkerProfileForm({ employeeId, initialProfile }: AdminWork
         ) : (
           <ul className="setup-list">
             {qualifications.map((q) => (
-              <li key={q.id} className="setup-item">
-                <span className="setup-label">
-                  {locale === 'RU' && q.nameRu ? q.nameRu : q.name}
-                  {q.certificateNumber ? <span className="setup-subtitle"> · {q.certificateNumber}</span> : null}
-                  {q.issuer ? <span className="setup-subtitle"> · {q.issuer}</span> : null}
-                  {q.expiresOn ? <span className="setup-subtitle"> · {q.expiresOn}</span> : null}
-                  <QualificationBadge status={q.expiryStatus} color={q.expiryColor} locale={locale} />
-                  <VerificationBadge verified={q.verificationState === 'VERIFIED'} locale={locale} />
-                </span>
-                <span style={{ display: 'inline-flex', gap: 8 }}>
-                  {q.verificationState === 'VERIFIED' ? (
-                    <button type="button" className="wk-clock-cancel-button" onClick={() => handleToggleVerification(q.id, false)} disabled={verifyBusyId === q.id}>
-                      {localeText(locale, 'Remove verification', 'Снять подтверждение')}
-                    </button>
-                  ) : (
-                    <button type="button" className="setup-action" onClick={() => handleToggleVerification(q.id, true)} disabled={verifyBusyId === q.id}>
-                      {localeText(locale, 'Verify', 'Подтвердить')}
-                    </button>
-                  )}
-                  <button type="button" className="wk-clock-cancel-button" onClick={() => handleDeleteQualification(q.id)}>
-                    {localeText(locale, 'Delete', 'Удалить')}
-                  </button>
-                </span>
-              </li>
+              <QualificationCard
+                key={q.id}
+                qualification={q}
+                locale={locale}
+                isAdmin
+                apiBase={`/api/admin/workers/${employeeId}/profile/qualifications/${q.id}`}
+                onChanged={refetchQualifications}
+                onDeleted={() => handleDeleteQualification(q.id)}
+              />
             ))}
           </ul>
         )}
@@ -426,6 +482,13 @@ export function AdminWorkerProfileForm({ employeeId, initialProfile }: AdminWork
             + {localeText(locale, 'Add card', 'Добавить карточку')}
           </button>
         )}
+      </section>
+
+      <section className="worker-work-setup">
+        <h2>{localeText(locale, 'Dossier export', 'Экспорт досье')}</h2>
+        <a className="login-submit" style={{ display: 'inline-block', textAlign: 'center', textDecoration: 'none' }} href={`/api/admin/workers/${employeeId}/dossier`} target="_blank" rel="noreferrer">
+          {localeText(locale, 'Download dossier', 'Скачать досье')}
+        </a>
       </section>
     </div>
   );

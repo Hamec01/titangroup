@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation';
 import { useAppLocale } from '@/components/i18n/AppLocaleProvider';
 import { WORKER_STRINGS } from '@/lib/i18n/worker';
 import type { EmployeeProfileView } from '@/lib/employee-profile';
-import { QualificationBadge, VerificationBadge } from '@/components/qualifications/QualificationBadge';
+import { QualificationCard } from '@/components/qualifications/QualificationCard';
 
 const CSRF_HEADER_VALUE = 'titanor-time';
 
@@ -30,6 +30,17 @@ export function WorkerProfileForm({ initialProfile }: WorkerProfileFormProps) {
   const [dateOfBirth, setDateOfBirth] = useState(initialProfile.dateOfBirth ?? '');
   const [specialty, setSpecialty] = useState(initialProfile.specialty ?? '');
   const [skills, setSkills] = useState(initialProfile.skills ?? '');
+  const [contactEmail, setContactEmail] = useState(initialProfile.contactEmail ?? '');
+  const [addressStreet, setAddressStreet] = useState(initialProfile.addressStreet ?? '');
+  const [addressPostalCode, setAddressPostalCode] = useState(initialProfile.addressPostalCode ?? '');
+  const [addressCity, setAddressCity] = useState(initialProfile.addressCity ?? '');
+  const [addressCountry, setAddressCountry] = useState(initialProfile.addressCountry ?? '');
+  const [hasPersonalIdentityCode, setHasPersonalIdentityCode] = useState(initialProfile.hasPersonalIdentityCode);
+  const [personalIdentityCodeLast4] = useState(initialProfile.personalIdentityCodeLast4);
+  const [personalIdentityCodeInput, setPersonalIdentityCodeInput] = useState('');
+  const [personalIdentityCodeEditing, setPersonalIdentityCodeEditing] = useState(false);
+  const [personalIdentityCodeRevealed, setPersonalIdentityCodeRevealed] = useState<string | null>(null);
+  const [personalIdentityCodeRevealBusy, setPersonalIdentityCodeRevealBusy] = useState(false);
   const [hasPhoto, setHasPhoto] = useState(initialProfile.hasPhoto);
   const [photoVersion, setPhotoVersion] = useState(0);
   const [qualifications, setQualifications] = useState(initialProfile.qualifications);
@@ -86,7 +97,13 @@ export function WorkerProfileForm({ initialProfile }: WorkerProfileFormProps) {
           version,
           dateOfBirth: dateOfBirth === '' ? null : dateOfBirth,
           specialty: specialty.trim() === '' ? null : specialty.trim(),
-          skills: skills.trim() === '' ? null : skills.trim()
+          skills: skills.trim() === '' ? null : skills.trim(),
+          contactEmail: contactEmail.trim() === '' ? null : contactEmail.trim(),
+          addressStreet: addressStreet.trim() === '' ? null : addressStreet.trim(),
+          addressPostalCode: addressPostalCode.trim() === '' ? null : addressPostalCode.trim(),
+          addressCity: addressCity.trim() === '' ? null : addressCity.trim(),
+          addressCountry: addressCountry.trim() === '' ? null : addressCountry.trim(),
+          ...(personalIdentityCodeEditing ? { personalIdentityCode: personalIdentityCodeInput.trim() === '' ? null : personalIdentityCodeInput.trim() } : {})
         })
       });
       const body = await response.json().catch(() => null);
@@ -101,12 +118,36 @@ export function WorkerProfileForm({ initialProfile }: WorkerProfileFormProps) {
         return;
       }
       setVersion(body.version);
+      if (personalIdentityCodeEditing) {
+        setHasPersonalIdentityCode(personalIdentityCodeInput.trim() !== '');
+        setPersonalIdentityCodeEditing(false);
+        setPersonalIdentityCodeInput('');
+        setPersonalIdentityCodeRevealed(null);
+      }
       setSavedMessage(t.profileSaved);
       router.refresh();
     } catch {
       setErrorMessage(t.errCouldNotReachServer);
     } finally {
       setSaving(false);
+    }
+  }
+
+  async function handleRevealPersonalIdentityCode(): Promise<void> {
+    if (personalIdentityCodeRevealBusy) return;
+    if (personalIdentityCodeRevealed !== null) {
+      setPersonalIdentityCodeRevealed(null);
+      return;
+    }
+    setPersonalIdentityCodeRevealBusy(true);
+    try {
+      const response = await fetch('/api/worker/profile/personal-identity-code', { credentials: 'same-origin' });
+      if (response.ok) {
+        const body = await response.json();
+        setPersonalIdentityCodeRevealed(body.value);
+      }
+    } finally {
+      setPersonalIdentityCodeRevealBusy(false);
     }
   }
 
@@ -240,6 +281,53 @@ export function WorkerProfileForm({ initialProfile }: WorkerProfileFormProps) {
           <input id="profile-date-of-birth" type="date" value={dateOfBirth} onChange={(e) => setDateOfBirth(e.target.value)} disabled={saving} />
           {fieldErrors.dateOfBirth ? <p className="field-error">{fieldErrors.dateOfBirth.join(', ')}</p> : null}
         </div>
+        <div className="login-field" id="profile-personal-identity-code-field">
+          <label htmlFor="profile-personal-identity-code">{t.profilePersonalIdentityCodeLabel}</label>
+          {personalIdentityCodeEditing ? (
+            <input
+              id="profile-personal-identity-code"
+              type="text"
+              placeholder={hasPersonalIdentityCode ? `••••••-••••${personalIdentityCodeLast4 ?? ''}` : ''}
+              value={personalIdentityCodeInput}
+              onChange={(e) => setPersonalIdentityCodeInput(e.target.value)}
+              disabled={saving}
+            />
+          ) : (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <span>{hasPersonalIdentityCode ? (personalIdentityCodeRevealed ?? `••••••-••••${personalIdentityCodeLast4 ?? ''}`) : t.profilePersonalIdentityCodeNotSet}</span>
+              {hasPersonalIdentityCode ? (
+                <button type="button" className="wk-inline-secondary" onClick={handleRevealPersonalIdentityCode} disabled={personalIdentityCodeRevealBusy}>
+                  {personalIdentityCodeRevealed !== null ? t.profilePersonalIdentityCodeHide : t.profilePersonalIdentityCodeShow}
+                </button>
+              ) : null}
+              <button type="button" className="wk-inline-secondary" onClick={() => setPersonalIdentityCodeEditing(true)}>
+                {t.qualificationEditButton}
+              </button>
+            </div>
+          )}
+          {fieldErrors.personalIdentityCode ? <p className="field-error">{t.profilePersonalIdentityCodeInvalid}</p> : null}
+        </div>
+        <div className="login-field">
+          <label htmlFor="profile-contact-email">{t.profileContactEmailLabel}</label>
+          <input id="profile-contact-email" type="email" maxLength={255} value={contactEmail} onChange={(e) => setContactEmail(e.target.value)} disabled={saving} />
+          {fieldErrors.contactEmail ? <p className="field-error">{fieldErrors.contactEmail.join(', ')}</p> : null}
+        </div>
+        <div className="login-field">
+          <label htmlFor="profile-address-street">{t.profileAddressStreetLabel}</label>
+          <input id="profile-address-street" type="text" maxLength={255} value={addressStreet} onChange={(e) => setAddressStreet(e.target.value)} disabled={saving} />
+        </div>
+        <div className="login-field">
+          <label htmlFor="profile-address-postal-code">{t.profileAddressPostalCodeLabel}</label>
+          <input id="profile-address-postal-code" type="text" maxLength={32} value={addressPostalCode} onChange={(e) => setAddressPostalCode(e.target.value)} disabled={saving} />
+        </div>
+        <div className="login-field">
+          <label htmlFor="profile-address-city">{t.profileAddressCityLabel}</label>
+          <input id="profile-address-city" type="text" maxLength={120} value={addressCity} onChange={(e) => setAddressCity(e.target.value)} disabled={saving} />
+        </div>
+        <div className="login-field">
+          <label htmlFor="profile-address-country">{t.profileAddressCountryLabel}</label>
+          <input id="profile-address-country" type="text" maxLength={120} value={addressCountry} onChange={(e) => setAddressCountry(e.target.value)} disabled={saving} />
+        </div>
         {errorMessage ? (
           <p className="login-error" role="alert">
             {errorMessage}
@@ -275,18 +363,15 @@ export function WorkerProfileForm({ initialProfile }: WorkerProfileFormProps) {
         ) : (
           <ul className="setup-list">
             {qualifications.map((q) => (
-              <li key={q.id} className="setup-item">
-                <span className="setup-label">
-                  {locale === 'RU' && q.nameRu ? q.nameRu : q.name}
-                  {q.certificateNumber ? <span className="setup-subtitle"> · {q.certificateNumber}</span> : null}
-                  {q.expiresOn ? <span className="setup-subtitle"> · {q.expiresOn}</span> : null}
-                  <QualificationBadge status={q.expiryStatus} color={q.expiryColor} locale={locale} />
-                  <VerificationBadge verified={q.verificationState === 'VERIFIED'} locale={locale} />
-                </span>
-                <button type="button" className="wk-clock-cancel-button" onClick={() => handleDeleteQualification(q.id)}>
-                  {t.qualificationDeleteButton}
-                </button>
-              </li>
+              <QualificationCard
+                key={q.id}
+                qualification={q}
+                locale={locale}
+                isAdmin={false}
+                apiBase={`/api/worker/profile/qualifications/${q.id}`}
+                onChanged={refetchQualifications}
+                onDeleted={() => handleDeleteQualification(q.id)}
+              />
             ))}
           </ul>
         )}

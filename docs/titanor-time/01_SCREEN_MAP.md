@@ -733,6 +733,23 @@ actions`) на каждой `/admin/*` странице. Bell-иконка с ba
   employee-picker; attention-sort — EXPIRED/MISSING сначала, дальше ближайший expiresOn, дальше
   lastName/firstName; 25/25 browser QA (`scripts/_test-qualifications-browser-qa.ts`)
 
+**Worker Dossier — `[2026-08-26]` расширение `/admin/workers/:employeeId/profile` и
+`/worker/profile`** (существующие экраны, не новые роуты; сами не имели полной screen-map записи
+уже в исходном `[2026-08-24]` слайсе):
+- Новые секции на admin-экране: Contact & Address (`contactEmail`/`addressStreet`/
+  `addressPostalCode`/`addressCity`/`addressCountry`), henkilötunnus (masked по умолчанию,
+  `Show`/`Hide` — decrypt только по явному клику через отдельный reveal-запрос, никогда в исходном
+  profile-payload), Dossier export (`Download dossier` → `GET .../dossier`, PDF)
+- Тот же Contact & Address + henkilötunnus набор на `/worker/profile` (только собственный, `own`-
+  scope) — без Dossier export (admin-only)
+- Карточки квалификации на обоих экранах заменены с plain `<li>` текста на `QualificationCard`
+  (`components/qualifications/QualificationCard.tsx`) — миниатюра фото, inline-редактирование
+  metadata, upload/replace/remove фото независимо от самой карточки; worker-редактирование уже
+  `VERIFIED` карточки сбрасывает её в `SELF_REPORTED` (см. `02_...` §2.10b, `04_...` §26)
+- DoD: 31/31 browser QA (`scripts/_test-worker-dossier-browser-qa.ts`, desktop admin + desktop
+  worker + mobile 390×844), плюс исходный 25/25 `_test-qualifications-browser-qa.ts` остаётся
+  зелёным (регрессия проверена)
+
 #### `/admin/reports/custom` 🟢 **`[2026-08-24] Custom Report`**
 - Роли: `ADMIN`, `SUPER_ADMIN`; `worker.read.all` + `site.read.all` + `timesheet.read.all` +
   `export.read` вместе (GET-only, stateless — ни `export.create`, ни `Idempotency-Key`, ни

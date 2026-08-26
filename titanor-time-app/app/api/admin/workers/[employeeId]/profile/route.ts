@@ -4,7 +4,8 @@ import { jsonError, successHeaders } from '@/lib/api-error';
 import { resolveAuthenticatedSession } from '@/lib/auth';
 import { hasPermission } from '@/lib/permissions';
 import { SESSION_COOKIE_NAME } from '@/lib/session';
-import { getEmployeeProfileView, updateEmployeeProfileFields, validateProfileFields } from '@/lib/employee-profile';
+import { getEmployeeProfileView, updateEmployeeProfileFields, validateProfileFields, type UpdateEmployeeProfileFieldsInput } from '@/lib/employee-profile';
+import { normalizePersonalIdentityCode } from '@/lib/personal-identity-code';
 
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
@@ -59,18 +60,24 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
     return jsonError(400, { code: 'VALIDATION_ERROR', message: 'Request body must be valid JSON.' }, requestId);
   }
   const bodyObject = rawBody && typeof rawBody === 'object' ? (rawBody as Record<string, unknown>) : {};
-  const { version, dateOfBirth, specialty, skills } = bodyObject as {
+  const { version, dateOfBirth, specialty, skills, personalIdentityCode, contactEmail, addressStreet, addressPostalCode, addressCity, addressCountry } = bodyObject as {
     version?: unknown;
     dateOfBirth?: unknown;
     specialty?: unknown;
     skills?: unknown;
+    personalIdentityCode?: unknown;
+    contactEmail?: unknown;
+    addressStreet?: unknown;
+    addressPostalCode?: unknown;
+    addressCity?: unknown;
+    addressCountry?: unknown;
   };
 
   if (typeof version !== 'number' || !Number.isInteger(version) || version < 0) {
     return jsonError(400, { code: 'VALIDATION_ERROR', message: 'version is required.', fieldErrors: { version: ['required'] } }, requestId);
   }
 
-  const fields: { dateOfBirth?: Date | null; specialty?: string | null; skills?: string | null } = {};
+  const fields: UpdateEmployeeProfileFieldsInput = {};
   if (dateOfBirth !== undefined) {
     if (dateOfBirth === null) {
       fields.dateOfBirth = null;
@@ -91,6 +98,42 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
       return jsonError(400, { code: 'VALIDATION_ERROR', message: 'Invalid skills.', fieldErrors: { skills: ['invalid'] } }, requestId);
     }
     fields.skills = skills;
+  }
+  if (personalIdentityCode !== undefined) {
+    if (personalIdentityCode !== null && typeof personalIdentityCode !== 'string') {
+      return jsonError(400, { code: 'VALIDATION_ERROR', message: 'Invalid personalIdentityCode.', fieldErrors: { personalIdentityCode: ['invalid'] } }, requestId);
+    }
+    fields.personalIdentityCode = personalIdentityCode === null ? null : normalizePersonalIdentityCode(personalIdentityCode);
+  }
+  if (contactEmail !== undefined) {
+    if (contactEmail !== null && typeof contactEmail !== 'string') {
+      return jsonError(400, { code: 'VALIDATION_ERROR', message: 'Invalid contactEmail.', fieldErrors: { contactEmail: ['invalid'] } }, requestId);
+    }
+    fields.contactEmail = contactEmail;
+  }
+  if (addressStreet !== undefined) {
+    if (addressStreet !== null && typeof addressStreet !== 'string') {
+      return jsonError(400, { code: 'VALIDATION_ERROR', message: 'Invalid addressStreet.', fieldErrors: { addressStreet: ['invalid'] } }, requestId);
+    }
+    fields.addressStreet = addressStreet;
+  }
+  if (addressPostalCode !== undefined) {
+    if (addressPostalCode !== null && typeof addressPostalCode !== 'string') {
+      return jsonError(400, { code: 'VALIDATION_ERROR', message: 'Invalid addressPostalCode.', fieldErrors: { addressPostalCode: ['invalid'] } }, requestId);
+    }
+    fields.addressPostalCode = addressPostalCode;
+  }
+  if (addressCity !== undefined) {
+    if (addressCity !== null && typeof addressCity !== 'string') {
+      return jsonError(400, { code: 'VALIDATION_ERROR', message: 'Invalid addressCity.', fieldErrors: { addressCity: ['invalid'] } }, requestId);
+    }
+    fields.addressCity = addressCity;
+  }
+  if (addressCountry !== undefined) {
+    if (addressCountry !== null && typeof addressCountry !== 'string') {
+      return jsonError(400, { code: 'VALIDATION_ERROR', message: 'Invalid addressCountry.', fieldErrors: { addressCountry: ['invalid'] } }, requestId);
+    }
+    fields.addressCountry = addressCountry;
   }
 
   const fieldErrors = validateProfileFields(fields);

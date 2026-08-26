@@ -76,7 +76,9 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
     issuedOn: issuedOnParsed as Date | null,
     expiresOn: expiresOnParsed as Date | null,
     actorUserId: authenticated.user.id,
-    requestId
+    requestId,
+    // Admin edits stay authoritative — never auto-reset verification (task spec §20).
+    resetVerificationOnEdit: false
   });
   if (!result.ok) {
     if (result.code === 'VALIDATION_ERROR') {

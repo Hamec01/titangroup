@@ -14,6 +14,8 @@ import {
   type QualificationStatusColor
 } from '@/lib/qualification-expiry';
 import { helsinkiCalendarDateAsUtcMidnight } from '@/lib/attendance-clock';
+import { encryptPersonalData, decryptPersonalData } from '@/lib/personal-data-encryption';
+import { validatePersonalIdentityCode } from '@/lib/personal-identity-code';
 
 // Worker Profile feature (2026-08-24 plan) — docs/titanor-time/02_ROLE_PERMISSION_MATRIX.md
 // §2.2 worker.profile.* rows. Shared core between the worker self-service routes
@@ -56,6 +58,14 @@ export interface EmployeeProfileView {
   hasPhoto: boolean;
   contract: { uploadedAt: string; uploadedByUsername: string | null } | null;
   qualifications: EmployeeQualificationView[];
+  /** Never the decrypted value — see getEmployeeProfilePersonalIdentityCode for the explicit, separately-authorized reveal call (task spec §43). */
+  hasPersonalIdentityCode: boolean;
+  personalIdentityCodeLast4: string | null;
+  contactEmail: string | null;
+  addressStreet: string | null;
+  addressPostalCode: string | null;
+  addressCity: string | null;
+  addressCountry: string | null;
 }
 
 function formatDate(date: Date): string {
@@ -80,7 +90,14 @@ export async function getEmployeeProfileView(employeeId: string, includeContract
         photoPath: true,
         contractPath: true,
         contractUploadedAt: true,
-        contractUploadedByUser: { select: { username: true } }
+        contractUploadedByUser: { select: { username: true } },
+        personalIdentityCodeEncrypted: true,
+        personalIdentityCodeLast4: true,
+        contactEmail: true,
+        addressStreet: true,
+        addressPostalCode: true,
+        addressCity: true,
+        addressCountry: true
       }
     }),
     prisma.employeeQualification.findMany({
@@ -117,6 +134,13 @@ export async function getEmployeeProfileView(employeeId: string, includeContract
       includeContract && profile?.contractPath && profile.contractUploadedAt
         ? { uploadedAt: profile.contractUploadedAt.toISOString(), uploadedByUsername: profile.contractUploadedByUser?.username ?? null }
         : null,
+    hasPersonalIdentityCode: Boolean(profile?.personalIdentityCodeEncrypted),
+    personalIdentityCodeLast4: profile?.personalIdentityCodeLast4 ?? null,
+    contactEmail: profile?.contactEmail ?? null,
+    addressStreet: profile?.addressStreet ?? null,
+    addressPostalCode: profile?.addressPostalCode ?? null,
+    addressCity: profile?.addressCity ?? null,
+    addressCountry: profile?.addressCountry ?? null,
     qualifications: qualifications.map((q) => {
       const expiryMode = q.definition?.expiryMode ?? (q.expiresOn ? 'OPTIONAL' : 'NONE');
       const expiry = computeQualificationExpiryStatus(expiryMode, q.expiresOn, today);
@@ -143,9 +167,36 @@ export async function getEmployeeProfileView(employeeId: string, includeContract
   };
 }
 
+/** Decrypts and returns the employee's henkilötunnus, or null if none is set. Callers are
+ * responsible for authorization (admin worker.profile.read.all vs worker's own session) before
+ * calling this — same convention as getEmployeeProfilePhotoPath/getEmployeeContractPath. Never
+ * log the return value (task spec §40). */
+export async function getEmployeeProfilePersonalIdentityCode(employeeId: string): Promise<string | null> {
+  const profile = await prisma.employeeProfile.findUnique({ where: { employeeId }, select: { personalIdentityCodeEncrypted: true } });
+  if (!profile?.personalIdentityCodeEncrypted) {
+    return null;
+  }
+  return decryptPersonalData(profile.personalIdentityCodeEncrypted);
+}
+
+const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
 /** Every field is optional/nullable — the worker fills in whatever they want, nothing here
- * is required. Only validates the ones actually present in the partial-update body. */
-export function validateProfileFields(input: { dateOfBirth?: Date | null; specialty?: string | null; skills?: string | null }): Record<string, string[]> {
+ * is required. Only validates the ones actually present in the partial-update body.
+ * `personalIdentityCode` must already be normalized (normalizePersonalIdentityCode) by the
+ * caller — this only re-checks validity, it never reflects the input back in an error (task
+ * spec §5: no echo of the submitted value). */
+export function validateProfileFields(input: {
+  dateOfBirth?: Date | null;
+  specialty?: string | null;
+  skills?: string | null;
+  personalIdentityCode?: string | null;
+  contactEmail?: string | null;
+  addressStreet?: string | null;
+  addressPostalCode?: string | null;
+  addressCity?: string | null;
+  addressCountry?: string | null;
+}): Record<string, string[]> {
   const errors: Record<string, string[]> = {};
   if (input.dateOfBirth !== undefined && input.dateOfBirth !== null) {
     if (Number.isNaN(input.dateOfBirth.getTime()) || input.dateOfBirth < MIN_BIRTH_DATE || input.dateOfBirth > MAX_BIRTH_DATE) {
@@ -158,6 +209,28 @@ export function validateProfileFields(input: { dateOfBirth?: Date | null; specia
   if (input.skills !== undefined && input.skills !== null && input.skills.length > 2000) {
     errors.skills = ['must be 2000 characters or fewer'];
   }
+  if (input.personalIdentityCode !== undefined && input.personalIdentityCode !== null) {
+    if (!validatePersonalIdentityCode(input.personalIdentityCode).valid) {
+      errors.personalIdentityCode = ['Invalid personal identity code'];
+    }
+  }
+  if (input.contactEmail !== undefined && input.contactEmail !== null) {
+    if (input.contactEmail.length > 255 || !EMAIL_PATTERN.test(input.contactEmail)) {
+      errors.contactEmail = ['invalid email'];
+    }
+  }
+  if (input.addressStreet !== undefined && input.addressStreet !== null && input.addressStreet.length > 255) {
+    errors.addressStreet = ['must be 255 characters or fewer'];
+  }
+  if (input.addressPostalCode !== undefined && input.addressPostalCode !== null && input.addressPostalCode.length > 32) {
+    errors.addressPostalCode = ['must be 32 characters or fewer'];
+  }
+  if (input.addressCity !== undefined && input.addressCity !== null && input.addressCity.length > 120) {
+    errors.addressCity = ['must be 120 characters or fewer'];
+  }
+  if (input.addressCountry !== undefined && input.addressCountry !== null && input.addressCountry.length > 120) {
+    errors.addressCountry = ['must be 120 characters or fewer'];
+  }
   return errors;
 }
 
@@ -166,21 +239,80 @@ export type UpdateProfileFieldsResult = { ok: true; version: number } | { ok: fa
 /** `version` is what the caller last read via getEmployeeProfileView (0 when no row exists
  * yet). First write for an employee creates the row at version 1; every later write is a
  * version-matched compare-and-swap, same optimistic-concurrency shape as Employee.version. */
+export interface UpdateEmployeeProfileFieldsInput {
+  dateOfBirth?: Date | null;
+  specialty?: string | null;
+  skills?: string | null;
+  /** Already-normalized (normalizePersonalIdentityCode) plaintext, or null to clear. Never stored as-is — always encrypted here. */
+  personalIdentityCode?: string | null;
+  contactEmail?: string | null;
+  addressStreet?: string | null;
+  addressPostalCode?: string | null;
+  addressCity?: string | null;
+  addressCountry?: string | null;
+}
+
 export async function updateEmployeeProfileFields(input: {
   employeeId: string;
   version: number;
   actorUserId: string;
   requestId: string;
-  fields: { dateOfBirth?: Date | null; specialty?: string | null; skills?: string | null };
+  fields: UpdateEmployeeProfileFieldsInput;
 }): Promise<UpdateProfileFieldsResult> {
   const employee = await prisma.employee.findUnique({ where: { id: input.employeeId }, select: { id: true } });
   if (!employee) {
     return { ok: false, code: 'EMPLOYEE_NOT_FOUND' };
   }
 
-  // Prisma.InputJsonValue (AuditEvent.afterValue) has no Date support — the audit snapshot
-  // needs a plain ISO date string, not the Date instance passed to the actual Prisma write.
-  const auditFields = { ...input.fields, dateOfBirth: input.fields.dateOfBirth ? formatDate(input.fields.dateOfBirth) : input.fields.dateOfBirth };
+  const { dateOfBirth, specialty, skills, personalIdentityCode, contactEmail, addressStreet, addressPostalCode, addressCity, addressCountry } = input.fields;
+
+  // Actual DB write shape — personalIdentityCode (plaintext) never appears here, only its
+  // encrypted form + last4 cache (task spec §4). Deliberately a plain scalar-only local type
+  // (not Prisma.EmployeeProfileUpdateInput) so the same object literal can feed both `create`
+  // and `updateMany` below without fighting their differing relation-wrapper input types.
+  const dbFields: {
+    dateOfBirth?: Date | null;
+    specialty?: string | null;
+    skills?: string | null;
+    contactEmail?: string | null;
+    addressStreet?: string | null;
+    addressPostalCode?: string | null;
+    addressCity?: string | null;
+    addressCountry?: string | null;
+    personalIdentityCodeEncrypted?: string | null;
+    personalIdentityCodeLast4?: string | null;
+  } = {};
+  if (dateOfBirth !== undefined) dbFields.dateOfBirth = dateOfBirth;
+  if (specialty !== undefined) dbFields.specialty = specialty;
+  if (skills !== undefined) dbFields.skills = skills;
+  if (contactEmail !== undefined) dbFields.contactEmail = contactEmail;
+  if (addressStreet !== undefined) dbFields.addressStreet = addressStreet;
+  if (addressPostalCode !== undefined) dbFields.addressPostalCode = addressPostalCode;
+  if (addressCity !== undefined) dbFields.addressCity = addressCity;
+  if (addressCountry !== undefined) dbFields.addressCountry = addressCountry;
+  if (personalIdentityCode !== undefined) {
+    if (personalIdentityCode === null) {
+      dbFields.personalIdentityCodeEncrypted = null;
+      dbFields.personalIdentityCodeLast4 = null;
+    } else {
+      dbFields.personalIdentityCodeEncrypted = encryptPersonalData(personalIdentityCode);
+      dbFields.personalIdentityCodeLast4 = personalIdentityCode.slice(-4);
+    }
+  }
+
+  // Audit snapshot — deliberately NOT the same shape as dbFields (task spec §42). dateOfBirth/
+  // specialty/skills keep the pre-existing full-value behavior; henkilötunnus/contactEmail/
+  // address are new-in-this-feature sensitive-ish fields, recorded as presence/change markers
+  // only, never their actual value.
+  const auditFields: Record<string, string | boolean | null> = {};
+  if (dateOfBirth !== undefined) auditFields.dateOfBirth = dateOfBirth ? formatDate(dateOfBirth) : null;
+  if (specialty !== undefined) auditFields.specialty = specialty;
+  if (skills !== undefined) auditFields.skills = skills;
+  if (contactEmail !== undefined) auditFields.contactEmailPresent = contactEmail !== null;
+  if (addressStreet !== undefined || addressPostalCode !== undefined || addressCity !== undefined || addressCountry !== undefined) {
+    auditFields.addressUpdated = true;
+  }
+  if (personalIdentityCode !== undefined) auditFields.personalIdentityCodePresent = personalIdentityCode !== null;
 
   return prisma.$transaction(async (tx) => {
     if (input.version === 0) {
@@ -189,7 +321,7 @@ export async function updateEmployeeProfileFields(input: {
         return { ok: false, code: 'VERSION_CONFLICT' } as const;
       }
       const created = await tx.employeeProfile.create({
-        data: { employeeId: input.employeeId, ...input.fields }
+        data: { employeeId: input.employeeId, ...dbFields }
       });
       await createAuditEvent(tx, {
         actorUserId: input.actorUserId,
@@ -205,7 +337,7 @@ export async function updateEmployeeProfileFields(input: {
 
     const result = await tx.employeeProfile.updateMany({
       where: { employeeId: input.employeeId, version: input.version },
-      data: { ...input.fields, version: { increment: 1 } }
+      data: { ...dbFields, version: { increment: 1 } }
     });
     if (result.count === 0) {
       return { ok: false, code: 'VERSION_CONFLICT' } as const;
@@ -339,7 +471,6 @@ export type CreateQualificationResult =
 export async function createEmployeeQualification(input: CreateQualificationInput): Promise<CreateQualificationResult> {
   const fieldErrors: Record<string, string[]> = {};
   let resolvedName = input.name?.trim() ?? '';
-  let expiryMode: 'REQUIRED' | 'OPTIONAL' | 'NONE' = 'OPTIONAL';
 
   if (input.definitionId) {
     const definition = await getQualificationDefinitionById(input.definitionId);
@@ -352,7 +483,6 @@ export async function createEmployeeQualification(input: CreateQualificationInpu
       return { ok: false, code: 'DEFINITION_NOT_SELECTABLE' };
     }
     resolvedName = definition.nameEn;
-    expiryMode = definition.expiryMode;
   } else if (resolvedName.length === 0) {
     fieldErrors.name = ['required'];
   } else if (resolvedName.length > 120) {
@@ -365,8 +495,15 @@ export async function createEmployeeQualification(input: CreateQualificationInpu
   if (input.issuer && input.issuer.length > 160) {
     fieldErrors.issuer = ['must be 160 characters or fewer'];
   }
-  if (expiryMode === 'REQUIRED' && !input.expiresOn) {
-    fieldErrors.expiresOn = ['required for this qualification'];
+  // Worker Dossier feature (2026-08-26, task spec §15/§16): unconditionally required for every
+  // NEW employee credential going forward, regardless of the catalog's expiryMode — unlike
+  // updateEmployeeQualification below, which still only requires it when the catalog says
+  // REQUIRED, so editing an existing legacy row's other fields doesn't force adding a date.
+  if (!input.expiresOn) {
+    fieldErrors.expiresOn = ['required'];
+  }
+  if (input.issuedOn && input.expiresOn && input.issuedOn > input.expiresOn) {
+    fieldErrors.expiresOn = ['must be on or after issuedOn'];
   }
   if (Object.keys(fieldErrors).length > 0) {
     return { ok: false, code: 'VALIDATION_ERROR', fieldErrors };
@@ -436,6 +573,12 @@ export interface UpdateQualificationInput {
   expiresOn: Date | null;
   actorUserId: string;
   requestId: string;
+  /** True only for the worker's own-profile route. A worker editing their own qualification's
+   * metadata can never set VERIFIED, but per task spec §20 a content change to an already-
+   * VERIFIED credential also can't leave it silently marked VERIFIED under new (unreviewed)
+   * data — it drops back to SELF_REPORTED and the admin re-confirms. Admin-route calls always
+   * pass false: an admin's own edit stays authoritative and never resets verification. */
+  resetVerificationOnEdit: boolean;
 }
 
 export type UpdateQualificationResult =
@@ -443,13 +586,13 @@ export type UpdateQualificationResult =
   | { ok: false; code: 'VALIDATION_ERROR'; fieldErrors: Record<string, string[]> }
   | { ok: false; code: 'NOT_FOUND' | 'FORBIDDEN' };
 
-/** Admin-only metadata edit (certificate number/issuer/issued/expires) — never touches `name`/
- * `definitionId` (re-pick by deleting and re-adding) or `verificationState` (see
- * setQualificationVerification). */
+/** Metadata edit (certificate number/issuer/issued/expires) for admin or worker-own callers —
+ * never touches `name`/`definitionId` (re-pick by deleting and re-adding) or lets a non-admin
+ * caller set VERIFIED (see setQualificationVerification, admin-only). */
 export async function updateEmployeeQualification(input: UpdateQualificationInput): Promise<UpdateQualificationResult> {
   const existing = await prisma.employeeQualification.findUnique({
     where: { id: input.qualificationId },
-    select: { id: true, employeeId: true, definitionId: true, certificateNumber: true, issuer: true, issuedOn: true, expiresOn: true, definition: { select: { expiryMode: true } } }
+    select: { id: true, employeeId: true, definitionId: true, certificateNumber: true, issuer: true, issuedOn: true, expiresOn: true, verificationState: true, definition: { select: { expiryMode: true } } }
   });
   if (!existing) {
     return { ok: false, code: 'NOT_FOUND' };
@@ -468,9 +611,14 @@ export async function updateEmployeeQualification(input: UpdateQualificationInpu
   if (existing.definition?.expiryMode === 'REQUIRED' && !input.expiresOn) {
     fieldErrors.expiresOn = ['required for this qualification'];
   }
+  if (input.issuedOn && input.expiresOn && input.issuedOn > input.expiresOn) {
+    fieldErrors.expiresOn = ['must be on or after issuedOn'];
+  }
   if (Object.keys(fieldErrors).length > 0) {
     return { ok: false, code: 'VALIDATION_ERROR', fieldErrors };
   }
+
+  const shouldResetVerification = input.resetVerificationOnEdit && existing.verificationState === 'VERIFIED';
 
   await prisma.$transaction(async (tx) => {
     await tx.employeeQualification.update({
@@ -479,7 +627,8 @@ export async function updateEmployeeQualification(input: UpdateQualificationInpu
         certificateNumber: input.certificateNumber?.trim() || null,
         issuer: input.issuer?.trim() || null,
         issuedOn: input.issuedOn,
-        expiresOn: input.expiresOn
+        expiresOn: input.expiresOn,
+        ...(shouldResetVerification ? { verificationState: 'SELF_REPORTED' as const, verifiedAt: null, verifiedByUserId: null } : {})
       }
     });
     await createAuditEvent(tx, {
@@ -492,13 +641,15 @@ export async function updateEmployeeQualification(input: UpdateQualificationInpu
         certificateNumber: existing.certificateNumber,
         issuer: existing.issuer,
         issuedOn: existing.issuedOn ? formatDate(existing.issuedOn) : null,
-        expiresOn: existing.expiresOn ? formatDate(existing.expiresOn) : null
+        expiresOn: existing.expiresOn ? formatDate(existing.expiresOn) : null,
+        ...(shouldResetVerification ? { verificationState: existing.verificationState } : {})
       },
       afterValue: {
         certificateNumber: input.certificateNumber?.trim() || null,
         issuer: input.issuer?.trim() || null,
         issuedOn: input.issuedOn ? formatDate(input.issuedOn) : null,
-        expiresOn: input.expiresOn ? formatDate(input.expiresOn) : null
+        expiresOn: input.expiresOn ? formatDate(input.expiresOn) : null,
+        ...(shouldResetVerification ? { verificationState: 'SELF_REPORTED' } : {})
       }
     });
   });
@@ -582,6 +733,57 @@ export async function getEmployeeQualificationPhotoPath(qualificationId: string,
     return null;
   }
   return qualification.photoPath;
+}
+
+export type SetQualificationPhotoResult = { ok: true } | { ok: false; code: 'UNSUPPORTED_TYPE' | 'TOO_LARGE' | 'NOT_FOUND' | 'FORBIDDEN' };
+
+/** Worker Dossier feature (2026-08-26, task spec §17) — upload-or-replace a qualification's
+ * photo independent of creating/deleting the qualification row itself. Same re-encode/ownership/
+ * old-file-cleanup shape as setEmployeeProfilePhoto. `employeeId` is the caller's own (worker) or
+ * the path param (admin) — always checked against the row's actual owner, never trusted alone. */
+export async function setEmployeeQualificationPhoto(qualificationId: string, employeeId: string, file: File): Promise<SetQualificationPhotoResult> {
+  const existing = await prisma.employeeQualification.findUnique({ where: { id: qualificationId }, select: { id: true, employeeId: true, photoPath: true } });
+  if (!existing) {
+    return { ok: false, code: 'NOT_FOUND' };
+  }
+  if (existing.employeeId !== employeeId) {
+    return { ok: false, code: 'FORBIDDEN' };
+  }
+  let saved;
+  try {
+    saved = await saveEmployeeImageUpload(employeeId, 'qualification-photo', file);
+  } catch (error) {
+    if (error instanceof EmployeeUploadError) {
+      return { ok: false, code: error.code };
+    }
+    throw error;
+  }
+  await prisma.employeeQualification.update({ where: { id: existing.id }, data: { photoPath: saved.relativePath } });
+  if (existing.photoPath && existing.photoPath !== saved.relativePath) {
+    await deleteEmployeeUpload(existing.photoPath);
+  }
+  return { ok: true };
+}
+
+export type RemoveQualificationPhotoResult = { ok: true } | { ok: false; code: 'NOT_FOUND' | 'FORBIDDEN' };
+
+/** Removes only the photo — the qualification row, its metadata, and its verification state are
+ * all untouched (task spec §19). Safe to call repeatedly: a second DELETE on an already-
+ * photoless qualification still returns ok, it just has nothing to remove. */
+export async function removeEmployeeQualificationPhoto(qualificationId: string, employeeId: string): Promise<RemoveQualificationPhotoResult> {
+  const existing = await prisma.employeeQualification.findUnique({ where: { id: qualificationId }, select: { id: true, employeeId: true, photoPath: true } });
+  if (!existing) {
+    return { ok: false, code: 'NOT_FOUND' };
+  }
+  if (existing.employeeId !== employeeId) {
+    return { ok: false, code: 'FORBIDDEN' };
+  }
+  if (!existing.photoPath) {
+    return { ok: true };
+  }
+  await prisma.employeeQualification.update({ where: { id: existing.id }, data: { photoPath: null } });
+  await deleteEmployeeUpload(existing.photoPath);
+  return { ok: true };
 }
 
 export type { EmployeeImageKind };

@@ -539,6 +539,28 @@ ADMIN'ом → сразу `VERIFIED` (акт создания администр
 поверхности (worker profile, admin worker profile, `/admin/qualifications` matrix, notification
 generation) обязаны вызывать эту функцию — ни одна не считает цвета независимо.
 
+### 4.2b Worker Dossier — **`[2026-08-26] реализовано`**
+
+Additive-only миграция `20260826084432_add_worker_dossier_fields` на уже существующей
+`EmployeeProfile` (сама модель, `dateOfBirth`/`specialty`/`skills`/`photoPath`/`contractPath`/
+`version`, задокументирована не была — вне рамок этой правки, только новые поля ниже):
+
+| Поле | Тип | Null | Примечание |
+|---|---|---|---|
+| `personalIdentityCodeEncrypted` | text | да | henkilötunnus, AES-256-GCM ciphertext, base64 (`lib/personal-data-encryption.ts`), ключ `PERSONAL_DATA_ENCRYPTION_KEY` (32 байта, base64, отдельный от `IDEMPOTENCY_ENCRYPTION_KEY`/`ACTIVATION_TOKEN_HMAC_KEY`) |
+| `personalIdentityCodeLast4` | varchar(4) | да | последние 4 символа (индивидуальный номер + checksum) — единственная часть, безопасная для отображения в списке без decrypt |
+| `contactEmail` | varchar(255) | да | HR-контактный email, независим от `User.email` (account/login) — правка одного никогда не пишет в другой |
+| `addressStreet` | varchar(255) | да | |
+| `addressPostalCode` | varchar(32) | да | |
+| `addressCity` | varchar(120) | да | |
+| `addressCountry` | varchar(120) | да | |
+
+Валидация henkilötunnus (формат/дата/checksum, `lib/personal-identity-code.ts`) — локальная,
+без сетевого запроса к внешнему реестру. Plaintext никогда не в `AuditEvent` (только
+`personalIdentityCodePresent: boolean`), никогда в generic worker list/qualifications matrix
+ответах (только `personalIdentityCodeLast4`) — decrypt только через выделенный
+`GET .../profile/personal-identity-code` (см. `04_...`).
+
 ### 4.3 Локации
 
 **City** (mutable) — `id`, `name` (unique), `createdAt`, `updatedAt`. Полностью опциональна:
@@ -2030,3 +2052,4 @@ UPDATE`-триггер `trg_proposal_resolved_immutable` (см. выше) физ
 | `Employee.phone`/`User.email` уволенного сотрудника | удалить через 90 дней после `DEACTIVATED`, если нет другого основания |
 | `AuditEvent` | по классу события |
 | `IdempotencyKey` | 24 часа |
+| `EmployeeProfile.personalIdentityCodeEncrypted`/`Last4` | тот же жизненный цикл, что `Employee.phone` (§ выше) — не отдельная политика |

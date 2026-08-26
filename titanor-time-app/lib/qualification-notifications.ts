@@ -24,12 +24,22 @@ interface DesiredNotification {
   severity: AdminNotificationSeverity;
 }
 
-function desiredNotificationFor(status: QualificationExpiryStatus): DesiredNotification | null {
+// Worker Dossier feature (2026-08-26, task spec §23-26): a fourth checkpoint at 7 days, between
+// the pre-existing 14-day CRITICAL and the expiry itself. Deliberately does NOT change
+// qualification-expiry.ts's status/color (days 0-14 stay one CRITICAL/ORANGE-or-RED UI bucket —
+// "Expires today" vs "Critical" is still the only visible distinction, unchanged) — only the
+// notification threshold splits 8-14 vs 0-7 using the daysUntilExpiry the status computation
+// already returns. Day 0 ("expires today") is intentionally grouped into the more urgent
+// 7-day bucket, not the 0/expired one: it hasn't actually expired yet, and QUALIFICATION_EXPIRED
+// text ("expired N days ago") would misdescribe it.
+function desiredNotificationFor(status: QualificationExpiryStatus, daysUntilExpiry: number | null): DesiredNotification | null {
   switch (status) {
     case 'EXPIRING_SOON':
       return { type: 'QUALIFICATION_EXPIRING_SOON', threshold: 60, severity: 'WARNING' };
-    case 'CRITICAL':
-      return { type: 'QUALIFICATION_CRITICAL', threshold: 14, severity: 'CRITICAL' };
+    case 'CRITICAL': {
+      const threshold = daysUntilExpiry !== null && daysUntilExpiry <= 7 ? 7 : 14;
+      return { type: 'QUALIFICATION_CRITICAL', threshold, severity: 'CRITICAL' };
+    }
     case 'EXPIRED':
       return { type: 'QUALIFICATION_EXPIRED', threshold: 0, severity: 'CRITICAL' };
     case 'MISSING_EXPIRY':
@@ -80,8 +90,8 @@ export async function ensureQualificationNotifications(): Promise<void> {
 
     for (const qualification of qualifications) {
       const expiryMode = qualification.definition?.expiryMode ?? (qualification.expiresOn ? 'OPTIONAL' : 'NONE');
-      const { status } = computeQualificationExpiryStatus(expiryMode, qualification.expiresOn, today);
-      const desired = desiredNotificationFor(status);
+      const { status, daysUntilExpiry } = computeQualificationExpiryStatus(expiryMode, qualification.expiresOn, today);
+      const desired = desiredNotificationFor(status, daysUntilExpiry);
       const existingForQualification = activeByQualification.get(qualification.id) ?? [];
 
       for (const existing of existingForQualification) {
