@@ -4,19 +4,28 @@ import { generateActivationCode, formatActivationCodeForDisplay, normalizeActiva
 import { SESSION_DURATION_MS, generateSessionToken, hashSessionToken } from '@/lib/session';
 
 // docs/titanor-time/02_ROLE_PERMISSION_MATRIX.md §2.12 + 04_ADMIN_FIRST_API_CONTRACTS.md — credential
-// vertical slice for a standalone FOREMAN User (created via POST /api/admin/users, mode
-// STANDALONE — employeeId IS NULL). Deliberately separate from lib/activation.ts's worker flow:
-// reuses its crypto/session primitives (generateActivationCode, formatActivationCodeForDisplay,
-// normalizeActivationCode, hashActivationCode, ACTIVATION_TOKEN_HMAC_KEY via those helpers,
-// generateSessionToken/hashSessionToken) but never touches ActivationToken, worker eligibility,
-// or setInitialPassword — this module only ever reads/writes UserActivationToken + User rows
-// where employeeId IS NULL.
+// vertical slice for a standalone User (created via POST /api/admin/users, mode STANDALONE —
+// employeeId IS NULL — for FOREMAN, or POST /api/admin/users/admins for ADMIN). Deliberately
+// separate from lib/activation.ts's worker flow: reuses its crypto/session primitives
+// (generateActivationCode, formatActivationCodeForDisplay, normalizeActivationCode,
+// hashActivationCode, ACTIVATION_TOKEN_HMAC_KEY via those helpers, generateSessionToken/
+// hashSessionToken) but never touches ActivationToken, worker eligibility, or
+// setInitialPassword — this module only ever reads/writes UserActivationToken + User rows where
+// employeeId IS NULL.
+//
+// STANDALONE_ELIGIBLE_ROLES was originally FOREMAN-only (this module predates admin creation);
+// createStandaloneAdmin (lib/users.ts) later added a second standalone-user path assigning
+// ADMIN, but this eligibility gate was never updated to match — a SUPER_ADMIN-created second
+// admin got permanently stuck PENDING_ACTIVATION with no way to ever receive an activation code.
+// Fixed here. SUPER_ADMIN itself is out of scope: it is only ever created via the bootstrap CLI,
+// which sets a password directly and never goes through this token flow at all.
 
 const TOKEN_TTL_MS = 72 * 60 * 60 * 1000;
+const STANDALONE_ELIGIBLE_ROLES = new Set(['FOREMAN', 'ADMIN']);
 
-function currentForemanRoleWhere(now: Date) {
+function currentStandaloneRoleWhere(now: Date) {
   return (ur: { validFrom: Date; validTo: Date | null; role: { name: string } }) =>
-    ur.role.name === 'FOREMAN' && ur.validFrom <= now && (ur.validTo === null || ur.validTo > now);
+    STANDALONE_ELIGIBLE_ROLES.has(ur.role.name) && ur.validFrom <= now && (ur.validTo === null || ur.validTo > now);
 }
 
 export type IssueSystemActivationTokenError =
@@ -72,8 +81,8 @@ export async function issueSystemActivationToken(userId: string, actorUserId: st
     }
 
     const now = new Date();
-    const hasCurrentForeman = user.userRoles.some(currentForemanRoleWhere(now));
-    if (user.status !== 'PENDING_ACTIVATION' || user.passwordHash !== null || !hasCurrentForeman) {
+    const hasEligibleStandaloneRole = user.userRoles.some(currentStandaloneRoleWhere(now));
+    if (user.status !== 'PENDING_ACTIVATION' || user.passwordHash !== null || !hasEligibleStandaloneRole) {
       return { code: 'ACCOUNT_NOT_ELIGIBLE' as const };
     }
 
@@ -258,13 +267,13 @@ export async function setAccountPassword(
     if (user.userKind !== 'HUMAN') {
       return { code: 'SYSTEM_USER_NOT_ELIGIBLE' as const };
     }
-    const hasCurrentForeman = user.userRoles.some(currentForemanRoleWhere(now));
-    if (user.employeeId !== null || user.status !== 'PENDING_ACTIVATION' || user.passwordHash !== null || !hasCurrentForeman) {
+    const hasEligibleStandaloneRole = user.userRoles.some(currentStandaloneRoleWhere(now));
+    if (user.employeeId !== null || user.status !== 'PENDING_ACTIVATION' || user.passwordHash !== null || !hasEligibleStandaloneRole) {
       return { code: 'ACCOUNT_NOT_ELIGIBLE' as const };
     }
 
     await tx.user.update({ where: { id: user.id }, data: { status: 'ACTIVE', passwordHash } });
-    // The current FOREMAN role checked above already exists — never created or duplicated here.
+    // The current FOREMAN/ADMIN role checked above already exists — never created or duplicated here.
 
     await tx.userActivationToken.update({ where: { id: token.id }, data: { status: 'USED', usedAt: now } });
 
