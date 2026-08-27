@@ -3,6 +3,7 @@ import { resolveServerSession } from '@/lib/server-session';
 import { listWorkerTimesheets, listWorkerCurrentAssignments } from '@/lib/worker-context';
 import { getWorkerTimesheetSummary } from '@/lib/worker-timesheets';
 import { ReturnReasonsNotice } from './ReturnReasonsNotice';
+import { AdminCorrectionNotice } from './AdminCorrectionNotice';
 import { SnapshotWriter } from '@/components/worker-pwa/SnapshotWriter';
 import { ConnectivityBanner } from '@/components/worker-pwa/ConnectivityBanner';
 import { WorkerLink } from '@/components/worker-pwa/WorkerLink';
@@ -73,6 +74,7 @@ export default async function WorkerPeriodDetailPage({ params }: RouteParams) {
   const assignments = await listWorkerCurrentAssignments(employeeId, new Date(`${period.startDate}T00:00:00.000Z`));
   const summary = await getWorkerTimesheetSummary(employeeId, period.timesheetId);
   const returnReasons = 'code' in summary ? [] : summary.returnReasons;
+  const adminCorrection = 'code' in summary ? null : summary.adminCorrection;
   const editable = EDITABLE_STATUSES.has(period.timesheetStatus);
 
   const snapshotPayload: PeriodDetailPayload = {
@@ -96,6 +98,7 @@ export default async function WorkerPeriodDetailPage({ params }: RouteParams) {
         <span className={`wk-status-badge wk-status-${period.timesheetStatus.toLowerCase()}`}>{workerTimesheetStatusLabel(period.timesheetStatus, period.totalMinutes, locale)}</span>
 
         <ReturnReasonsNotice status={period.timesheetStatus} reasons={returnReasons} />
+        <AdminCorrectionNotice correction={adminCorrection} />
 
         <h2 className="wk-section-title">{t.yourAssignments}</h2>
         {assignments.length === 0 ? (

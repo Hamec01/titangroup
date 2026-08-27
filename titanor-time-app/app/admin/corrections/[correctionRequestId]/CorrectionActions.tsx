@@ -9,7 +9,7 @@ const CSRF_HEADER_VALUE = 'titanor-time';
 function describeError(code: string | undefined, fieldErrors: Record<string, string[]> | undefined, ru: boolean): string {
   switch (code) {
     case 'NO_CORRECTION_CHANGES':
-      return ru ? 'Черновик идентичен исходному — нечего отправлять. Сначала измените день.' : 'The draft is identical to the original — nothing to submit. Edit a day first.';
+      return ru ? 'Черновик идентичен исходному — нечего применять. Сначала измените день.' : 'The draft is identical to the original — nothing to apply. Edit a day first.';
     case 'SELF_APPROVAL_FORBIDDEN':
       return ru ? 'Эту корректировку должен решить другой администратор (принцип «четырёх глаз»), если только вы не используете переопределение SUPER_ADMIN ниже.' : 'A different admin must decide this correction (four-eyes), unless you use the SUPER_ADMIN override below.';
     case 'INVALID_STATE_TRANSITION':
@@ -29,15 +29,44 @@ interface CorrectionActionsProps {
   correctionRequestId: string;
   status: string;
   isSuperAdmin: boolean;
+  /** Task A — SUBMITTED/FOREMAN_APPROVED => this is an in-review admin edit (apply / discard),
+   * not the FINAL_APPROVED four-eyes decision flow. */
+  timesheetStatus: string;
 }
 
-export function CorrectionActions({ correctionRequestId, status, isSuperAdmin }: CorrectionActionsProps) {
+export function CorrectionActions({ correctionRequestId, status, isSuperAdmin, timesheetStatus }: CorrectionActionsProps) {
   const router = useRouter();
   const ru = useAppLocale() === 'RU';
-  const [loading, setLoading] = useState<'open' | 'submit' | 'approve' | 'reject' | null>(null);
+  const [loading, setLoading] = useState<'open' | 'submit' | 'approve' | 'reject' | 'apply' | 'discard' | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [overrideReason, setOverrideReason] = useState('');
   const [useOverride, setUseOverride] = useState(false);
+
+  const inReview = timesheetStatus === 'SUBMITTED' || timesheetStatus === 'FOREMAN_APPROVED';
+
+  async function handleApplyInReview(): Promise<void> {
+    setLoading('apply');
+    setError(null);
+    const { ok, data } = await post(`/api/admin/corrections/${correctionRequestId}/apply-in-review`);
+    if (!ok) {
+      setError(describeError((data as { error?: { code?: string } })?.error?.code, undefined, ru));
+      setLoading(null);
+      return;
+    }
+    router.push('/admin/review-scopes');
+  }
+
+  async function handleDiscard(): Promise<void> {
+    setLoading('discard');
+    setError(null);
+    const { ok, data } = await post(`/api/admin/corrections/${correctionRequestId}/discard`);
+    if (!ok) {
+      setError(describeError((data as { error?: { code?: string } })?.error?.code, undefined, ru));
+      setLoading(null);
+      return;
+    }
+    router.push('/admin/timesheets?status=SUBMITTED');
+  }
 
   async function post(path: string, body?: unknown): Promise<{ ok: boolean; data: unknown }> {
     const res = await fetch(path, {
@@ -96,6 +125,45 @@ export function CorrectionActions({ correctionRequestId, status, isSuperAdmin }:
       return;
     }
     router.push('/admin/corrections');
+  }
+
+  // Task A — an in-review admin edit: apply (-> new CORRECTION version, timesheet back to
+  // SUBMITTED, every scope PENDING) or discard. No four-eyes / override / reject — the review
+  // pass that follows is the second pair of eyes.
+  if (inReview) {
+    if (status === 'APPROVED') {
+      return (
+        <div className="setup-card form">
+          <p className="setup-subtitle">{ru ? 'Изменения применены. Табель вернулся в очередь на утверждение.' : 'Changes applied. The timesheet is back in the review queue.'}</p>
+          <button className="login-submit" type="button" onClick={() => router.push('/admin/review-scopes')}>
+            {ru ? 'К очереди проверки' : 'To the review queue'}
+          </button>
+        </div>
+      );
+    }
+    if (status === 'REJECTED') {
+      return <p className="setup-subtitle">{ru ? 'Исправление отменено — табель не менялся.' : 'Correction discarded — the timesheet was not changed.'}</p>;
+    }
+    return (
+      <div className="setup-card form">
+        {error ? (
+          <p className="login-error" role="alert">
+            {error}
+          </p>
+        ) : null}
+        <p className="setup-subtitle">
+          {ru
+            ? 'Измените дни ниже. «Применить изменения» создаст новую версию за вашей подписью, и табель вернётся в очередь на утверждение.'
+            : 'Edit the days below. “Apply changes” freezes a new version under your name and sends the timesheet back to the review queue.'}
+        </p>
+        <button className="login-submit" type="button" disabled={loading !== null} onClick={handleApplyInReview}>
+          {loading === 'apply' ? (ru ? 'Применение…' : 'Applying…') : (ru ? 'Применить изменения' : 'Apply changes')}
+        </button>
+        <button className="wk-clock-cancel-button" type="button" disabled={loading !== null} onClick={handleDiscard}>
+          {loading === 'discard' ? (ru ? 'Отмена…' : 'Discarding…') : (ru ? 'Отменить исправление' : 'Discard correction')}
+        </button>
+      </div>
+    );
   }
 
   if (status === 'PENDING') {

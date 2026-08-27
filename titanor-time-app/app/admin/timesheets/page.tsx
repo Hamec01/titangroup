@@ -10,10 +10,17 @@ export const dynamic = 'force-dynamic';
 
 const PAGE_SIZE = 20;
 
-// docs/titanor-time/01_SCREEN_MAP.md §2 `/admin/timesheets` — defaults to FOREMAN_APPROVED, the
-// actionable queue for final-approve/override-return; ?status=FINAL_APPROVED added (T7.9) so an
-// admin can browse to a finalized timesheet and start a correction from its card — no full filter
-// UI, just this one extra toggle, same minimal scope as /admin/assignments's list page otherwise.
+// docs/titanor-time/01_SCREEN_MAP.md §2 `/admin/timesheets` — the admin's timesheet queues.
+// FOREMAN_APPROVED (default) = ready for final approval; FINAL_APPROVED (T7.9) = finalized, browse
+// to start a correction; SUBMITTED (Task A) = under review, where the admin can now edit hours in
+// place. No full filter UI — just these toggles; the unified worker-first review screen is Task B.
+const VIEWS = {
+  SUBMITTED: { en: 'Timesheets under review', ru: 'Табели на проверке' },
+  FOREMAN_APPROVED: { en: 'Ready for final approval', ru: 'Готовы к окончательному одобрению' },
+  FINAL_APPROVED: { en: 'Finalized timesheets', ru: 'Окончательно одобренные табели' }
+} as const;
+type ViewStatus = keyof typeof VIEWS;
+
 type RouteParams = { searchParams: Promise<{ status?: string }> };
 
 export default async function AdminTimesheetsPage({ searchParams }: RouteParams) {
@@ -22,6 +29,7 @@ export default async function AdminTimesheetsPage({ searchParams }: RouteParams)
     redirect('/login');
   }
   const locale = await resolveAppLocale();
+  const ru = locale === 'RU';
   const s = adminDailyStrings(locale);
 
   const isAdmin = session.user.roles.includes('ADMIN') || session.user.roles.includes('SUPER_ADMIN');
@@ -36,23 +44,26 @@ export default async function AdminTimesheetsPage({ searchParams }: RouteParams)
   }
 
   const { status: statusParam } = await searchParams;
-  const status = statusParam === 'FINAL_APPROVED' ? 'FINAL_APPROVED' : 'FOREMAN_APPROVED';
+  const status: ViewStatus = statusParam === 'FINAL_APPROVED' || statusParam === 'SUBMITTED' ? statusParam : 'FOREMAN_APPROVED';
   const { items, totalItems } = await listTimesheets({ page: 1, pageSize: PAGE_SIZE, status });
+
+  const otherViews = (Object.keys(VIEWS) as ViewStatus[]).filter((v) => v !== status);
 
   return (
     <main className="setup-page">
       <div className="setup-card worker-card">
-        <h1>{status === 'FINAL_APPROVED' ? localeText(locale, 'Finalized timesheets', 'Окончательно одобренные табели') : localeText(locale, 'Timesheets ready for final approval', 'Табели, готовые к окончательному одобрению')}</h1>
+        <h1>{ru ? VIEWS[status].ru : VIEWS[status].en}</h1>
         <p className="setup-subtitle">
-          {status === 'FINAL_APPROVED' ? (
-            <Link href="/admin/timesheets">{localeText(locale, 'Awaiting final approval', 'Ожидают окончательного одобрения')}</Link>
-          ) : (
-            <Link href="/admin/timesheets?status=FINAL_APPROVED">{localeText(locale, 'Finalized (start a correction)', 'Окончательно одобрено (начать корректировку)')}</Link>
-          )}
+          {otherViews.map((v, i) => (
+            <span key={v}>
+              {i > 0 ? ' · ' : ''}
+              <Link href={v === 'FOREMAN_APPROVED' ? '/admin/timesheets' : `/admin/timesheets?status=${v}`}>{ru ? VIEWS[v].ru : VIEWS[v].en}</Link>
+            </span>
+          ))}
         </p>
-        <p className="setup-subtitle">{localeText(locale, `${totalItems} ${status === 'FINAL_APPROVED' ? 'finalized' : 'awaiting final approval'}`, `${status === 'FINAL_APPROVED' ? 'Окончательно одобрено' : 'Ожидает окончательного одобрения'}: ${totalItems}`)}</p>
+        <p className="setup-subtitle">{ru ? `Всего: ${totalItems}` : `${totalItems} total`}</p>
         {items.length === 0 ? (
-          <p>{localeText(locale, 'Nothing awaiting final approval.', 'Нет табелей, ожидающих окончательного одобрения.')}</p>
+          <p>{ru ? 'Пусто.' : 'Nothing here.'}</p>
         ) : (
           <table className="worker-table">
             <thead>

@@ -105,6 +105,9 @@ export interface TimesheetCard {
   versionNumber: number | null;
   days: TimesheetCardDay[];
   approvalActions: never[];
+  /** Task A — id of an open (PENDING / DRAFT_OPEN) CorrectionRequest on this timesheet, if any.
+   * When set, the card links straight to it instead of offering to start another one. */
+  openCorrectionRequestId: string | null;
 }
 
 export async function getTimesheetCard(timesheetId: string): Promise<TimesheetCard | null> {
@@ -171,6 +174,11 @@ export async function getTimesheetCard(timesheetId: string): Promise<TimesheetCa
     }
   }
 
+  const openCorrection = await prisma.correctionRequest.findFirst({
+    where: { timesheetId, status: { in: ['PENDING', 'DRAFT_OPEN'] } },
+    select: { id: true }
+  });
+
   return {
     timesheetId: timesheet.id,
     employeeId: timesheet.employeeId,
@@ -180,7 +188,8 @@ export async function getTimesheetCard(timesheetId: string): Promise<TimesheetCa
     versionId: timesheet.currentVersionId,
     versionNumber,
     days,
-    approvalActions: []
+    approvalActions: [],
+    openCorrectionRequestId: openCorrection?.id ?? null
   };
 }
 

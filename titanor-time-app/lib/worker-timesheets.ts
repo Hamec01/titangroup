@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { Prisma, AbsenceType, DayType, SubmissionSource } from '@prisma/client';
+import { Prisma, AbsenceType, DayType, SubmissionSource, type TimesheetVersionSource } from '@prisma/client';
 import { prisma } from '@/lib/prisma';
 import { createAuditEvent } from '@/lib/audit';
 import { helsinkiToday } from '@/lib/workers';
@@ -125,6 +125,9 @@ export interface TimesheetSummary {
   currentVersionId: string | null;
   /** RETURNED scopes of currentVersionId only — empty once resubmitted (new version, fresh scopes) or if never returned. */
   returnReasons: ReturnReasonView[];
+  /** Task A — set when the current version was frozen by an admin's in-review edit
+   * (source=CORRECTION). The worker's period screen shows "Часы исправил администратор". */
+  adminCorrection: { byUsername: string | null; reason: string | null; at: string } | null;
 }
 
 export async function getWorkerTimesheetSummary(employeeId: string, timesheetId: string): Promise<TimesheetSummary | TimesheetAccessError> {
@@ -134,7 +137,19 @@ export async function getWorkerTimesheetSummary(employeeId: string, timesheetId:
   }
   const t = result.timesheet;
   const returnReasons = t.currentVersionId ? toReturnReasons(await loadCurrentVersionReviewScopes(t.currentVersionId)) : [];
-  return { timesheetId: t.id, periodId: t.periodId, status: t.status, currentVersionId: t.currentVersionId, returnReasons };
+
+  let adminCorrection: TimesheetSummary['adminCorrection'] = null;
+  if (t.currentVersionId) {
+    const current = await prisma.timesheetVersion.findUnique({
+      where: { id: t.currentVersionId },
+      select: { source: true, note: true, createdAt: true, createdByUser: { select: { username: true } } }
+    });
+    if (current?.source === 'CORRECTION') {
+      adminCorrection = { byUsername: current.createdByUser?.username ?? null, reason: current.note, at: current.createdAt.toISOString() };
+    }
+  }
+
+  return { timesheetId: t.id, periodId: t.periodId, status: t.status, currentVersionId: t.currentVersionId, returnReasons, adminCorrection };
 }
 
 export interface BreakView {
@@ -967,6 +982,22 @@ export type SubmitError = TimesheetAccessError | { code: 'INVALID_STATE_TRANSITI
  */
 export interface SubmitWorkerTimesheetCoreContext {
   validatedSystemActorId?: string;
+  /**
+   * Task A (admin pre-final timesheet edit, 2026-08-27) — when an ADMIN applies an inline
+   * correction to a SUBMITTED/FOREMAN_APPROVED timesheet, the frozen version is authored by the
+   * admin and carries `source=CORRECTION` + the admin's reason as `note`, so the worker's version
+   * history reads "Исправлено администратором · <имя> · <причина>". Defaults keep every existing
+   * worker/auto-submit caller byte-identical: `source=WORKER`, `note=null`.
+   */
+  versionSource?: TimesheetVersionSource;
+  versionNote?: string | null;
+  /**
+   * Task A — an admin pre-final correction re-enters review from the top (owner decision:
+   * "перезапускает проверку прораба — да"), so every SITE / NON_SITE scope of the new version is
+   * a fresh PENDING regardless of whether that site's content actually changed. Worker/auto-submit
+   * callers never pass this and keep the normal carry-forward rule (unchanged APPROVED carries).
+   */
+  forceScopesPending?: boolean;
 }
 
 /**
@@ -1032,7 +1063,15 @@ export async function submitWorkerTimesheetCore(
   const versionNumber = (lastVersion?.versionNumber ?? 0) + 1;
 
   const version = await tx.timesheetVersion.create({
-    data: { timesheetId, employeeId, versionNumber, source: 'WORKER', createdByUserId: actorUserId, submissionSource }
+    data: {
+      timesheetId,
+      employeeId,
+      versionNumber,
+      source: internalContext?.versionSource ?? 'WORKER',
+      createdByUserId: actorUserId,
+      submissionSource,
+      note: internalContext?.versionNote ?? null
+    }
   });
 
   // TimesheetPlannedShift must be frozen before any WorkSegment — WorkSegment's composite FK
@@ -1115,11 +1154,12 @@ export async function submitWorkerTimesheetCore(
     : [];
   const previousSiteScopeBySite = new Map(previousSiteScopes.map((s) => [s.siteId as string, s]));
   const allSiteIds = new Set<string>([...siteIdsWithData, ...previousSiteScopeBySite.keys()]);
+  const forceScopesPending = internalContext?.forceScopesPending === true;
 
   for (const siteId of allSiteIds) {
     const contentHash = computeContentHash(canonicalSiteProjection(siteId, frozenDays, frozenPlannedShifts));
     const previous = previousSiteScopeBySite.get(siteId);
-    const { status, carriedFromScopeId } = decideScopeCarryForward(previous, contentHash);
+    const { status, carriedFromScopeId } = forceScopesPending ? { status: 'PENDING' as const, carriedFromScopeId: null } : decideScopeCarryForward(previous, contentHash);
     await tx.timesheetReviewScope.create({
       data: { timesheetVersionId: version.id, scopeType: 'SITE', siteId, status, contentHash, carriedFromScopeId }
     });
@@ -1135,7 +1175,7 @@ export async function submitWorkerTimesheetCore(
 
   if (hasNonSiteData || previousNonSiteDataScope) {
     const contentHash = computeContentHash(canonicalNonSiteDataProjection(nonSiteDataDays));
-    const { status, carriedFromScopeId } = decideScopeCarryForward(previousNonSiteDataScope ?? undefined, contentHash);
+    const { status, carriedFromScopeId } = forceScopesPending ? { status: 'PENDING' as const, carriedFromScopeId: null } : decideScopeCarryForward(previousNonSiteDataScope ?? undefined, contentHash);
     const contextSiteId = await resolvePrimarySiteId(tx, employeeId);
     await tx.timesheetReviewScope.create({
       data: { timesheetVersionId: version.id, scopeType: 'NON_SITE', scopePurpose: 'DATA', contextSiteId, status, contentHash, carriedFromScopeId }

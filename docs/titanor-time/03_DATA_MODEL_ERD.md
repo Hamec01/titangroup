@@ -1759,6 +1759,24 @@ canonicalCorrectionProjection(basedOnVersionId)`, §4.5 — иначе `409 NO_C
 `correction.approve` (другой исполнитель) → `TimesheetVersion (source=CORRECTION)`,
 `Timesheet.status` остаётся `FINAL_APPROVED`.
 
+**`[2026-08-27]` Task A — корректировка табеля, ещё находящегося на проверке.** `correction.request`
+теперь принимает не только `FINAL_APPROVED`, но и `SUBMITTED` / `FOREMAN_APPROVED`: администратор
+правит часы работника (который «напутал», плохо владеет телефоном/ПК) прямо на карточке
+`/admin/timesheets/[id]`, не возвращая табель. Редактор дня (`patchCorrectionDraftDay` +
+`CorrectionDayEditor`) переиспользуется как есть. Применение — **`applyInReviewCorrection()`**, не
+`decideCorrection()`: содержимое `CorrectionDraft` переносится в `TimesheetDraft` работника и
+замораживается общим `submitWorkerTimesheetCore(versionSource=CORRECTION, forceScopesPending=true)` →
+`TimesheetVersion (source=CORRECTION, createdByUserId = администратор, note = причина)`, все
+`TimesheetReviewScope` новой версии — свежий `PENDING`, `Timesheet.status` → `SUBMITTED` («обратно в
+очередь» — решение владельца: правка администратора перезапускает проверку). **Правило «четырёх
+глаз» здесь не применяется** — второй парой глаз выступает последующее ревью; экспорт-сцепка
+(`pendingExport`, `coveredByExportBatchId`) не задействуется, период `OPEN`. `decideCorrection()`
+по-прежнему обслуживает только `FINAL_APPROVED` (явный guard) со всеми его правилами. Работник
+видит в своём табеле «Часы исправил администратор · <логин> · <причина>»
+(`TimesheetSummary.adminCorrection`). Инвариант **«администратор не автор версий»**
+(см. §4.5 / ниже) уточняется: администратор может быть автором `TimesheetVersion(source=CORRECTION)`
+и во время проверки, а не только после финала.
+
 **Отложенный корректирующий экспорт.** Повторный `export.create` для уже `EXPORTED` периода создаёт
 `ExportBatch(correctsBatchId=предыдущий)`, покрывающий все накопленные `pendingExport=true` записи
 разом. **`[2026-08-19]` Реализовано T8.4B** (`lib/csv-export.ts`) — покрытые записи получают

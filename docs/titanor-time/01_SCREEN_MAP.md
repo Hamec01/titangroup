@@ -844,11 +844,21 @@ actions`) на каждой `/admin/*` странице. Bell-иконка с ba
 - Данные: текущая `TimesheetVersion` + `TimesheetDay`/`WorkSegment`/`BreakSegment`/
   `TimesheetPlannedShift` + `ApprovalAction[]`; после ЭТАП 7A — исходные Check In/Check Out,
   геостатус каждой точки, sync-state и clock-vs-reported diff с автором/timestamp/причиной правки
-- Действия: перейти к сравнению версий, финально утвердить, вернуть с причиной
-- Состояния: loading; error
-- Откуда: `/admin/timesheets`
-- Куда: `/admin/timesheets/[timesheetId]/versions`, `/admin/timesheets/[timesheetId]/approve`
-- API: `GET /api/admin/timesheets/:timesheetId`
+- Действия: перейти к сравнению версий, финально утвердить, вернуть с причиной; **`[2026-08-27]`
+  Task A — при статусе `SUBMITTED` / `FOREMAN_APPROVED` «Исправить часы» (с обязательной причиной)
+  → открывает inline-корректировку и ведёт на `/admin/corrections/[id]`, где админ правит дни и
+  жмёт «Применить изменения» (→ `TimesheetVersion(source=CORRECTION)` за подписью админа, табель
+  возвращается в `SUBMITTED`, все scope → `PENDING`) или «Отменить исправление»**
+- Состояния: loading; error; `SUBMITTED`/`FOREMAN_APPROVED` с уже открытой корректировкой →
+  «Продолжить исправление» вместо «Исправить часы»
+- Откуда: `/admin/timesheets` (вкладки `SUBMITTED` / `FOREMAN_APPROVED` / `FINAL_APPROVED`),
+  `/admin/review-scopes`
+- Куда: `/admin/timesheets/[timesheetId]/versions`, `/admin/timesheets/[timesheetId]/approve`,
+  `/admin/corrections/[correctionRequestId]`
+- API: `GET /api/admin/timesheets/:timesheetId`,
+  `POST /api/admin/timesheets/:timesheetId/correction` (Task A — request + open draft одним
+  запросом), `POST /api/admin/corrections/:id/apply-in-review`,
+  `POST /api/admin/corrections/:id/discard`
 
 #### `/admin/timesheets/[timesheetId]/versions` ⚪
 - Роли: `ADMIN`, `SUPER_ADMIN`

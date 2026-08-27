@@ -76,7 +76,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       case 'TIMESHEET_NOT_FOUND':
         return jsonError(404, { code: 'TIMESHEET_NOT_FOUND', message: 'No timesheet with this id.' }, requestId);
       case 'INVALID_STATE_TRANSITION':
-        return jsonError(409, { code: 'INVALID_STATE_TRANSITION', message: 'Only a FINAL_APPROVED timesheet can be corrected.' }, requestId);
+        return jsonError(409, { code: 'INVALID_STATE_TRANSITION', message: 'This timesheet cannot be corrected in its current status.' }, requestId);
       case 'CORRECTION_ALREADY_OPEN':
         return jsonError(409, { code: 'CORRECTION_ALREADY_OPEN', message: 'A correction is already open for this timesheet.' }, requestId);
     }

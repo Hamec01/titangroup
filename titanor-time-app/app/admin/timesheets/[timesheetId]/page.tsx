@@ -4,6 +4,7 @@ import { resolveServerSession } from '@/lib/server-session';
 import { getTimesheetCard } from '@/lib/admin-timesheets';
 import { FinalApprovalActions } from './FinalApprovalActions';
 import { RequestCorrectionForm } from './RequestCorrectionForm';
+import { StartCorrectionForm } from './StartCorrectionForm';
 import { workedMinutesFromIsoSegments, timesheetStatusLabel } from '@/lib/reporting/report-format';
 import { dayTypeLabel } from '@/lib/i18n/worker';
 import { resolveAppLocale } from '@/lib/i18n/server';
@@ -95,11 +96,24 @@ export default async function AdminTimesheetCardPage({ params }: RouteParams) {
           </table>
         )}
 
+        {card.status === 'SUBMITTED' || card.status === 'FOREMAN_APPROVED' ? (
+          card.openCorrectionRequestId ? (
+            <div className="setup-card form">
+              <p className="setup-subtitle">{localeText(locale, 'An admin correction is open for this timesheet.', 'Для этого табеля открыта корректировка администратора.')}</p>
+              <Link className="login-submit" href={`/admin/corrections/${card.openCorrectionRequestId}`}>
+                {localeText(locale, 'Continue editing', 'Продолжить исправление')}
+              </Link>
+            </div>
+          ) : (
+            <StartCorrectionForm timesheetId={card.timesheetId} />
+          )
+        ) : null}
+
         {card.status === 'FOREMAN_APPROVED' ? (
           <FinalApprovalActions timesheetId={card.timesheetId} />
         ) : card.status === 'FINAL_APPROVED' ? (
           <RequestCorrectionForm timesheetId={card.timesheetId} />
-        ) : (
+        ) : card.status === 'SUBMITTED' ? null : (
           <p className="setup-subtitle">{localeText(locale, `Not awaiting final approval (status: ${timesheetStatusLabel(card.status, locale)}).`, `Не ожидает окончательного одобрения (статус: ${timesheetStatusLabel(card.status, locale)}).`)}</p>
         )}
 

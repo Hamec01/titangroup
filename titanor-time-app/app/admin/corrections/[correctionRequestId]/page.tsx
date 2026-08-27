@@ -60,6 +60,9 @@ export default async function AdminCorrectionDetailPage({ params }: RouteParams)
     <main className="setup-page">
       <div className="setup-card">
         <h1>{correction.employeeName}</h1>
+        {correction.timesheetStatus === 'SUBMITTED' || correction.timesheetStatus === 'FOREMAN_APPROVED' ? (
+          <p className="setup-subtitle">{localeText(locale, 'Admin edit of a timesheet still under review.', 'Исправление табеля, ещё находящегося на проверке.')}</p>
+        ) : null}
         <p className="setup-subtitle">
           {localeText(locale, 'Status:', 'Статус:')} {correctionStatusLabel(correction.status, locale)} · {localeText(locale, 'reason:', 'причина:')} {correction.reason}
         </p>
@@ -100,7 +103,12 @@ export default async function AdminCorrectionDetailPage({ params }: RouteParams)
           </table>
         )}
 
-        <CorrectionActions correctionRequestId={correction.id} status={correction.status} isSuperAdmin={session.user.roles.includes('SUPER_ADMIN')} />
+        <CorrectionActions
+          correctionRequestId={correction.id}
+          status={correction.status}
+          isSuperAdmin={session.user.roles.includes('SUPER_ADMIN')}
+          timesheetStatus={correction.timesheetStatus}
+        />
 
         <p>
           <Link href="/admin/corrections">{localeText(locale, 'Back to corrections', 'К списку корректировок')}</Link>

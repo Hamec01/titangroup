@@ -4,6 +4,7 @@ import { listWorkerTimesheets } from '@/lib/worker-context';
 import { getWorkerTimesheetDraft, getWorkerTimesheetCurrentVersion, getWorkerTimesheetSummary, type SegmentView } from '@/lib/worker-timesheets';
 import { prisma } from '@/lib/prisma';
 import { ReturnReasonsNotice } from '../ReturnReasonsNotice';
+import { AdminCorrectionNotice } from '../AdminCorrectionNotice';
 import { SnapshotWriter } from '@/components/worker-pwa/SnapshotWriter';
 import { ConnectivityBanner } from '@/components/worker-pwa/ConnectivityBanner';
 import { WorkerLink } from '@/components/worker-pwa/WorkerLink';
@@ -90,6 +91,7 @@ export default async function WorkerHoursListPage({ params }: RouteParams) {
 
   const summary = await getWorkerTimesheetSummary(employeeId, period.timesheetId);
   const returnReasons = 'code' in summary ? [] : summary.returnReasons;
+  const adminCorrection = 'code' in summary ? null : summary.adminCorrection;
 
   const snapshotPayload: HoursListPayload = {
     periodId,
@@ -178,6 +180,7 @@ export default async function WorkerHoursListPage({ params }: RouteParams) {
         </WorkerLink>
         <h1>{t.hours}</h1>
         <ReturnReasonsNotice status={period.timesheetStatus} reasons={returnReasons} />
+        <AdminCorrectionNotice correction={adminCorrection} />
         {!editable && <p className="wk-readonly-note">{t.readOnlyBeingReviewed}</p>}
 
         {days.length === 0 ? (

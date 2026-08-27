@@ -1,6 +1,39 @@
 # Titanor Time — Implementation Status
 
-Обновлено: 2026-08-21 Europe/Helsinki (RU/EN — ежедневный ADMIN workflow)
+Обновлено: 2026-08-27 Europe/Helsinki (Task A — админ правит часы до финала)
+
+**`[2026-08-27]` Task A — администратор правит часы работника до финального утверждения.** По
+запросу владельца (пакет задач A–F, делаем последовательно): если работник ошибся или плохо
+владеет телефоном/ПК, администратор теперь правит его табель прямо на карточке
+`/admin/timesheets/[id]` в статусе `SUBMITTED` / `FOREMAN_APPROVED`, не возвращая табель работнику.
+Механика переиспользует существующий редактор корректировок (`patchCorrectionDraftDay` +
+`CorrectionDayEditor`); новая `applyInReviewCorrection()` переносит содержимое `CorrectionDraft` в
+`TimesheetDraft` и замораживает его общим `submitWorkerTimesheetCore()` (расширен опциональными
+`versionSource` / `versionNote` / `forceScopesPending`, по умолчанию — прежнее поведение
+worker/auto-submit байт-в-байт) → `TimesheetVersion(source=CORRECTION, createdBy = админ, note =
+причина)`, все review-scope новой версии — свежий `PENDING`, `Timesheet.status` → `SUBMITTED`
+(«обратно в очередь», решение владельца — правка перезапускает проверку). Правило «четырёх глаз»
+здесь не действует (второй парой глаз выступает последующее ревью); `decideCorrection()`
+по-прежнему обслуживает только `FINAL_APPROVED` (явный guard, регрессия проверена). Работник видит
+в табеле «Часы исправил администратор · <логин> · <причина>»
+(`TimesheetSummary.adminCorrection`, `AdminCorrectionNotice`). `/admin/timesheets` получил третью
+вкладку `SUBMITTED`. Схема/миграции не менялись — переиспользованы `TimesheetVersionSource.CORRECTION`
++ `createdByUserId` + `note` и права `correction.request/draft.edit`.
+
+Изменены: `lib/worker-timesheets.ts`, `lib/corrections.ts`, `lib/admin-timesheets.ts`,
+`app/api/admin/timesheets/[timesheetId]/correction/route.ts` (new),
+`app/api/admin/corrections/[correctionRequestId]/{apply-in-review,discard}/route.ts` (new),
+`app/api/admin/corrections/route.ts`, `app/admin/timesheets/{page,[timesheetId]/page}.tsx`,
+`app/admin/timesheets/[timesheetId]/StartCorrectionForm.tsx` (new),
+`app/admin/corrections/[correctionRequestId]/{page.tsx,CorrectionActions.tsx}`,
+`app/worker/periods/[periodId]/{page,hours/page}.tsx`,
+`app/worker/periods/[periodId]/AdminCorrectionNotice.tsx` (new),
+`scripts/_test-admin-pre-final-correction.ts` (new),
+`docs/titanor-time/{03_DATA_MODEL_ERD.md §4.7, 01_SCREEN_MAP.md}`.
+
+Проверки: новый `_test-admin-pre-final-correction.ts` — **28/28** на одноразовом PostgreSQL 16
+(75 миграций), включая регрессию пост-финальной корректировки и «четыре глаза»; `npx tsc --noEmit`
+и `npm run build` — зелёные. Осталось: прогон на пилоте + браузер-проверка.
 
 **`[2026-08-21]` RU/EN — ежедневная цепочка начальника локализована.** Второй i18n-слайс
 перевёл списки, карточки, формы, ошибки и действия для Workers, Sites/Work areas, бесплатной

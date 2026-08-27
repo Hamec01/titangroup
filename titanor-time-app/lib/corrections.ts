@@ -1,7 +1,8 @@
-import { Prisma, AbsenceType, DayType } from '@prisma/client';
+import { Prisma, AbsenceType, DayType, SubmissionSource } from '@prisma/client';
 import { prisma } from '@/lib/prisma';
 import { createAuditEvent } from '@/lib/audit';
 import { effectiveReportedRangesBatch, resolveOverlapsForAffectedShifts, provenanceValuesEqual, type ProvenanceValues } from '@/lib/attendance-reported-projection';
+import { submitWorkerTimesheetCore } from '@/lib/worker-timesheets';
 
 // docs/titanor-time/03_DATA_MODEL_ERD.md §4.7 "CorrectionRequest"/"CorrectionDraft*" +
 // 02_ROLE_PERMISSION_MATRIX.md §2.9 — T7.9, first UI slice confirmed ADMIN-only
@@ -29,22 +30,31 @@ export interface RequestCorrectionResult {
 }
 
 /**
- * Corrections only ever target a FINAL_APPROVED timesheet (§4.7 "Поток": the flow ends with
- * TimesheetVersion(source=CORRECTION), Timesheet.status stays FINAL_APPROVED — there would be
- * nothing to "correct" via this path otherwise, a DRAFT/SUBMITTED/RETURNED/FOREMAN_APPROVED
- * timesheet is edited through the normal draft, not a correction).
+ * Two timesheet states can carry a CorrectionRequest:
+ *   - FINAL_APPROVED — the original post-approval correction (§4.7 "Поток"): the flow ends with
+ *     TimesheetVersion(source=CORRECTION) and Timesheet.status stays FINAL_APPROVED. Applied via
+ *     decideCorrection() with its four-eyes / approvalOverride / export-coupling rules.
+ *   - SUBMITTED / FOREMAN_APPROVED — Task A (admin pre-final edit, 2026-08-27): the admin fixes a
+ *     worker's still-under-review timesheet in place. Applied via applyInReviewCorrection(), which
+ *     freezes a CORRECTION version authored by the admin and sends the timesheet BACK to SUBMITTED
+ *     for a fresh review pass (owner decision: "обратно в очередь"). No four-eyes on the apply
+ *     itself — the subsequent review IS the second pair of eyes; no export coupling — the period
+ *     is still OPEN.
+ * A DRAFT/RETURNED timesheet is still edited through the normal worker draft, never a correction.
  *
  * CORRECTION_ALREADY_OPEN is an app-level guard, not schema-mandated: nothing in the doc
  * forbids two open CorrectionRequests on the same timesheet at once, but allowing it would let
  * two drafts race to freeze two different resultingVersions from the same basedOnVersionId —
  * confusing, not useful. One request open (status NOT IN (APPROVED, REJECTED)) at a time.
  */
+const CORRECTABLE_TIMESHEET_STATUSES = new Set(['SUBMITTED', 'FOREMAN_APPROVED', 'FINAL_APPROVED']);
+
 export async function requestCorrection(timesheetId: string, requestedByUserId: string, reason: string, requestId: string): Promise<RequestCorrectionResult | RequestCorrectionError> {
   const timesheet = await prisma.timesheet.findUnique({ where: { id: timesheetId }, select: { status: true } });
   if (!timesheet) {
     return { code: 'TIMESHEET_NOT_FOUND' };
   }
-  if (timesheet.status !== 'FINAL_APPROVED') {
+  if (!CORRECTABLE_TIMESHEET_STATUSES.has(timesheet.status)) {
     return { code: 'INVALID_STATE_TRANSITION' };
   }
 
@@ -679,6 +689,273 @@ export async function submitCorrection(correctionRequestId: string, requestId: s
 }
 
 // ============================================================================
+// Task A — apply an admin's inline correction to a SUBMITTED / FOREMAN_APPROVED timesheet
+// ============================================================================
+
+export type ApplyInReviewCorrectionError = { code: 'NOT_FOUND' } | { code: 'INVALID_STATE_TRANSITION' };
+
+export interface ApplyInReviewCorrectionResult {
+  correctionRequestId: string;
+  resultingVersionId: string;
+  versionNumber: number;
+  timesheetStatus: 'SUBMITTED';
+}
+
+/**
+ * Task A (2026-08-27) — the pre-final counterpart of decideCorrection(). The admin opened a
+ * CorrectionRequest on a still-under-review timesheet (requestCorrection now accepts SUBMITTED /
+ * FOREMAN_APPROVED), edited days via patchCorrectionDraftDay, submitted it, and hit "Применить
+ * изменения". This:
+ *   1. rebuilds the worker's own TimesheetDraft from the CorrectionDraft content (days) plus the
+ *      current version's planned shifts — the submit-freeze needs them, and WorkSegment's
+ *      composite FK requires a matching TimesheetDraftPlannedShift per (date, sourceAssignmentId),
+ *      so a zero placeholder is written for any assignment/date the plan doesn't cover (same trick
+ *      decideCorrection uses on TimesheetPlannedShift);
+ *   2. calls submitWorkerTimesheetCore with versionSource=CORRECTION + note=reason +
+ *      forceScopesPending — freezes exactly one new TimesheetVersion, recreates every review scope
+ *      as PENDING, and sets Timesheet.status = SUBMITTED ("обратно в очередь" — owner decision);
+ *   3. closes the CorrectionRequest (APPROVED, resultingVersionId, decidedBy = the admin).
+ *
+ * No four-eyes / approvalOverride (unlike decideCorrection): the subsequent review pass IS the
+ * second pair of eyes. No export coupling: a pre-final timesheet's period is still OPEN. The
+ * "no actual changes" case can't reach here — submitCorrection already rejects it with
+ * NO_CORRECTION_CHANGES before the correction reaches status SUBMITTED.
+ */
+export async function applyInReviewCorrection(
+  correctionRequestId: string,
+  adminUserId: string,
+  requestId: string
+): Promise<ApplyInReviewCorrectionResult | ApplyInReviewCorrectionError> {
+  const routing = await prisma.correctionRequest.findUnique({
+    where: { id: correctionRequestId },
+    select: { timesheetId: true, timesheet: { select: { employeeId: true } } }
+  });
+  if (!routing) {
+    return { code: 'NOT_FOUND' };
+  }
+  const { timesheetId } = routing;
+  const employeeId = routing.timesheet.employeeId;
+
+  const outcome = await prisma.$transaction(async (tx): Promise<ApplyInReviewCorrectionError | { resultingVersionId: string; versionNumber: number }> => {
+    // §8.1 canonical lock order: Employee -> Timesheet -> draft/correction rows.
+    await tx.$queryRaw`SELECT id FROM "Employee" WHERE id = ${employeeId}::uuid FOR UPDATE`;
+    await tx.$queryRaw`SELECT id FROM "Timesheet" WHERE id = ${timesheetId}::uuid FOR UPDATE`;
+    await tx.$queryRaw`SELECT id FROM "TimesheetDraft" WHERE "timesheetId" = ${timesheetId}::uuid FOR UPDATE`;
+    await tx.$queryRaw`SELECT id FROM "CorrectionRequest" WHERE id = ${correctionRequestId}::uuid FOR UPDATE`;
+
+    const request = await tx.correctionRequest.findUniqueOrThrow({
+      where: { id: correctionRequestId },
+      select: {
+        status: true,
+        reason: true,
+        draftOwner: { select: { id: true } },
+        timesheet: { select: { status: true, currentVersionId: true, draft: { select: { id: true } } } }
+      }
+    });
+    if (!request.draftOwner || !request.timesheet.draft) {
+      return { code: 'NOT_FOUND' as const };
+    }
+    if (request.status !== 'SUBMITTED') {
+      return { code: 'INVALID_STATE_TRANSITION' as const };
+    }
+    if (request.timesheet.status !== 'SUBMITTED' && request.timesheet.status !== 'FOREMAN_APPROVED') {
+      return { code: 'INVALID_STATE_TRANSITION' as const };
+    }
+    const currentVersionId = request.timesheet.currentVersionId;
+    if (!currentVersionId) {
+      return { code: 'INVALID_STATE_TRANSITION' as const };
+    }
+    const workerDraftId = request.timesheet.draft.id;
+    const correctionDraftId = request.draftOwner.id;
+
+    // --- 1. Rebuild the worker's TimesheetDraft from the correction content + the current plan ---
+    await tx.timesheetDraftDay.deleteMany({ where: { draftId: workerDraftId } });
+    await tx.timesheetDraftPlannedShift.deleteMany({ where: { draftId: workerDraftId } });
+
+    const correctionDays = await tx.correctionDraftDay.findMany({
+      where: { draftId: correctionDraftId },
+      select: {
+        date: true,
+        dayType: true,
+        confirmedZero: true,
+        sourceAbsenceId: true,
+        note: true,
+        segments: {
+          select: {
+            siteId: true,
+            workAreaId: true,
+            sourceAssignmentId: true,
+            startAt: true,
+            endAt: true,
+            originClockShiftFragmentId: true,
+            breaks: { select: { startAt: true, endAt: true, paid: true } }
+          }
+        }
+      }
+    });
+
+    const versionPlannedShifts = await tx.timesheetPlannedShift.findMany({
+      where: { timesheetVersionId: currentVersionId },
+      select: { date: true, siteId: true, sourceAssignmentId: true, templateVersionDayId: true, plannedStartAt: true, plannedEndAt: true, plannedBreakMinutes: true }
+    });
+
+    const plannedByKey = new Map<
+      string,
+      { date: Date; siteId: string; sourceAssignmentId: string; templateVersionDayId: string | null; plannedStartAt: Date | null; plannedEndAt: Date | null; plannedBreakMinutes: number }
+    >();
+    for (const p of versionPlannedShifts) {
+      plannedByKey.set(`${formatDate(p.date)}::${p.sourceAssignmentId}`, p);
+    }
+    // Zero-planned placeholder for any (date, sourceAssignmentId) the correction touches that the
+    // current plan doesn't cover — mirrors decideCorrection's TimesheetPlannedShift.upsert.
+    for (const day of correctionDays) {
+      for (const seg of day.segments) {
+        const key = `${formatDate(day.date)}::${seg.sourceAssignmentId}`;
+        if (!plannedByKey.has(key)) {
+          plannedByKey.set(key, { date: day.date, siteId: seg.siteId, sourceAssignmentId: seg.sourceAssignmentId, templateVersionDayId: null, plannedStartAt: null, plannedEndAt: null, plannedBreakMinutes: 0 });
+        }
+      }
+    }
+    if (plannedByKey.size > 0) {
+      await tx.timesheetDraftPlannedShift.createMany({
+        data: [...plannedByKey.values()].map((p) => ({
+          draftId: workerDraftId,
+          employeeId,
+          date: p.date,
+          siteId: p.siteId,
+          sourceAssignmentId: p.sourceAssignmentId,
+          templateVersionDayId: p.templateVersionDayId,
+          plannedStartAt: p.plannedStartAt,
+          plannedEndAt: p.plannedEndAt,
+          plannedBreakMinutes: p.plannedBreakMinutes
+        }))
+      });
+    }
+
+    for (const day of correctionDays) {
+      const newDay = await tx.timesheetDraftDay.create({
+        data: { draftId: workerDraftId, date: day.date, dayType: day.dayType, confirmedZero: day.confirmedZero, sourceAbsenceId: day.sourceAbsenceId, note: day.note }
+      });
+      for (const seg of day.segments) {
+        const newSegment = await tx.timesheetDraftSegment.create({
+          data: {
+            draftDayId: newDay.id,
+            draftId: workerDraftId,
+            employeeId,
+            date: day.date,
+            startAt: seg.startAt,
+            endAt: seg.endAt,
+            siteId: seg.siteId,
+            workAreaId: seg.workAreaId,
+            sourceAssignmentId: seg.sourceAssignmentId,
+            originClockShiftFragmentId: seg.originClockShiftFragmentId
+          }
+        });
+        if (seg.breaks.length > 0) {
+          await tx.timesheetDraftBreakSegment.createMany({
+            data: seg.breaks.map((b) => ({ draftSegmentId: newSegment.id, startAt: b.startAt, endAt: b.endAt, paid: b.paid }))
+          });
+        }
+      }
+    }
+
+    await tx.timesheetDraft.update({ where: { id: workerDraftId }, data: { basedOnVersionId: currentVersionId } });
+
+    // --- 2. Freeze via the normal submit path: new CORRECTION version, all scopes PENDING, status SUBMITTED ---
+    const submit = await submitWorkerTimesheetCore(tx, employeeId, timesheetId, adminUserId, requestId, SubmissionSource.MANUAL, {
+      versionSource: 'CORRECTION',
+      versionNote: request.reason,
+      forceScopesPending: true
+    });
+
+    // --- 3. Close the correction ---
+    await tx.correctionRequest.update({
+      where: { id: correctionRequestId },
+      data: { status: 'APPROVED', decidedByUserId: adminUserId, decidedAt: new Date(), resultingVersionId: submit.versionId }
+    });
+
+    await createAuditEvent(tx, {
+      actorUserId: adminUserId,
+      eventType: 'CORRECTION_APPROVED',
+      entityType: 'CORRECTION_REQUEST',
+      entityId: correctionRequestId,
+      requestId,
+      beforeValue: { status: 'SUBMITTED', timesheetStatus: request.timesheet.status },
+      afterValue: { status: 'APPROVED', resultingVersionId: submit.versionId, timesheetStatus: 'SUBMITTED', appliedInReview: true }
+    });
+
+    return { resultingVersionId: submit.versionId, versionNumber: submit.versionNumber };
+  });
+
+  if ('code' in outcome) {
+    return outcome;
+  }
+  return { correctionRequestId, resultingVersionId: outcome.resultingVersionId, versionNumber: outcome.versionNumber, timesheetStatus: 'SUBMITTED' };
+}
+
+export type DiscardInReviewCorrectionError = { code: 'NOT_FOUND' } | { code: 'INVALID_STATE_TRANSITION' };
+
+/**
+ * Task A — the admin started an inline correction on a SUBMITTED/FOREMAN_APPROVED timesheet, then
+ * changed their mind. Marks the CorrectionRequest REJECTED (never applied, no version frozen);
+ * the orphaned CorrectionDraft is harmless and left in place, same as a rejected post-final
+ * correction's draft. Frees the timesheet for a fresh correction (CORRECTION_ALREADY_OPEN checks
+ * status NOT IN (APPROVED, REJECTED)).
+ */
+export async function discardInReviewCorrection(
+  correctionRequestId: string,
+  adminUserId: string,
+  requestId: string
+): Promise<{ correctionRequestId: string; status: 'REJECTED' } | DiscardInReviewCorrectionError> {
+  const routing = await prisma.correctionRequest.findUnique({
+    where: { id: correctionRequestId },
+    select: { timesheetId: true, timesheet: { select: { employeeId: true } } }
+  });
+  if (!routing) {
+    return { code: 'NOT_FOUND' };
+  }
+  const { timesheetId } = routing;
+  const employeeId = routing.timesheet.employeeId;
+
+  const outcome = await prisma.$transaction(async (tx): Promise<DiscardInReviewCorrectionError | { status: 'REJECTED' }> => {
+    await tx.$queryRaw`SELECT id FROM "Employee" WHERE id = ${employeeId}::uuid FOR UPDATE`;
+    await tx.$queryRaw`SELECT id FROM "Timesheet" WHERE id = ${timesheetId}::uuid FOR UPDATE`;
+    await tx.$queryRaw`SELECT id FROM "CorrectionRequest" WHERE id = ${correctionRequestId}::uuid FOR UPDATE`;
+
+    const request = await tx.correctionRequest.findUniqueOrThrow({
+      where: { id: correctionRequestId },
+      select: { status: true, timesheet: { select: { status: true } } }
+    });
+    if (request.status !== 'PENDING' && request.status !== 'DRAFT_OPEN') {
+      return { code: 'INVALID_STATE_TRANSITION' as const };
+    }
+    if (request.timesheet.status !== 'SUBMITTED' && request.timesheet.status !== 'FOREMAN_APPROVED') {
+      return { code: 'INVALID_STATE_TRANSITION' as const };
+    }
+
+    await tx.correctionRequest.update({
+      where: { id: correctionRequestId },
+      data: { status: 'REJECTED', decidedByUserId: adminUserId, decidedAt: new Date() }
+    });
+    await createAuditEvent(tx, {
+      actorUserId: adminUserId,
+      eventType: 'CORRECTION_REJECTED',
+      entityType: 'CORRECTION_REQUEST',
+      entityId: correctionRequestId,
+      requestId,
+      beforeValue: { status: request.status },
+      afterValue: { status: 'REJECTED', appliedInReview: true, discarded: true }
+    });
+    return { status: 'REJECTED' as const };
+  });
+
+  if ('code' in outcome) {
+    return outcome;
+  }
+  return { correctionRequestId, status: 'REJECTED' };
+}
+
+// ============================================================================
 // correction.approve (decision: APPROVED or REJECTED)
 // ============================================================================
 
@@ -758,6 +1035,7 @@ export async function decideCorrection(
         timesheet: {
           select: {
             employeeId: true,
+            status: true,
             currentVersionId: true,
             periodId: true,
             period: { select: { status: true } },
@@ -776,6 +1054,12 @@ export async function decideCorrection(
       return { code: 'NOT_FOUND' as const };
     }
     if (request.status !== 'SUBMITTED') {
+      return { code: 'INVALID_STATE_TRANSITION' as const };
+    }
+    // decideCorrection is the FINAL_APPROVED-only path (four-eyes, approvalOverride, export
+    // coupling). A correction opened on a SUBMITTED/FOREMAN_APPROVED timesheet (Task A) is applied
+    // through applyInReviewCorrection() instead and must never reach here.
+    if (request.timesheet.status !== 'FINAL_APPROVED') {
       return { code: 'INVALID_STATE_TRANSITION' as const };
     }
     if (!approvalOverride && deciderUserId === request.draftOwner.openedByUserId) {
@@ -1083,6 +1367,9 @@ export async function listCorrections(status?: string): Promise<CorrectionListIt
 export interface CorrectionDetail {
   id: string;
   timesheetId: string;
+  /** Task A — SUBMITTED/FOREMAN_APPROVED means this is an in-review admin edit (apply via
+   * applyInReviewCorrection); FINAL_APPROVED means the classic post-approval correction. */
+  timesheetStatus: string;
   employeeId: string;
   employeeName: string;
   status: string;
@@ -1110,7 +1397,7 @@ export async function getCorrectionDetail(correctionRequestId: string): Promise<
       resultingVersionId: true,
       approvalOverride: true,
       overrideReason: true,
-      timesheet: { select: { employeeId: true, employee: { select: { firstName: true, lastName: true } } } },
+      timesheet: { select: { employeeId: true, status: true, employee: { select: { firstName: true, lastName: true } } } },
       draftOwner: {
         select: {
           id: true,
@@ -1148,6 +1435,7 @@ export async function getCorrectionDetail(correctionRequestId: string): Promise<
   return {
     id: request.id,
     timesheetId: request.timesheetId,
+    timesheetStatus: request.timesheet.status,
     employeeId: request.timesheet.employeeId,
     employeeName: `${request.timesheet.employee.firstName} ${request.timesheet.employee.lastName}`,
     status: request.status,
