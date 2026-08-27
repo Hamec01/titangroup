@@ -119,7 +119,8 @@ export const ADMIN_NAV: Record<AppLocale, AdminNavStrings> = {
         key: 'review',
         label: 'Review',
         items: [
-          { href: '/admin/review-scopes', label: 'Timesheet review' },
+          { href: '/admin/review', label: 'Awaiting approval' },
+          { href: '/admin/review-scopes', label: 'By-scope review' },
           { href: '/admin/corrections', label: 'Corrections' }
         ]
       },
@@ -172,7 +173,8 @@ export const ADMIN_NAV: Record<AppLocale, AdminNavStrings> = {
         key: 'review',
         label: 'Проверка',
         items: [
-          { href: '/admin/review-scopes', label: 'Табели на проверку' },
+          { href: '/admin/review', label: 'На утверждении' },
+          { href: '/admin/review-scopes', label: 'Проверка по разделам' },
           { href: '/admin/corrections', label: 'Исправления' }
         ]
       },

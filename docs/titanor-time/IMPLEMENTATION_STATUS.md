@@ -1,6 +1,45 @@
 # Titanor Time — Implementation Status
 
-Обновлено: 2026-08-27 Europe/Helsinki (Task A — админ правит часы до финала)
+Обновлено: 2026-08-27 Europe/Helsinki (Task B — единый экран утверждения)
+
+**`[2026-08-27]` Task B — единый экран утверждения часов + одна кнопка «Утвердить».** Второй пункт
+пакета A–F. Раньше начальник, чтобы утвердить недельные часы, ходил по трём экранам (`review-scopes`
+→ `timesheets` → `corrections`). Теперь:
+- **`/admin/review`** («На утверждении») — все `Timesheet` в `SUBMITTED`/`FOREMAN_APPROVED` по всем
+  открытым периодам, по строке на работника: часы, объект(ы), «замечания» (открытые
+  `AttendanceException` + расхождение план/факт). Фильтр по объекту, «только с замечаниями»,
+  сортировка (фамилия/часы/объект) — всё `<form method=GET>`. Отдельный свёрнутый блок «Ещё не
+  сдали: N». Строка → карточка табеля; **inline «Утвердить»** для строк без замечаний.
+- **`adminApproveTimesheet()`** (`lib/admin-timesheets.ts`): `SUBMITTED` без прораба на объекте →
+  подтверждает все `TimesheetReviewScope(PENDING)` + `FOREMAN_APPROVED` + `FINAL_APPROVED` одной
+  транзакцией (статус проходит через `FOREMAN_APPROVED` с отдельным audit-событием); `SUBMITTED` с
+  прорабом на объекте → `409 FOREMAN_REVIEW_PENDING` (двухшаговую модель не ломаем);
+  `FOREMAN_APPROVED` → `FINAL_APPROVED`. Запрет самоутверждения (`actor.employeeId != worker`).
+  Права: `timesheet.scope_review.all` + `timesheet.final_approve` (обе есть). **Миграции нет.**
+- **Иконка-календарь в шапке** (`ReviewQueueIndicator`) рядом с колокольчиком — счётчик неутверждённых
+  (`GET /api/admin/review-queue`), клик → `/admin/review`. Опрос как у колокольчика (5 мин + focus).
+- `returnTimesheetOverride()` теперь принимает и `SUBMITTED` (не только `FOREMAN_APPROVED`) — «Вернуть
+  работнику» с карточки. `FinalApprovalActions.tsx` удалён (заменён `ApproveTimesheetButton` +
+  `ReturnTimesheetForm`). Nav-группа «Проверка»: `/admin/review` первым пунктом.
+- `/admin/review-scopes`, `/admin/timesheets` (список), `/admin/corrections` — остаются как
+  fallback, просто перестают быть основным путём. Модель `SUBMITTED → FOREMAN_APPROVED →
+  FINAL_APPROVED` и review-scopes — без изменений.
+
+Изменены: `lib/admin-timesheets.ts`, `lib/i18n/admin.ts`, `app/admin/layout.tsx`,
+`app/admin/review/{page.tsx,ApproveTimesheetButton.tsx}` (new),
+`app/admin/timesheets/[timesheetId]/{page.tsx,ReturnTimesheetForm.tsx (new)}` (`FinalApprovalActions.tsx`
+удалён), `app/api/admin/timesheets/[timesheetId]/{approve/route.ts (new),return/route.ts}`,
+`app/api/admin/review-queue/route.ts` (new), `components/admin/ReviewQueueIndicator.tsx` (new),
+`scripts/_test-admin-approve-timesheet.ts` (new), `docs/titanor-time/{01_SCREEN_MAP.md,
+T10_B_UNIFIED_REVIEW_DESIGN.md (new)}`.
+
+Проверки: `_test-admin-approve-timesheet.ts` — **22/22** на одноразовом PostgreSQL 16 (75 миграций):
+one-click SUBMITTED→FINAL_APPROVED + audit-цепочка, `FOREMAN_REVIEW_PENDING` при прорабе,
+`FOREMAN_APPROVED`→`FINAL_APPROVED`, запрет самоутверждения, `getReviewQueue` (открытые/закрытые
+периоды, notSubmitted, фильтры), регрессия `finalApproveTimesheet`. `_test-admin-pre-final-correction.ts`
+(Task A) — 28/28 без изменений. `tsc --noEmit` + `next build` — зелёные. Осталось: HTTP E2E + пилот.
+
+**`[2026-08-27]` Task A — администратор правит часы работника до финального утверждения.** По
 
 **`[2026-08-27]` Task A — администратор правит часы работника до финального утверждения.** По
 запросу владельца (пакет задач A–F, делаем последовательно): если работник ошибся или плохо

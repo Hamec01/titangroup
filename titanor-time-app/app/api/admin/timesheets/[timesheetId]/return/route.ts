@@ -57,7 +57,7 @@ export async function POST(request: NextRequest, { params }: RouteParams): Promi
     if (result.code === 'NOT_FOUND') {
       return jsonError(404, { code: 'TIMESHEET_NOT_FOUND', message: 'No timesheet with this id.' }, requestId);
     }
-    return jsonError(409, { code: 'INVALID_STATE_TRANSITION', message: 'Timesheet is not in FOREMAN_APPROVED status.' }, requestId);
+    return jsonError(409, { code: 'INVALID_STATE_TRANSITION', message: 'Timesheet is not in a returnable status (SUBMITTED / FOREMAN_APPROVED).' }, requestId);
   }
 
   return NextResponse.json(result, { status: 200, headers: successHeaders(requestId) });

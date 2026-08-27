@@ -1,6 +1,8 @@
 import { prisma } from '@/lib/prisma';
 import { createAuditEvent } from '@/lib/audit';
-import { reinitializeDraftFromVersion } from '@/lib/review-scopes';
+import { reinitializeDraftFromVersion, computeSiteScopeHasExceptionBulk } from '@/lib/review-scopes';
+import { helsinkiToday } from '@/lib/workers';
+import { workedMinutesFromIsoSegments } from '@/lib/reporting/report-format';
 
 // docs/titanor-time/01_SCREEN_MAP.md §2 `/admin/timesheets[/...]` — final approval / admin
 // override-return. Not detailed in 04_...§9 (that's the worker/foreman-fallback side) — contract
@@ -231,18 +233,309 @@ export async function finalApproveTimesheet(timesheetId: string, actorUserId: st
   return { timesheetId, status: 'FINAL_APPROVED' };
 }
 
+// ============================================================================
+// Task B — one-click "Утвердить табель" + the /admin/review queue
+// ============================================================================
+
+export type AdminApproveError =
+  | { code: 'NOT_FOUND' }
+  | { code: 'INVALID_STATE_TRANSITION' }
+  | { code: 'SELF_APPROVAL_FORBIDDEN' }
+  | { code: 'FOREMAN_REVIEW_PENDING'; siteNames: string[] };
+
+/**
+ * Task B (2026-08-27) — the admin is the last instance (заказчик прораба не учитывает). This
+ * collapses the three-screen ritual into one action:
+ *   - FOREMAN_APPROVED  -> FINAL_APPROVED (same as finalApproveTimesheet).
+ *   - SUBMITTED, no ForemanAssignment on any pending SITE-scope's site -> approve every PENDING
+ *     scope, then FOREMAN_APPROVED, then FINAL_APPROVED, one transaction. The status still passes
+ *     through FOREMAN_APPROVED (own audit event) so the history reads as the full chain.
+ *   - SUBMITTED with a foreman covering a pending site -> FOREMAN_REVIEW_PENDING (the two-step
+ *     model is preserved for whenever foremen actually exist; the admin uses /admin/review-scopes
+ *     for the NON_SITE / foreman-less scopes as before).
+ * Self-approval (actor is the worker) is refused, same rule as approveReviewScope.
+ */
+export async function adminApproveTimesheet(
+  timesheetId: string,
+  actorUserId: string,
+  actorEmployeeId: string | null,
+  requestId: string
+): Promise<TimesheetActionResult | AdminApproveError> {
+  const routing = await prisma.timesheet.findUnique({ where: { id: timesheetId }, select: { employeeId: true } });
+  if (!routing) {
+    return { code: 'NOT_FOUND' };
+  }
+
+  const outcome = await prisma.$transaction(async (tx): Promise<AdminApproveError | { status: 'FINAL_APPROVED' }> => {
+    await tx.$queryRaw`SELECT id FROM "Employee" WHERE id = ${routing.employeeId}::uuid FOR UPDATE`;
+    await tx.$queryRaw`SELECT id FROM "Timesheet" WHERE id = ${timesheetId}::uuid FOR UPDATE`;
+
+    const ts = await tx.timesheet.findUniqueOrThrow({ where: { id: timesheetId }, select: { status: true, employeeId: true, currentVersionId: true } });
+    if (actorEmployeeId !== null && actorEmployeeId === ts.employeeId) {
+      return { code: 'SELF_APPROVAL_FORBIDDEN' as const };
+    }
+
+    if (ts.status === 'FOREMAN_APPROVED') {
+      await tx.timesheet.update({ where: { id: timesheetId }, data: { status: 'FINAL_APPROVED' } });
+      await createAuditEvent(tx, {
+        actorUserId,
+        eventType: 'FINAL_APPROVED',
+        entityType: 'TIMESHEET',
+        entityId: timesheetId,
+        requestId,
+        beforeValue: { status: 'FOREMAN_APPROVED' },
+        afterValue: { status: 'FINAL_APPROVED' }
+      });
+      return { status: 'FINAL_APPROVED' as const };
+    }
+
+    if (ts.status !== 'SUBMITTED' || !ts.currentVersionId) {
+      return { code: 'INVALID_STATE_TRANSITION' as const };
+    }
+
+    const scopes = await tx.timesheetReviewScope.findMany({
+      where: { timesheetVersionId: ts.currentVersionId },
+      select: { id: true, status: true, scopeType: true, siteId: true }
+    });
+    const pendingSiteIds = [...new Set(scopes.filter((s) => s.status === 'PENDING' && s.scopeType === 'SITE' && s.siteId).map((s) => s.siteId as string))];
+
+    if (pendingSiteIds.length > 0) {
+      const today = helsinkiToday();
+      const foremanCovered = await tx.foremanAssignment.findMany({
+        where: { siteId: { in: pendingSiteIds }, validFrom: { lte: today }, OR: [{ validTo: null }, { validTo: { gte: today } }] },
+        select: { site: { select: { name: true } } }
+      });
+      if (foremanCovered.length > 0) {
+        return { code: 'FOREMAN_REVIEW_PENDING' as const, siteNames: [...new Set(foremanCovered.map((f) => f.site.name))] };
+      }
+    }
+
+    for (const scope of scopes.filter((s) => s.status === 'PENDING')) {
+      await tx.timesheetReviewScope.update({ where: { id: scope.id }, data: { status: 'APPROVED', reviewedByUserId: actorUserId, reviewedAt: new Date() } });
+      await createAuditEvent(tx, {
+        actorUserId,
+        eventType: 'FOREMAN_APPROVED',
+        entityType: 'TIMESHEET_REVIEW_SCOPE',
+        entityId: scope.id,
+        requestId,
+        beforeValue: { status: 'PENDING' },
+        afterValue: { status: 'APPROVED', viaAdminApprove: true }
+      });
+    }
+
+    await tx.timesheet.update({ where: { id: timesheetId }, data: { status: 'FOREMAN_APPROVED' } });
+    await createAuditEvent(tx, {
+      actorUserId,
+      eventType: 'FOREMAN_APPROVED',
+      entityType: 'TIMESHEET',
+      entityId: timesheetId,
+      requestId,
+      beforeValue: { status: 'SUBMITTED' },
+      afterValue: { status: 'FOREMAN_APPROVED', viaAdminApprove: true }
+    });
+
+    await tx.timesheet.update({ where: { id: timesheetId }, data: { status: 'FINAL_APPROVED' } });
+    await createAuditEvent(tx, {
+      actorUserId,
+      eventType: 'FINAL_APPROVED',
+      entityType: 'TIMESHEET',
+      entityId: timesheetId,
+      requestId,
+      beforeValue: { status: 'FOREMAN_APPROVED' },
+      afterValue: { status: 'FINAL_APPROVED', viaAdminApprove: true }
+    });
+
+    return { status: 'FINAL_APPROVED' as const };
+  });
+
+  if ('code' in outcome) {
+    return outcome;
+  }
+  return { timesheetId, status: outcome.status };
+}
+
+export type ReviewQueueSort = 'name' | 'hours' | 'site';
+
+export interface ReviewQueueFilters {
+  siteId?: string;
+  onlyIssues?: boolean;
+  sort?: ReviewQueueSort;
+}
+
+export interface ReviewQueueRow {
+  timesheetId: string;
+  employeeId: string;
+  employeeName: string;
+  employeeNumber: string;
+  periodStartDate: string;
+  periodEndDate: string;
+  status: 'SUBMITTED' | 'FOREMAN_APPROVED';
+  workedMinutes: number;
+  siteNames: string[];
+  exceptionCount: number;
+  planMismatch: boolean;
+  hasForeman: boolean;
+}
+
+export interface NotSubmittedRow {
+  timesheetId: string;
+  employeeName: string;
+  employeeNumber: string;
+  periodStartDate: string;
+  periodEndDate: string;
+  status: 'DRAFT' | 'RETURNED';
+}
+
+export interface ReviewQueue {
+  rows: ReviewQueueRow[];
+  notSubmitted: NotSubmittedRow[];
+  siteOptions: { id: string; name: string }[];
+}
+
+/**
+ * Task B — every Timesheet in SUBMITTED / FOREMAN_APPROVED whose PayrollPeriod is OPEN, across all
+ * open periods (weekly + biweekly cohorts together), with worked hours, sites, and the "замечания"
+ * signal (open AttendanceException count + plan-vs-actual mismatch). Plus a separate list of
+ * workers who have not submitted yet (DRAFT / RETURNED in an open period).
+ */
+export async function getReviewQueue(filters: ReviewQueueFilters): Promise<ReviewQueue> {
+  const timesheets = await prisma.timesheet.findMany({
+    where: { status: { in: ['SUBMITTED', 'FOREMAN_APPROVED'] }, period: { status: 'OPEN' } },
+    select: {
+      id: true,
+      status: true,
+      employeeId: true,
+      currentVersionId: true,
+      employee: { select: { firstName: true, lastName: true, employeeNumber: true } },
+      periodId: true,
+      period: { select: { startDate: true, endDate: true } },
+      currentVersion: {
+        select: {
+          workSegments: {
+            select: { siteId: true, startAt: true, endAt: true, breaks: { select: { startAt: true, endAt: true, paid: true } } }
+          },
+          reviewScopes: { where: { scopeType: 'SITE' }, select: { siteId: true } }
+        }
+      }
+    }
+  });
+
+  const notSubmittedRaw = await prisma.timesheet.findMany({
+    where: { status: { in: ['DRAFT', 'RETURNED'] }, period: { status: 'OPEN' } },
+    select: {
+      id: true,
+      status: true,
+      employee: { select: { firstName: true, lastName: true, employeeNumber: true } },
+      period: { select: { startDate: true, endDate: true } }
+    },
+    orderBy: [{ employee: { lastName: 'asc' } }, { employee: { firstName: 'asc' } }]
+  });
+
+  // plan-vs-actual, in bulk
+  const scopeKeys = timesheets.flatMap((t) =>
+    (t.currentVersion?.reviewScopes ?? []).filter((s) => s.siteId).map((s) => ({ timesheetVersionId: t.currentVersionId as string, siteId: s.siteId as string }))
+  );
+  const mismatchByKey = await computeSiteScopeHasExceptionBulk(scopeKeys);
+
+  // open attendance exceptions per (employee, period)
+  const exceptionRows = await prisma.attendanceException.groupBy({
+    by: ['employeeId', 'payrollPeriodId'],
+    where: {
+      status: 'OPEN',
+      OR: timesheets.map((t) => ({ employeeId: t.employeeId, payrollPeriodId: t.periodId }))
+    },
+    _count: { _all: true }
+  });
+  const exceptionCountByKey = new Map(exceptionRows.map((r) => [`${r.employeeId}:${r.payrollPeriodId}`, r._count._all]));
+
+  // site names
+  const allSiteIds = [...new Set(timesheets.flatMap((t) => (t.currentVersion?.workSegments ?? []).map((s) => s.siteId)))];
+  const sites = allSiteIds.length > 0 ? await prisma.workSite.findMany({ where: { id: { in: allSiteIds } }, select: { id: true, name: true } }) : [];
+  const siteNameById = new Map(sites.map((s) => [s.id, s.name]));
+
+  // foreman coverage
+  const today = helsinkiToday();
+  const foremanAssignments =
+    allSiteIds.length > 0
+      ? await prisma.foremanAssignment.findMany({
+          where: { siteId: { in: allSiteIds }, validFrom: { lte: today }, OR: [{ validTo: null }, { validTo: { gte: today } }] },
+          select: { siteId: true }
+        })
+      : [];
+  const foremanSiteIds = new Set(foremanAssignments.map((f) => f.siteId));
+
+  let rows: ReviewQueueRow[] = timesheets.map((t) => {
+    const segs = t.currentVersion?.workSegments ?? [];
+    const workedMinutes = workedMinutesFromIsoSegments(
+      segs.map((s) => ({ startAt: s.startAt.toISOString(), endAt: s.endAt.toISOString(), breaks: s.breaks.map((b) => ({ startAt: b.startAt.toISOString(), endAt: b.endAt.toISOString(), paid: b.paid })) }))
+    );
+    const siteIds = [...new Set(segs.map((s) => s.siteId))];
+    const planMismatch = (t.currentVersion?.reviewScopes ?? []).some((s) => s.siteId && mismatchByKey.get(`${t.currentVersionId}:${s.siteId}`) === true);
+    return {
+      timesheetId: t.id,
+      employeeId: t.employeeId,
+      employeeName: `${t.employee.lastName} ${t.employee.firstName}`,
+      employeeNumber: t.employee.employeeNumber,
+      periodStartDate: formatDate(t.period.startDate),
+      periodEndDate: formatDate(t.period.endDate),
+      status: t.status as 'SUBMITTED' | 'FOREMAN_APPROVED',
+      workedMinutes,
+      siteNames: siteIds.map((id) => siteNameById.get(id) ?? id),
+      exceptionCount: exceptionCountByKey.get(`${t.employeeId}:${t.periodId}`) ?? 0,
+      planMismatch,
+      hasForeman: siteIds.some((id) => foremanSiteIds.has(id))
+    };
+  });
+
+  if (filters.siteId) {
+    rows = rows.filter((r) => timesheets.find((t) => t.id === r.timesheetId)?.currentVersion?.workSegments.some((s) => s.siteId === filters.siteId));
+  }
+  if (filters.onlyIssues) {
+    rows = rows.filter((r) => r.exceptionCount > 0 || r.planMismatch);
+  }
+  const sort = filters.sort ?? 'name';
+  rows.sort((a, b) => {
+    if (sort === 'hours') return b.workedMinutes - a.workedMinutes || a.employeeName.localeCompare(b.employeeName);
+    if (sort === 'site') return (a.siteNames[0] ?? '').localeCompare(b.siteNames[0] ?? '') || a.employeeName.localeCompare(b.employeeName);
+    return a.employeeName.localeCompare(b.employeeName);
+  });
+
+  return {
+    rows,
+    notSubmitted: notSubmittedRaw.map((t) => ({
+      timesheetId: t.id,
+      employeeName: `${t.employee.lastName} ${t.employee.firstName}`,
+      employeeNumber: t.employee.employeeNumber,
+      periodStartDate: formatDate(t.period.startDate),
+      periodEndDate: formatDate(t.period.endDate),
+      status: t.status as 'DRAFT' | 'RETURNED'
+    })),
+    siteOptions: [...siteNameById.entries()].map(([id, name]) => ({ id, name })).sort((a, b) => a.name.localeCompare(b.name))
+  };
+}
+
+/** Task B — count for the header calendar badge: timesheets awaiting the admin in open periods. */
+export async function getReviewQueueCount(): Promise<number> {
+  return prisma.timesheet.count({ where: { status: { in: ['SUBMITTED', 'FOREMAN_APPROVED'] }, period: { status: 'OPEN' } } });
+}
+
 /**
  * Admin override-return of a WHOLE timesheet from FOREMAN_APPROVED (03_...§4.7): forces every
  * TimesheetReviewScope of the current version to RETURNED — including already-APPROVED ones,
  * deliberately breaking their carry-forward — then reinitializes the draft (idempotent, same
  * helper scope.return uses) so PATCH .../days/:date has something to edit again.
  */
+const RETURNABLE_TIMESHEET_STATUSES = new Set(['SUBMITTED', 'FOREMAN_APPROVED']);
+
 export async function returnTimesheetOverride(timesheetId: string, actorUserId: string, returnReason: string, requestId: string): Promise<TimesheetActionResult | TimesheetActionError> {
   const timesheet = await prisma.timesheet.findUnique({ where: { id: timesheetId }, select: { status: true, employeeId: true, draft: { select: { id: true } } } });
   if (!timesheet || !timesheet.draft) {
     return { code: 'NOT_FOUND' };
   }
-  if (timesheet.status !== 'FOREMAN_APPROVED') {
+  // Task B — the whole-timesheet return now also covers SUBMITTED (an admin at the /admin/review
+  // card who wants the worker to redo it, not fix it in place). The mechanics are identical:
+  // every scope -> RETURNED, draft reinitialized, Timesheet.status -> RETURNED.
+  if (!RETURNABLE_TIMESHEET_STATUSES.has(timesheet.status)) {
     return { code: 'INVALID_STATE_TRANSITION' };
   }
   const draftId = timesheet.draft.id;
@@ -252,9 +545,10 @@ export async function returnTimesheetOverride(timesheetId: string, actorUserId: 
     await tx.$queryRaw`SELECT id FROM "TimesheetDraft" WHERE id = ${draftId}::uuid FOR UPDATE`;
 
     const fresh = await tx.timesheet.findUniqueOrThrow({ where: { id: timesheetId }, select: { status: true, currentVersionId: true } });
-    if (fresh.status !== 'FOREMAN_APPROVED' || !fresh.currentVersionId) {
+    if (!RETURNABLE_TIMESHEET_STATUSES.has(fresh.status) || !fresh.currentVersionId) {
       return 'STALE';
     }
+    const previousStatus = fresh.status;
 
     await tx.timesheetReviewScope.updateMany({
       where: { timesheetVersionId: fresh.currentVersionId },
@@ -276,7 +570,7 @@ export async function returnTimesheetOverride(timesheetId: string, actorUserId: 
       entityType: 'TIMESHEET',
       entityId: timesheetId,
       requestId,
-      beforeValue: { status: 'FOREMAN_APPROVED' },
+      beforeValue: { status: previousStatus },
       afterValue: { status: 'RETURNED', returnReason, override: true }
     });
 

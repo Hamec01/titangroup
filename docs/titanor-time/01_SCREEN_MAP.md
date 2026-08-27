@@ -823,11 +823,31 @@ actions`) на каждой `/admin/*` странице. Bell-иконка с ba
   `FOREMAN_APPROVED`; возврат одного `NON_SITE`/`SITE`-scope не блокируется тем, что другой scope той
   же версии уже вернули долями секунды раньше
 
+#### `/admin/review` 🟢 (`[2026-08-27]` Task B — единый экран утверждения)
+- Роли: `ADMIN`, `SUPER_ADMIN`
+- Приоритет: desktop
+- Назначение: **основной экран утверждения часов** — все `Timesheet` в статусе `SUBMITTED` /
+  `FOREMAN_APPROVED` по **всем открытым периодам** сразу, по одной строке на работника. Начальник
+  садится за ПК (воскресенье/понедельник) и проходит список.
+- Данные: `getReviewQueue()` — работник, период, отработанные часы (`lib/reporting/worked-time.ts`),
+  объект(ы), «замечания» (открытые `AttendanceException` + расхождение план/факт
+  `computeSiteScopeHasExceptionBulk`), флаг «есть прораб». Плюс отдельный свёрнутый блок «Ещё не
+  сдали» (`DRAFT`/`RETURNED` в открытом периоде).
+- Фильтры: `<form method="GET">` — объект, «только с замечаниями», сортировка (фамилия/часы/объект)
+- Действия: строка → `/admin/timesheets/[id]`; **inline «Утвердить»** прямо в строке для табелей
+  **без замечаний** (`POST /api/admin/timesheets/:id/approve`)
+- Состояния: loading; empty («нет табелей на утверждении»); error
+- Откуда: nav (группа «Проверка», первый пункт), **иконка-календарь в шапке** рядом с колокольчиком
+  (`ReviewQueueIndicator`, счётчик из `GET /api/admin/review-queue`)
+- Куда: `/admin/timesheets/[timesheetId]`
+- API: `GET /api/admin/review-queue` (счётчик), `POST /api/admin/timesheets/:id/approve`
+
 #### `/admin/timesheets` ⚪
 - Роли: `ADMIN`, `SUPER_ADMIN`
 - Приоритет: desktop
 - Назначение: полный операционный обзор всех работников и список табелей с фильтром по
-  периоду/объекту/статусу
+  периоду/объекту/статусу (вкладки `SUBMITTED` / `FOREMAN_APPROVED` / `FINAL_APPROVED`). Вторичен
+  относительно `/admin/review`.
 - Данные: `Timesheet` + `TimesheetVersion` (текущая) + `Employee`; после ЭТАП 7A — агрегаты
   `working now`, `finished`, `missing checkout`, `GPS/sync issue`, `draft`, `manual/auto submitted`,
   `awaiting foreman`, `returned`, `ready for final approval`, `correction`
@@ -844,7 +864,11 @@ actions`) на каждой `/admin/*` странице. Bell-иконка с ba
 - Данные: текущая `TimesheetVersion` + `TimesheetDay`/`WorkSegment`/`BreakSegment`/
   `TimesheetPlannedShift` + `ApprovalAction[]`; после ЭТАП 7A — исходные Check In/Check Out,
   геостатус каждой точки, sync-state и clock-vs-reported diff с автором/timestamp/причиной правки
-- Действия: перейти к сравнению версий, финально утвердить, вернуть с причиной; **`[2026-08-27]`
+- Действия: перейти к сравнению версий; **`[2026-08-27]` Task B — при статусе `SUBMITTED` /
+  `FOREMAN_APPROVED` одна кнопка «Утвердить часы» (`POST .../approve` → `adminApproveTimesheet`:
+  когда прораба нет — подтверждает все разделы + `FOREMAN_APPROVED` + `FINAL_APPROVED` одним
+  шагом; когда прораб есть на объекте — `409 FOREMAN_REVIEW_PENDING`) + «Вернуть работнику»
+  (`POST .../return`, теперь и из `SUBMITTED`)**; **`[2026-08-27]`
   Task A — при статусе `SUBMITTED` / `FOREMAN_APPROVED` «Исправить часы» (с обязательной причиной)
   → открывает inline-корректировку и ведёт на `/admin/corrections/[id]`, где админ правит дни и
   жмёт «Применить изменения» (→ `TimesheetVersion(source=CORRECTION)` за подписью админа, табель
