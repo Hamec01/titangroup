@@ -110,6 +110,8 @@ export function WorkerProfileForm({ initialProfile }: WorkerProfileFormProps) {
       if (!response.ok) {
         if (body?.error?.code === 'VERSION_CONFLICT') {
           setErrorMessage(t.profileSaveErrorConflict);
+        } else if (body?.error?.code === 'PERSONAL_DATA_ENCRYPTION_UNAVAILABLE') {
+          setErrorMessage(t.profileSaveErrorEncryptionUnavailable);
         } else if (body?.error?.fieldErrors) {
           setFieldErrors(body.error.fieldErrors);
         } else {

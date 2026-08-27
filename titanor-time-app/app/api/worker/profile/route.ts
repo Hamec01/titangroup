@@ -1,10 +1,10 @@
 import { randomUUID } from 'node:crypto';
 import { NextRequest, NextResponse } from 'next/server';
-import { jsonError, successHeaders } from '@/lib/api-error';
+import { jsonError, personalDataEncryptionUnavailable, successHeaders } from '@/lib/api-error';
 import { resolveAuthenticatedSession } from '@/lib/auth';
 import { hasPermission } from '@/lib/permissions';
 import { SESSION_COOKIE_NAME } from '@/lib/session';
-import { getEmployeeProfileView, updateEmployeeProfileFields, validateProfileFields, type UpdateEmployeeProfileFieldsInput } from '@/lib/employee-profile';
+import { getEmployeeProfileView, updateEmployeeProfileFields, validateProfileFields, type UpdateEmployeeProfileFieldsInput, type UpdateProfileFieldsResult } from '@/lib/employee-profile';
 import { normalizePersonalIdentityCode } from '@/lib/personal-identity-code';
 
 export const dynamic = 'force-dynamic';
@@ -138,13 +138,18 @@ export async function PATCH(request: NextRequest): Promise<NextResponse> {
     return jsonError(400, { code: 'VALIDATION_ERROR', message: 'Invalid request body.', fieldErrors }, requestId);
   }
 
-  const result = await updateEmployeeProfileFields({
-    employeeId: authenticated.user.employeeId,
-    version,
-    actorUserId: authenticated.user.id,
-    requestId,
-    fields
-  });
+  let result: UpdateProfileFieldsResult;
+  try {
+    result = await updateEmployeeProfileFields({
+      employeeId: authenticated.user.employeeId,
+      version,
+      actorUserId: authenticated.user.id,
+      requestId,
+      fields
+    });
+  } catch (error) {
+    return personalDataEncryptionUnavailable(error, requestId);
+  }
 
   if (!result.ok) {
     if (result.code === 'EMPLOYEE_NOT_FOUND') {

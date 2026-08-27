@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { NextRequest, NextResponse } from 'next/server';
-import { jsonError } from '@/lib/api-error';
+import { jsonError, personalDataEncryptionUnavailable } from '@/lib/api-error';
 import { resolveAuthenticatedSession } from '@/lib/auth';
 import { hasPermission } from '@/lib/permissions';
 import { SESSION_COOKIE_NAME } from '@/lib/session';
@@ -27,7 +27,12 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
   if (!UUID_PATTERN.test(employeeId)) {
     return jsonError(404, { code: 'NOT_FOUND', message: 'Not found.' }, requestId);
   }
-  const value = await getEmployeeProfilePersonalIdentityCode(employeeId);
+  let value: string | null;
+  try {
+    value = await getEmployeeProfilePersonalIdentityCode(employeeId);
+  } catch (error) {
+    return personalDataEncryptionUnavailable(error, requestId);
+  }
   if (!value) {
     return jsonError(404, { code: 'NOT_FOUND', message: 'Not found.' }, requestId);
   }

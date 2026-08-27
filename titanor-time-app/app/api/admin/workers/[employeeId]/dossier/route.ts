@@ -1,12 +1,12 @@
 import { randomUUID } from 'node:crypto';
 import { NextRequest, NextResponse } from 'next/server';
-import { jsonError } from '@/lib/api-error';
+import { jsonError, personalDataEncryptionUnavailable } from '@/lib/api-error';
 import { resolveAuthenticatedSession } from '@/lib/auth';
 import { hasPermission } from '@/lib/permissions';
 import { SESSION_COOKIE_NAME } from '@/lib/session';
 import { prisma } from '@/lib/prisma';
 import { createAuditEvent } from '@/lib/audit';
-import { getWorkerDossierData } from '@/lib/worker-dossier';
+import { getWorkerDossierData, type WorkerDossierData } from '@/lib/worker-dossier';
 import { buildWorkerDossierPdf, workerDossierPdfFileName } from '@/lib/reporting/worker-dossier-pdf';
 
 export const dynamic = 'force-dynamic';
@@ -33,7 +33,12 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
     return jsonError(404, { code: 'EMPLOYEE_NOT_FOUND', message: 'Employee not found.' }, requestId);
   }
 
-  const data = await getWorkerDossierData(employeeId);
+  let data: WorkerDossierData | null;
+  try {
+    data = await getWorkerDossierData(employeeId);
+  } catch (error) {
+    return personalDataEncryptionUnavailable(error, requestId);
+  }
   if (!data) {
     return jsonError(404, { code: 'EMPLOYEE_NOT_FOUND', message: 'Employee not found.' }, requestId);
   }

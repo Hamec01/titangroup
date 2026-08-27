@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { NextRequest, NextResponse } from 'next/server';
-import { jsonError } from '@/lib/api-error';
+import { jsonError, personalDataEncryptionUnavailable } from '@/lib/api-error';
 import { resolveAuthenticatedSession } from '@/lib/auth';
 import { hasPermission } from '@/lib/permissions';
 import { SESSION_COOKIE_NAME } from '@/lib/session';
@@ -23,7 +23,12 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   if (!(await hasPermission(authenticated.user.roles, 'worker.profile.read.own'))) {
     return jsonError(403, { code: 'FORBIDDEN', message: 'Missing required permission.' }, requestId);
   }
-  const value = await getEmployeeProfilePersonalIdentityCode(authenticated.user.employeeId);
+  let value: string | null;
+  try {
+    value = await getEmployeeProfilePersonalIdentityCode(authenticated.user.employeeId);
+  } catch (error) {
+    return personalDataEncryptionUnavailable(error, requestId);
+  }
   if (!value) {
     return jsonError(404, { code: 'NOT_FOUND', message: 'Not found.' }, requestId);
   }

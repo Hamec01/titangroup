@@ -217,6 +217,7 @@ export interface WorkerStrings {
   profileSaving: string;
   profileSaved: string;
   profileSaveErrorConflict: string;
+  profileSaveErrorEncryptionUnavailable: string;
   profileUnsupportedPhotoType: string;
   profilePhotoTooLarge: string;
   // -- Worker Dossier feature (2026-08-26): contact/address + henkilötunnus, own profile --
@@ -463,6 +464,7 @@ export const WORKER_STRINGS: Record<AppLocale, WorkerStrings> = {
     profileSaving: 'Saving…',
     profileSaved: 'Saved.',
     profileSaveErrorConflict: 'This profile changed elsewhere — reload the page and try again.',
+    profileSaveErrorEncryptionUnavailable: "The personal identity code can't be saved right now — secure storage isn't configured on the server. Please contact your administrator.",
     profileUnsupportedPhotoType: 'Only JPG and PNG photos are supported.',
     profilePhotoTooLarge: 'This file is too large.',
     profileContactEmailLabel: 'Contact email',
@@ -706,6 +708,7 @@ export const WORKER_STRINGS: Record<AppLocale, WorkerStrings> = {
     profileSaving: 'Сохранение…',
     profileSaved: 'Сохранено.',
     profileSaveErrorConflict: 'Профиль изменён в другом месте — обновите страницу и попробуйте снова.',
+    profileSaveErrorEncryptionUnavailable: 'Личный идентификационный код сейчас нельзя сохранить — на сервере не настроено защищённое хранилище. Обратитесь к администратору.',
     profileUnsupportedPhotoType: 'Поддерживаются только фото JPG и PNG.',
     profilePhotoTooLarge: 'Файл слишком большой.',
     profileContactEmailLabel: 'Контактный email',

@@ -112,6 +112,14 @@ export function AdminWorkerProfileForm({ employeeId, initialProfile }: AdminWork
       if (!response.ok) {
         if (body?.error?.code === 'VERSION_CONFLICT') {
           setErrorMessage(localeText(locale, 'This profile changed elsewhere — reload the page and try again.', 'Профиль изменён в другом месте — обновите страницу и попробуйте снова.'));
+        } else if (body?.error?.code === 'PERSONAL_DATA_ENCRYPTION_UNAVAILABLE') {
+          setErrorMessage(
+            localeText(
+              locale,
+              "The personal identity code can't be saved — secure storage (PERSONAL_DATA_ENCRYPTION_KEY) isn't configured on the server. Contact the system administrator.",
+              'Личный идентификационный код нельзя сохранить — на сервере не настроено защищённое хранилище (PERSONAL_DATA_ENCRYPTION_KEY). Сообщите системному администратору.'
+            )
+          );
         } else if (body?.error?.fieldErrors) {
           setFieldErrors(body.error.fieldErrors);
         } else {

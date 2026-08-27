@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { NextResponse } from 'next/server';
+import { PersonalDataEncryptionConfigError } from '@/lib/personal-data-encryption';
 
 // Shared error shape mandated by docs/titanor-time/04_ADMIN_FIRST_API_CONTRACTS.md
 // §0 ("Формат ошибки (единый)") — every endpoint in the API, not just auth,
@@ -45,4 +46,24 @@ export function successHeaders(requestId: string): Record<string, string> {
     'Cache-Control': 'no-store',
     'X-Request-Id': requestId
   };
+}
+
+/** Maps a PERSONAL_DATA_ENCRYPTION_KEY misconfiguration (key missing or not 32 bytes — a server
+ * setup problem, never a bad request) to a 503 in the standard envelope, and re-throws anything
+ * else unchanged. Call from the catch block of any route that encrypts or decrypts a henkilötunnus
+ * (lib/personal-data-encryption.ts) so the failure is a clear, diagnosable status with a stable
+ * `code` instead of an opaque 500 the UI can only render as a generic "contact your administrator".
+ * Routes that never touch that field never hit this path. */
+export function personalDataEncryptionUnavailable(error: unknown, requestId: string): NextResponse {
+  if (error instanceof PersonalDataEncryptionConfigError) {
+    return jsonError(
+      503,
+      {
+        code: 'PERSONAL_DATA_ENCRYPTION_UNAVAILABLE',
+        message: 'Secure storage for the personal identity code is not configured on the server. Contact the system administrator.'
+      },
+      requestId
+    );
+  }
+  throw error;
 }
