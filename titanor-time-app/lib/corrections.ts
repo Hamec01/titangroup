@@ -292,7 +292,12 @@ export type PatchCorrectionDayError =
  * information only (which rows to lock), never a status/ownership decision; status and `draftId`
  * are re-read fresh under the lock below.
  */
-export async function patchCorrectionDraftDay(correctionRequestId: string, date: Date, input: PatchDayInput): Promise<CorrectionDayView | PatchCorrectionDayError> {
+export async function patchCorrectionDraftDay(
+  correctionRequestId: string,
+  date: Date,
+  input: PatchDayInput,
+  actorUserId?: string
+): Promise<CorrectionDayView | PatchCorrectionDayError> {
   if (input.segments !== undefined) {
     const sortedSegments = [...input.segments].sort((a, b) => a.startAt.getTime() - b.startAt.getTime());
     for (let i = 1; i < sortedSegments.length; i++) {
@@ -371,10 +376,48 @@ export async function patchCorrectionDraftDay(correctionRequestId: string, date:
           where: { employeeId, status: 'APPROVED', type: input.dayType as AbsenceType, startDate: { lte: date }, endDate: { gte: date } },
           select: { id: true }
         });
-        if (!absence) {
+        if (absence) {
+          resolvedAbsenceId = absence.id;
+        } else if (actorUserId) {
+          // Task C (2026-08-27) — the admin marks a day «Больничный / Отпуск / Неоплачиваемый /
+          // Другое» straight from the timesheet review, with an optional note. There is no
+          // separate absence-approval workflow yet, so record a one-day APPROVED Absence here
+          // (by this admin) that justifies the day type — same row lib/periods.ts's overlay
+          // would consume. WORK <- non-WORK just drops sourceAbsenceId; the Absence row is left
+          // (harmless, and still the audit trail of what the admin decided).
+          const created = await tx.absence.create({
+            data: {
+              employeeId,
+              type: input.dayType as AbsenceType,
+              startDate: date,
+              endDate: date,
+              status: 'APPROVED',
+              note: input.note ?? null,
+              createdByUserId: actorUserId,
+              approvedByUserId: actorUserId,
+              approvedAt: new Date(),
+              // ck_absence_status_metadata_shape requires both to be JSON arrays for an APPROVED
+              // Absence. The regular overlay engine (lib/periods.ts) fills these when it stamps a
+              // period's draft days; here the admin applies the day directly through the
+              // correction (CorrectionDraftDay.sourceAbsenceId), so nothing was overlaid and there
+              // are no conflicts.
+              overlayAppliedDates: [],
+              overlayConflicts: []
+            }
+          });
+          await createAuditEvent(tx, {
+            actorUserId,
+            eventType: 'ABSENCE_CREATED',
+            entityType: 'ABSENCE',
+            entityId: created.id,
+            requestId: correctionRequestId,
+            beforeValue: null,
+            afterValue: { employeeId, type: input.dayType, date: formatDate(date), viaTimesheetReview: true }
+          });
+          resolvedAbsenceId = created.id;
+        } else {
           return { code: 'DAY_TYPE_REQUIRES_ABSENCE' as const };
         }
-        resolvedAbsenceId = absence.id;
       }
 
       const previousLiveRows = await tx.correctionDraftSegment.findMany({

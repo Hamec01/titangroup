@@ -58,7 +58,7 @@ export function StartCorrectionForm({ timesheetId }: { timesheetId: string }) {
     return (
       <div className="setup-card form">
         <button className="wk-inline-secondary" type="button" onClick={() => setOpen(true)}>
-          {ru ? 'Исправить часы' : 'Edit hours'}
+          {ru ? 'Исправить часы / отметить больничный, отпуск' : 'Edit hours / mark sick leave, vacation'}
         </button>
       </div>
     );
@@ -68,8 +68,8 @@ export function StartCorrectionForm({ timesheetId }: { timesheetId: string }) {
     <div className="setup-card form">
       <p className="setup-subtitle">
         {ru
-          ? 'Вы правите часы за работника. После «Применить изменения» табель вернётся в очередь на утверждение, а в истории работника появится «Исправлено администратором» с вашим именем и причиной.'
-          : "You are editing the worker's hours. After “Apply changes” the timesheet goes back to the review queue, and the worker's history shows “Edited by administrator” with your name and the reason."}
+          ? 'Вы правите табель за работника: часы по дням и/или тип дня (больничный, отпуск, неоплачиваемый, другое — с комментарием). После «Применить изменения» табель вернётся в очередь на утверждение, а в истории работника появится «Исправлено администратором» с вашим именем и причиной.'
+          : "You are editing the worker's timesheet: hours per day and/or the day type (sick leave, vacation, unpaid, other — with a note). After “Apply changes” the timesheet goes back to the review queue, and the worker's history shows “Edited by administrator” with your name and the reason."}
       </p>
       {error ? (
         <p className="login-error" role="alert">

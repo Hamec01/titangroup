@@ -97,10 +97,21 @@ export default function CorrectionDayEditor({ correctionRequestId, date, initial
     }))
   );
   const [confirmedZero, setConfirmedZero] = useState(initialConfirmedZero);
+  const [dayType, setDayType] = useState(initialDayType);
+  const [note, setNote] = useState('');
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const isAbsenceDay = initialDayType !== 'WORK';
+  // Task C — the admin can mark this day «Работал / Больничный / Отпуск / Неоплачиваемый / Другое»
+  // straight here. A non-WORK type auto-records a one-day APPROVED Absence server-side.
+  const DAY_TYPE_OPTIONS: { value: string; ru: string; en: string }[] = [
+    { value: 'WORK', ru: 'Работал', en: 'Worked' },
+    { value: 'SICK_LEAVE', ru: 'Больничный', en: 'Sick leave' },
+    { value: 'VACATION', ru: 'Отпуск', en: 'Vacation' },
+    { value: 'UNPAID_LEAVE', ru: 'Неоплачиваемый отпуск', en: 'Unpaid leave' },
+    { value: 'OTHER', ru: 'Другое', en: 'Other' }
+  ];
+  const isAbsenceDay = dayType !== 'WORK';
 
   function addSegment() {
     if (assignmentOptions.length === 0) {
@@ -137,19 +148,23 @@ export default function CorrectionDayEditor({ correctionRequestId, date, initial
     setSaving(true);
     setError(null);
     try {
-      const body = {
-        confirmedZero: segments.length === 0 ? confirmedZero : false,
-        segments: segments.map((s) => {
-          const [siteId, workAreaId] = s.assignmentKey.split('::');
-          return {
-            startAt: helsinkiTimeToIso(date, s.startAt),
-            endAt: helsinkiTimeToIso(date, s.endAt),
-            siteId,
-            workAreaId: workAreaId || null,
-            breaks: s.breaks.map((b) => ({ startAt: helsinkiTimeToIso(date, b.startAt), endAt: helsinkiTimeToIso(date, b.endAt), paid: b.paid }))
-          };
-        })
-      };
+      const body: Record<string, unknown> =
+        dayType === 'WORK'
+          ? {
+              dayType: 'WORK',
+              confirmedZero: segments.length === 0 ? confirmedZero : false,
+              segments: segments.map((s) => {
+                const [siteId, workAreaId] = s.assignmentKey.split('::');
+                return {
+                  startAt: helsinkiTimeToIso(date, s.startAt),
+                  endAt: helsinkiTimeToIso(date, s.endAt),
+                  siteId,
+                  workAreaId: workAreaId || null,
+                  breaks: s.breaks.map((b) => ({ startAt: helsinkiTimeToIso(date, b.startAt), endAt: helsinkiTimeToIso(date, b.endAt), paid: b.paid }))
+                };
+              })
+            }
+          : { dayType, note: note.trim() || null, confirmedZero: false, segments: [] };
       const res = await fetch(`/api/admin/corrections/${correctionRequestId}/days/${date}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json', 'X-Requested-With': CSRF_HEADER_VALUE },
@@ -176,8 +191,27 @@ export default function CorrectionDayEditor({ correctionRequestId, date, initial
         </a>
         <h1>{date}</h1>
 
+        <div className="login-field">
+          <label htmlFor="cde-daytype">{ru ? 'Тип дня' : 'Day type'}</label>
+          <select id="cde-daytype" value={DAY_TYPE_OPTIONS.some((o) => o.value === dayType) ? dayType : 'OTHER'} onChange={(e) => setDayType(e.target.value)} disabled={saving}>
+            {DAY_TYPE_OPTIONS.map((o) => (
+              <option key={o.value} value={o.value}>
+                {ru ? o.ru : o.en}
+              </option>
+            ))}
+          </select>
+        </div>
+
         {isAbsenceDay ? (
-          <p className="wk-readonly-note">{ru ? `Этот день отмечен как «${dayTypeLabel(initialDayType, locale)}».` : <>This day is marked as {dayTypeLabel(initialDayType, locale)}.</>}</p>
+          <div className="login-field">
+            <label htmlFor="cde-note">{ru ? 'Комментарий (необязательно)' : 'Comment (optional)'}</label>
+            <textarea id="cde-note" rows={2} value={note} onChange={(e) => setNote(e.target.value)} disabled={saving} placeholder={ru ? 'например, со слов работника' : 'e.g. per the worker'} />
+            <p className="wk-readonly-note">
+              {ru
+                ? `Часы за этот день будут очищены, день пойдёт как «${dayTypeLabel(dayType, locale)}».`
+                : `This day's hours will be cleared and it will count as ${dayTypeLabel(dayType, locale)}.`}
+            </p>
+          </div>
         ) : (
           <>
             {segments.length === 0 && (
@@ -244,11 +278,9 @@ export default function CorrectionDayEditor({ correctionRequestId, date, initial
           </p>
         )}
 
-        {!isAbsenceDay && (
-          <button type="button" className="wk-action-button" onClick={handleSave} disabled={saving}>
-            {saving ? (ru ? 'Сохранение…' : 'Saving…') : (ru ? 'Сохранить' : 'Save')}
-          </button>
-        )}
+        <button type="button" className="wk-action-button" onClick={handleSave} disabled={saving}>
+          {saving ? (ru ? 'Сохранение…' : 'Saving…') : (ru ? 'Сохранить' : 'Save')}
+        </button>
       </div>
     </main>
   );

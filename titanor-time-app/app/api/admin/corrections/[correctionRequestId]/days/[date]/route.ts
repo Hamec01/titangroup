@@ -180,7 +180,9 @@ export async function PATCH(request: NextRequest, { params }: RouteParams): Prom
     return NextResponse.json(errorBody({ code: 'VALIDATION_ERROR', message: 'Invalid request body.', fieldErrors }, requestId), { status: 400, headers: successHeaders(requestId) });
   }
 
-  const result = await patchCorrectionDraftDay(correctionRequestId, date, input);
+  // Task C — actorUserId lets patchCorrectionDraftDay auto-record a one-day APPROVED Absence when
+  // the admin marks a non-WORK day type and none exists yet.
+  const result = await patchCorrectionDraftDay(correctionRequestId, date, input, authenticated.user.id);
 
   if ('code' in result) {
     switch (result.code) {

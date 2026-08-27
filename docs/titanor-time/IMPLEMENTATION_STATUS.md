@@ -1,6 +1,32 @@
 # Titanor Time — Implementation Status
 
-Обновлено: 2026-08-27 Europe/Helsinki (Task B — единый экран утверждения)
+Обновлено: 2026-08-27 Europe/Helsinki (Task C — отметить день отсутствием)
+
+**`[2026-08-27]` Task C — админ отмечает день больничным / отпуском / … при проверке табеля.**
+Третий пункт пакета A–F. Раньше любой не-`WORK` тип дня требовал одобренного `Absence`, а создать
+`Absence` было нечем (ни API, ни UI, ни permission) — то есть отметить отсутствие было в принципе
+невозможно. Теперь редактор дня корректировки (задача A) умеет менять тип дня: `patchCorrectionDraftDay`
+получил 4-й аргумент `actorUserId`; когда админ ставит absence-тип
+(`SICK_LEAVE/VACATION/UNPAID_LEAVE/OTHER`) и покрывающего `Absence` нет, функция сама создаёт
+однодневный `APPROVED Absence` (`createdBy=approvedBy=этот админ`, `note` из поля,
+`overlayAppliedDates/overlayConflicts=[]`) + `AuditEvent(ABSENCE_CREATED)`; существующий `Absence`
+переиспользуется; `PUBLIC_HOLIDAY` по-прежнему отклоняется (нет `AbsenceType`); без `actorUserId`
+поведение прежнее. `CorrectionDayEditor` получил `<select>` типа дня + поле комментария (для не-`WORK`
+часы прячутся, PATCH шлёт `{dayType, note, segments:[]}`). Кнопка на карточке табеля — «Исправить
+часы / отметить больничный, отпуск». Отдельная кнопка «утвердить как есть» не нужна: пустой день не
+блокирует утверждение (задача B считает его 0 ч). **Миграции нет.** Отдельный экран управления
+отсутствиями / `absence.manage` — на потом.
+
+Изменены: `lib/corrections.ts`, `app/api/admin/corrections/[correctionRequestId]/days/[date]/route.ts`,
+`app/admin/corrections/[correctionRequestId]/days/[date]/CorrectionDayEditor.tsx`,
+`app/admin/timesheets/[timesheetId]/StartCorrectionForm.tsx`,
+`scripts/_test-admin-mark-absence-day.ts` (new),
+`docs/titanor-time/T10_C_MARK_ABSENCE_DAY_DESIGN.md` (new).
+
+Проверки: `_test-admin-mark-absence-day.ts` — **12/12** на одноразовом PostgreSQL 16; регрессия
+A (28/28) и B (22/22). `tsc --noEmit` + `next build` — зелёные. Осталось: пилот.
+
+**`[2026-08-27]` Task B — единый экран утверждения часов + одна кнопка «Утвердить».** Второй пункт
 
 **`[2026-08-27]` Task B — единый экран утверждения часов + одна кнопка «Утвердить».** Второй пункт
 пакета A–F. Раньше начальник, чтобы утвердить недельные часы, ходил по трём экранам (`review-scopes`
