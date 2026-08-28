@@ -7,6 +7,7 @@ import { materializeClockShiftCore } from '@/lib/attendance-materializer';
 import { resolveMissingCheckoutAtCutoffOnLateCheckOut } from '@/lib/attendance-auto-submit';
 import {
   evaluateGpsReading,
+  loadMaxGpsAccuracyMeters,
   validateGpsPayload,
   loadCurrentGeofence,
   exceptionDetailForGps,
@@ -455,7 +456,7 @@ async function runPreflight(tx: Prisma.TransactionClient, event: SyncEventInput)
       }
     }
     const geofence = await loadCurrentGeofence(tx, event.siteId);
-    const gpsResult = evaluateGpsReading(event.gps, geofence);
+    const gpsResult = evaluateGpsReading(event.gps, geofence, await loadMaxGpsAccuracyMeters(tx));
     if (gpsResult.gpsVerification === 'VERIFIED_OUTSIDE') {
       return { terminal: true, code: 'OUTSIDE_GEOFENCE' };
     }
@@ -648,7 +649,7 @@ async function insertAndApplyCheckOut(
     const timeResult = computeOfflineEffectiveTime(event.clientCapturedAt, serverReceivedAt);
     const { timesheetId, payrollPeriodId } = await resolveTimesheetForInstant(tx, employeeId, timeResult.effectiveAt);
     const geofence = await loadCurrentGeofence(tx, event.assumedSiteId!);
-    const gpsResult = evaluateGpsReading(event.gps, geofence);
+    const gpsResult = evaluateGpsReading(event.gps, geofence, await loadMaxGpsAccuracyMeters(tx));
 
     const inserted = await tryInsertClockEvent(tx, {
       id: event.clientEventId,
@@ -724,7 +725,7 @@ async function insertAndApplyCheckOut(
   const openedAt = openShift.openedAt;
 
   const geofence = await loadCurrentGeofence(tx, authoritativeSiteId);
-  const gpsResult = evaluateGpsReading(event.gps, geofence);
+  const gpsResult = evaluateGpsReading(event.gps, geofence, await loadMaxGpsAccuracyMeters(tx));
   const timeResult = computeOfflineEffectiveTime(event.clientCapturedAt, serverReceivedAt);
   const effectiveAt = timeResult.effectiveAt;
 

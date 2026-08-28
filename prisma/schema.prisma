@@ -1620,6 +1620,11 @@ model CompanyAttendancePolicy {
   cutoffTime                  DateTime @default(dbgenerated("'23:59:00'::time")) @db.Time(0)
   systemReopenDebounceMinutes Int      @default(30)
   maxShiftDurationHours       Int      @default(16)
+  // GPS step 4 (T11) — server-side geofence-verification accuracy gate. A reading with
+  // accuracyMeters above this becomes GPS_NOT_VERIFIED (reason LOW_ACCURACY). Default 75 keeps
+  // the previous hard-coded MAX_ACCEPTABLE_ACCURACY_METERS; a site with chronically poor indoor
+  // signal (e.g. a shipyard) can be raised here rather than in code.
+  maxGpsAccuracyMeters        Int      @default(75)
   updatedByUserId             String?  @db.Uuid
   updatedAt                   DateTime @updatedAt @db.Timestamptz(6)
   createdAt                   DateTime @default(now()) @db.Timestamptz(6)

@@ -96,12 +96,19 @@ function haversineDistanceMeters(lat1: number, lon1: number, lat2: number, lon2:
  * trusts a geofence version supplied by the client — `geofence` here must always be the caller's
  * own fresh, server-side lookup of the site's authoritative currentGeofenceVersionId.
  */
-export function evaluateGpsReading(reading: ClockGpsReading, geofence: ClockGeofence | null): GpsEvaluation {
+export function evaluateGpsReading(
+  reading: ClockGpsReading,
+  geofence: ClockGeofence | null,
+  // GPS step 4 (T11) — the accuracy gate is now CompanyAttendancePolicy.maxGpsAccuracyMeters,
+  // loaded by the caller (loadMaxGpsAccuracyMeters). Defaults to the historic hard-coded 75 so
+  // every pure/test caller that doesn't pass one keeps the old behaviour.
+  maxAccuracyMeters: number = MAX_ACCEPTABLE_ACCURACY_METERS
+): GpsEvaluation {
   if (!reading.location) {
     return { gpsVerification: 'NOT_VERIFIED', gpsUnavailableReason: reading.gpsUnavailableReason, geofenceVersionId: null, gpsAccuracyMeters: null, distanceMeters: null, location: null };
   }
   const { latitude, longitude, accuracyMeters } = reading.location;
-  if (accuracyMeters > MAX_ACCEPTABLE_ACCURACY_METERS) {
+  if (accuracyMeters > maxAccuracyMeters) {
     return { gpsVerification: 'NOT_VERIFIED', gpsUnavailableReason: 'LOW_ACCURACY', geofenceVersionId: null, gpsAccuracyMeters: accuracyMeters, distanceMeters: null, location: { latitude, longitude } };
   }
   if (!geofence) {
@@ -638,6 +645,14 @@ export async function loadCurrentGeofence(tx: Prisma.TransactionClient, siteId: 
   return { geofenceVersionId: version.id, latitude: Number(version.latitude), longitude: Number(version.longitude), radiusMeters: version.radiusMeters };
 }
 
+/** GPS step 4 (T11) — the configurable accuracy gate for evaluateGpsReading. Reused by both the
+ * online clock paths (lib/attendance-clock.ts) and the offline sync path (lib/attendance-sync.ts),
+ * same "load fresh server-side, never trust the client" reasoning as loadCurrentGeofence. */
+export async function loadMaxGpsAccuracyMeters(tx: Prisma.TransactionClient): Promise<number> {
+  const policy = await tx.companyAttendancePolicy.findFirst({ select: { maxGpsAccuracyMeters: true } });
+  return policy?.maxGpsAccuracyMeters ?? MAX_ACCEPTABLE_ACCURACY_METERS;
+}
+
 export function exceptionDetailForGps(evaluation: GpsEvaluation, geofence: ClockGeofence | null): Prisma.InputJsonValue | undefined {
   if (evaluation.gpsVerification === 'VERIFIED_OUTSIDE' && geofence && evaluation.distanceMeters !== null) {
     return { distanceMeters: Math.round(evaluation.distanceMeters), accuracyMeters: evaluation.gpsAccuracyMeters, thresholdMeters: geofence.radiusMeters };
@@ -699,7 +714,7 @@ async function checkInCore(tx: Prisma.TransactionClient, employeeId: string, act
   }
 
   const geofence = await loadCurrentGeofence(tx, input.siteId);
-  const gpsResult = evaluateGpsReading(input.gps, geofence);
+  const gpsResult = evaluateGpsReading(input.gps, geofence, await loadMaxGpsAccuracyMeters(tx));
 
   if (gpsResult.gpsVerification === 'VERIFIED_OUTSIDE') {
     throw new OutsideGeofenceSignal();
@@ -908,7 +923,7 @@ async function checkOutCore(tx: Prisma.TransactionClient, employeeId: string, ac
     const timeResult = computeOnlineEffectiveTime(input.clientCapturedAt, serverReceivedAt);
     const { timesheetId, payrollPeriodId } = await resolveTimesheetForInstant(tx, employeeId, timeResult.effectiveAt);
     const geofence = await loadCurrentGeofence(tx, input.assumedSiteId);
-    const gpsResult = evaluateGpsReading(input.gps, geofence);
+    const gpsResult = evaluateGpsReading(input.gps, geofence, await loadMaxGpsAccuracyMeters(tx));
 
     await tx.clockEvent.create({
       data: {
@@ -975,7 +990,7 @@ async function checkOutCore(tx: Prisma.TransactionClient, employeeId: string, ac
 
   // (b) GPS against the authoritative site's CURRENT geofence.
   const geofence = await loadCurrentGeofence(tx, authoritativeSiteId);
-  const gpsResult = evaluateGpsReading(input.gps, geofence);
+  const gpsResult = evaluateGpsReading(input.gps, geofence, await loadMaxGpsAccuracyMeters(tx));
 
   // (c) effectiveAt — never blocked, never clamped itself.
   const timeResult = computeOnlineEffectiveTime(input.clientCapturedAt, serverReceivedAt);

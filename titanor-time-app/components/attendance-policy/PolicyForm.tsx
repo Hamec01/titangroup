@@ -22,6 +22,7 @@ interface FormState {
   cutoffTime: string;
   systemReopenDebounceMinutes: string;
   maxShiftDurationHours: string;
+  maxGpsAccuracyMeters: string;
 }
 
 interface Attempt {
@@ -34,7 +35,8 @@ function formStateFromPolicy(policy: PolicyView): FormState {
     cutoffDaysAfterPeriodEnd: String(policy.cutoffDaysAfterPeriodEnd),
     cutoffTime: policy.cutoffTime,
     systemReopenDebounceMinutes: String(policy.systemReopenDebounceMinutes),
-    maxShiftDurationHours: String(policy.maxShiftDurationHours)
+    maxShiftDurationHours: String(policy.maxShiftDurationHours),
+    maxGpsAccuracyMeters: String(policy.maxGpsAccuracyMeters)
   };
 }
 
@@ -70,6 +72,12 @@ function buildPatch(form: FormState, policy: PolicyView): { patch: PolicyPatchIn
     incompleteFields.push('maxShiftDurationHours');
   } else if (Number(form.maxShiftDurationHours) !== policy.maxShiftDurationHours) {
     patch.maxShiftDurationHours = Number(form.maxShiftDurationHours);
+  }
+
+  if (form.maxGpsAccuracyMeters === '') {
+    incompleteFields.push('maxGpsAccuracyMeters');
+  } else if (Number(form.maxGpsAccuracyMeters) !== policy.maxGpsAccuracyMeters) {
+    patch.maxGpsAccuracyMeters = Number(form.maxGpsAccuracyMeters);
   }
 
   return { patch, incompleteFields };
@@ -300,6 +308,27 @@ export function PolicyForm({ initialPolicy, canUpdate }: { initialPolicy: Policy
             disabled={fieldsDisabled}
           />
           <FieldError fieldErrors={fieldErrors} field="maxShiftDurationHours" />
+        </div>
+
+        <div className="policy-field">
+          <label htmlFor="policy-max-gps-accuracy">{ru ? 'Максимальная точность GPS для подтверждения геозоны (метры)' : 'Max GPS accuracy for geofence verification (metres)'}</label>
+          <input
+            id="policy-max-gps-accuracy"
+            name="maxGpsAccuracyMeters"
+            type="number"
+            min={10}
+            max={5000}
+            step={5}
+            value={form.maxGpsAccuracyMeters}
+            onChange={(e) => onFieldChange('maxGpsAccuracyMeters', e.target.value)}
+            disabled={fieldsDisabled}
+          />
+          <p className="policy-readonly-note">
+            {ru
+              ? 'Отметка прихода/ухода с точностью хуже этого значения помечается «GPS не подтверждён» и уходит администратору на проверку. По умолчанию 75 м; повысьте, если на объекте стабильно слабый сигнал (например, внутри цеха).'
+              : 'A clock-in/out with accuracy worse than this is flagged “GPS not verified” for admin review. Default 75 m; raise it for a site with chronically weak signal (e.g. inside a workshop).'}
+          </p>
+          <FieldError fieldErrors={fieldErrors} field="maxGpsAccuracyMeters" />
         </div>
 
         {fieldErrors.body && <FieldError fieldErrors={fieldErrors} field="body" />}

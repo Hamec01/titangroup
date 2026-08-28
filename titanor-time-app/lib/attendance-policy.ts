@@ -7,13 +7,14 @@ import { createAuditEvent } from '@/lib/audit';
 // other lib/*.ts in this project.
 
 const TIME_PATTERN = /^([01]\d|2[0-3]):[0-5]\d:[0-5]\d$/;
-const ALLOWED_PATCH_FIELDS = new Set(['cutoffDaysAfterPeriodEnd', 'cutoffTime', 'systemReopenDebounceMinutes', 'maxShiftDurationHours']);
+const ALLOWED_PATCH_FIELDS = new Set(['cutoffDaysAfterPeriodEnd', 'cutoffTime', 'systemReopenDebounceMinutes', 'maxShiftDurationHours', 'maxGpsAccuracyMeters']);
 
 export interface PolicyView {
   cutoffDaysAfterPeriodEnd: number;
   cutoffTime: string; // strict HH:mm:ss — a TIME column, not an ISO instant.
   systemReopenDebounceMinutes: number;
   maxShiftDurationHours: number;
+  maxGpsAccuracyMeters: number;
   timezone: 'Europe/Helsinki'; // frozen at the DB level (ck_company_attendance_policy_timezone_frozen) — read-only.
   updatedAt: string;
   updatedByUserId: string | null;
@@ -37,6 +38,7 @@ interface PolicyRow {
   cutoffTime: Date;
   systemReopenDebounceMinutes: number;
   maxShiftDurationHours: number;
+  maxGpsAccuracyMeters: number;
   updatedAt: Date;
   updatedByUserId: string | null;
 }
@@ -47,6 +49,7 @@ function toView(row: PolicyRow): PolicyView {
     cutoffTime: formatTimeOfDay(row.cutoffTime),
     systemReopenDebounceMinutes: row.systemReopenDebounceMinutes,
     maxShiftDurationHours: row.maxShiftDurationHours,
+    maxGpsAccuracyMeters: row.maxGpsAccuracyMeters,
     timezone: 'Europe/Helsinki',
     updatedAt: row.updatedAt.toISOString(),
     updatedByUserId: row.updatedByUserId
@@ -56,7 +59,7 @@ function toView(row: PolicyRow): PolicyView {
 export async function getCompanyAttendancePolicy(): Promise<PolicyView> {
   const row = await prisma.companyAttendancePolicy.findUniqueOrThrow({
     where: { singleton: true },
-    select: { cutoffDaysAfterPeriodEnd: true, cutoffTime: true, systemReopenDebounceMinutes: true, maxShiftDurationHours: true, updatedAt: true, updatedByUserId: true }
+    select: { cutoffDaysAfterPeriodEnd: true, cutoffTime: true, systemReopenDebounceMinutes: true, maxShiftDurationHours: true, maxGpsAccuracyMeters: true, updatedAt: true, updatedByUserId: true }
   });
   return toView(row);
 }
@@ -66,6 +69,7 @@ export interface PolicyPatchInput {
   cutoffTime?: string;
   systemReopenDebounceMinutes?: number;
   maxShiftDurationHours?: number;
+  maxGpsAccuracyMeters?: number;
 }
 
 export type ValidatePolicyPatchResult = { ok: true; value: PolicyPatchInput } | { ok: false; fieldErrors: Record<string, string[]> };
@@ -119,6 +123,15 @@ export function validatePolicyPatchInput(body: Record<string, unknown>): Validat
     }
   }
 
+  if ('maxGpsAccuracyMeters' in body) {
+    const v = body.maxGpsAccuracyMeters;
+    if (typeof v !== 'number' || !Number.isInteger(v) || v < 10 || v > 5000) {
+      fieldErrors.maxGpsAccuracyMeters = ['must be an integer between 10 and 5000'];
+    } else {
+      value.maxGpsAccuracyMeters = v;
+    }
+  }
+
   if (Object.keys(fieldErrors).length === 0 && Object.keys(value).length === 0) {
     fieldErrors.body = ['at least one field must be provided'];
   }
@@ -135,7 +148,7 @@ export async function updateCompanyAttendancePolicy(actorUserId: string, request
     await tx.$queryRaw`SELECT id FROM "CompanyAttendancePolicy" WHERE singleton = true FOR UPDATE`;
     const before = await tx.companyAttendancePolicy.findUniqueOrThrow({
       where: { singleton: true },
-      select: { cutoffDaysAfterPeriodEnd: true, cutoffTime: true, systemReopenDebounceMinutes: true, maxShiftDurationHours: true }
+      select: { cutoffDaysAfterPeriodEnd: true, cutoffTime: true, systemReopenDebounceMinutes: true, maxShiftDurationHours: true, maxGpsAccuracyMeters: true }
     });
 
     const updated = await tx.companyAttendancePolicy.update({
@@ -145,9 +158,10 @@ export async function updateCompanyAttendancePolicy(actorUserId: string, request
         ...(patch.cutoffDaysAfterPeriodEnd !== undefined ? { cutoffDaysAfterPeriodEnd: patch.cutoffDaysAfterPeriodEnd } : {}),
         ...(patch.cutoffTime !== undefined ? { cutoffTime: parseTimeOfDay(patch.cutoffTime) } : {}),
         ...(patch.systemReopenDebounceMinutes !== undefined ? { systemReopenDebounceMinutes: patch.systemReopenDebounceMinutes } : {}),
-        ...(patch.maxShiftDurationHours !== undefined ? { maxShiftDurationHours: patch.maxShiftDurationHours } : {})
+        ...(patch.maxShiftDurationHours !== undefined ? { maxShiftDurationHours: patch.maxShiftDurationHours } : {}),
+        ...(patch.maxGpsAccuracyMeters !== undefined ? { maxGpsAccuracyMeters: patch.maxGpsAccuracyMeters } : {})
       },
-      select: { cutoffDaysAfterPeriodEnd: true, cutoffTime: true, systemReopenDebounceMinutes: true, maxShiftDurationHours: true, updatedAt: true, updatedByUserId: true }
+      select: { cutoffDaysAfterPeriodEnd: true, cutoffTime: true, systemReopenDebounceMinutes: true, maxShiftDurationHours: true, maxGpsAccuracyMeters: true, updatedAt: true, updatedByUserId: true }
     });
 
     // Only the four policy values — never id/singleton/updatedByUserId of the audit actor itself.
@@ -161,13 +175,15 @@ export async function updateCompanyAttendancePolicy(actorUserId: string, request
         cutoffDaysAfterPeriodEnd: before.cutoffDaysAfterPeriodEnd,
         cutoffTime: formatTimeOfDay(before.cutoffTime),
         systemReopenDebounceMinutes: before.systemReopenDebounceMinutes,
-        maxShiftDurationHours: before.maxShiftDurationHours
+        maxShiftDurationHours: before.maxShiftDurationHours,
+        maxGpsAccuracyMeters: before.maxGpsAccuracyMeters
       },
       afterValue: {
         cutoffDaysAfterPeriodEnd: updated.cutoffDaysAfterPeriodEnd,
         cutoffTime: formatTimeOfDay(updated.cutoffTime),
         systemReopenDebounceMinutes: updated.systemReopenDebounceMinutes,
-        maxShiftDurationHours: updated.maxShiftDurationHours
+        maxShiftDurationHours: updated.maxShiftDurationHours,
+        maxGpsAccuracyMeters: updated.maxGpsAccuracyMeters
       }
     });
 
