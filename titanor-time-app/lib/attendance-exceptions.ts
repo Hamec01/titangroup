@@ -493,6 +493,10 @@ export async function getAttendanceExceptionDetail(
 // always a 400 with fieldErrors — never silently replaced by a default (unlike the older
 // review-scopes list routes' lenient fallback behavior, deliberately NOT reused here per this
 // slice's own explicit "не молча заменять явно переданное невалидное значение дефолтом" contract).
+//
+// T12 fix: an EMPTY string (`?type=&from=&to=`, which is exactly what the filter <form method=GET>
+// emits for its untouched fields) is "filter not set", not "explicitly present and invalid" — URL
+// query semantics. It is normalized to null before validation. `?type=GARBAGE` is still a 400.
 // ---------------------------------------------------------------------------------------------
 
 export interface ExceptionListQueryInput {
@@ -509,8 +513,22 @@ export interface ExceptionListQueryInput {
 
 export type ExceptionListQueryResult = { ok: true; filters: ExceptionListFilters } | { ok: false; fieldErrors: Record<string, string[]> };
 
-export function parseExceptionListQuery(input: ExceptionListQueryInput, options: { allowEmployeeId: boolean }): ExceptionListQueryResult {
+export function parseExceptionListQuery(rawInput: ExceptionListQueryInput, options: { allowEmployeeId: boolean }): ExceptionListQueryResult {
   const fieldErrors: Record<string, string[]> = {};
+
+  // Empty / whitespace-only string == "not provided" (see the header comment above).
+  const blankToNull = (v: string | null): string | null => (v !== null && v.trim() === '' ? null : v);
+  const input: ExceptionListQueryInput = {
+    page: blankToNull(rawInput.page),
+    pageSize: blankToNull(rawInput.pageSize),
+    status: blankToNull(rawInput.status),
+    type: blankToNull(rawInput.type),
+    siteId: blankToNull(rawInput.siteId),
+    employeeId: blankToNull(rawInput.employeeId),
+    payrollPeriodId: blankToNull(rawInput.payrollPeriodId),
+    from: blankToNull(rawInput.from),
+    to: blankToNull(rawInput.to)
+  };
 
   let page = 1;
   if (input.page !== null) {
