@@ -4,7 +4,7 @@ import { jsonError, successHeaders } from '@/lib/api-error';
 import { resolveAuthenticatedSession } from '@/lib/auth';
 import { hasPermission } from '@/lib/permissions';
 import { SESSION_COOKIE_NAME } from '@/lib/session';
-import { getReviewQueueCount } from '@/lib/admin-timesheets';
+import { getReviewQueueCount, getReviewQueueWeeks } from '@/lib/admin-timesheets';
 
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
@@ -22,6 +22,6 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     return jsonError(403, { code: 'FORBIDDEN', message: 'Missing required permission.' }, requestId);
   }
 
-  const count = await getReviewQueueCount();
-  return NextResponse.json({ count }, { status: 200, headers: successHeaders(requestId) });
+  const [count, weeks] = await Promise.all([getReviewQueueCount(), getReviewQueueWeeks()]);
+  return NextResponse.json({ count, weeks }, { status: 200, headers: successHeaders(requestId) });
 }

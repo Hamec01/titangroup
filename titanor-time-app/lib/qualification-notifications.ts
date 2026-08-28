@@ -3,6 +3,7 @@ import type { AdminNotificationType, AdminNotificationSeverity } from '@prisma/c
 import { prisma } from '@/lib/prisma';
 import { helsinkiCalendarDateAsUtcMidnight } from '@/lib/attendance-clock';
 import { computeQualificationExpiryStatus, type QualificationExpiryStatus } from '@/lib/qualification-expiry';
+import { ensureTimesheetApprovalNotifications } from '@/lib/timesheet-approval-notifications';
 
 // Admin Notification Center — generation service (task spec §22-26). Called before every read
 // of the notification center (badge/drawer), never on a schedule of its own in this slice — see
@@ -141,16 +142,21 @@ export interface AdminNotificationView {
   expiresOn: string | null;
   threshold: number | null;
   createdAt: string;
+  // T12 §1a — set for TIMESHEET_AWAITING_APPROVAL: link target + the week it covers.
+  timesheetId: string | null;
+  periodStartDate: string | null;
+  periodEndDate: string | null;
 }
 
 function formatDate(date: Date): string {
   return date.toISOString().slice(0, 10);
 }
 
-/** Active notifications not yet dismissed by this admin. Runs ensureQualificationNotifications()
- * first so the list is always current — see module docblock. */
+/** Active notifications not yet dismissed by this admin. Runs the two "ensure" passes first so the
+ * list is always current — see module docblock. */
 export async function listActiveNotificationsForAdmin(userId: string): Promise<AdminNotificationView[]> {
   await ensureQualificationNotifications();
+  await ensureTimesheetApprovalNotifications();
 
   const rows = await prisma.adminNotification.findMany({
     where: { resolvedAt: null, dismissals: { none: { userId } } },
@@ -162,8 +168,10 @@ export async function listActiveNotificationsForAdmin(userId: string): Promise<A
       threshold: true,
       createdAt: true,
       employeeId: true,
+      timesheetId: true,
       employee: { select: { firstName: true, lastName: true, employeeNumber: true } },
-      employeeQualification: { select: { name: true, expiresOn: true, definition: { select: { nameRu: true } } } }
+      employeeQualification: { select: { name: true, expiresOn: true, definition: { select: { nameRu: true } } } },
+      timesheet: { select: { period: { select: { startDate: true, endDate: true } } } }
     }
   });
 
@@ -178,7 +186,10 @@ export async function listActiveNotificationsForAdmin(userId: string): Promise<A
     qualificationNameRu: row.employeeQualification?.definition?.nameRu ?? null,
     expiresOn: row.employeeQualification?.expiresOn ? formatDate(row.employeeQualification.expiresOn) : null,
     threshold: row.threshold,
-    createdAt: row.createdAt.toISOString()
+    createdAt: row.createdAt.toISOString(),
+    timesheetId: row.timesheetId,
+    periodStartDate: row.timesheet?.period.startDate ? formatDate(row.timesheet.period.startDate) : null,
+    periodEndDate: row.timesheet?.period.endDate ? formatDate(row.timesheet.period.endDate) : null
   }));
 }
 

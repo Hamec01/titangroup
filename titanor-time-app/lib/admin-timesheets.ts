@@ -519,6 +519,37 @@ export async function getReviewQueueCount(): Promise<number> {
   return prisma.timesheet.count({ where: { status: { in: ['SUBMITTED', 'FOREMAN_APPROVED'] }, period: { status: 'OPEN' } } });
 }
 
+export interface ReviewQueueWeek {
+  periodId: string;
+  startDate: string;
+  endDate: string;
+  count: number;
+}
+
+/** T12 §1a — per-week (per open PayrollPeriod) breakdown behind the header calendar badge, so the
+ * admin sees "which weeks still have timesheets to approve" rather than one flat number. */
+export async function getReviewQueueWeeks(): Promise<ReviewQueueWeek[]> {
+  const grouped = await prisma.timesheet.groupBy({
+    by: ['periodId'],
+    where: { status: { in: ['SUBMITTED', 'FOREMAN_APPROVED'] }, period: { status: 'OPEN' } },
+    _count: { _all: true }
+  });
+  if (grouped.length === 0) {
+    return [];
+  }
+  const periods = await prisma.payrollPeriod.findMany({
+    where: { id: { in: grouped.map((g) => g.periodId) } },
+    select: { id: true, startDate: true, endDate: true }
+  });
+  const byId = new Map(periods.map((p) => [p.id, p]));
+  return grouped
+    .map((g) => {
+      const p = byId.get(g.periodId);
+      return { periodId: g.periodId, startDate: p ? formatDate(p.startDate) : '', endDate: p ? formatDate(p.endDate) : '', count: g._count._all };
+    })
+    .sort((a, b) => b.startDate.localeCompare(a.startDate));
+}
+
 /**
  * Admin override-return of a WHOLE timesheet from FOREMAN_APPROVED (03_...§4.7): forces every
  * TimesheetReviewScope of the current version to RETURNED — including already-APPROVED ones,

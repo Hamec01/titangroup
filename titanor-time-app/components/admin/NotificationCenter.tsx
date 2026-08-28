@@ -20,6 +20,16 @@ interface NotificationItem {
   expiresOn: string | null;
   threshold: number | null;
   createdAt: string;
+  // T12 §1a — TIMESHEET_AWAITING_APPROVAL
+  timesheetId: string | null;
+  periodStartDate: string | null;
+  periodEndDate: string | null;
+}
+
+function formatWeek(startDate: string | null, endDate: string | null, locale: 'EN' | 'RU'): string {
+  if (!startDate || !endDate) return '';
+  const fmt = (d: string) => new Date(d).toLocaleDateString(locale === 'RU' ? 'ru-RU' : 'en-GB', { day: 'numeric', month: 'short' });
+  return `${fmt(startDate)} – ${fmt(endDate)}`;
 }
 
 function BellIcon() {
@@ -37,6 +47,10 @@ function BellIcon() {
 }
 
 function summaryLine(item: NotificationItem, locale: 'EN' | 'RU', daysWord: (n: number) => string): string {
+  if (item.type === 'TIMESHEET_AWAITING_APPROVAL') {
+    const week = formatWeek(item.periodStartDate, item.periodEndDate, locale);
+    return locale === 'RU' ? `сдал табель за неделю ${week} — нужно утвердить` : `submitted the timesheet for ${week} — needs approval`;
+  }
   const name = locale === 'RU' && item.qualificationNameRu ? item.qualificationNameRu : item.qualificationName ?? '';
   if (item.type === 'QUALIFICATION_MISSING_EXPIRY') {
     return locale === 'RU' ? `${name} — не указан срок действия` : `${name} — expiry date missing`;
@@ -139,6 +153,16 @@ export function NotificationCenter({ strings, locale }: { strings: AdminStrings;
     if (employeeId) router.push(`/admin/workers/${employeeId}/profile#qualifications`);
   }
 
+  // T12 §1a — a timesheet-approval notification links to the timesheet card, not the worker dossier.
+  function handleView(item: NotificationItem): void {
+    setDrawerOpen(false);
+    if (item.type === 'TIMESHEET_AWAITING_APPROVAL' && item.timesheetId) {
+      router.push(`/admin/timesheets/${item.timesheetId}`);
+      return;
+    }
+    if (item.employeeId) router.push(`/admin/workers/${item.employeeId}/profile#qualifications`);
+  }
+
   const criticalCount = items.filter((i) => i.severity === 'CRITICAL').length;
 
   return (
@@ -184,8 +208,8 @@ export function NotificationCenter({ strings, locale }: { strings: AdminStrings;
                     <p className="notif-drawer-item-name">{item.employeeName}</p>
                     <p className="notif-drawer-item-detail">{summaryLine(item, locale, ruDays)}</p>
                     {item.expiresOn ? <p className="notif-drawer-item-date">{item.expiresOn}</p> : null}
-                    <button type="button" className="notif-drawer-item-link" onClick={() => handleViewWorker(item.employeeId)}>
-                      {strings.notificationViewWorker} →
+                    <button type="button" className="notif-drawer-item-link" onClick={() => handleView(item)}>
+                      {item.type === 'TIMESHEET_AWAITING_APPROVAL' ? (locale === 'RU' ? 'Открыть табель' : 'Open timesheet') : strings.notificationViewWorker} →
                     </button>
                   </li>
                 ))}
@@ -210,7 +234,7 @@ export function NotificationCenter({ strings, locale }: { strings: AdminStrings;
                 type="button"
                 onClick={() => {
                   setToasts((prev) => prev.filter((t) => t.id !== toast.id));
-                  handleViewWorker(toast.employeeId);
+                  handleView(toast);
                 }}
               >
                 {strings.notificationToastView}

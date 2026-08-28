@@ -260,14 +260,19 @@ enum QualificationVerificationState {
   VERIFIED
 }
 
-// Admin Notification Center (2026-08-24). Only qualification-expiry types exist today; the
-// type enum is deliberately flat so future types (SYSTEM_WARNING, ATTENDANCE_ERROR, ...) can
-// be added without redesigning AdminNotification/AdminNotificationDismissal.
+// Admin Notification Center (2026-08-24). The type enum is deliberately flat so new types
+// (SYSTEM_WARNING, ATTENDANCE_ERROR, ...) can be added without redesigning
+// AdminNotification/AdminNotificationDismissal.
 enum AdminNotificationType {
   QUALIFICATION_EXPIRING_SOON
   QUALIFICATION_CRITICAL
   QUALIFICATION_EXPIRED
   QUALIFICATION_MISSING_EXPIRY
+  // T12 (2026-08-28) — one active row per SUBMITTED/FOREMAN_APPROVED timesheet in an OPEN period
+  // ("<работник> сдал табель за неделю … — нужно утвердить"); resolved once the timesheet leaves
+  // that state (approved / returned / period closed). Dedup is a partial unique index on
+  // timesheetId WHERE resolvedAt IS NULL (raw SQL in the migration).
+  TIMESHEET_AWAITING_APPROVAL
 }
 
 enum AdminNotificationSeverity {
@@ -566,16 +571,22 @@ model AdminNotification {
   severity                AdminNotificationSeverity
   employeeId              String?                      @db.Uuid
   employeeQualificationId String?                      @db.Uuid
+  // T12 — set for TIMESHEET_AWAITING_APPROVAL. onDelete Cascade: if a timesheet is ever hard-
+  // deleted its notification goes with it. Active-row dedup is a partial unique index added by raw
+  // SQL in the migration (ux_admin_notification_active_timesheet).
+  timesheetId             String?                      @db.Uuid
   threshold               Int?
   createdAt               DateTime                     @default(now()) @db.Timestamptz(6)
   resolvedAt              DateTime?                    @db.Timestamptz(6)
   employee                Employee?                    @relation(fields: [employeeId], references: [id], onDelete: Restrict, onUpdate: Cascade)
   employeeQualification   EmployeeQualification?       @relation(fields: [employeeQualificationId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  timesheet               Timesheet?                   @relation(fields: [timesheetId], references: [id], onDelete: Cascade, onUpdate: Cascade)
   dismissals              AdminNotificationDismissal[]
 
   @@index([resolvedAt, createdAt(sort: Desc)])
   @@index([employeeQualificationId])
   @@index([employeeId])
+  @@index([timesheetId])
 }
 
 // Per-admin dismissal state, normalized out of AdminNotification so it's naturally per-user.
@@ -915,6 +926,7 @@ model Timesheet {
   clockShiftFragments    ClockShiftFragment[]
   attendanceExceptions   AttendanceException[]
   autoSubmissionAttempts AutoSubmissionAttempt[]
+  adminNotifications     AdminNotification[]
 
   @@unique([employeeId, periodId])
   @@unique([id, employeeId])
