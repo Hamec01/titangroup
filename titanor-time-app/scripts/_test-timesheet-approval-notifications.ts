@@ -85,6 +85,7 @@ async function main() {
   check('  carries the period start/end for the week label', item?.periodStartDate === a.start && !!item?.periodEndDate, item);
   check('  first submission -> timesheetIsRevision false', item?.timesheetIsRevision === false, item?.timesheetIsRevision);
   check('  severity WARNING', item?.severity === 'WARNING');
+  check('  eventAt is the submission time (a valid recent timestamp)', !!item?.eventAt && !Number.isNaN(Date.parse(item!.eventAt)) && Date.now() - Date.parse(item!.eventAt) < 5 * 60 * 1000, item?.eventAt);
 
   // 4. Approving (status change away from SUBMITTED/FOREMAN_APPROVED) resolves it.
   await prisma.timesheet.update({ where: { id: a.timesheetId }, data: { status: 'FINAL_APPROVED' } });

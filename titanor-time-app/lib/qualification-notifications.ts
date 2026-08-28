@@ -142,6 +142,11 @@ export interface AdminNotificationView {
   expiresOn: string | null;
   threshold: number | null;
   createdAt: string;
+  /** For TIMESHEET_AWAITING_APPROVAL — when the worker submitted / revised the timesheet (the
+   *  current version's freeze time), shown as the small "when it happened" line in the card.
+   *  Null for the qualification alerts: nobody performed an action there, and the card already
+   *  shows the expiry date. */
+  eventAt: string | null;
   // T12 §1a — set for TIMESHEET_AWAITING_APPROVAL: link target + the week it covers.
   timesheetId: string | null;
   periodStartDate: string | null;
@@ -174,7 +179,7 @@ export async function listActiveNotificationsForAdmin(userId: string): Promise<A
       timesheetId: true,
       employee: { select: { firstName: true, lastName: true, employeeNumber: true } },
       employeeQualification: { select: { name: true, expiresOn: true, definition: { select: { nameRu: true } } } },
-      timesheet: { select: { period: { select: { startDate: true, endDate: true } }, currentVersion: { select: { versionNumber: true } } } }
+      timesheet: { select: { period: { select: { startDate: true, endDate: true } }, currentVersion: { select: { versionNumber: true, createdAt: true } } } }
     }
   });
 
@@ -190,6 +195,7 @@ export async function listActiveNotificationsForAdmin(userId: string): Promise<A
     expiresOn: row.employeeQualification?.expiresOn ? formatDate(row.employeeQualification.expiresOn) : null,
     threshold: row.threshold,
     createdAt: row.createdAt.toISOString(),
+    eventAt: row.timesheet?.currentVersion?.createdAt ? row.timesheet.currentVersion.createdAt.toISOString() : null,
     timesheetId: row.timesheetId,
     periodStartDate: row.timesheet?.period.startDate ? formatDate(row.timesheet.period.startDate) : null,
     periodEndDate: row.timesheet?.period.endDate ? formatDate(row.timesheet.period.endDate) : null,

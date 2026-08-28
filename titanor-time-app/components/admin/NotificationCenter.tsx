@@ -20,6 +20,7 @@ interface NotificationItem {
   expiresOn: string | null;
   threshold: number | null;
   createdAt: string;
+  eventAt: string | null;
   // T12 §1a — TIMESHEET_AWAITING_APPROVAL
   timesheetId: string | null;
   periodStartDate: string | null;
@@ -31,6 +32,17 @@ function formatWeek(startDate: string | null, endDate: string | null, locale: 'E
   if (!startDate || !endDate) return '';
   const fmt = (d: string) => new Date(d).toLocaleDateString(locale === 'RU' ? 'ru-RU' : 'en-GB', { day: 'numeric', month: 'short' });
   return `${fmt(startDate)} – ${fmt(endDate)}`;
+}
+
+// The small "when it happened" line under the severity tag — for a timesheet alert this is when
+// the worker submitted / revised it, for a qualification alert when the alert was raised.
+function formatEventAt(iso: string, locale: 'EN' | 'RU'): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return '';
+  const loc = locale === 'RU' ? 'ru-RU' : 'en-GB';
+  const date = d.toLocaleDateString(loc, { day: 'numeric', month: 'short', year: 'numeric' }).replace(' г.', '');
+  const time = d.toLocaleTimeString(loc, { hour: '2-digit', minute: '2-digit' });
+  return `${date}, ${time}`;
 }
 
 function BellIcon() {
@@ -209,6 +221,7 @@ export function NotificationCenter({ strings, locale }: { strings: AdminStrings;
                         ×
                       </button>
                     </div>
+                    {item.eventAt ? <p className="notif-drawer-item-time">{formatEventAt(item.eventAt, locale)}</p> : null}
                     <p className="notif-drawer-item-name">{item.employeeName}</p>
                     <p className="notif-drawer-item-detail">{summaryLine(item, locale, ruDays)}</p>
                     {item.expiresOn ? <p className="notif-drawer-item-date">{item.expiresOn}</p> : null}
@@ -236,6 +249,7 @@ export function NotificationCenter({ strings, locale }: { strings: AdminStrings;
             </span>
             <div className="notif-toast-body">
               <p className="notif-toast-name">{toast.employeeName}</p>
+              {toast.eventAt ? <p className="notif-toast-time">{formatEventAt(toast.eventAt, locale)}</p> : null}
               <p className="notif-toast-detail">{summaryLine(toast, locale, ruDays)}</p>
             </div>
             <div className="notif-toast-actions">

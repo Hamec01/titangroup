@@ -274,6 +274,13 @@ button:disabled {
   outline: none;
 }
 
+.notif-drawer-item-time {
+  font-size: 0.72rem;
+  color: var(--text-soft);
+  opacity: 0.75;
+  margin: 3px 0 0;
+}
+
 .notif-drawer-item-name {
   font-weight: 600;
   margin: 4px 0 2px;
@@ -383,6 +390,13 @@ button:disabled {
   font-weight: 600;
   margin: 0;
   font-size: 0.85rem;
+}
+
+.notif-toast-time {
+  margin: 2px 0 0;
+  font-size: 0.7rem;
+  color: var(--text-soft);
+  opacity: 0.75;
 }
 
 .notif-toast-detail {
