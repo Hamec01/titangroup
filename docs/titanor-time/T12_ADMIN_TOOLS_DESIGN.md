@@ -22,6 +22,7 @@
 | 1a | Уведомление «нужно утвердить» на каждый сданный табель + разбивка по неделям в календарном бейдже | ✅ ГОТОВО. Коммит `d8e404e`. Миграция `20260828130000`. Тест `_test-timesheet-approval-notifications` 12/12. |
 | 2b | Авто-точка «на месте» при открытой смене (≥3ч, офлайн-safe), карта у админа | ✅ ГОТОВО. Коммит `dedf3a0`. Миграция `20260828140000`. Тесты `_test-attendance-presence` 20/20, `_test-presence-pacing` 7/7, `_test-offline-idb-invariants` 32/32. |
 | 3 | Деплой на пилот (3 миграции) + `git push` ветки в origin | ✅ ГОТОВО. `git push` — 20 коммитов в `origin/feature/titanor-time-foundation` (`41d2c04..75cdde5`). Пилот на образе `t97-pilot-75cdde5`. |
+| 5 | Обновить встроенную инструкцию (`/guide`) до текущего состояния | ✅ ГОТОВО. Коммит `d16e37f`. Пилот пересобран → образ `t97-pilot-d16e37f` (без миграций). |
 
 **Пилот (`t97-pilot-75cdde5`, 2026-08-28).** Бэкап `t97-pilot-20260828T122802Z-pre-75cdde5.dump`.
 3 миграции (`20260828120000`, `130000`, `140000`) применены на `titanor_time_t97` через
@@ -36,6 +37,14 @@ enum, `CorrectionRequest.directEdit`, `AdminNotification.timesheetId`, табл�
 `titanor-time-app:latest` и контейнер `titanor-time-app-1` не тронуты (up 6 days healthy).
 Smoke: `POST /api/worker/attendance/presence` → 401, `GET /api/admin/review-queue` → 401,
 `/admin/attendance/exceptions?status=OPEN&type=&from=&to=` → 307 (login) — ни одного 500, лог чист.
+
+**Пилот повторно (`t97-pilot-d16e37f`, 2026-08-28).** Обновление `/guide` (`lib/i18n/guide.ts`,
+RU + EN) до текущего состояния — сгруппированное меню, колокольчик уведомлений + календарный
+бейдж, матрица допусков + досье, экран «На утверждении», три способа правки табеля,
+больничный/отпуск из редактора, порог точности GPS, mid-shift presence в приложении. Миграций
+нет, только код. Контейнер пересоздан на `t97-pilot-d16e37f`; `/guide` 200 (новый текст в HTML),
+`/api/ready`/`/api/health`/`/login` 200, внешний HTTPS 200. Счётчики строк без изменений
+(10/23/12), pending-миграций 0, prod не тронут.
 
 `tsc --noEmit` зелёный после каждого шага. Регрессии (corrections, qualification-notifications,
 GPS steps 1/4) — зелёные.
