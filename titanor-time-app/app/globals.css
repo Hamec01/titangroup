@@ -1079,6 +1079,15 @@ button:disabled {
   font-size: 0.85rem;
 }
 
+.template-day-breakpaid input:disabled {
+  opacity: 0.4;
+}
+
+.template-break-tag {
+  color: var(--text-soft);
+  font-size: 0.85rem;
+}
+
 .setup-action {
   flex-shrink: 0;
   font-size: 0.85rem;

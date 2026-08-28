@@ -7,7 +7,15 @@ import { createAuditEvent } from '@/lib/audit';
 // other lib/*.ts in this project.
 
 const TIME_PATTERN = /^([01]\d|2[0-3]):[0-5]\d:[0-5]\d$/;
-const ALLOWED_PATCH_FIELDS = new Set(['cutoffDaysAfterPeriodEnd', 'cutoffTime', 'systemReopenDebounceMinutes', 'maxShiftDurationHours', 'maxGpsAccuracyMeters']);
+const ALLOWED_PATCH_FIELDS = new Set([
+  'cutoffDaysAfterPeriodEnd',
+  'cutoffTime',
+  'systemReopenDebounceMinutes',
+  'maxShiftDurationHours',
+  'maxGpsAccuracyMeters',
+  'autoUnpaidBreakThresholdMinutes',
+  'autoUnpaidBreakMinutes'
+]);
 
 export interface PolicyView {
   cutoffDaysAfterPeriodEnd: number;
@@ -15,6 +23,12 @@ export interface PolicyView {
   systemReopenDebounceMinutes: number;
   maxShiftDurationHours: number;
   maxGpsAccuracyMeters: number;
+  // T10-D — a worked day whose gross duration is at least this many minutes and that has no break
+  // logged gets its planned (unpaid) lunch auto-deducted. 360 = Finnish 6 h norm; 0 = always.
+  autoUnpaidBreakThresholdMinutes: number;
+  // T10-D — fallback unpaid-lunch minutes used when the plan carries no break of its own (e.g. an
+  // assignment with no schedule template). 30 = Finnish norm; 0 disables the fallback.
+  autoUnpaidBreakMinutes: number;
   timezone: 'Europe/Helsinki'; // frozen at the DB level (ck_company_attendance_policy_timezone_frozen) — read-only.
   updatedAt: string;
   updatedByUserId: string | null;
@@ -39,9 +53,23 @@ interface PolicyRow {
   systemReopenDebounceMinutes: number;
   maxShiftDurationHours: number;
   maxGpsAccuracyMeters: number;
+  autoUnpaidBreakThresholdMinutes: number;
+  autoUnpaidBreakMinutes: number;
   updatedAt: Date;
   updatedByUserId: string | null;
 }
+
+const POLICY_SELECT = {
+  cutoffDaysAfterPeriodEnd: true,
+  cutoffTime: true,
+  systemReopenDebounceMinutes: true,
+  maxShiftDurationHours: true,
+  maxGpsAccuracyMeters: true,
+  autoUnpaidBreakThresholdMinutes: true,
+  autoUnpaidBreakMinutes: true,
+  updatedAt: true,
+  updatedByUserId: true
+} as const;
 
 function toView(row: PolicyRow): PolicyView {
   return {
@@ -50,6 +78,8 @@ function toView(row: PolicyRow): PolicyView {
     systemReopenDebounceMinutes: row.systemReopenDebounceMinutes,
     maxShiftDurationHours: row.maxShiftDurationHours,
     maxGpsAccuracyMeters: row.maxGpsAccuracyMeters,
+    autoUnpaidBreakThresholdMinutes: row.autoUnpaidBreakThresholdMinutes,
+    autoUnpaidBreakMinutes: row.autoUnpaidBreakMinutes,
     timezone: 'Europe/Helsinki',
     updatedAt: row.updatedAt.toISOString(),
     updatedByUserId: row.updatedByUserId
@@ -59,7 +89,7 @@ function toView(row: PolicyRow): PolicyView {
 export async function getCompanyAttendancePolicy(): Promise<PolicyView> {
   const row = await prisma.companyAttendancePolicy.findUniqueOrThrow({
     where: { singleton: true },
-    select: { cutoffDaysAfterPeriodEnd: true, cutoffTime: true, systemReopenDebounceMinutes: true, maxShiftDurationHours: true, maxGpsAccuracyMeters: true, updatedAt: true, updatedByUserId: true }
+    select: POLICY_SELECT
   });
   return toView(row);
 }
@@ -70,6 +100,8 @@ export interface PolicyPatchInput {
   systemReopenDebounceMinutes?: number;
   maxShiftDurationHours?: number;
   maxGpsAccuracyMeters?: number;
+  autoUnpaidBreakThresholdMinutes?: number;
+  autoUnpaidBreakMinutes?: number;
 }
 
 export type ValidatePolicyPatchResult = { ok: true; value: PolicyPatchInput } | { ok: false; fieldErrors: Record<string, string[]> };
@@ -132,6 +164,24 @@ export function validatePolicyPatchInput(body: Record<string, unknown>): Validat
     }
   }
 
+  if ('autoUnpaidBreakThresholdMinutes' in body) {
+    const v = body.autoUnpaidBreakThresholdMinutes;
+    if (typeof v !== 'number' || !Number.isInteger(v) || v < 0 || v > 1440) {
+      fieldErrors.autoUnpaidBreakThresholdMinutes = ['must be an integer between 0 and 1440'];
+    } else {
+      value.autoUnpaidBreakThresholdMinutes = v;
+    }
+  }
+
+  if ('autoUnpaidBreakMinutes' in body) {
+    const v = body.autoUnpaidBreakMinutes;
+    if (typeof v !== 'number' || !Number.isInteger(v) || v < 0 || v > 1440) {
+      fieldErrors.autoUnpaidBreakMinutes = ['must be an integer between 0 and 1440'];
+    } else {
+      value.autoUnpaidBreakMinutes = v;
+    }
+  }
+
   if (Object.keys(fieldErrors).length === 0 && Object.keys(value).length === 0) {
     fieldErrors.body = ['at least one field must be provided'];
   }
@@ -148,7 +198,7 @@ export async function updateCompanyAttendancePolicy(actorUserId: string, request
     await tx.$queryRaw`SELECT id FROM "CompanyAttendancePolicy" WHERE singleton = true FOR UPDATE`;
     const before = await tx.companyAttendancePolicy.findUniqueOrThrow({
       where: { singleton: true },
-      select: { cutoffDaysAfterPeriodEnd: true, cutoffTime: true, systemReopenDebounceMinutes: true, maxShiftDurationHours: true, maxGpsAccuracyMeters: true }
+      select: POLICY_SELECT
     });
 
     const updated = await tx.companyAttendancePolicy.update({
@@ -159,32 +209,32 @@ export async function updateCompanyAttendancePolicy(actorUserId: string, request
         ...(patch.cutoffTime !== undefined ? { cutoffTime: parseTimeOfDay(patch.cutoffTime) } : {}),
         ...(patch.systemReopenDebounceMinutes !== undefined ? { systemReopenDebounceMinutes: patch.systemReopenDebounceMinutes } : {}),
         ...(patch.maxShiftDurationHours !== undefined ? { maxShiftDurationHours: patch.maxShiftDurationHours } : {}),
-        ...(patch.maxGpsAccuracyMeters !== undefined ? { maxGpsAccuracyMeters: patch.maxGpsAccuracyMeters } : {})
+        ...(patch.maxGpsAccuracyMeters !== undefined ? { maxGpsAccuracyMeters: patch.maxGpsAccuracyMeters } : {}),
+        ...(patch.autoUnpaidBreakThresholdMinutes !== undefined ? { autoUnpaidBreakThresholdMinutes: patch.autoUnpaidBreakThresholdMinutes } : {}),
+        ...(patch.autoUnpaidBreakMinutes !== undefined ? { autoUnpaidBreakMinutes: patch.autoUnpaidBreakMinutes } : {})
       },
-      select: { cutoffDaysAfterPeriodEnd: true, cutoffTime: true, systemReopenDebounceMinutes: true, maxShiftDurationHours: true, maxGpsAccuracyMeters: true, updatedAt: true, updatedByUserId: true }
+      select: POLICY_SELECT
     });
 
-    // Only the four policy values — never id/singleton/updatedByUserId of the audit actor itself.
+    const auditShape = (row: PolicyRow) => ({
+      cutoffDaysAfterPeriodEnd: row.cutoffDaysAfterPeriodEnd,
+      cutoffTime: formatTimeOfDay(row.cutoffTime),
+      systemReopenDebounceMinutes: row.systemReopenDebounceMinutes,
+      maxShiftDurationHours: row.maxShiftDurationHours,
+      maxGpsAccuracyMeters: row.maxGpsAccuracyMeters,
+      autoUnpaidBreakThresholdMinutes: row.autoUnpaidBreakThresholdMinutes,
+      autoUnpaidBreakMinutes: row.autoUnpaidBreakMinutes
+    });
+
+    // Only the policy values — never id/singleton/updatedByUserId of the audit actor itself.
     await createAuditEvent(tx, {
       actorUserId,
       eventType: 'ATTENDANCE_POLICY_UPDATED',
       entityType: 'COMPANY_ATTENDANCE_POLICY',
       entityId: null,
       requestId,
-      beforeValue: {
-        cutoffDaysAfterPeriodEnd: before.cutoffDaysAfterPeriodEnd,
-        cutoffTime: formatTimeOfDay(before.cutoffTime),
-        systemReopenDebounceMinutes: before.systemReopenDebounceMinutes,
-        maxShiftDurationHours: before.maxShiftDurationHours,
-        maxGpsAccuracyMeters: before.maxGpsAccuracyMeters
-      },
-      afterValue: {
-        cutoffDaysAfterPeriodEnd: updated.cutoffDaysAfterPeriodEnd,
-        cutoffTime: formatTimeOfDay(updated.cutoffTime),
-        systemReopenDebounceMinutes: updated.systemReopenDebounceMinutes,
-        maxShiftDurationHours: updated.maxShiftDurationHours,
-        maxGpsAccuracyMeters: updated.maxGpsAccuracyMeters
-      }
+      beforeValue: auditShape(before),
+      afterValue: auditShape(updated)
     });
 
     return toView(updated);

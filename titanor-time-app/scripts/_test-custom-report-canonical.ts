@@ -99,6 +99,13 @@ async function addDraftSegment(draft: { id: string }, day: { id: string }, emplo
 
 async function main() {
   adminId = await makeAdmin();
+  // This test is about detail↔summary aggregation agreement, not the T10-D auto unpaid lunch — the
+  // fixtures use plannedBreakMinutes: 0, so disable the company-wide fallback for a clean invariant.
+  await prisma.companyAttendancePolicy.upsert({
+    where: { singleton: true },
+    create: { singleton: true, autoUnpaidBreakMinutes: 0 },
+    update: { autoUnpaidBreakMinutes: 0 }
+  });
 
   // --- 1: FINAL_APPROVED, two days with breaks, single employee/site — totals must match T8.1 exactly. ---
   {

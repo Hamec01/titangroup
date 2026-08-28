@@ -11,6 +11,7 @@ import { ConnectivityBanner } from '@/components/worker-pwa/ConnectivityBanner';
 import { WorkerLink } from '@/components/worker-pwa/WorkerLink';
 import type { HoursListPayload } from '@/lib/offline-outbox/read-snapshots';
 import { workedMinutesFromIsoSegments, workedDayMinutesFromIso } from '@/lib/reporting/report-format';
+import { effectiveUnpaidBreakMinutes, loadAutoUnpaidBreakDefaultMinutes } from '@/lib/reporting/auto-break';
 import { resolveAppLocale } from '@/lib/i18n/server';
 import { COMMON_STRINGS } from '@/lib/i18n/common';
 import { WORKER_STRINGS, dayTypeLabel } from '@/lib/i18n/worker';
@@ -82,7 +83,7 @@ export default async function WorkerHoursListPage({ params }: RouteParams) {
   const canReopen = withinEditWindow && !editable;
 
   let days: { date: string; dayType: string; confirmedZero: boolean; segments: SegmentView[] }[];
-  let plannedShifts: { date: string; plannedBreakMinutes: number }[] = [];
+  let plannedShifts: { date: string; plannedBreakMinutes: number; plannedBreakPaid: boolean }[] = [];
   if (editable) {
     const draft = await getWorkerTimesheetDraft(employeeId, period.timesheetId);
     days = 'code' in draft ? [] : draft.days;
@@ -92,12 +93,15 @@ export default async function WorkerHoursListPage({ params }: RouteParams) {
     days = 'code' in version ? [] : version.days;
     plannedShifts = 'code' in version ? [] : version.plannedShifts;
   }
-  // T10-D — planned UNPAID break minutes per date (all planned breaks are unpaid by default; the
-  // "обед оплачивается" template flag is not in the UI yet). The worker sees the same auto-deducted
-  // hours the admin/reports do.
+  // T10-D — planned UNPAID lunch minutes per date. Same precedence the admin card / reports use
+  // (lib/reporting/auto-break.ts): a paid break contributes 0, a template break its own minutes,
+  // and an assignment with no template break falls back to the company default. The worker sees the
+  // same auto-deducted hours the admin does ("работник тоже должен видеть что обед не оплачивается").
+  const autoUnpaidDefault = await loadAutoUnpaidBreakDefaultMinutes();
   const plannedUnpaidByDate = new Map<string, number>();
   for (const ps of plannedShifts) {
-    plannedUnpaidByDate.set(ps.date, Math.max(plannedUnpaidByDate.get(ps.date) ?? 0, ps.plannedBreakMinutes));
+    const unpaid = effectiveUnpaidBreakMinutes(ps.plannedBreakMinutes, ps.plannedBreakPaid, autoUnpaidDefault);
+    plannedUnpaidByDate.set(ps.date, Math.max(plannedUnpaidByDate.get(ps.date) ?? 0, unpaid));
   }
   const workedMinutesForDay = (day: { date: string; segments: SegmentView[] }): number =>
     workedDayMinutesFromIso(day.segments, plannedUnpaidByDate.get(day.date) ?? 0);

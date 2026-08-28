@@ -162,7 +162,8 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
         isWorkingDay: day.isWorkingDay,
         plannedStartTime: day.plannedStartTime ? parseTemplateTimeToDate(day.plannedStartTime) : null,
         plannedEndTime: day.plannedEndTime ? parseTemplateTimeToDate(day.plannedEndTime) : null,
-        plannedBreakMinutes: day.plannedBreakMinutes
+        plannedBreakMinutes: day.plannedBreakMinutes,
+        plannedBreakPaid: day.plannedBreakPaid
       }))
     });
 
@@ -197,7 +198,8 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
         isWorkingDay: day.isWorkingDay,
         plannedStartTime: day.plannedStartTime,
         plannedEndTime: day.plannedEndTime,
-        plannedBreakMinutes: day.plannedBreakMinutes
+        plannedBreakMinutes: day.plannedBreakMinutes,
+        plannedBreakPaid: day.plannedBreakPaid
       }))
   });
 }

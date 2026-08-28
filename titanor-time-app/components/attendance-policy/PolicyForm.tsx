@@ -23,6 +23,8 @@ interface FormState {
   systemReopenDebounceMinutes: string;
   maxShiftDurationHours: string;
   maxGpsAccuracyMeters: string;
+  autoUnpaidBreakThresholdMinutes: string;
+  autoUnpaidBreakMinutes: string;
 }
 
 interface Attempt {
@@ -36,7 +38,9 @@ function formStateFromPolicy(policy: PolicyView): FormState {
     cutoffTime: policy.cutoffTime,
     systemReopenDebounceMinutes: String(policy.systemReopenDebounceMinutes),
     maxShiftDurationHours: String(policy.maxShiftDurationHours),
-    maxGpsAccuracyMeters: String(policy.maxGpsAccuracyMeters)
+    maxGpsAccuracyMeters: String(policy.maxGpsAccuracyMeters),
+    autoUnpaidBreakThresholdMinutes: String(policy.autoUnpaidBreakThresholdMinutes),
+    autoUnpaidBreakMinutes: String(policy.autoUnpaidBreakMinutes)
   };
 }
 
@@ -78,6 +82,18 @@ function buildPatch(form: FormState, policy: PolicyView): { patch: PolicyPatchIn
     incompleteFields.push('maxGpsAccuracyMeters');
   } else if (Number(form.maxGpsAccuracyMeters) !== policy.maxGpsAccuracyMeters) {
     patch.maxGpsAccuracyMeters = Number(form.maxGpsAccuracyMeters);
+  }
+
+  if (form.autoUnpaidBreakThresholdMinutes === '') {
+    incompleteFields.push('autoUnpaidBreakThresholdMinutes');
+  } else if (Number(form.autoUnpaidBreakThresholdMinutes) !== policy.autoUnpaidBreakThresholdMinutes) {
+    patch.autoUnpaidBreakThresholdMinutes = Number(form.autoUnpaidBreakThresholdMinutes);
+  }
+
+  if (form.autoUnpaidBreakMinutes === '') {
+    incompleteFields.push('autoUnpaidBreakMinutes');
+  } else if (Number(form.autoUnpaidBreakMinutes) !== policy.autoUnpaidBreakMinutes) {
+    patch.autoUnpaidBreakMinutes = Number(form.autoUnpaidBreakMinutes);
   }
 
   return { patch, incompleteFields };
@@ -329,6 +345,48 @@ export function PolicyForm({ initialPolicy, canUpdate }: { initialPolicy: Policy
               : 'A clock-in/out with accuracy worse than this is flagged “GPS not verified” for admin review. Default 75 m; raise it for a site with chronically weak signal (e.g. inside a workshop).'}
           </p>
           <FieldError fieldErrors={fieldErrors} field="maxGpsAccuracyMeters" />
+        </div>
+
+        <div className="policy-field">
+          <label htmlFor="policy-auto-unpaid-threshold">{ru ? 'Порог для автоматического вычета обеда (минуты отработки)' : 'Auto unpaid-lunch threshold (worked minutes)'}</label>
+          <input
+            id="policy-auto-unpaid-threshold"
+            name="autoUnpaidBreakThresholdMinutes"
+            type="number"
+            min={0}
+            max={1440}
+            step={30}
+            value={form.autoUnpaidBreakThresholdMinutes}
+            onChange={(e) => onFieldChange('autoUnpaidBreakThresholdMinutes', e.target.value)}
+            disabled={fieldsDisabled}
+          />
+          <p className="policy-readonly-note">
+            {ru
+              ? 'Если работник отработал за день не меньше этого времени и не отметил перерыв, из оплачиваемых часов автоматически вычитается плановый обед. По умолчанию 360 мин (6 ч) — финская норма. 0 — вычитать всегда.'
+              : 'If a worker logs at least this much on a day and records no break, the planned lunch is auto-deducted from paid hours. Default 360 min (6 h) — the Finnish norm. 0 = always deduct.'}
+          </p>
+          <FieldError fieldErrors={fieldErrors} field="autoUnpaidBreakThresholdMinutes" />
+        </div>
+
+        <div className="policy-field">
+          <label htmlFor="policy-auto-unpaid-minutes">{ru ? 'Обед по умолчанию, если в шаблоне не задан (минуты)' : 'Default unpaid lunch when the template has none (minutes)'}</label>
+          <input
+            id="policy-auto-unpaid-minutes"
+            name="autoUnpaidBreakMinutes"
+            type="number"
+            min={0}
+            max={1440}
+            step={5}
+            value={form.autoUnpaidBreakMinutes}
+            onChange={(e) => onFieldChange('autoUnpaidBreakMinutes', e.target.value)}
+            disabled={fieldsDisabled}
+          />
+          <p className="policy-readonly-note">
+            {ru
+              ? 'Страховка: применяется, когда у смены нет своего перерыва (например, объект без шаблона графика). Шаблон со своим перерывом или галочкой «обед оплачивается» всегда важнее. По умолчанию 30 мин; 0 — отключить страховку.'
+              : 'Safety net: used when a shift has no break of its own (e.g. an assignment with no schedule template). A template with its own break or the “lunch is paid” flag always wins. Default 30 min; 0 disables the fallback.'}
+          </p>
+          <FieldError fieldErrors={fieldErrors} field="autoUnpaidBreakMinutes" />
         </div>
 
         {fieldErrors.body && <FieldError fieldErrors={fieldErrors} field="body" />}

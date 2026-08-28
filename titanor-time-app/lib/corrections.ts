@@ -886,12 +886,12 @@ export async function applyInReviewCorrection(
 
     const versionPlannedShifts = await tx.timesheetPlannedShift.findMany({
       where: { timesheetVersionId: currentVersionId },
-      select: { date: true, siteId: true, sourceAssignmentId: true, templateVersionDayId: true, plannedStartAt: true, plannedEndAt: true, plannedBreakMinutes: true }
+      select: { date: true, siteId: true, sourceAssignmentId: true, templateVersionDayId: true, plannedStartAt: true, plannedEndAt: true, plannedBreakMinutes: true, plannedBreakPaid: true }
     });
 
     const plannedByKey = new Map<
       string,
-      { date: Date; siteId: string; sourceAssignmentId: string; templateVersionDayId: string | null; plannedStartAt: Date | null; plannedEndAt: Date | null; plannedBreakMinutes: number }
+      { date: Date; siteId: string; sourceAssignmentId: string; templateVersionDayId: string | null; plannedStartAt: Date | null; plannedEndAt: Date | null; plannedBreakMinutes: number; plannedBreakPaid: boolean }
     >();
     for (const p of versionPlannedShifts) {
       plannedByKey.set(`${formatDate(p.date)}::${p.sourceAssignmentId}`, p);
@@ -902,7 +902,7 @@ export async function applyInReviewCorrection(
       for (const seg of day.segments) {
         const key = `${formatDate(day.date)}::${seg.sourceAssignmentId}`;
         if (!plannedByKey.has(key)) {
-          plannedByKey.set(key, { date: day.date, siteId: seg.siteId, sourceAssignmentId: seg.sourceAssignmentId, templateVersionDayId: null, plannedStartAt: null, plannedEndAt: null, plannedBreakMinutes: 0 });
+          plannedByKey.set(key, { date: day.date, siteId: seg.siteId, sourceAssignmentId: seg.sourceAssignmentId, templateVersionDayId: null, plannedStartAt: null, plannedEndAt: null, plannedBreakMinutes: 0, plannedBreakPaid: false });
         }
       }
     }
@@ -917,7 +917,8 @@ export async function applyInReviewCorrection(
           templateVersionDayId: p.templateVersionDayId,
           plannedStartAt: p.plannedStartAt,
           plannedEndAt: p.plannedEndAt,
-          plannedBreakMinutes: p.plannedBreakMinutes
+          plannedBreakMinutes: p.plannedBreakMinutes,
+          plannedBreakPaid: p.plannedBreakPaid
         }))
       });
     }

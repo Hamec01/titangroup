@@ -1699,6 +1699,11 @@ model CompanyAttendancePolicy {
   // (docs/titanor-time/T10_DEF_PLAN.md §D). 360 = Finnish 6 h norm. 0 = always auto-deduct (no
   // threshold). CHECK 0..1440.
   autoUnpaidBreakThresholdMinutes Int  @default(360)
+  // T10-D safety net (2026-08-28) — used when a day's planned break is 0 and not marked paid
+  // (typically a SiteAssignment with no schedule template). 30 = Finnish lunch norm. A template
+  // that sets its own plannedBreakMinutes or ticks plannedBreakPaid still wins. 0 disables the
+  // fallback (template-only). CHECK 0..1440.
+  autoUnpaidBreakMinutes      Int      @default(30)
   updatedByUserId             String?  @db.Uuid
   updatedAt                   DateTime @updatedAt @db.Timestamptz(6)
   createdAt                   DateTime @default(now()) @db.Timestamptz(6)

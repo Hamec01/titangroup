@@ -15,6 +15,8 @@ export interface TemplateDayState {
   plannedStartTime: string;
   plannedEndTime: string;
   plannedBreakMinutes: number;
+  // T10-D — true = the customer pays the lunch (no auto-deduction). Default false = Finnish norm.
+  plannedBreakPaid: boolean;
 }
 
 export function defaultTemplateDays(): TemplateDayState[] {
@@ -23,12 +25,13 @@ export function defaultTemplateDays(): TemplateDayState[] {
     isWorkingDay: weekday < 5,
     plannedStartTime: '09:00',
     plannedEndTime: '17:00',
-    plannedBreakMinutes: weekday < 5 ? 30 : 0
+    plannedBreakMinutes: weekday < 5 ? 30 : 0,
+    plannedBreakPaid: false
   }));
 }
 
 export function templateDaysFromDetail(
-  days: { weekday: number; isWorkingDay: boolean; plannedStartTime: string | null; plannedEndTime: string | null; plannedBreakMinutes: number }[]
+  days: { weekday: number; isWorkingDay: boolean; plannedStartTime: string | null; plannedEndTime: string | null; plannedBreakMinutes: number; plannedBreakPaid?: boolean }[]
 ): TemplateDayState[] {
   const byWeekday = new Map(days.map((d) => [d.weekday, d]));
   return WEEKDAY_LABELS.map((_, weekday) => {
@@ -38,7 +41,8 @@ export function templateDaysFromDetail(
       isWorkingDay: day?.isWorkingDay ?? false,
       plannedStartTime: day?.plannedStartTime ?? '',
       plannedEndTime: day?.plannedEndTime ?? '',
-      plannedBreakMinutes: day?.plannedBreakMinutes ?? 0
+      plannedBreakMinutes: day?.plannedBreakMinutes ?? 0,
+      plannedBreakPaid: day?.plannedBreakPaid ?? false
     };
   });
 }
@@ -48,7 +52,7 @@ export function toggleTemplateWorkingDay(days: TemplateDayState[], weekday: numb
     day.weekday === weekday
       ? isWorkingDay
         ? { ...day, isWorkingDay: true, plannedStartTime: '09:00', plannedEndTime: '17:00', plannedBreakMinutes: 30 }
-        : { ...day, isWorkingDay: false, plannedStartTime: '', plannedEndTime: '', plannedBreakMinutes: 0 }
+        : { ...day, isWorkingDay: false, plannedStartTime: '', plannedEndTime: '', plannedBreakMinutes: 0, plannedBreakPaid: false }
       : day
   );
 }
@@ -64,13 +68,15 @@ export function templateDaysToRequestPayload(days: TemplateDayState[]): {
   plannedStartTime: string | undefined;
   plannedEndTime: string | undefined;
   plannedBreakMinutes: number;
+  plannedBreakPaid: boolean;
 }[] {
   return days.map((day) => ({
     weekday: day.weekday,
     isWorkingDay: day.isWorkingDay,
     plannedStartTime: day.isWorkingDay ? day.plannedStartTime : undefined,
     plannedEndTime: day.isWorkingDay ? day.plannedEndTime : undefined,
-    plannedBreakMinutes: day.plannedBreakMinutes
+    plannedBreakMinutes: day.plannedBreakMinutes,
+    plannedBreakPaid: day.isWorkingDay ? day.plannedBreakPaid : false
   }));
 }
 
@@ -131,6 +137,15 @@ export function TemplateDaysEditor({
                 onChange={(event) => onUpdateDay(day.weekday, { plannedBreakMinutes: Number(event.target.value) })}
               />
               <span className="template-day-unit">{localeText(locale, 'min break', 'мин перерыв')}</span>
+              <label className="template-day-toggle template-day-breakpaid">
+                <input
+                  type="checkbox"
+                  disabled={loading || day.plannedBreakMinutes === 0}
+                  checked={day.plannedBreakPaid && day.plannedBreakMinutes > 0}
+                  onChange={(event) => onUpdateDay(day.weekday, { plannedBreakPaid: event.target.checked })}
+                />
+                {localeText(locale, 'lunch is paid', 'обед оплачивается')}
+              </label>
             </>
           ) : (
             <span className="template-day-off">{localeText(locale, 'Day off', 'Выходной')}</span>

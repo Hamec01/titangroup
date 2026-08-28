@@ -79,7 +79,26 @@ export default async function AdminTemplateDetailPage({ params }: RouteParams) {
                   <td>{day.isWorkingDay ? s.common.yes : s.common.off}</td>
                   <td>{day.plannedStartTime ?? '—'}</td>
                   <td>{day.plannedEndTime ?? '—'}</td>
-                  <td>{day.isWorkingDay ? `${day.plannedBreakMinutes} ${s.templates.minutes}` : '—'}</td>
+                  <td>
+                    {day.isWorkingDay ? (
+                      <>
+                        {day.plannedBreakMinutes} {s.templates.minutes}
+                        {day.plannedBreakMinutes > 0 ? (
+                          <span className="template-break-tag">
+                            {day.plannedBreakPaid
+                              ? locale === 'RU'
+                                ? ' · оплачивается'
+                                : ' · paid'
+                              : locale === 'RU'
+                                ? ' · не оплачивается'
+                                : ' · unpaid'}
+                          </span>
+                        ) : null}
+                      </>
+                    ) : (
+                      '—'
+                    )}
+                  </td>
                 </tr>
               ))}
             </tbody>

@@ -490,7 +490,7 @@ export async function reinitializeDraftFromVersion(tx: Prisma.TransactionClient,
 
   const plannedShifts = await tx.timesheetPlannedShift.findMany({
     where: { timesheetVersionId: versionId },
-    select: { date: true, siteId: true, sourceAssignmentId: true, templateVersionDayId: true, plannedStartAt: true, plannedEndAt: true, plannedBreakMinutes: true }
+    select: { date: true, siteId: true, sourceAssignmentId: true, templateVersionDayId: true, plannedStartAt: true, plannedEndAt: true, plannedBreakMinutes: true, plannedBreakPaid: true }
   });
   if (plannedShifts.length > 0) {
     await tx.timesheetDraftPlannedShift.createMany({
@@ -503,7 +503,8 @@ export async function reinitializeDraftFromVersion(tx: Prisma.TransactionClient,
         templateVersionDayId: p.templateVersionDayId,
         plannedStartAt: p.plannedStartAt,
         plannedEndAt: p.plannedEndAt,
-        plannedBreakMinutes: p.plannedBreakMinutes
+        plannedBreakMinutes: p.plannedBreakMinutes,
+        plannedBreakPaid: p.plannedBreakPaid
       }))
     });
   }

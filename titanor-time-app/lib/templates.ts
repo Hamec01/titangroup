@@ -18,6 +18,9 @@ export interface TemplateDayInput {
   plannedStartTime: string | null;
   plannedEndTime: string | null;
   plannedBreakMinutes: number;
+  // T10-D — true = the customer pays the planned lunch (no auto-deduction). Default false = the
+  // Finnish norm: a long worked day with no logged break has plannedBreakMinutes deducted.
+  plannedBreakPaid: boolean;
 }
 
 /** "HH:MM" (or "HH:MM:SS") wall-clock string -> a Date on 1970-01-01 UTC, the same shape Prisma reads/writes for a `@db.Time(0)` column. Shared by POST (create version 1) and PATCH (create version N+1) — the day/time invariants must never diverge between them. */
@@ -56,7 +59,7 @@ export function validateTemplateDays(rawDays: unknown): { days: TemplateDayInput
     if (!raw || typeof raw !== 'object') {
       return { error: 'each entry must be an object' };
     }
-    const { weekday, isWorkingDay, plannedStartTime, plannedEndTime, plannedBreakMinutes } = raw as Record<string, unknown>;
+    const { weekday, isWorkingDay, plannedStartTime, plannedEndTime, plannedBreakMinutes, plannedBreakPaid } = raw as Record<string, unknown>;
 
     if (typeof weekday !== 'number' || !Number.isInteger(weekday) || weekday < 0 || weekday > 6) {
       return { error: 'weekday must be an integer 0-6 (0=Mon..6=Sun)' };
@@ -72,6 +75,12 @@ export function validateTemplateDays(rawDays: unknown): { days: TemplateDayInput
     if (typeof plannedBreakMinutes !== 'number' || !Number.isInteger(plannedBreakMinutes) || plannedBreakMinutes < 0) {
       return { error: 'plannedBreakMinutes must be a non-negative integer' };
     }
+    // T10-D — optional; absent is treated as false (Finnish unpaid-lunch norm), so older clients
+    // and existing callers keep working unchanged.
+    if (plannedBreakPaid !== undefined && typeof plannedBreakPaid !== 'boolean') {
+      return { error: `weekday ${weekday}: plannedBreakPaid must be a boolean` };
+    }
+    const breakPaid = plannedBreakPaid === true;
 
     if (isWorkingDay) {
       if (typeof plannedStartTime !== 'string' || !TEMPLATE_TIME_PATTERN.test(plannedStartTime)) {
@@ -80,7 +89,7 @@ export function validateTemplateDays(rawDays: unknown): { days: TemplateDayInput
       if (typeof plannedEndTime !== 'string' || !TEMPLATE_TIME_PATTERN.test(plannedEndTime)) {
         return { error: `weekday ${weekday}: plannedEndTime required (HH:MM) for a working day` };
       }
-      days.push({ weekday, isWorkingDay: true, plannedStartTime, plannedEndTime, plannedBreakMinutes });
+      days.push({ weekday, isWorkingDay: true, plannedStartTime, plannedEndTime, plannedBreakMinutes, plannedBreakPaid: breakPaid });
     } else {
       if (plannedStartTime !== undefined && plannedStartTime !== null) {
         return { error: `weekday ${weekday}: plannedStartTime must be empty for a non-working day` };
@@ -91,7 +100,7 @@ export function validateTemplateDays(rawDays: unknown): { days: TemplateDayInput
       if (plannedBreakMinutes !== 0) {
         return { error: `weekday ${weekday}: plannedBreakMinutes must be 0 for a non-working day` };
       }
-      days.push({ weekday, isWorkingDay: false, plannedStartTime: null, plannedEndTime: null, plannedBreakMinutes: 0 });
+      days.push({ weekday, isWorkingDay: false, plannedStartTime: null, plannedEndTime: null, plannedBreakMinutes: 0, plannedBreakPaid: false });
     }
   }
 
@@ -167,6 +176,7 @@ export interface TemplateDetailDay {
   plannedStartTime: string | null;
   plannedEndTime: string | null;
   plannedBreakMinutes: number;
+  plannedBreakPaid: boolean;
 }
 
 export interface TemplateDetail {
@@ -195,7 +205,7 @@ export async function getTemplateDetail(templateId: string): Promise<TemplateDet
           versionNumber: true,
           days: {
             orderBy: { weekday: 'asc' },
-            select: { weekday: true, isWorkingDay: true, plannedStartTime: true, plannedEndTime: true, plannedBreakMinutes: true }
+            select: { weekday: true, isWorkingDay: true, plannedStartTime: true, plannedEndTime: true, plannedBreakMinutes: true, plannedBreakPaid: true }
           }
         }
       }
@@ -219,14 +229,15 @@ export async function getTemplateDetail(templateId: string): Promise<TemplateDet
       isWorkingDay: day.isWorkingDay,
       plannedStartTime: formatTimeOfDay(day.plannedStartTime),
       plannedEndTime: formatTimeOfDay(day.plannedEndTime),
-      plannedBreakMinutes: day.plannedBreakMinutes
+      plannedBreakMinutes: day.plannedBreakMinutes,
+      plannedBreakPaid: day.plannedBreakPaid
     }))
   };
 }
 
 /** True if `input` (already-validated request days) describes exactly the same 7 days as `existing` (current version's stored rows) — used to detect a genuine no-op PATCH that must not create a new version. */
 function daysEqual(
-  existing: { weekday: number; isWorkingDay: boolean; plannedStartTime: Date | null; plannedEndTime: Date | null; plannedBreakMinutes: number }[],
+  existing: { weekday: number; isWorkingDay: boolean; plannedStartTime: Date | null; plannedEndTime: Date | null; plannedBreakMinutes: number; plannedBreakPaid: boolean }[],
   input: TemplateDayInput[]
 ): boolean {
   if (existing.length !== input.length) {
@@ -238,7 +249,7 @@ function daysEqual(
     if (!prior) {
       return false;
     }
-    if (prior.isWorkingDay !== day.isWorkingDay || prior.plannedBreakMinutes !== day.plannedBreakMinutes) {
+    if (prior.isWorkingDay !== day.isWorkingDay || prior.plannedBreakMinutes !== day.plannedBreakMinutes || prior.plannedBreakPaid !== day.plannedBreakPaid) {
       return false;
     }
     const priorStart = prior.plannedStartTime?.getTime() ?? null;
@@ -326,7 +337,8 @@ export async function updateTemplate(input: UpdateTemplateInput): Promise<Update
             isWorkingDay: day.isWorkingDay,
             plannedStartTime: formatTimeOfDay(day.plannedStartTime),
             plannedEndTime: formatTimeOfDay(day.plannedEndTime),
-            plannedBreakMinutes: day.plannedBreakMinutes
+            plannedBreakMinutes: day.plannedBreakMinutes,
+            plannedBreakPaid: day.plannedBreakPaid
           }));
     const sortedDays = daysToPersist.slice().sort((a, b) => a.weekday - b.weekday);
 
@@ -385,7 +397,8 @@ export async function updateTemplate(input: UpdateTemplateInput): Promise<Update
         isWorkingDay: day.isWorkingDay,
         plannedStartTime: day.plannedStartTime ? parseTemplateTimeToDate(day.plannedStartTime) : null,
         plannedEndTime: day.plannedEndTime ? parseTemplateTimeToDate(day.plannedEndTime) : null,
-        plannedBreakMinutes: day.plannedBreakMinutes
+        plannedBreakMinutes: day.plannedBreakMinutes,
+        plannedBreakPaid: day.plannedBreakPaid
       }))
     });
 

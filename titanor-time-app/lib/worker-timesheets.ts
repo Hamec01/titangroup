@@ -180,6 +180,8 @@ export interface PlannedShiftView {
   plannedStartAt: string | null;
   plannedEndAt: string | null;
   plannedBreakMinutes: number;
+  // T10-D — true = the customer pays this lunch (no auto-deduction). false = Finnish unpaid norm.
+  plannedBreakPaid: boolean;
 }
 
 export interface DraftDayView {
@@ -232,7 +234,7 @@ export async function getWorkerTimesheetDraft(employeeId: string, timesheetId: s
       },
       plannedShifts: {
         orderBy: { date: 'asc' },
-        select: { date: true, siteId: true, sourceAssignmentId: true, plannedStartAt: true, plannedEndAt: true, plannedBreakMinutes: true }
+        select: { date: true, siteId: true, sourceAssignmentId: true, plannedStartAt: true, plannedEndAt: true, plannedBreakMinutes: true, plannedBreakPaid: true }
       }
     }
   });
@@ -264,7 +266,8 @@ export async function getWorkerTimesheetDraft(employeeId: string, timesheetId: s
       sourceAssignmentId: p.sourceAssignmentId,
       plannedStartAt: p.plannedStartAt ? p.plannedStartAt.toISOString() : null,
       plannedEndAt: p.plannedEndAt ? p.plannedEndAt.toISOString() : null,
-      plannedBreakMinutes: p.plannedBreakMinutes
+      plannedBreakMinutes: p.plannedBreakMinutes,
+      plannedBreakPaid: p.plannedBreakPaid
     }))
   };
 }
@@ -332,7 +335,7 @@ export async function getWorkerTimesheetCurrentVersion(employeeId: string, times
       },
       plannedShifts: {
         orderBy: { date: 'asc' },
-        select: { date: true, siteId: true, sourceAssignmentId: true, plannedStartAt: true, plannedEndAt: true, plannedBreakMinutes: true }
+        select: { date: true, siteId: true, sourceAssignmentId: true, plannedStartAt: true, plannedEndAt: true, plannedBreakMinutes: true, plannedBreakPaid: true }
       }
     }
   });
@@ -369,7 +372,8 @@ export async function getWorkerTimesheetCurrentVersion(employeeId: string, times
       sourceAssignmentId: p.sourceAssignmentId,
       plannedStartAt: p.plannedStartAt ? p.plannedStartAt.toISOString() : null,
       plannedEndAt: p.plannedEndAt ? p.plannedEndAt.toISOString() : null,
-      plannedBreakMinutes: p.plannedBreakMinutes
+      plannedBreakMinutes: p.plannedBreakMinutes,
+      plannedBreakPaid: p.plannedBreakPaid
     })),
     reviewScopes: await loadCurrentVersionReviewScopes(version.id)
   };
@@ -1054,7 +1058,7 @@ export async function submitWorkerTimesheetCore(
         }
       },
       plannedShifts: {
-        select: { date: true, siteId: true, sourceAssignmentId: true, templateVersionDayId: true, plannedStartAt: true, plannedEndAt: true, plannedBreakMinutes: true }
+        select: { date: true, siteId: true, sourceAssignmentId: true, templateVersionDayId: true, plannedStartAt: true, plannedEndAt: true, plannedBreakMinutes: true, plannedBreakPaid: true }
       }
     }
   });
@@ -1102,7 +1106,8 @@ export async function submitWorkerTimesheetCore(
         templateVersionDayId: p.templateVersionDayId,
         plannedStartAt: p.plannedStartAt,
         plannedEndAt: p.plannedEndAt,
-        plannedBreakMinutes: p.plannedBreakMinutes
+        plannedBreakMinutes: p.plannedBreakMinutes,
+        plannedBreakPaid: p.plannedBreakPaid
       }))
     });
   }

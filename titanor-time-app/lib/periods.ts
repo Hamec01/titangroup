@@ -71,6 +71,8 @@ export interface TemplateDayInput {
   plannedStartTime: Date | null;
   plannedEndTime: Date | null;
   plannedBreakMinutes: number;
+  // T10-D — is the planned break PAID? (false = Finnish unpaid-lunch norm.)
+  plannedBreakPaid?: boolean;
 }
 
 export interface PlannedShiftComputation {
@@ -78,6 +80,9 @@ export interface PlannedShiftComputation {
   plannedStartAt: Date | null;
   plannedEndAt: Date | null;
   plannedBreakMinutes: number;
+  // T10-D — copied from the template day onto the (draft) planned shift so reports never join back
+  // to the template. A non-working day / no-template day is always false (0-minute break anyway).
+  plannedBreakPaid: boolean;
 }
 
 /**
@@ -97,7 +102,8 @@ export function computePlannedShiftForAssignmentDate(templateDay: TemplateDayInp
     templateVersionDayId: isWorking && templateDay ? templateDay.id : null,
     plannedStartAt: isWorking && templateDay?.plannedStartTime ? helsinkiWallClockToUtc(date, templateDay.plannedStartTime) : null,
     plannedEndAt: isWorking && templateDay?.plannedEndTime ? helsinkiWallClockToUtc(date, templateDay.plannedEndTime) : null,
-    plannedBreakMinutes: isWorking && templateDay ? templateDay.plannedBreakMinutes : 0
+    plannedBreakMinutes: isWorking && templateDay ? templateDay.plannedBreakMinutes : 0,
+    plannedBreakPaid: isWorking && templateDay ? (templateDay.plannedBreakPaid ?? false) : false
   };
 }
 

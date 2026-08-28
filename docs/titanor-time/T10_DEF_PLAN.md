@@ -11,11 +11,25 @@
 
 ## D — автоматический неоплачиваемый обед (30 мин)
 
-**СТАТУС (2026-08-28): в работе, ядро + отчёты/экспорт на пилоте `t97-pilot-66e8a4e`.**
+**СТАТУС (2026-08-28): ГОТОВО и на пилоте (коммит после `126f527`). Ядро + отчёты/экспорт + галочка
+«обед оплачивается» + поля политики + страховка «нет шаблона» — всё сделано.**
 - Миграция `20260828150000`: `plannedBreakPaid` на `WorkScheduleTemplateVersionDay` +
   `Timesheet(Draft)PlannedShift` (все DEFAULT false = финская норма: обед не оплачивается);
   `CompanyAttendancePolicy.autoUnpaidBreakThresholdMinutes` DEFAULT 360 (6 ч), CHECK 0..1440
   (0 = вычитать всегда).
+- Миграция `20260828170000`: `CompanyAttendancePolicy.autoUnpaidBreakMinutes` DEFAULT 30, CHECK
+  0..1440 — **страховка**: если у смены нет своего перерыва (объект без шаблона графика), берётся
+  это значение. Шаблон со своим перерывом или галочкой «оплачивается» всегда важнее. 0 — выключить.
+- Приоритет «оплачивается / минуты шаблона / дефолт политики» — в одном месте:
+  `lib/reporting/auto-break.ts::effectiveUnpaidBreakMinutes`. `plannedBreakPaid` пробрасывается
+  `computePlannedShiftForAssignmentDate` → createPeriod/createAssignment/materializer/submit-freeze/
+  reinitializeDraftFromVersion/seedCorrectionDraftFromVersion (НЕ в contentHash).
+- UI: галочка «обед оплачивается» в `TemplateDaysEditor` (только рабочий день, гаснет при перерыве
+  0); два поля на `/admin/attendance/policy` (порог + дефолт); страница шаблона показывает
+  «· не оплачивается» / «· оплачивается».
+- Работник видит то же, что админ: `worker/periods/[id]/hours` + `.../submit` +
+  `worker-context::mapWorkerPeriod` (итог за неделю) — все через `computeDayWorkedMs`.
+- Тесты: `_test-auto-unpaid-break` 21/21; новый `_test-planned-break-paid-propagation` 12/12.
 - `lib/reporting/worked-time.ts::computeDayWorkedMs(daySegments, { plannedUnpaidBreakMinutes,
   grossThresholdMinutes })` — DAY-level: если перерыв НЕ отмечен, gross ≥ порога и в плане есть
   неоплачиваемый перерыв — вычитаем плановый перерыв один раз (не больше gross; любой отмеченный
@@ -25,12 +39,23 @@
 - Подключено: `canonical-daily-buckets` (→ period report, CSV export), custom report, worker time
   report, site time report, `getTimesheetCard` (столбец «Детали» показывает `−30 мин обед`),
   `getReviewQueue` (столбец «Часы» = сумма по-дневных авто-скорректированных).
-- Тест `_test-auto-unpaid-break` 13/13; report-canonical 20/20.
+- Тест `_test-auto-unpaid-break` 21/21; report-canonical 20/20; propagation 12/12.
 
-**Осталось:** галочка «обед оплачивается» в UI шаблона графика + её проброс в planned shift;
-поле порога на `/admin/attendance/policy`; дашборд «Сегодня» plan-vs-actual, список часов у
-работника, превью корректировки / review-scopes / foreman-review (сейчас там сегмент-уровень без
-авто-обеда — косметическое расхождение, не бухгалтерское). Порядок пакета: **D → F → E**.
+**Осталось (косметика, не бухгалтерия):** дашборд «Сегодня» plan-vs-actual
+(`attendance-overview.ts`), превью корректировки, `/admin/review-scopes/[id]`,
+`/foreman/review/[timesheetId]` — там ещё сегмент-уровень без авто-обеда.
+
+**Причина бага у Andrei Sakki:** его объект «Pipe and Co» (SiteAssignment) не был привязан к
+шаблону графика (`templateVersionId` NULL) → плановый перерыв 0 → авто-вычет молча не срабатывал.
+У остальных 5 работников шаблон «work time» (`d7ded80c-cc6b-4c63-ba96-1f47d9eff926`, перерыв 30)
+привязан — у них работало. Починка на пилоте: привязали шаблон к его назначению; уже
+материализованные planned shifts (перерыв 0) закрывает новая страховка `autoUnpaidBreakMinutes`.
+
+**Следующая просьба владельца (не начато): авто-чек-аут через 16 ч** — если работник не сделал
+чек-аут, закрыть смену по плановому времени окончания из шаблона. `maxShiftDurationHours` (16)
+уже есть, но только рейзит исключение `EXCESSIVE_SHIFT_DURATION` при чек-ауте; развёртки
+планировщика по незакрытым сменам пока нет. Порядок пакета был **D → F → E**; авто-чек-аут
+владелец ставит вперёд.
 
 ---
 ### Исходный план D

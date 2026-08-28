@@ -8,7 +8,8 @@ import { SnapshotWriter } from '@/components/worker-pwa/SnapshotWriter';
 import { ConnectivityBanner } from '@/components/worker-pwa/ConnectivityBanner';
 import { WorkerLink } from '@/components/worker-pwa/WorkerLink';
 import type { SubmitSummaryPayload } from '@/lib/offline-outbox/read-snapshots';
-import { workedMinutesFromIsoSegments } from '@/lib/reporting/report-format';
+import { workedDayMinutesFromIso } from '@/lib/reporting/report-format';
+import { effectiveUnpaidBreakMinutes, loadAutoUnpaidBreakDefaultMinutes } from '@/lib/reporting/auto-break';
 import { resolveAppLocale } from '@/lib/i18n/server';
 import { WORKER_STRINGS } from '@/lib/i18n/worker';
 
@@ -43,8 +44,16 @@ export default async function WorkerSubmitPage({ params }: RouteParams) {
 
   const draft = await getWorkerTimesheetDraft(employeeId, period.timesheetId);
   const days = 'code' in draft ? [] : draft.days;
+  const plannedShifts = 'code' in draft ? [] : draft.plannedShifts;
   const workedDays = days.filter((d) => d.segments.length > 0 || d.confirmedZero || d.dayType !== 'WORK');
-  const totalMinutes = days.reduce((sum, d) => sum + workedMinutesFromIsoSegments(d.segments), 0);
+  // T10-D — the review total is the same auto-deducted (unpaid lunch) figure the admin sees.
+  const autoUnpaidDefault = await loadAutoUnpaidBreakDefaultMinutes();
+  const plannedUnpaidByDate = new Map<string, number>();
+  for (const ps of plannedShifts) {
+    const unpaid = effectiveUnpaidBreakMinutes(ps.plannedBreakMinutes, ps.plannedBreakPaid, autoUnpaidDefault);
+    plannedUnpaidByDate.set(ps.date, Math.max(plannedUnpaidByDate.get(ps.date) ?? 0, unpaid));
+  }
+  const totalMinutes = days.reduce((sum, d) => sum + workedDayMinutesFromIso(d.segments, plannedUnpaidByDate.get(d.date) ?? 0), 0);
   const summary = await getWorkerTimesheetSummary(employeeId, period.timesheetId);
   const returnReasons = 'code' in summary ? [] : summary.returnReasons;
 

@@ -1,6 +1,7 @@
 // T10-D (2026-08-28) — computeDayWorkedMs: the automatic unpaid-lunch deduction
 // (docs/titanor-time/T10_DEF_PLAN.md §D). Pure, no DB.
 import { computeDayWorkedMs, sumWorkedDayMs, msToMinutes } from '../lib/reporting/worked-time';
+import { effectiveUnpaidBreakMinutes } from '../lib/reporting/auto-break';
 
 let pass = 0;
 let fail = 0;
@@ -88,6 +89,26 @@ function seg(startH: number, endH: number, breaks: { s: number; e: number; paid:
   const d2 = computeDayWorkedMs([{ ...seg(7, 15), endAt: new Date('2026-08-24T15:30:00Z') }], { plannedUnpaidBreakMinutes: 30, grossThresholdMinutes: 360 });
   const t = sumWorkedDayMs([d1, d2]);
   check('sumWorkedDayMs totals auto break (60 min over 2 days)', msToMinutes(t.autoUnpaidBreakMs) === 60 && msToMinutes(t.workedMs) === 16 * 60);
+}
+
+// 10. effectiveUnpaidBreakMinutes precedence: paid flag > template minutes > policy default
+{
+  check('paid break -> 0 regardless of minutes', effectiveUnpaidBreakMinutes(30, true, 30) === 0);
+  check('paid break -> 0 even with 0 template minutes', effectiveUnpaidBreakMinutes(0, true, 30) === 0);
+  check('template 45 min, not paid -> 45 (ignores policy default)', effectiveUnpaidBreakMinutes(45, false, 30) === 45);
+  check('no template break (0), not paid -> policy default 30', effectiveUnpaidBreakMinutes(0, false, 30) === 30);
+  check('no template break, policy default 0 -> 0 (fallback disabled)', effectiveUnpaidBreakMinutes(0, false, 0) === 0);
+  check('negative policy default clamped to 0', effectiveUnpaidBreakMinutes(0, false, -5) === 0);
+}
+
+// 11. the "assignment with no template" bug: 09:00–16:30 (7.5h gross), break 0 on the plan,
+//     policy default 30 -> 7h paid
+{
+  const s = { ...seg(9, 16), endAt: new Date('2026-08-24T16:30:00Z') };
+  const unpaid = effectiveUnpaidBreakMinutes(0, false, 30);
+  const r = computeDayWorkedMs([s], { plannedUnpaidBreakMinutes: unpaid, grossThresholdMinutes: 360 });
+  check('no-template 7.5h day + policy default -> 7h worked', msToMinutes(r.workedMs) === 7 * 60, msToMinutes(r.workedMs));
+  check('  autoUnpaidBreakMs = 30', msToMinutes(r.autoUnpaidBreakMs) === 30);
 }
 
 console.log(JSON.stringify({ pass, fail }));

@@ -1,7 +1,9 @@
 import { Prisma } from '@prisma/client';
 import { prisma } from '@/lib/prisma';
 import { resolveCanonicalSource } from '@/lib/reporting/canonical-source';
-import { computeSegmentMs, msToMinutes, sumWorkedTimeMs } from '@/lib/reporting/worked-time';
+import { computeDayWorkedMs, msToMinutes } from '@/lib/reporting/worked-time';
+import { effectiveUnpaidBreakMinutes, DEFAULT_AUTO_UNPAID_BREAK_MINUTES } from '@/lib/reporting/auto-break';
+import { DEFAULT_AUTO_UNPAID_BREAK_THRESHOLD_MINUTES } from '@/lib/reporting/canonical-daily-buckets';
 import { computeTimesheetEditCutoff } from '@/lib/timesheet-edit-window';
 
 // docs/titanor-time/04_ADMIN_FIRST_API_CONTRACTS.md §9 (Рабочий кабинет), read-only context
@@ -139,7 +141,8 @@ const workerPeriodSelect = Prisma.validator<Prisma.TimesheetSelect>()({
           site: { select: { name: true } },
           breaks: { select: { startAt: true, endAt: true, paid: true } }
         }
-      }
+      },
+      plannedShifts: { select: { date: true, plannedBreakMinutes: true, plannedBreakPaid: true } }
     }
   },
   currentVersion: {
@@ -155,7 +158,8 @@ const workerPeriodSelect = Prisma.validator<Prisma.TimesheetSelect>()({
           site: { select: { name: true } },
           breaks: { select: { startAt: true, endAt: true, paid: true } }
         }
-      }
+      },
+      plannedShifts: { select: { date: true, plannedBreakMinutes: true, plannedBreakPaid: true } }
     }
   }
 });
@@ -165,11 +169,21 @@ type WorkerPeriodRow = Prisma.TimesheetGetPayload<{ select: typeof workerPeriodS
 export interface WorkerEditWindowPolicy {
   cutoffDaysAfterPeriodEnd: number;
   cutoffTime: Date;
+  // T10-D — same inputs the admin card / reports use for the automatic unpaid lunch.
+  autoUnpaidBreakThresholdMinutes: number;
+  autoUnpaidBreakMinutes: number;
 }
 
 async function loadWorkerEditWindowPolicy(): Promise<WorkerEditWindowPolicy> {
-  const p = await prisma.companyAttendancePolicy.findFirst({ select: { cutoffDaysAfterPeriodEnd: true, cutoffTime: true } });
-  return { cutoffDaysAfterPeriodEnd: p?.cutoffDaysAfterPeriodEnd ?? 1, cutoffTime: p?.cutoffTime ?? new Date('1970-01-01T23:59:00.000Z') };
+  const p = await prisma.companyAttendancePolicy.findFirst({
+    select: { cutoffDaysAfterPeriodEnd: true, cutoffTime: true, autoUnpaidBreakThresholdMinutes: true, autoUnpaidBreakMinutes: true }
+  });
+  return {
+    cutoffDaysAfterPeriodEnd: p?.cutoffDaysAfterPeriodEnd ?? 1,
+    cutoffTime: p?.cutoffTime ?? new Date('1970-01-01T23:59:00.000Z'),
+    autoUnpaidBreakThresholdMinutes: p?.autoUnpaidBreakThresholdMinutes ?? DEFAULT_AUTO_UNPAID_BREAK_THRESHOLD_MINUTES,
+    autoUnpaidBreakMinutes: p?.autoUnpaidBreakMinutes ?? DEFAULT_AUTO_UNPAID_BREAK_MINUTES
+  };
 }
 
 function mapWorkerPeriod(row: WorkerPeriodRow, policy: WorkerEditWindowPolicy): ActionablePeriod {
@@ -181,30 +195,34 @@ function mapWorkerPeriod(row: WorkerPeriodRow, policy: WorkerEditWindowPolicy): 
     currentVersion: row.currentVersion
   });
   const segments = source.dataSource === 'DRAFT' ? row.draft!.timesheetDraftSegments : row.currentVersion!.workSegments;
-  const buckets = new Map<string, { date: string; siteName: string; segments: typeof segments }>();
+  const plannedShifts = source.dataSource === 'DRAFT' ? (row.draft?.plannedShifts ?? []) : (row.currentVersion?.plannedShifts ?? []);
 
-  for (const segment of segments) {
-    const date = formatDate(segment.date);
-    const key = `${date}:${segment.siteId}`;
-    const bucket = buckets.get(key);
-    if (bucket) {
-      bucket.segments.push(segment);
-    } else {
-      buckets.set(key, { date, siteName: segment.site.name, segments: [segment] });
-    }
+  // T10-D — planned UNPAID lunch minutes per date, same precedence as lib/reporting/auto-break.ts.
+  const plannedUnpaidByDate = new Map<string, number>();
+  for (const ps of plannedShifts) {
+    const unpaid = effectiveUnpaidBreakMinutes(ps.plannedBreakMinutes, ps.plannedBreakPaid, policy.autoUnpaidBreakMinutes);
+    plannedUnpaidByDate.set(formatDate(ps.date), Math.max(plannedUnpaidByDate.get(formatDate(ps.date)) ?? 0, unpaid));
   }
 
-  const days = new Map<string, { totalMinutes: number; siteNames: Set<string> }>();
-  for (const bucket of buckets.values()) {
-    const worked = sumWorkedTimeMs(bucket.segments.map((segment) => computeSegmentMs(segment)));
-    const day = days.get(bucket.date) ?? { totalMinutes: 0, siteNames: new Set<string>() };
-    day.totalMinutes += msToMinutes(worked.workedMs);
-    day.siteNames.add(bucket.siteName);
-    days.set(bucket.date, day);
+  // One bucket per calendar day (across sites) — the automatic unpaid lunch is a per-DAY deduction,
+  // matching getTimesheetCard.
+  const days = new Map<string, { segments: typeof segments; siteNames: Set<string> }>();
+  for (const segment of segments) {
+    const date = formatDate(segment.date);
+    const day = days.get(date) ?? { segments: [] as typeof segments, siteNames: new Set<string>() };
+    day.segments.push(segment);
+    day.siteNames.add(segment.site.name);
+    days.set(date, day);
   }
 
   const activityDays = [...days.entries()]
-    .map(([date, day]) => ({ date, totalMinutes: day.totalMinutes, siteNames: [...day.siteNames].sort((a, b) => a.localeCompare(b)) }))
+    .map(([date, day]) => {
+      const worked = computeDayWorkedMs(day.segments, {
+        plannedUnpaidBreakMinutes: plannedUnpaidByDate.get(date) ?? 0,
+        grossThresholdMinutes: policy.autoUnpaidBreakThresholdMinutes
+      });
+      return { date, totalMinutes: msToMinutes(worked.workedMs), siteNames: [...day.siteNames].sort((a, b) => a.localeCompare(b)) };
+    })
     .sort((a, b) => b.date.localeCompare(a.date));
 
   return {
