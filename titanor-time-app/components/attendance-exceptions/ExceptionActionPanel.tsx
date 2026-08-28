@@ -25,7 +25,9 @@ import type { AppLocale } from '@/lib/i18n/locale';
 const CSRF_HEADER_VALUE = 'titanor-time';
 
 const ACTION_LABELS: Record<ResolutionActionName, { en: string; ru: string }> = {
-  DISMISS: { en: 'Dismiss', ru: 'Отклонить' },
+  // T12 — was "Dismiss / Отклонить", which read as "reject the hours"; this action changes nothing
+  // about the event or the hours, it only clears the alert from the queue.
+  DISMISS: { en: 'Clear alert', ru: 'Снять сигнал' },
   ACKNOWLEDGE_AS_VALID: { en: 'Acknowledge as valid', ru: 'Подтвердить как верное' },
   PAIR_ORPHAN_EVENTS: { en: 'Pair with another event', ru: 'Связать с другим событием' },
   CONFIRM_SOURCE_ASSIGNMENT: { en: 'Confirm site assignment', ru: 'Подтвердить назначение объекта' },
@@ -45,14 +47,14 @@ const ERROR_MESSAGES: Record<string, { en: string; ru: string }> = {
   EXCEPTION_ALREADY_RESOLVED: { en: 'This exception was already resolved by someone else — showing the latest state.', ru: 'Это исключение уже решено кем-то другим — показано актуальное состояние.' },
   ACTION_NOT_APPLICABLE: { en: 'This action no longer applies to this exception — showing the latest state.', ru: 'Это действие больше не применимо к этому исключению — показано актуальное состояние.' },
   FOREMAN_SCOPE_INCOMPLETE: { en: 'This exception now touches a site outside your current assignments.', ru: 'Это исключение теперь относится к объекту вне ваших текущих назначений.' },
-  OPEN_SHIFT_STILL_PENDING: { en: 'The originating shift is still open — it cannot be dismissed yet.', ru: 'Исходная смена всё ещё открыта — отклонить пока нельзя.' },
+  OPEN_SHIFT_STILL_PENDING: { en: 'The originating shift is still open — the alert cannot be cleared yet.', ru: 'Исходная смена всё ещё открыта — сигнал пока снять нельзя.' },
   VALIDATION_ERROR: { en: 'Please check the highlighted fields.', ru: 'Проверьте выделенные поля.' },
   CLOCK_EVENT_NOT_FOUND: { en: 'One of the selected events could no longer be found — showing the latest state.', ru: 'Одно из выбранных событий больше не найдено — показано актуальное состояние.' },
   EVENT_ALREADY_PAIRED: { en: 'One of these events was just paired by someone else — showing the latest state.', ru: 'Одно из этих событий только что было связано кем-то другим — показано актуальное состояние.' },
   PAIRED_SHIFT_OVERLAP: { en: 'This pair would overlap an existing shift for this employee. Choose a different event.', ru: 'Эта пара пересечётся с существующей сменой этого работника. Выберите другое событие.' },
   TARGET_NOT_FOUND: { en: 'The target for this confirmation could no longer be found — showing the latest state.', ru: 'Цель для этого подтверждения больше не найдена — показано актуальное состояние.' },
   TARGET_ALREADY_RESOLVED: { en: 'This was already confirmed — showing the latest state.', ru: 'Это уже было подтверждено — показано актуальное состояние.' },
-  OPEN_SHIFT_ALREADY_CLOSED: { en: 'This shift is no longer open — a Check Out may have already arrived. Consider Dismiss instead.', ru: 'Эта смена больше не открыта — возможно, уход уже был зафиксирован. Рассмотрите вариант «Отклонить».' },
+  OPEN_SHIFT_ALREADY_CLOSED: { en: 'This shift is no longer open — a Check Out may have already arrived. Use "Clear alert" instead.', ru: 'Эта смена больше не открыта — возможно, уход уже был зафиксирован. Используйте «Снять сигнал».' },
   TARGET_NOT_EDITABLE: { en: 'There is no live editable entry for this fragment anymore — showing the latest state.', ru: 'Для этого фрагмента больше нет доступной для редактирования записи — показано актуальное состояние.' },
   DRAFT_NOT_EDITABLE: { en: 'This timesheet is no longer in a draft/returned state — showing the latest state.', ru: 'Этот табель больше не в состоянии черновика/возврата — показано актуальное состояние.' },
   OVERLAP_STILL_PRESENT: { en: 'This change does not fully resolve the overlap between the two shifts. Adjust the times and try again.', ru: 'Это изменение не устраняет пересечение полностью между двумя сменами. Скорректируйте время и попробуйте снова.' },
@@ -248,8 +250,8 @@ function DismissAckForm({ apiBasePath, exceptionId, action, chronologyNoteRequir
     <div className="exc-action-form">
       <p className="exc-muted">
         {action === 'DISMISS'
-          ? (ru ? 'Отклонение помечает исключение как не требующее дальнейших действий, не подтверждая корректность исходного события.' : 'Dismiss marks this exception as not requiring further action, without confirming the underlying event was correct.')
-          : (ru ? 'Подтверждение подтверждает зафиксированные данные как верные, несмотря на флаг — данные не изменяются.' : 'Acknowledging confirms the recorded data as valid despite the flag — no data is changed.')}
+          ? (ru ? 'Убирает сигнал из очереди. Часы, смена и отметки НЕ меняются — это не признание события верным и не исправление часов. Если часы неправильные, используйте «Изменить часы» на карточке табеля или верните табель работнику.' : 'Clears the alert from the queue. The hours, the shift and the check-ins are NOT changed — this is neither confirming the event nor fixing the hours. If the hours are wrong, use "Edit hours" on the timesheet card or return the timesheet to the worker.')
+          : (ru ? 'Подтверждает зафиксированные данные как верные, несмотря на флаг — данные не изменяются.' : 'Confirms the recorded data as valid despite the flag — no data is changed.')}
       </p>
       <div className="exc-filter-field">
         <label htmlFor={`note-${action}`}>{ru ? 'Примечание' : 'Note'} {noteRequired ? (ru ? '(обязательно)' : '(required)') : (ru ? '(необязательно)' : '(optional)')}</label>
@@ -328,8 +330,8 @@ function PairOrphanEventsForm({ apiBasePath, exceptionId, namedEvent, candidates
       {candidates.length === 0 ? (
         <p className="exc-empty-candidates">
           {ru
-            ? `Подходящее событие ${missingOpName} для этого работника пока не найдено. Обычно это значит, что работник ещё не отмечался снова после появления этого исключения — проверьте позже, либо используйте «Отклонить», если это была ложная тревога.`
-            : <>No matching {missingOpName} event was found for this employee yet. This usually means the worker hasn&apos;t clocked again since this exception was raised — check back later, or use Dismiss if this was a false alarm.</>}
+            ? `Подходящее событие ${missingOpName} для этого работника пока не найдено. Обычно это значит, что работник ещё не отмечался снова после появления этого исключения — проверьте позже, либо нажмите «Снять сигнал», если это была ложная тревога.`
+            : <>No matching {missingOpName} event was found for this employee yet. This usually means the worker hasn&apos;t clocked again since this exception was raised — check back later, or use "Clear alert" if this was a false alarm.</>}
         </p>
       ) : (
         <fieldset className="exc-candidate-list">
@@ -489,7 +491,7 @@ function ForceCloseOpenShiftForm({ apiBasePath, exceptionId, openShift }: { apiB
   const [clientError, setClientError] = useState<string | null>(null);
 
   if (!openShift) {
-    return <p className="exc-empty-candidates">{ru ? 'Эта смена больше не открыта — возможно, уже поступил реальный уход. Используйте «Отклонить».' : 'This shift is no longer open — a real Check Out may have already arrived. Use Dismiss instead.'}</p>;
+    return <p className="exc-empty-candidates">{ru ? 'Эта смена больше не открыта — возможно, уже поступил реальный уход. Нажмите «Снять сигнал».' : 'This shift is no longer open — a real Check Out may have already arrived. Use "Clear alert" instead.'}</p>;
   }
 
   function validateAndArm() {

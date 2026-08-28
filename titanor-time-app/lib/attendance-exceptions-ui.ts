@@ -38,7 +38,9 @@ export function exceptionTypeLabel(type: string, locale: AppLocale): string {
 const EXCEPTION_STATUS_LABELS: Record<ExceptionStatusFilter, { en: string; ru: string }> = {
   OPEN: { en: 'Open', ru: 'Открыто' },
   RESOLVED: { en: 'Resolved', ru: 'Решено' },
-  DISMISSED: { en: 'Dismissed', ru: 'Отклонено' }
+  // T12 — the DISMISS action is now surfaced as "Clear alert / Снять сигнал"; the terminal status
+  // matches (it never meant "the hours were rejected").
+  DISMISSED: { en: 'Cleared', ru: 'Снято' }
 };
 
 export function exceptionStatusLabel(status: string, locale: AppLocale): string {
