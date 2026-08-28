@@ -16,6 +16,7 @@ import {
   detailKeyLabel
 } from '@/lib/attendance-exceptions-ui';
 import type { AppLocale } from '@/lib/i18n/locale';
+import { ExceptionGpsMap } from './ExceptionGpsMap';
 
 // docs/titanor-time/T7A_1_ATTENDANCE_CLOCK_DESIGN.md §11/§12.1/§12.3 — T7A.8C.1. Renders only the
 // already-allowlisted ExceptionDetail DTO returned by lib/attendance-exceptions.ts's
@@ -145,10 +146,34 @@ export function ExceptionDetailView({ basePath, detail, timesheetHref, resolutio
             {Object.entries(detail.detail).map(([key, value]) => (
               <div key={key}>
                 <dt>{detailKeyLabel(key, locale)}</dt>
-                <dd>{String(value)}</dd>
+                <dd>{typeof value === 'boolean' ? (value ? (ru ? 'Да' : 'Yes') : ru ? 'Нет' : 'No') : String(value)}</dd>
               </div>
             ))}
           </dl>
+        </section>
+      )}
+
+      {/* GPS-1 — "where was this" for a GPS exception: the retained (possibly imprecise) worker
+          point, its accuracy circle and the site geofence. Only present when the viewer holds
+          attendance.gps.read.raw. */}
+      {detail.gpsLocation && (
+        <section className="exc-detail-section">
+          <h2 className="wk-section-title">{ru ? 'Где это было' : 'Where this was'}</h2>
+          <ExceptionGpsMap
+            point={detail.gpsLocation}
+            accuracyMeters={detail.clockEvent?.gpsAccuracyMeters ?? null}
+            geofence={detail.siteGeofence}
+          />
+          <p className="exc-muted">
+            {ru
+              ? 'Красный — GPS-точка работника и круг точности; зелёный — геозона объекта. Координаты приблизительны при плохой точности.'
+              : "Red — the worker's GPS point and its accuracy circle; green — the site geofence. Coordinates are approximate at low accuracy."}
+          </p>
+          <p>
+            <Link href={`/admin/workers/${detail.employee.id}/locations`}>
+              {ru ? 'Все GPS-точки этого работника →' : "All of this worker's GPS points →"}
+            </Link>
+          </p>
         </section>
       )}
 

@@ -9,7 +9,7 @@
 
 | Шаг | Что | Статус |
 |---|---|---|
-| 1 | Админ видит, откуда было: detail для `LOW_ACCURACY`/`NO_GEOFENCE` (расстояние до центра геозоны, попадает ли в радиус) + мини-карта в карточке исключения + ссылка на GPS-точки работника | ⏳ НЕ НАЧАТ |
+| 1 | Админ видит, откуда было: detail для `LOW_ACCURACY`/`NO_GEOFENCE` (расстояние до центра геозоны, попадает ли в радиус) + мини-карта в карточке исключения + ссылка на GPS-точки работника | ✅ ГОТОВО — код + тест 21/21 + `tsc`/`build` зелёные. Деплой на пилот — в процессе. |
 | 2 | Разрешение один раз: `navigator.permissions` + один `watchPosition` вместо периодических `getCurrentPosition` + экран-онбординг | ⏳ НЕ НАЧАТ |
 | 3 | Лучший fix: минимальная точность за окно ~60 с, ретрай до ~25 с, показ точности работнику + «Уточнить» | ⏳ НЕ НАЧАТ |
 | 4 | Порог в `CompanyAttendancePolicy.maxGpsAccuracyMeters` (миграция) + действие «Подтвердить по координате» в резолюции `GPS_NOT_VERIFIED` | ⏳ НЕ НАЧАТ |
@@ -19,7 +19,27 @@
 
 ### Детали по шагам (обновляются фактом)
 
-_(пусто — работа не начата)_
+**Шаг 1 — `<коммит будет здесь>` (2026-08-28).**
+- `lib/attendance-clock.ts` `exceptionDetailForGps()` — для `GPS_NOT_VERIFIED` (LOW_ACCURACY /
+  нет геозоны) теперь пишет в `detail`: `reason`, `accuracyMeters`, и если есть точка + геозона —
+  `distanceToSiteMeters` (Haversine от координаты до центра геозоны), `geofenceRadiusMeters`,
+  `pointInsideGeofence` (попадает ли в круг даже без учёта точности). Без сырых координат.
+- `lib/attendance-exceptions.ts` — новые allowlist-ключи; `getAttendanceExceptionDetail(id, scope,
+  { includeRawGps })` — при `includeRawGps` (у вызывающего есть `attendance.gps.read.raw`) в DTO
+  добавляются `gpsLocation {lat,lon}` (из `ClockEventLocation`) и `siteGeofence {lat,lon,radius}`
+  (текущая геозона объекта). Без права — оба `null`.
+- `app/admin/attendance/exceptions/[exceptionId]/page.tsx` — проверяет `attendance.gps.read.raw`
+  (у ADMIN/SUPER_ADMIN оно уже есть) и передаёт `includeRawGps`.
+- `components/attendance-exceptions/ExceptionGpsMap.tsx` (new) — мини-карта (MapLibre/OpenFreeMap):
+  красная точка + круг точности (пунктир), зелёный круг геозоны, авто-fit. Рендерится в
+  `ExceptionDetailView` в новой секции «Где это было» + ссылка «Все GPS-точки этого работника →»
+  на `/admin/workers/[id]/locations`. Булевы значения в detail рендерятся как Да/Нет.
+- Тест `_test-gps-exception-detail.ts` — 21/21 (точка рядом/далеко/без геозоны/без координаты,
+  regression VERIFIED_OUTSIDE, sanitizer, includeRawGps toggle).
+- **Существующие исключения** (напр. Sadovnikov на пилоте): текстовый `distanceToSiteMeters` не
+  добавляется задним числом (только новым), но **карта работает и для старых** — она читает
+  `ClockEventLocation` вживую. Backfill-скрипт для старых `detail` — опционально, если понадобится.
+- Миграции нет.
 
 
 ## 0. Как GPS работает сейчас (факты из кода)

@@ -37,7 +37,10 @@ export default async function AdminAttendanceExceptionDetailPage({ params }: Rou
   }
 
   const { exceptionId } = await params;
-  const detail = UUID_PATTERN.test(exceptionId) ? await getAttendanceExceptionDetail(exceptionId, null) : null;
+  // GPS-1 — a viewer with attendance.gps.read.raw also gets the raw coordinates + the site geofence
+  // for the "where was this" mini-map on GPS exceptions.
+  const includeRawGps = await hasPermission(session.user.roles, 'attendance.gps.read.raw');
+  const detail = UUID_PATTERN.test(exceptionId) ? await getAttendanceExceptionDetail(exceptionId, null, { includeRawGps }) : null;
 
   if (!detail) {
     return (

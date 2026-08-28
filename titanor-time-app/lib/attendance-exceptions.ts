@@ -25,6 +25,10 @@ const EXCEPTION_DETAIL_ALLOWED_KEYS = new Set([
   'distanceMeters',
   'accuracyMeters',
   'thresholdMeters',
+  // GPS-1 — LOW_ACCURACY / no-geofence GPS_NOT_VERIFIED context (no raw coordinates).
+  'distanceToSiteMeters',
+  'geofenceRadiusMeters',
+  'pointInsideGeofence',
   'reason',
   'clockSkewMs',
   'assumedSiteId',
@@ -331,6 +335,11 @@ export interface ExceptionDetail extends ExceptionListItem {
   /** Explicit allowlist sanitizer output — never the raw AttendanceException.detail JSON. */
   detail: Record<string, unknown> | null;
   resolvedBy: { id: string; name: string } | null;
+  /** GPS-1 — raw retained Check In/Out coordinates + the site's current geofence, for the
+   * "where was this" mini-map. Non-null ONLY when getAttendanceExceptionDetail was called with
+   * `includeRawGps` (the caller holds attendance.gps.read.raw). */
+  gpsLocation: { latitude: number; longitude: number } | null;
+  siteGeofence: { latitude: number; longitude: number; radiusMeters: number } | null;
 }
 
 const CLOCK_SHIFT_DETAIL_SELECT = {
@@ -353,8 +362,23 @@ type ClockShiftDetailRow = Prisma.ClockShiftGetPayload<{ select: typeof CLOCK_SH
 
 const DETAIL_SELECT = {
   ...LIST_SELECT,
+  // GPS-1 — site's current geofence, for the "where was this" mini-map on GPS exceptions.
+  site: { select: { name: true, currentGeofenceVersion: { select: { latitude: true, longitude: true, radiusMeters: true } } } },
   clockEvent: {
-    select: { id: true, siteId: true, operationType: true, effectiveAt: true, serverReceivedAt: true, capturedOffline: true, channel: true, gpsVerification: true, gpsAccuracyMeters: true, gpsUnavailableReason: true }
+    select: {
+      id: true,
+      siteId: true,
+      operationType: true,
+      effectiveAt: true,
+      serverReceivedAt: true,
+      capturedOffline: true,
+      channel: true,
+      gpsVerification: true,
+      gpsAccuracyMeters: true,
+      gpsUnavailableReason: true,
+      // GPS-1 — raw retained coordinates; only ever surfaced when the caller holds attendance.gps.read.raw.
+      location: { select: { latitude: true, longitude: true } }
+    }
   },
   clockShiftId: true,
   clockShift: { select: CLOCK_SHIFT_DETAIL_SELECT },
@@ -399,7 +423,11 @@ function toClockShiftDetail(row: ClockShiftDetailRow | null, ownSiteIds: string[
 /** Same safe-404 outcome for malformed id (caller must pre-validate UUID shape before calling —
  * an invalid UUID literal passed straight to Prisma's `@db.Uuid` column throws at the DB level,
  * not a clean null), missing exception, and existing-but-out-of-scope exception. */
-export async function getAttendanceExceptionDetail(exceptionId: string, scope: ForemanScope | null): Promise<ExceptionDetail | null> {
+export async function getAttendanceExceptionDetail(
+  exceptionId: string,
+  scope: ForemanScope | null,
+  options?: { includeRawGps?: boolean }
+): Promise<ExceptionDetail | null> {
   if (scope && scope.ownSiteIds.length === 0) {
     return null;
   }
@@ -442,7 +470,19 @@ export async function getAttendanceExceptionDetail(exceptionId: string, scope: F
     clockShift: toClockShiftDetail(row.clockShift, ownSiteIds),
     relatedClockShift: toClockShiftDetail(row.relatedClockShift, ownSiteIds),
     detail: sanitizeExceptionDetail(row.detail),
-    resolvedBy: row.resolvedByUserId && row.resolvedByUser ? { id: row.resolvedByUserId, name: actorDisplayName(row.resolvedByUser) } : null
+    resolvedBy: row.resolvedByUserId && row.resolvedByUser ? { id: row.resolvedByUserId, name: actorDisplayName(row.resolvedByUser) } : null,
+    gpsLocation:
+      options?.includeRawGps && row.clockEvent?.location
+        ? { latitude: Number(row.clockEvent.location.latitude), longitude: Number(row.clockEvent.location.longitude) }
+        : null,
+    siteGeofence:
+      options?.includeRawGps && row.site?.currentGeofenceVersion
+        ? {
+            latitude: Number(row.site.currentGeofenceVersion.latitude),
+            longitude: Number(row.site.currentGeofenceVersion.longitude),
+            radiusMeters: row.site.currentGeofenceVersion.radiusMeters
+          }
+        : null
   };
 }
 

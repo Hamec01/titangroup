@@ -643,10 +643,21 @@ export function exceptionDetailForGps(evaluation: GpsEvaluation, geofence: Clock
     return { distanceMeters: Math.round(evaluation.distanceMeters), accuracyMeters: evaluation.gpsAccuracyMeters, thresholdMeters: geofence.radiusMeters };
   }
   if (evaluation.gpsVerification === 'NOT_VERIFIED') {
-    if (evaluation.gpsUnavailableReason) {
-      return { reason: evaluation.gpsUnavailableReason };
+    // GPS-1 (2026-08-28) — give the admin enough to judge "was the worker actually near the site?"
+    // without exposing raw coordinates in the exception JSON. For a LOW_ACCURACY reading the point
+    // is imprecise but still known, so record how far it lands from the geofence centre and whether
+    // it falls inside the circle even when the poor accuracy is ignored.
+    const base: Record<string, unknown> = { reason: evaluation.gpsUnavailableReason ?? 'NO_GEOFENCE_CONFIGURED' };
+    if (evaluation.gpsAccuracyMeters !== null) {
+      base.accuracyMeters = evaluation.gpsAccuracyMeters;
     }
-    return { reason: 'NO_GEOFENCE_CONFIGURED' };
+    if (evaluation.location && geofence) {
+      const distanceToSiteMeters = Math.round(haversineDistanceMeters(evaluation.location.latitude, evaluation.location.longitude, geofence.latitude, geofence.longitude));
+      base.distanceToSiteMeters = distanceToSiteMeters;
+      base.geofenceRadiusMeters = geofence.radiusMeters;
+      base.pointInsideGeofence = distanceToSiteMeters <= geofence.radiusMeters;
+    }
+    return base as Prisma.InputJsonValue;
   }
   return undefined;
 }
