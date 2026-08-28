@@ -1,6 +1,32 @@
 # Titanor Time — Implementation Status
 
-Обновлено: 2026-08-28 Europe/Helsinki (дата+время в карточке уведомления)
+Обновлено: 2026-08-29 Europe/Helsinki (T13.1–T13.3 — профессии)
+
+**`[2026-08-29]` T13 — Профессии + Workforce Matrix + отчёты по часам (серия, TES отложен).**
+Мастер-дизайн: артефакт `https://claude.ai/code/artifact/a9e7afc2-d316-477d-b237-08916492e430`
+(по заданию T13.0 документ опубликован как артефакт, не коммитился). Владелец 2026-08-29 разрешил
+автономное выполнение по этапам; **TES для экспорта переведён в опциональные** (литовская компания
+в Финляндии) — T13.8/9/12 не делаются без отдельной команды.
+- **T13.1 (`39081c0`)** — `ProfessionCategory {SHIPBUILDING, CONSTRUCTION}` + `ProfessionDefinition`
+  (каталог, сид 43 профессии, коды `SHIP_*`/`CON_*`, `SHIP_WELDER` ≠ `CON_WELDER`) +
+  `EmployeeProfession` (FK к `Employee`; `ck_employee_profession_catalog_xor_custom`; partial unique
+  `ux_employee_profession_catalog` / `ux_employee_profession_custom` — custom-имя, отличающееся
+  только регистром/пробелами, отклоняется). Профессия ≠ сертификат, не даёт роль/право/доступ.
+  `EmployeeProfile.specialty` НЕ удалён. Миграции `20260829120000`/`121000`.
+  `_test-professions-schema` 20/20.
+- **T13.2 (`922b068`)** — `lib/professions.ts` + API: `GET /api/admin/professions` (каталог),
+  `GET/POST /api/admin/workers/:id/professions`, `DELETE .../:profId`. Право
+  `worker.profession.manage` (ADMIN+SUPER_ADMIN, миграция `20260829122000`). Дубликат → `409
+  PROFESSION_ALREADY_ADDED`. Аудит `EMPLOYEE_PROFESSION_ADDED/REMOVED` — только код/категория, без PII.
+  `_test-professions-api` 23/23. tsc + build.
+- **T13.3 (`5d89c7c`)** — блок «Профессии» на `/admin/workers/:id/profile` (при праве
+  `worker.profession.manage`): пикер каталога по категориям + «Другое». Профессии в досье-PDF (RU/EN);
+  `specialty` переименована в «Специальность (свободный текст, устар.)».
+  `scripts/_report-legacy-specialty.ts` — read-only помощник для ручного backfill.
+  `_test-professions-dossier` 9/9. tsc + build.
+- **Задеплоено на пилот `t97-pilot-5d89c7c`** (app + scheduler), БД 84 → 87. Прод не тронут.
+
+
 
 **`[2026-08-28]` Уведомления — когда работник сдал/внёс правки (`1efe659`, пилот `t97-pilot-1efe659`).**
 - В карточке уведомления «нужно утвердить» (и в drawer, и в тосте) под тегом «ПРЕДУПРЕЖДЕНИЕ» —
