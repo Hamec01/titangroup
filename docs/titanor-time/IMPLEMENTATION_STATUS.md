@@ -2,6 +2,32 @@
 
 Обновлено: 2026-08-28 Europe/Helsinki (T12 инструменты админа + доводка GPS)
 
+**`[2026-08-28]` T10-D добивка — «обед оплачивается» + страховка «нет шаблона» (`a61763b`,
+пилот `t97-pilot-a61763b`).**
+- Первопричина жалобы владельца («у Andrei Sakki полные часы, обед словно оплачен»): его объект
+  «Pipe and Co» (`SiteAssignment`) не был привязан к шаблону графика → плановый перерыв 0 →
+  авто-вычет молча не срабатывал. У остальных 5 работников шаблон «work time» (перерыв 30) привязан.
+- Миграция `20260828170000`: `CompanyAttendancePolicy.autoUnpaidBreakMinutes` DEFAULT 30
+  (CHECK 0..1440) — страховка, когда у смены нет своего перерыва. `effectiveUnpaidBreakMinutes()`
+  в `lib/reporting/auto-break.ts` — единая точка приоритета «оплачивается / минуты шаблона / дефолт».
+- `plannedBreakPaid` теперь пробрасывается шаблон → planned shift (createPeriod/createAssignment/
+  materializer/submit-freeze/reinitialize/seedCorrection), НЕ в contentHash.
+- UI: галочка «обед оплачивается» в `TemplateDaysEditor` (рабочий день, гаснет при перерыве 0);
+  два числовых поля на `/admin/attendance/policy` (порог + дефолт); страница шаблона показывает
+  «· не оплачивается» / «· оплачивается».
+- Работник видит то же, что админ: `worker/periods/[id]/hours` + `.../submit` +
+  `worker-context.mapWorkerPeriod` (итог за неделю) — все через `computeDayWorkedMs`.
+- `_test-auto-unpaid-break` 21/21; новый `_test-planned-break-paid-propagation` 12/12;
+  `_test-custom-report-canonical` 20/20 (фикстура фиксирует `autoUnpaidBreakMinutes: 0`).
+  `tsc --noEmit` зелёный. Регрессии corrections / admin-direct-edit / worker-reopen / approval-
+  notifications / GPS 1,4 — зелёные.
+- **Пилот `t97-pilot-a61763b`.** Бэкап `t97-pilot-20260828T154332Z-pre-a61763b.dump`. Миграция
+  `20260828170000` применена, idempotent-повтор чист; `t97-pilot-app` + `t97-pilot-scheduler`
+  пересозданы; `/api/ready`/`/api/health`/`/login` 200, внешний HTTPS 200; счётчики строк без
+  изменений (14/26/12); prod (`titanor-time-app:latest`, `titanor-time-app-1`) не тронут.
+  Данные пилота: шаблон «work time» привязан к назначению Andrei; его текущие planned shifts
+  (перерыв 0) покрывает новая страховка → табель 34.5 ч вместо 37 ч (−30 мин/день).
+
 **`[2026-08-28]` T12 — правки по утреннему списку владельца (5 задач).**
 Дизайн и журнал: `docs/titanor-time/T12_ADMIN_TOOLS_DESIGN.md`. Ветка на 5 коммитов впереди T11.
 - **2a (`402f66b`).** GPS-баннер «Разрешите геолокацию один раз» больше не залипает: локальный
