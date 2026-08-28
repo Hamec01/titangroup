@@ -1,6 +1,51 @@
 # Titanor Time — Implementation Status
 
-Обновлено: 2026-08-27 Europe/Helsinki (Task C — отметить день отсутствием)
+Обновлено: 2026-08-28 Europe/Helsinki (T11 GPS-улучшения — все 4 шага на пилоте)
+
+**`[2026-08-28]` T11 — улучшение GPS (4 шага, все готовы и на пилоте `t97-pilot-176d35e`).**
+По запросу владельца: (1) приложение спрашивает разрешение на GPS один раз, не при каждом
+чек-ине; (2) когда чек-ин сделан офлайн с плохой точностью (у работника Sadovnikov часто
+«GPS не подтверждён», точность ~2000 м) — лучше показывать админу, откуда именно.
+Дизайн и журнал: `docs/titanor-time/T11_GPS_IMPROVEMENTS_DESIGN.md`.
+- **Шаг 1 (`52e5471`, `t97-pilot-52e5471`).** Карточка исключения `GPS_NOT_VERIFIED`
+  (`LOW_ACCURACY` / `NO_GEOFENCE_CONFIGURED`) обогащена: `exceptionDetailForGps()` добавляет
+  `distanceToSiteMeters` / `geofenceRadiusMeters` / `pointInsideGeofence` (по-прежнему через
+  allowlist, сырые координаты в `detail` не пишутся). Новый `ExceptionGpsMap` (MapLibre +
+  OpenFreeMap) рисует точку работника (+ круг точности) и геозону; секция «Где это было» +
+  ссылка на `/admin/workers/[id]/locations`. Сырые координаты для карты подтягиваются только
+  при `attendance.gps.read.raw` (`getAttendanceExceptionDetail(..., { includeRawGps })`).
+  `_test-gps-exception-detail.ts` — 21/21. Миграции нет.
+- **Шаги 2+3 (`99936cc`, `t97-pilot-99936cc`).** `lib/worker-gps.ts` переписан: один
+  `navigator.geolocation.watchPosition` (разрешение спрашивается один раз, GPS «прогрет»),
+  буфер ~90 с / 24 фикса, `pickBestFix()` берёт лучший свежий фикс, `captureGpsSnapshot()`
+  ждёт хороший фикс (≤75 м) до ~25 с и иначе отдаёт лучший из имеющихся.
+  `getGeolocationPermissionState()` / `requestGeolocationPermission()`. В `WorkerClockPanel`
+  — баннер-онбординг для состояния `prompt`, баннер для `denied`, строка точности с кнопкой
+  «Уточнить» при >75 м; периодическая зона-проверка теперь читает буфер, а не запрашивает
+  GPS заново. i18n RU/EN. `_test-worker-gps.ts` — 15/15. Миграции нет.
+- **Шаг 4 (`176d35e`, `t97-pilot-176d35e`).** Порог точности для подтверждения геозоны стал
+  настройкой `CompanyAttendancePolicy.maxGpsAccuracyMeters` (миграция
+  `20260828050000`, `INT NOT NULL DEFAULT 75`, CHECK 10..5000) — был захардкожен 75.
+  `evaluateGpsReading(reading, geofence, maxAccuracyMeters = 75)` принимает порог параметром;
+  `loadMaxGpsAccuracyMeters(tx)` читает singleton-политику; 6 боевых вызовов (3 в
+  `attendance-clock.ts`, 3 в `attendance-sync.ts`) пробрасывают его. Поле редактируется на
+  `/admin/attendance/policy` (`lib/attendance-policy.ts` + `PolicyForm`, валидация 10..5000,
+  аудит before/after). Клиентский `MAX_ACCEPTABLE_ACCURACY_METERS` остаётся 75 (только бейдж
+  «в зоне», сервер авторитетен). Guided-действие «подтвердить по координате» не делали —
+  `ACKNOWLEDGE_AS_VALID` + карта из шага 1 закрывают потребность. `_test-gps-accuracy-threshold.ts`
+  — 15/15. **Миграция есть**: применена на `t97-pilot-db` через `prisma migrate deploy`
+  (75 → 76), idempotent-повтор чист, дефолт 75, CHECK на месте; контейнер пересоздан,
+  health/ready 200, `AttendanceException`/`ClockEvent`/`Timesheet` = 9/20/12 без изменений,
+  prod-образ `daa2edbb…` и `titanor-time-app:latest` не тронуты.
+- `tsc --noEmit` + `next build` — зелёные на каждом шаге. Prod не трогали.
+
+**`[2026-08-28]` Пакет A–F — пункты A, B, C задеплоены на пилот и осеменены данными.**
+A (`fe28442` → `t97-pilot-fe28442`, HTTP E2E 14/14), B (`c1db6d0` → `t97-pilot-c1db6d0`,
+HTTP E2E 12/12), C (`75b1064` → `t97-pilot-75b1064`, HTTP E2E 8/8) — все три прошли прогон
+на собранном образе и на пилоте; пилот осеменён так, чтобы изменения A и B были видны.
+Пакет **приостановлен после C** — владелец переключил приоритет на T11 (GPS). D/E/F —
+решения владельца зафиксированы в `docs/titanor-time/T10_DEF_PLAN.md`, продолжаем оттуда
+(рекомендованный порядок D → F → E).
 
 **`[2026-08-27]` Task C — админ отмечает день больничным / отпуском / … при проверке табеля.**
 Третий пункт пакета A–F. Раньше любой не-`WORK` тип дня требовал одобренного `Absence`, а создать
