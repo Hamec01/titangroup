@@ -1,6 +1,42 @@
 # Titanor Time — Implementation Status
 
-Обновлено: 2026-08-28 Europe/Helsinki (T11 GPS-улучшения — все 4 шага на пилоте)
+Обновлено: 2026-08-28 Europe/Helsinki (T12 инструменты админа + доводка GPS)
+
+**`[2026-08-28]` T12 — правки по утреннему списку владельца (5 задач).**
+Дизайн и журнал: `docs/titanor-time/T12_ADMIN_TOOLS_DESIGN.md`. Ветка на 5 коммитов впереди T11.
+- **2a (`402f66b`).** GPS-баннер «Разрешите геолокацию один раз» больше не залипает: локальный
+  флаг «онбординг пройден» (`titanor.geo.onboarded`), баннер только при явном `denied` или на
+  первом входе, `TIMEOUT` от `getCurrentPosition` внутри помещения его больше не держит.
+  `_test-worker-gps` 22/22.
+- **4 (`05a9a0c`).** `/admin/attendance/exceptions?status=OPEN&type=&from=&to=` больше не 400:
+  пустая query-строка = «фильтр не задан» (`parseExceptionListQuery`). `_test-exception-list-query`
+  12/12.
+- **1b (`543a339`).** Кнопка «Изменить часы» на карточке табеля — 1 клик, без причины, работник
+  не получает плашку «Часы исправил администратор» и уведомление, но полный аудит `AuditEvent`.
+  Переиспользует механику корректировок: миграция `20260828120000`
+  (`TimesheetVersionSource += ADMIN_EDIT`, `CorrectionRequest.directEdit`),
+  `applyInReviewCorrection` замораживает `source=ADMIN_EDIT`/`note=null`.
+  `_test-admin-direct-edit` 22/22, регрессия pre-final-correction 28/28.
+- **1a (`d8e404e`).** Уведомление `TIMESHEET_AWAITING_APPROVAL` в колокольчик на каждый
+  `SUBMITTED`/`FOREMAN_APPROVED` табель в OPEN-периоде («… сдал табель за неделю … — нужно
+  утвердить»), резолвится при утверждении/возврате/закрытии периода. Миграция `20260828130000`
+  (`AdminNotification.timesheetId` + частичный уникальный индекс
+  `ux_admin_notification_active_timesheet`). Календарный бейдж раскрывается в drawer с разбивкой
+  по неделям; `GET /api/admin/review-queue` отдаёт `{ count, weeks }`.
+  `_test-timesheet-approval-notifications` 12/12.
+- **2b (`dedf3a0`).** Авто-точка «на месте» при открытой смене: приложение развернули + смена
+  открыта + прошло ≥3ч с последней точки → один GPS-фикс в очередь (офлайн-safe), синхронизация
+  позже. Фоновая проверка «раз в 3ч в кармане» в PWA на iOS невозможна — записано как
+  ограничение. Миграция `20260828140000` (таблица `ShiftPresenceSample`, 90-дневная ретенция),
+  IndexedDB `DB_VERSION` 2→3 (стор `presenceOutbox`),
+  `POST /api/worker/attendance/presence`. Админ видит точки на карте
+  `/admin/workers/[id]/locations` (янтарные, «в зоне / вне зоны / офлайн»).
+  `_test-attendance-presence` 20/20, `_test-presence-pacing` 7/7,
+  `_test-offline-idb-invariants` 32/32 (добавлена фаза v2→v3).
+- `tsc --noEmit` зелёный. Регрессии corrections / qualification-notifications / GPS steps 1,4 —
+  зелёные. **3 миграции (`20260828120000`, `130000`, `140000`) ещё НЕ применены на пилот** —
+  см. журнал T12, шаг 3.
+
 
 **`[2026-08-28]` T11 — улучшение GPS (4 шага, все готовы и на пилоте `t97-pilot-176d35e`).**
 По запросу владельца: (1) приложение спрашивает разрешение на GPS один раз, не при каждом
