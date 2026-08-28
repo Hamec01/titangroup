@@ -5,6 +5,9 @@ import { createAuditEvent } from '@/lib/audit';
 import { helsinkiToday } from '@/lib/workers';
 import { effectiveReportedRangesBatch, resolveOverlapsForAffectedShifts, provenanceValuesEqual, type ProvenanceValues } from '@/lib/attendance-reported-projection';
 import { computeChangeType, buildClockShiftAdjustmentData } from '@/lib/clock-shift-fragment-edit';
+import { reinitializeDraftFromVersion } from '@/lib/review-scopes';
+import { autoCloseOpenCorrectionsForTimesheet } from '@/lib/correction-lifecycle';
+import { computeTimesheetEditCutoff } from '@/lib/timesheet-edit-window';
 
 // docs/titanor-time/04_ADMIN_FIRST_API_CONTRACTS.md §9 — read-only timesheet/draft/version views
 // (ЭТАП 7 sub-task 3a). §9's ownership rule: "сервер проверяет, что этот Timesheet.employeeId
@@ -1283,5 +1286,75 @@ export async function submitWorkerTimesheet(employeeId: string, timesheetId: str
     await tx.$queryRaw`SELECT id FROM "TimesheetDraft" WHERE "timesheetId" = ${timesheetId}::uuid FOR UPDATE`;
 
     return submitWorkerTimesheetCore(tx, employeeId, timesheetId, actorUserId, requestId, SubmissionSource.MANUAL);
+  });
+}
+
+export type ReopenWorkerTimesheetError =
+  | TimesheetAccessError
+  | { code: 'INVALID_STATE_TRANSITION' }
+  | { code: 'EDIT_WINDOW_CLOSED' };
+
+/**
+ * T12 (owner model) — the worker taps "Внести правки" on a timesheet they already sent. While the
+ * period is OPEN and now is before the cutoff (periodEnd + cutoffDaysAfterPeriodEnd @ cutoffTime),
+ * their submit is a soft, reversible signal — this takes it back: status -> DRAFT, the draft is
+ * repopulated from the current version so they see their own hours, and any open admin edit is
+ * auto-closed (it was on the version being left). generation is NOT touched, so the auto-submit
+ * cutoff stays the fixed period boundary (never a debounce). Overrides an early admin approval:
+ * FOREMAN_APPROVED / FINAL_APPROVED are reopenable too, since before the cutoff the timesheet is
+ * still the worker's.
+ */
+export async function reopenWorkerTimesheetForEdits(
+  employeeId: string,
+  timesheetId: string,
+  actorUserId: string,
+  requestId: string
+): Promise<{ code: 'REOPENED'; status: 'DRAFT' } | ReopenWorkerTimesheetError> {
+  return prisma.$transaction(async (tx) => {
+    await tx.$queryRaw`SELECT id FROM "Employee" WHERE id = ${employeeId}::uuid FOR UPDATE`;
+    await tx.$queryRaw`SELECT id FROM "Timesheet" WHERE id = ${timesheetId}::uuid FOR UPDATE`;
+
+    const fresh = await tx.timesheet.findUnique({
+      where: { id: timesheetId },
+      select: { employeeId: true, status: true, currentVersionId: true, draft: { select: { id: true } }, period: { select: { status: true, endDate: true } } }
+    });
+    if (!fresh || !fresh.draft) {
+      return { code: 'NOT_FOUND' as const };
+    }
+    if (fresh.employeeId !== employeeId) {
+      return { code: 'FORBIDDEN' as const };
+    }
+    if (fresh.status === 'DRAFT' || fresh.status === 'RETURNED') {
+      return { code: 'REOPENED' as const, status: 'DRAFT' as const }; // already editable — no-op
+    }
+    if (!fresh.currentVersionId) {
+      return { code: 'INVALID_STATE_TRANSITION' as const };
+    }
+
+    const policy = await tx.companyAttendancePolicy.findFirst({ select: { cutoffDaysAfterPeriodEnd: true, cutoffTime: true } });
+    const cutoff = computeTimesheetEditCutoff(fresh.period.endDate, {
+      cutoffDaysAfterPeriodEnd: policy?.cutoffDaysAfterPeriodEnd ?? 1,
+      cutoffTime: policy?.cutoffTime ?? new Date('1970-01-01T23:59:00.000Z')
+    });
+    if (fresh.period.status !== 'OPEN' || Date.now() >= cutoff.getTime()) {
+      return { code: 'EDIT_WINDOW_CLOSED' as const };
+    }
+
+    await tx.$queryRaw`SELECT id FROM "TimesheetDraft" WHERE id = ${fresh.draft.id}::uuid FOR UPDATE`;
+    await reinitializeDraftFromVersion(tx, fresh.draft.id, employeeId, fresh.currentVersionId);
+    // A worker reopen does NOT bump systemReopenGeneration — the auto-submit cutoff must stay the
+    // fixed period boundary. lastReturnedReason is cleared so this reads as a plain DRAFT.
+    await tx.timesheet.update({ where: { id: timesheetId }, data: { status: 'DRAFT', lastReturnedReason: null } });
+    await autoCloseOpenCorrectionsForTimesheet(tx, timesheetId, requestId, actorUserId, 'WORKER_REOPENED');
+    await createAuditEvent(tx, {
+      actorUserId,
+      eventType: 'TIMESHEET_WORKER_REOPENED',
+      entityType: 'TIMESHEET',
+      entityId: timesheetId,
+      requestId,
+      beforeValue: { status: fresh.status },
+      afterValue: { status: 'DRAFT', reason: 'worker_edit_within_window' }
+    });
+    return { code: 'REOPENED' as const, status: 'DRAFT' as const };
   });
 }

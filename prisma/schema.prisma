@@ -1682,7 +1682,10 @@ model CompanyAttendancePolicy {
   id                          String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   singleton                   Boolean  @unique @default(true)
   timezone                    String   @default("Europe/Helsinki") @db.VarChar(64)
-  cutoffDaysAfterPeriodEnd    Int      @default(0)
+  // T12 (2026-08-28) — default 1 = the worker gets the whole cycle + one grace day; the timesheet
+  // auto-submits and locks at cutoffTime on (periodEnd + this many days). Weekly Mon–Sun → the
+  // following Monday 23:59 (8 editable days); biweekly → day 15 (15 days).
+  cutoffDaysAfterPeriodEnd    Int      @default(1)
   cutoffTime                  DateTime @default(dbgenerated("'23:59:00'::time")) @db.Time(0)
   systemReopenDebounceMinutes Int      @default(30)
   maxShiftDurationHours       Int      @default(16)

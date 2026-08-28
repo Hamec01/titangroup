@@ -152,8 +152,12 @@ export interface WorkerStrings {
   // -- periods/[periodId]/hours/page.tsx --
   hours: string;
   readOnlyBeingReviewed: string;
+  weekOpenForEdits: string;
+  weekClosedWithManager: string;
+  makeChanges: string;
   noDaysInPeriodYet: string;
   chooseAnotherDate: (n: number) => string;
+  unpaidLunchDeducted: (m: number) => string;
   reviewAndSubmit: string;
   confirmedZeroShort: string;
   dayEmptyDash: string;
@@ -414,8 +418,12 @@ export const WORKER_STRINGS: Record<AppLocale, WorkerStrings> = {
     viewHours: 'View hours',
     hours: 'Hours',
     readOnlyBeingReviewed: 'Read-only — this timesheet is being reviewed.',
+    weekOpenForEdits: 'You already sent this week — but you can still add or change hours until it locks. Tap "Make changes".',
+    weekClosedWithManager: 'This week is closed and with your manager for approval.',
+    makeChanges: 'Make changes',
     noDaysInPeriodYet: 'No days in this period yet.',
     chooseAnotherDate: (n) => `Choose another date (${n})`,
+    unpaidLunchDeducted: (m) => `includes −${m} min unpaid lunch`,
     reviewAndSubmit: 'Review and submit',
     confirmedZeroShort: 'Confirmed 0h',
     dayEmptyDash: '—',
@@ -668,8 +676,12 @@ export const WORKER_STRINGS: Record<AppLocale, WorkerStrings> = {
     viewHours: 'Смотреть часы',
     hours: 'Часы',
     readOnlyBeingReviewed: 'Только просмотр — этот табель на проверке.',
+    weekOpenForEdits: 'Ты уже отправил эту неделю — но часы ещё можно добавить или поправить, пока она не закрылась. Нажми «Внести правки».',
+    weekClosedWithManager: 'Неделя закрыта и передана руководителю на утверждение.',
+    makeChanges: 'Внести правки',
     noDaysInPeriodYet: 'В этом периоде пока нет дней.',
     chooseAnotherDate: (n) => `Выбрать другую дату (${n})`,
+    unpaidLunchDeducted: (m) => `учтён −${m} мин обед (не оплачивается)`,
     reviewAndSubmit: 'Проверить и отправить',
     confirmedZeroShort: 'Подтверждено 0ч',
     dayEmptyDash: '—',

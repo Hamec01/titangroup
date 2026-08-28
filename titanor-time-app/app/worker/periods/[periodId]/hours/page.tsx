@@ -4,12 +4,13 @@ import { listWorkerTimesheets } from '@/lib/worker-context';
 import { getWorkerTimesheetDraft, getWorkerTimesheetCurrentVersion, getWorkerTimesheetSummary, type SegmentView } from '@/lib/worker-timesheets';
 import { prisma } from '@/lib/prisma';
 import { ReturnReasonsNotice } from '../ReturnReasonsNotice';
+import { ReopenForEditsButton } from '../ReopenForEditsButton';
 import { AdminCorrectionNotice } from '../AdminCorrectionNotice';
 import { SnapshotWriter } from '@/components/worker-pwa/SnapshotWriter';
 import { ConnectivityBanner } from '@/components/worker-pwa/ConnectivityBanner';
 import { WorkerLink } from '@/components/worker-pwa/WorkerLink';
 import type { HoursListPayload } from '@/lib/offline-outbox/read-snapshots';
-import { workedMinutesFromIsoSegments } from '@/lib/reporting/report-format';
+import { workedMinutesFromIsoSegments, workedDayMinutesFromIso } from '@/lib/reporting/report-format';
 import { resolveAppLocale } from '@/lib/i18n/server';
 import { COMMON_STRINGS } from '@/lib/i18n/common';
 import { WORKER_STRINGS, dayTypeLabel } from '@/lib/i18n/worker';
@@ -75,15 +76,33 @@ export default async function WorkerHoursListPage({ params }: RouteParams) {
 
   const editable = EDITABLE_STATUSES.has(period.timesheetStatus);
   const periodStatus = period.timesheetStatus;
+  // T12 — the worker still owns the timesheet while the period is OPEN and now is before the cutoff,
+  // even after they tapped "Отправить". A non-draft one just needs a one-tap reopen first.
+  const withinEditWindow = period.status === 'OPEN' && Date.now() < new Date(period.editCutoff).getTime();
+  const canReopen = withinEditWindow && !editable;
 
   let days: { date: string; dayType: string; confirmedZero: boolean; segments: SegmentView[] }[];
+  let plannedShifts: { date: string; plannedBreakMinutes: number }[] = [];
   if (editable) {
     const draft = await getWorkerTimesheetDraft(employeeId, period.timesheetId);
     days = 'code' in draft ? [] : draft.days;
+    plannedShifts = 'code' in draft ? [] : draft.plannedShifts;
   } else {
     const version = await getWorkerTimesheetCurrentVersion(employeeId, period.timesheetId);
     days = 'code' in version ? [] : version.days;
+    plannedShifts = 'code' in version ? [] : version.plannedShifts;
   }
+  // T10-D — planned UNPAID break minutes per date (all planned breaks are unpaid by default; the
+  // "обед оплачивается" template flag is not in the UI yet). The worker sees the same auto-deducted
+  // hours the admin/reports do.
+  const plannedUnpaidByDate = new Map<string, number>();
+  for (const ps of plannedShifts) {
+    plannedUnpaidByDate.set(ps.date, Math.max(plannedUnpaidByDate.get(ps.date) ?? 0, ps.plannedBreakMinutes));
+  }
+  const workedMinutesForDay = (day: { date: string; segments: SegmentView[] }): number =>
+    workedDayMinutesFromIso(day.segments, plannedUnpaidByDate.get(day.date) ?? 0);
+  const autoLunchForDay = (day: { date: string; segments: SegmentView[] }): number =>
+    workedMinutesFromIsoSegments(day.segments) - workedMinutesForDay(day);
 
   const siteIds = [...new Set(days.flatMap((d) => d.segments.map((s) => s.siteId)))];
   const sites = siteIds.length > 0 ? await prisma.workSite.findMany({ where: { id: { in: siteIds } }, select: { id: true, name: true } }) : [];
@@ -103,7 +122,7 @@ export default async function WorkerHoursListPage({ params }: RouteParams) {
       date: day.date,
       dayType: day.dayType,
       confirmedZero: day.confirmedZero,
-      totalMinutes: workedMinutesFromIsoSegments(day.segments),
+      totalMinutes: workedMinutesForDay(day),
       siteNames: [...new Set(day.segments.map((s) => siteNameById.get(s.siteId) ?? s.siteId))]
     })),
     returnReasons: returnReasons.map((r) => ({ scopeType: r.scopeType, siteName: r.siteName, contextSiteName: r.contextSiteName, reason: r.reason, returnedAt: r.returnedAt }))
@@ -116,7 +135,8 @@ export default async function WorkerHoursListPage({ params }: RouteParams) {
   const emptyDays = days.filter((day) => !visibleDays.includes(day));
 
   function renderDay(day: (typeof days)[number]) {
-    const minutes = workedMinutesFromIsoSegments(day.segments);
+    const minutes = workedMinutesForDay(day);
+    const autoLunch = autoLunchForDay(day);
     const siteNames = [...new Set(day.segments.map((s) => siteNameById.get(s.siteId) ?? s.siteId))];
     const isToday = day.date === todayKey;
     const stateLabel = day.dayType !== 'WORK'
@@ -155,6 +175,7 @@ export default async function WorkerHoursListPage({ params }: RouteParams) {
           <p className="wk-day-sites">{siteNames.length > 0 ? siteNames.join(' · ') : t.dayEmptyDash}</p>
           <strong>{formatMinutes(minutes)}</strong>
         </div>
+        {autoLunch > 0 ? <p className="wk-readonly-note">{t.unpaidLunchDeducted(autoLunch)}</p> : null}
       </article>
     );
     return (
@@ -181,7 +202,13 @@ export default async function WorkerHoursListPage({ params }: RouteParams) {
         <h1>{t.hours}</h1>
         <ReturnReasonsNotice status={period.timesheetStatus} reasons={returnReasons} />
         <AdminCorrectionNotice correction={adminCorrection} />
-        {!editable && <p className="wk-readonly-note">{t.readOnlyBeingReviewed}</p>}
+        {!editable && canReopen && (
+          <div className="wk-return-notice" role="status">
+            <p className="wk-return-reason-text">{t.weekOpenForEdits}</p>
+            <ReopenForEditsButton timesheetId={period.timesheetId} label={t.makeChanges} />
+          </div>
+        )}
+        {!editable && !canReopen && <p className="wk-readonly-note">{t.weekClosedWithManager}</p>}
 
         {days.length === 0 ? (
           <p className="wk-empty">{t.noDaysInPeriodYet}</p>

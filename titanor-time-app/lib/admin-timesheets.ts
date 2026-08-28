@@ -1,7 +1,7 @@
 import { prisma } from '@/lib/prisma';
 import { createAuditEvent } from '@/lib/audit';
 import { reinitializeDraftFromVersion, computeSiteScopeHasExceptionBulk } from '@/lib/review-scopes';
-import { autoCloseOpenCorrectionsForTimesheet } from '@/lib/corrections';
+import { autoCloseOpenCorrectionsForTimesheet } from '@/lib/correction-lifecycle';
 import { helsinkiToday } from '@/lib/workers';
 import { computeDayWorkedMs, msToMinutes } from '@/lib/reporting/worked-time';
 import { loadVersionPlannedUnpaidBreakByDate, loadAutoUnpaidBreakThresholdMinutes } from '@/lib/reporting/auto-break';

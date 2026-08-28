@@ -6,7 +6,7 @@ import { createAuditEvent } from '@/lib/audit';
 import { overlapCandidates, overlapExists, resolveOverlapTransition } from '@/lib/attendance-reported-projection';
 import { computePlannedShiftForAssignmentDate, toTemplateWeekday, helsinkiWallClockToUtc, type TemplateDayInput } from '@/lib/periods';
 import { reinitializeDraftFromVersion } from '@/lib/review-scopes';
-import { autoCloseOpenCorrectionsForTimesheet } from '@/lib/corrections';
+import { autoCloseOpenCorrectionsForTimesheet } from '@/lib/correction-lifecycle';
 
 // docs/titanor-time/T7A_1_ATTENDANCE_CLOCK_DESIGN.md §9.4/§9.5 — materializeClockShift. Called
 // inline from online Check Out (§9.2 step k) and Switch Site (§9.3), or from the internal catch-up

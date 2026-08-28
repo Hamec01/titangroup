@@ -2,6 +2,7 @@ import { Prisma } from '@prisma/client';
 import { prisma } from '@/lib/prisma';
 import { resolveCanonicalSource } from '@/lib/reporting/canonical-source';
 import { computeSegmentMs, msToMinutes, sumWorkedTimeMs } from '@/lib/reporting/worked-time';
+import { computeTimesheetEditCutoff } from '@/lib/timesheet-edit-window';
 
 // docs/titanor-time/04_ADMIN_FIRST_API_CONTRACTS.md §9 (Рабочий кабинет), read-only context
 // endpoints — first sub-task's own `worker.read.own`/`assignment.read.own`/`period.read.own`
@@ -111,6 +112,8 @@ export interface ActionablePeriod extends WorkerPeriodSummary {
   totalMinutes: number;
   workedDayCount: number;
   activityDays: WorkerPeriodActivityDay[];
+  /** T12 — the instant the worker loses edit rights (periodEnd + grace @ cutoffTime), ISO. */
+  editCutoff: string;
 }
 
 export interface WorkerPeriodActivityDay {
@@ -159,7 +162,17 @@ const workerPeriodSelect = Prisma.validator<Prisma.TimesheetSelect>()({
 
 type WorkerPeriodRow = Prisma.TimesheetGetPayload<{ select: typeof workerPeriodSelect }>;
 
-function mapWorkerPeriod(row: WorkerPeriodRow): ActionablePeriod {
+export interface WorkerEditWindowPolicy {
+  cutoffDaysAfterPeriodEnd: number;
+  cutoffTime: Date;
+}
+
+async function loadWorkerEditWindowPolicy(): Promise<WorkerEditWindowPolicy> {
+  const p = await prisma.companyAttendancePolicy.findFirst({ select: { cutoffDaysAfterPeriodEnd: true, cutoffTime: true } });
+  return { cutoffDaysAfterPeriodEnd: p?.cutoffDaysAfterPeriodEnd ?? 1, cutoffTime: p?.cutoffTime ?? new Date('1970-01-01T23:59:00.000Z') };
+}
+
+function mapWorkerPeriod(row: WorkerPeriodRow, policy: WorkerEditWindowPolicy): ActionablePeriod {
   const source = resolveCanonicalSource({
     id: row.id,
     status: row.status,
@@ -203,7 +216,8 @@ function mapWorkerPeriod(row: WorkerPeriodRow): ActionablePeriod {
     timesheetStatus: row.status,
     totalMinutes: activityDays.reduce((sum, day) => sum + day.totalMinutes, 0),
     workedDayCount: activityDays.length,
-    activityDays
+    activityDays,
+    editCutoff: computeTimesheetEditCutoff(row.period.endDate, policy).toISOString()
   };
 }
 
@@ -225,7 +239,8 @@ export async function listActionablePeriods(employeeId: string): Promise<Actiona
     select: workerPeriodSelect
   });
 
-  return timesheets.map(mapWorkerPeriod);
+  const policy = await loadWorkerEditWindowPolicy();
+  return timesheets.map((r) => mapWorkerPeriod(r, policy));
 }
 
 /**
@@ -242,5 +257,6 @@ export async function listWorkerTimesheets(employeeId: string): Promise<Actionab
     select: workerPeriodSelect
   });
 
-  return timesheets.map(mapWorkerPeriod);
+  const policy = await loadWorkerEditWindowPolicy();
+  return timesheets.map((r) => mapWorkerPeriod(r, policy));
 }

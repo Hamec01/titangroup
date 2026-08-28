@@ -3,6 +3,7 @@ import { resolveServerSession } from '@/lib/server-session';
 import { listWorkerTimesheets, listWorkerCurrentAssignments } from '@/lib/worker-context';
 import { getWorkerTimesheetSummary } from '@/lib/worker-timesheets';
 import { ReturnReasonsNotice } from './ReturnReasonsNotice';
+import { ReopenForEditsButton } from './ReopenForEditsButton';
 import { AdminCorrectionNotice } from './AdminCorrectionNotice';
 import { SnapshotWriter } from '@/components/worker-pwa/SnapshotWriter';
 import { ConnectivityBanner } from '@/components/worker-pwa/ConnectivityBanner';
@@ -76,6 +77,7 @@ export default async function WorkerPeriodDetailPage({ params }: RouteParams) {
   const returnReasons = 'code' in summary ? [] : summary.returnReasons;
   const adminCorrection = 'code' in summary ? null : summary.adminCorrection;
   const editable = EDITABLE_STATUSES.has(period.timesheetStatus);
+  const canReopen = period.status === 'OPEN' && !editable && Date.now() < new Date(period.editCutoff).getTime();
 
   const snapshotPayload: PeriodDetailPayload = {
     periodId: period.id,
@@ -122,6 +124,14 @@ export default async function WorkerPeriodDetailPage({ params }: RouteParams) {
           <WorkerLink href={`/worker/periods/${period.id}/hours`} className="wk-action-button">
             {t.enterHours}
           </WorkerLink>
+        ) : canReopen ? (
+          <>
+            <p className="wk-readonly-note">{t.weekOpenForEdits}</p>
+            <ReopenForEditsButton timesheetId={period.timesheetId} label={t.makeChanges} />
+            <WorkerLink href={`/worker/periods/${period.id}/hours`} className="wk-back-link">
+              {t.viewHours}
+            </WorkerLink>
+          </>
         ) : (
           <WorkerLink href={`/worker/periods/${period.id}/hours`} className="wk-back-link">
             {t.viewHours}
