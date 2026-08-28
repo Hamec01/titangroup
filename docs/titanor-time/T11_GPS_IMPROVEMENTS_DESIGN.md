@@ -92,7 +92,11 @@
 - **Миграция есть** — при деплое на пилот `prisma migrate deploy` на `t97-pilot-db`.
 
 
-## 0. Как GPS работает сейчас (факты из кода)
+## 0. Как GPS работал ДО этой работы (снимок 2026-08-28, до шагов 1–4)
+
+> Это исходный снимок для контекста. Что изменилось — см. ЖУРНАЛ выше. Кратко: LOW_ACCURACY
+> исключение теперь несёт расстояние до объекта + карту (шаг 1); `watchPosition` + разрешение один
+> раз + лучший-fix-за-окно (шаги 2–3); порог 75 м вынесен в `CompanyAttendancePolicy` (шаг 4).
 
 - **`lib/worker-gps.ts` `captureGpsSnapshot()`** — один-единственный `navigator.geolocation
   .getCurrentPosition(..., { enableHighAccuracy: true, timeout: 12000, maximumAge: 0 })`. **Никогда
