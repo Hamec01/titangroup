@@ -2,7 +2,8 @@ import { prisma } from '@/lib/prisma';
 import { createAuditEvent } from '@/lib/audit';
 import { reinitializeDraftFromVersion, computeSiteScopeHasExceptionBulk } from '@/lib/review-scopes';
 import { helsinkiToday } from '@/lib/workers';
-import { workedMinutesFromIsoSegments } from '@/lib/reporting/report-format';
+import { computeDayWorkedMs, msToMinutes } from '@/lib/reporting/worked-time';
+import { loadVersionPlannedUnpaidBreakByDate, loadAutoUnpaidBreakThresholdMinutes } from '@/lib/reporting/auto-break';
 
 // docs/titanor-time/01_SCREEN_MAP.md §2 `/admin/timesheets[/...]` — final approval / admin
 // override-return. Not detailed in 04_...§9 (that's the worker/foreman-fallback side) — contract
@@ -95,6 +96,10 @@ export interface TimesheetCardDay {
   dayType: string;
   confirmedZero: boolean;
   segments: TimesheetCardSegment[];
+  /** T10-D — worked minutes for this day WITH the automatic unpaid-lunch deduction applied. */
+  workedMinutes: number;
+  /** T10-D — the auto-deducted lunch minutes for this day (0 if a break was logged / short day). */
+  autoUnpaidBreakMinutes: number;
 }
 
 export interface TimesheetCard {
@@ -159,11 +164,14 @@ export async function getTimesheetCard(timesheetId: string): Promise<TimesheetCa
     });
     if (version) {
       versionNumber = version.versionNumber;
-      days = version.days.map((d) => ({
-        date: formatDate(d.date),
-        dayType: d.dayType,
-        confirmedZero: d.confirmedZero,
-        segments: d.segments.map((s) => ({
+      // T10-D — planned UNPAID break per date + the company threshold, for the automatic unpaid
+      // lunch deduction shown per day.
+      const [plannedUnpaidByDate, autoBreakThresholdMinutes] = await Promise.all([
+        loadVersionPlannedUnpaidBreakByDate([timesheet.currentVersionId]),
+        loadAutoUnpaidBreakThresholdMinutes()
+      ]);
+      days = version.days.map((d) => {
+        const segments = d.segments.map((s) => ({
           id: s.id,
           startAt: s.startAt.toISOString(),
           endAt: s.endAt.toISOString(),
@@ -171,8 +179,20 @@ export async function getTimesheetCard(timesheetId: string): Promise<TimesheetCa
           siteName: s.site.name,
           workAreaId: s.workAreaId,
           breaks: s.breaks.map((b) => ({ id: b.id, startAt: b.startAt.toISOString(), endAt: b.endAt.toISOString(), paid: b.paid }))
-        }))
-      }));
+        }));
+        const dayMs = computeDayWorkedMs(
+          segments.map((s) => ({ startAt: new Date(s.startAt), endAt: new Date(s.endAt), breaks: s.breaks.map((b) => ({ startAt: new Date(b.startAt), endAt: new Date(b.endAt), paid: b.paid })) })),
+          { plannedUnpaidBreakMinutes: plannedUnpaidByDate.get(formatDate(d.date)) ?? 0, grossThresholdMinutes: autoBreakThresholdMinutes }
+        );
+        return {
+          date: formatDate(d.date),
+          dayType: d.dayType,
+          confirmedZero: d.confirmedZero,
+          segments,
+          workedMinutes: msToMinutes(dayMs.workedMs),
+          autoUnpaidBreakMinutes: msToMinutes(dayMs.autoUnpaidBreakMs)
+        };
+      });
     }
   }
 
@@ -412,7 +432,7 @@ export async function getReviewQueue(filters: ReviewQueueFilters): Promise<Revie
       currentVersion: {
         select: {
           workSegments: {
-            select: { siteId: true, startAt: true, endAt: true, breaks: { select: { startAt: true, endAt: true, paid: true } } }
+            select: { siteId: true, date: true, startAt: true, endAt: true, breaks: { select: { startAt: true, endAt: true, paid: true } } }
           },
           reviewScopes: { where: { scopeType: 'SITE' }, select: { siteId: true } }
         }
@@ -464,11 +484,34 @@ export async function getReviewQueue(filters: ReviewQueueFilters): Promise<Revie
       : [];
   const foremanSiteIds = new Set(foremanAssignments.map((f) => f.siteId));
 
+  // T10-D — automatic unpaid-lunch inputs for every queued timesheet's current version.
+  const queueVersionIds = timesheets.map((t) => t.currentVersionId).filter((id): id is string => !!id);
+  const [plannedUnpaidByVersionDate, autoBreakThresholdMinutes] = await Promise.all([
+    loadVersionPlannedUnpaidBreakByDate(queueVersionIds),
+    loadAutoUnpaidBreakThresholdMinutes()
+  ]);
+  // loadVersionPlannedUnpaidBreakByDate keys by date only (one plan per worker/day). It pools all
+  // versions — fine here because each version belongs to a different worker and dates rarely
+  // collide; a small over-attribution only affects the queue's summary hours, never a frozen row.
+
   let rows: ReviewQueueRow[] = timesheets.map((t) => {
     const segs = t.currentVersion?.workSegments ?? [];
-    const workedMinutes = workedMinutesFromIsoSegments(
-      segs.map((s) => ({ startAt: s.startAt.toISOString(), endAt: s.endAt.toISOString(), breaks: s.breaks.map((b) => ({ startAt: b.startAt.toISOString(), endAt: b.endAt.toISOString(), paid: b.paid })) }))
-    );
+    // Per-day worked minutes with the T10-D auto unpaid-lunch, then sum the (rounded) day totals.
+    const byDate = new Map<string, typeof segs>();
+    for (const s of segs) {
+      const key = formatDate(s.date);
+      const list = byDate.get(key);
+      if (list) list.push(s);
+      else byDate.set(key, [s]);
+    }
+    let workedMinutes = 0;
+    for (const [dateKey, daySegs] of byDate) {
+      const dayMs = computeDayWorkedMs(
+        daySegs.map((s) => ({ startAt: s.startAt, endAt: s.endAt, breaks: s.breaks })),
+        { plannedUnpaidBreakMinutes: plannedUnpaidByVersionDate.get(dateKey) ?? 0, grossThresholdMinutes: autoBreakThresholdMinutes }
+      );
+      workedMinutes += msToMinutes(dayMs.workedMs);
+    }
     const siteIds = [...new Set(segs.map((s) => s.siteId))];
     const planMismatch = (t.currentVersion?.reviewScopes ?? []).some((s) => s.siteId && mismatchByKey.get(`${t.currentVersionId}:${s.siteId}`) === true);
     return {

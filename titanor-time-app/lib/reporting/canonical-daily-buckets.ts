@@ -1,9 +1,6 @@
-import { computeDayWorkedMs, msToMinutes, type WorkedTimeBreakInput } from './worked-time';
+import { computeDayWorkedMs, msToMinutes, DEFAULT_AUTO_UNPAID_BREAK_THRESHOLD_MINUTES, type WorkedTimeBreakInput } from './worked-time';
 
-// T10-D — the Finnish 6 h default for the "long enough to have taken a lunch" threshold, used when
-// a caller doesn't pass one (kept in sync with CompanyAttendancePolicy.autoUnpaidBreakThresholdMinutes's
-// default). A caller that has the policy loaded should always pass grossThresholdMinutes explicitly.
-export const DEFAULT_AUTO_UNPAID_BREAK_THRESHOLD_MINUTES = 360;
+export { DEFAULT_AUTO_UNPAID_BREAK_THRESHOLD_MINUTES };
 
 // docs/titanor-time/T8_REPORTS_DESIGN.md Addendum "T8.4B" §BD — the single reusable
 // (employeeId, siteId, date) grouping + rounding step shared by T8.3 (lib/period-time-report.ts)

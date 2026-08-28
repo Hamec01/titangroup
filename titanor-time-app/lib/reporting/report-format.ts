@@ -4,7 +4,7 @@
 // same formatting logic — same core/UI split already used by lib/attendance-overview.ts vs
 // lib/attendance-overview-ui.ts.
 
-import { computeSegmentMs, msToMinutes, sumWorkedTimeMs } from '@/lib/reporting/worked-time';
+import { computeSegmentMs, computeDayWorkedMs, msToMinutes, sumWorkedTimeMs, DEFAULT_AUTO_UNPAID_BREAK_THRESHOLD_MINUTES } from '@/lib/reporting/worked-time';
 import type { AppLocale } from '@/lib/i18n/locale';
 
 export interface IsoWorkedTimeSegment {
@@ -13,19 +13,31 @@ export interface IsoWorkedTimeSegment {
   breaks: { startAt: string; endAt: string; paid: boolean }[];
 }
 
-/** Shared presentation adapter for draft/version DTOs whose timestamps are serialized ISO strings. */
+function toDateSegments(segments: IsoWorkedTimeSegment[]) {
+  return segments.map((segment) => ({
+    startAt: new Date(segment.startAt),
+    endAt: new Date(segment.endAt),
+    breaks: segment.breaks.map((item) => ({ startAt: new Date(item.startAt), endAt: new Date(item.endAt), paid: item.paid }))
+  }));
+}
+
+/** Shared presentation adapter for draft/version DTOs whose timestamps are serialized ISO strings.
+ *  Segment-level only (no T10-D auto unpaid-lunch) — use workedDayMinutesFromIso for a single day's
+ *  worth of segments when the planned break is known, or when summing a whole timesheet where each
+ *  day was already adjusted upstream. */
 export function workedMinutesFromIsoSegments(segments: IsoWorkedTimeSegment[]): number {
-  return msToMinutes(
-    sumWorkedTimeMs(
-      segments.map((segment) =>
-        computeSegmentMs({
-          startAt: new Date(segment.startAt),
-          endAt: new Date(segment.endAt),
-          breaks: segment.breaks.map((item) => ({ startAt: new Date(item.startAt), endAt: new Date(item.endAt), paid: item.paid }))
-        })
-      )
-    ).workedMs
-  );
+  return msToMinutes(sumWorkedTimeMs(toDateSegments(segments).map((s) => computeSegmentMs(s))).workedMs);
+}
+
+/** T10-D — one day's worked minutes, WITH the automatic unpaid-lunch deduction (see
+ *  computeDayWorkedMs). `plannedUnpaidBreakMinutes` is that day's planned break when unpaid (0 if
+ *  paid / no plan); `grossThresholdMinutes` is CompanyAttendancePolicy.autoUnpaidBreakThresholdMinutes. */
+export function workedDayMinutesFromIso(
+  daySegments: IsoWorkedTimeSegment[],
+  plannedUnpaidBreakMinutes: number,
+  grossThresholdMinutes: number = DEFAULT_AUTO_UNPAID_BREAK_THRESHOLD_MINUTES
+): number {
+  return msToMinutes(computeDayWorkedMs(toDateSegments(daySegments), { plannedUnpaidBreakMinutes, grossThresholdMinutes }).workedMs);
 }
 
 /** "X h Y min" exactly, per the T8.1 task spec (reused verbatim by every later report). Negative

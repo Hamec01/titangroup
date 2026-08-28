@@ -64,6 +64,11 @@ export function msToMinutes(ms: number): number {
 // T10-D — automatic unpaid lunch (docs/titanor-time/T10_DEF_PLAN.md §D)
 // ---------------------------------------------------------------------------------------------
 
+// Finnish 6 h norm — the default for the "long enough to have taken a lunch" threshold, kept in
+// sync with CompanyAttendancePolicy.autoUnpaidBreakThresholdMinutes's column default. Callers that
+// have the policy loaded should pass the real value.
+export const DEFAULT_AUTO_UNPAID_BREAK_THRESHOLD_MINUTES = 360;
+
 export interface DayAutoBreakConfig {
   /** The day's PLANNED break in minutes, counting ONLY the unpaid part — the caller passes 0 when
    *  the planned break is marked paid (plannedBreakPaid) or there is no plan for that day. */

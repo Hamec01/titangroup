@@ -8,7 +8,7 @@ import { DirectEditForm } from './DirectEditForm';
 import { DiscardOpenEditButton } from './DiscardOpenEditButton';
 import { ReturnTimesheetForm } from './ReturnTimesheetForm';
 import { ApproveTimesheetButton } from '../../review/ApproveTimesheetButton';
-import { workedMinutesFromIsoSegments, timesheetStatusLabel } from '@/lib/reporting/report-format';
+import { timesheetStatusLabel } from '@/lib/reporting/report-format';
 import { dayTypeLabel } from '@/lib/i18n/worker';
 import { resolveAppLocale } from '@/lib/i18n/server';
 import { adminDailyStrings } from '@/lib/i18n/admin-daily';
@@ -91,7 +91,9 @@ export default async function AdminTimesheetCardPage({ params }: RouteParams) {
                         ? day.confirmedZero
                           ? localeText(locale, 'Confirmed 0h', 'Подтверждено 0ч')
                           : '—'
-                        : `${formatMinutes(workedMinutesFromIsoSegments(day.segments), ru)} · ${day.segments.map((s) => s.siteName).join(', ')}`}
+                        : `${formatMinutes(day.workedMinutes, ru)} · ${day.segments.map((s) => s.siteName).join(', ')}${
+                            day.autoUnpaidBreakMinutes > 0 ? localeText(locale, ` (−${day.autoUnpaidBreakMinutes} min unpaid lunch)`, ` (−${day.autoUnpaidBreakMinutes} мин обед не оплачивается)`) : ''
+                          }`}
                   </td>
                 </tr>
               ))}
