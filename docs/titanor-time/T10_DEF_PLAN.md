@@ -11,6 +11,31 @@
 
 ## D — автоматический неоплачиваемый обед (30 мин)
 
+**СТАТУС (2026-08-28): в работе, ядро + отчёты/экспорт на пилоте `t97-pilot-66e8a4e`.**
+- Миграция `20260828150000`: `plannedBreakPaid` на `WorkScheduleTemplateVersionDay` +
+  `Timesheet(Draft)PlannedShift` (все DEFAULT false = финская норма: обед не оплачивается);
+  `CompanyAttendancePolicy.autoUnpaidBreakThresholdMinutes` DEFAULT 360 (6 ч), CHECK 0..1440
+  (0 = вычитать всегда).
+- `lib/reporting/worked-time.ts::computeDayWorkedMs(daySegments, { plannedUnpaidBreakMinutes,
+  grossThresholdMinutes })` — DAY-level: если перерыв НЕ отмечен, gross ≥ порога и в плане есть
+  неоплачиваемый перерыв — вычитаем плановый перерыв один раз (не больше gross; любой отмеченный
+  перерыв, платный или нет, отключает авто-вычет). `sumWorkedDayMs`.
+- `lib/reporting/auto-break.ts` — загрузчики (порог из политики; плановый неоплачиваемый перерыв
+  по дате из замороженных/черновых planned shifts, без join к шаблону).
+- Подключено: `canonical-daily-buckets` (→ period report, CSV export), custom report, worker time
+  report, site time report, `getTimesheetCard` (столбец «Детали» показывает `−30 мин обед`),
+  `getReviewQueue` (столбец «Часы» = сумма по-дневных авто-скорректированных).
+- Тест `_test-auto-unpaid-break` 13/13; report-canonical 20/20.
+
+**Осталось:** галочка «обед оплачивается» в UI шаблона графика + её проброс в planned shift;
+поле порога на `/admin/attendance/policy`; дашборд «Сегодня» plan-vs-actual, список часов у
+работника, превью корректировки / review-scopes / foreman-review (сейчас там сегмент-уровень без
+авто-обеда — косметическое расхождение, не бухгалтерское). Порядок пакета: **D → F → E**.
+
+---
+### Исходный план D
+
+
 **Проблема (баг).** В Финляндии смена 07:00–15:30 = **8 оплачиваемых часов**, не 8:30 — обед 30 мин
 неоплачиваемый. Модель перерывов есть (`BreakSegment.paid`, `worked = gross − unpaid breaks`), но
 автоматически ничего не вычитается: если работник не отметил перерыв сам, смена считается целиком.
