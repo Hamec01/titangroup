@@ -923,6 +923,20 @@ button:disabled {
   gap: 8px;
 }
 
+.guide-change-entry {
+  margin-top: 18px;
+}
+
+.guide-change-entry:first-of-type {
+  margin-top: 12px;
+}
+
+.guide-change-entry h3 {
+  margin: 0;
+  font-size: 0.95rem;
+  color: var(--white);
+}
+
 @media (max-width: 700px) {
   .guide-roles-grid {
     grid-template-columns: 1fr;

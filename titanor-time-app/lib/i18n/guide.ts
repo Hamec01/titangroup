@@ -12,10 +12,19 @@ import type { AppLocale } from './locale';
 // screen with one-click approve, the three ways to change a timesheet (return / direct edit /
 // formal correction), marking sick-leave/vacation from review, the configurable GPS accuracy
 // threshold, and the mid-shift presence check in the worker app.
+//
+// The "What's new" section (changelog) at the bottom is written for the owner, in plain language,
+// newest first, dated. When something user-visible ships, add a bullet under the right date — no
+// commit hashes, no internal task codes, just what changed and why it matters.
 
 export interface GuideItem {
   title: string;
   text: string;
+}
+
+export interface GuideChangeEntry {
+  date: string;
+  items: string[];
 }
 
 export interface GuideGroup {
@@ -46,6 +55,9 @@ export interface GuideContent {
   workerApp: string[];
   tipsTitle: string;
   tips: string[];
+  changelogTitle: string;
+  changelogIntro: string;
+  changelog: GuideChangeEntry[];
   backToLogin: string;
   backToHome: string;
 }
@@ -186,6 +198,48 @@ export const GUIDE_CONTENT: Record<AppLocale, GuideContent> = {
       'Рабочую зону и шаблон графика, которые уже используются, нельзя удалить — только отключить: так сохраняется история по уже отработанному времени, но их больше нельзя выбрать для новых назначений.',
       'Изменение цикла отправки табеля задним числом ограничено, если по текущему периоду уже есть данные — такие изменения обычно применяются с ближайшей будущей границы периода.'
     ],
+    changelogTitle: 'Что нового',
+    changelogIntro: 'Коротко — что менялось в системе за последнее время. Самое свежее сверху.',
+    changelog: [
+      {
+        date: '28 августа 2026',
+        items: [
+          'Обеденный перерыв вычитается сам. Если в графике стоит перерыв 30 минут, система убирает эти полчаса из рабочего времени автоматически — после того как работник закончил день. Одни и те же часы теперь видят и работник, и руководитель, и отчёты. Если работник сам отметил перерыв, второй раз ничего не вычтется. Для тех, кому обед оплачивают, в шаблоне графика есть галочка «обед оплачивается».',
+          'Забытая смена закрывается сама. Работник ушёл и не нажал «Уход» — через 16 часов система закроет смену по плановому времени окончания из графика и покажет это руководителю отдельным сигналом, чтобы он проверил и при необходимости поправил часы.',
+          'Неделя принадлежит работнику до конца следующего дня после закрытия периода (при недельном цикле — до понедельника, 23:59). До этого момента он спокойно правит свои дни, система не спрашивает «почему изменил». Потом табель уходит на проверку. Уже утверждённый табель можно вернуть работнику кнопкой «Внести правки».'
+        ]
+      },
+      {
+        date: '27 августа 2026',
+        items: [
+          'Появился один экран «На утверждении» — все табели, которые ждут вашей проверки, в одном списке, а не в трёх разных разделах. Простые табели (без замечаний) можно утвердить прямо из списка одной кнопкой. Рядом с колокольчиком появилась иконка календаря — на ней видно, сколько недель ждёт утверждения.',
+          'Руководитель может поправить часы работника, не возвращая ему табель. «Изменить часы» — быстрая правка, работник её не видит и уведомления не получает. «Исправить часы» — правка с причиной, которую работник увидит.',
+          'Больничный, отпуск и неоплачиваемый день ставятся прямо в табеле при проверке. Отдельная заявка на отсутствие для этого больше не нужна.',
+          'Понятнее уведомления: на каждый сданный табель приходит отдельное «нужно утвердить неделю такую-то».',
+          'Кнопка «Отклонить» у проблем учёта переименована в «Снять сигнал» — раньше её путали с отклонением часов. Часы, смена и отметки при этом не меняются, сигнал просто убирается из списка после проверки.'
+        ]
+      },
+      {
+        date: 'Геолокация (GPS), 27–28 августа 2026',
+        items: [
+          'Разрешение на геолокацию спрашивается один раз. Если работник выбрал «Разрешить при использовании приложения», приложение больше не переспрашивает и не мешает отмечаться.',
+          'Точность стала выше. Приложение недолго «прогревает» геолокацию и берёт самую точную точку за последние секунды, а не первую попавшуюся. Работник видит текущую точность и может нажать «Уточнить».',
+          'Видно, где был работник, даже когда GPS «не подтверждён». В проблеме учёта теперь показывается расстояние до объекта, попал ли работник в геозону, и мини-карта. Даже при плохой точности по карте понятно, был человек на месте или нет.',
+          'Порог точности GPS можно настроить в «Правилах учёта» — для объектов со слабым сигналом внутри зданий его можно поднять.',
+          'На долгой смене приложение может тихо отметить, что работник ещё на объекте (когда он открывает приложение). Эти точки руководитель видит на карте работника. Перезаходить в смену для этого не нужно.'
+        ]
+      },
+      {
+        date: '23–26 августа 2026',
+        items: [
+          'Досье работника: дата рождения, личный код, контактный email, специальность, навыки, фото, договор — всё на карточке работника.',
+          'Допуски и сертификаты со сроком действия: общая таблица по всем работникам и напоминания в колокольчике заранее, до того как срок истёк.',
+          'Меню администратора сгруппировано по смыслу — Настройка, Работники, Учёт времени, Проверка, Отчёты.',
+          'Эта инструкция — на русском и английском, ссылка на неё есть на входе и в шапке.',
+          'Отчёты и выгрузки всегда на английском, независимо от языка панели — чтобы файл для бухгалтерии выглядел одинаково.'
+        ]
+      }
+    ],
     backToLogin: '← Назад ко входу',
     backToHome: '← На главную'
   },
@@ -323,6 +377,48 @@ export const GUIDE_CONTENT: Record<AppLocale, GuideContent> = {
       'The system shows expiring qualifications and certificates in the bell ahead of time — before they actually become invalid.',
       'A work area or schedule template that\'s already in use can\'t be deleted — only deactivated: this keeps the history of time already logged, while removing it from future assignment choices.',
       'Changing a submission cycle retroactively is limited if the current period already has data — such changes are usually applied from the nearest future period boundary.'
+    ],
+    changelogTitle: 'What\'s new',
+    changelogIntro: 'A short list of what has changed in the system recently. Newest first.',
+    changelog: [
+      {
+        date: '28 August 2026',
+        items: [
+          'The lunch break is deducted automatically. If the schedule has a 30-minute break, the system takes those 30 minutes out of worked time on its own, once the worker has finished the day. The worker, the manager, and the reports now all see the same hours. If the worker logged their own break, nothing is deducted twice. For cases where lunch is paid, the schedule template has a "lunch is paid" checkbox.',
+          'A forgotten shift closes itself. If a worker leaves without pressing "Check out", after 16 hours the system closes the shift at the planned end time from the schedule and flags it to the manager as an issue to review and adjust if needed.',
+          'The week belongs to the worker until the end of the day after the period closes (for a weekly cycle — until Monday, 23:59). Until then they edit their days freely and the system doesn\'t ask "why did you change this". After that the timesheet goes for review. An already-approved timesheet can be sent back to the worker with the "Reopen for edits" button.'
+        ]
+      },
+      {
+        date: '27 August 2026',
+        items: [
+          'There is now one "Awaiting approval" screen — every timesheet waiting for your review in a single list instead of three separate sections. Clean timesheets (no issues) can be approved straight from the list with one button. A calendar icon next to the bell shows how many weeks are waiting for approval.',
+          'The manager can fix a worker\'s hours without sending the timesheet back. "Edit hours" is a quick edit the worker doesn\'t see and isn\'t notified about. "Edit hours" with a reason shows that reason to the worker.',
+          'Sick leave, vacation and unpaid days are set right in the timesheet during review. A separate absence request is no longer needed for that.',
+          'Clearer notifications: each submitted timesheet gets its own "week X needs approval" alert.',
+          'The "Dismiss" button on attendance issues is now "Clear alert" — it used to be mistaken for rejecting hours. Hours, the shift and the check-ins are not changed; the alert is just removed from the list after review.'
+        ]
+      },
+      {
+        date: 'Location (GPS), 27–28 August 2026',
+        items: [
+          'Location permission is asked once. If the worker chose "Allow while using the app", the app no longer keeps asking and doesn\'t get in the way of checking in.',
+          'Accuracy is better. The app briefly "warms up" location and takes the most accurate point from the last few seconds rather than the first one. The worker sees the current accuracy and can tap "Refine".',
+          'You can see where the worker was even when GPS is "not verified". The attendance issue now shows the distance to the site, whether the worker was inside the geofence, and a mini-map. Even with poor accuracy the map makes it clear whether the person was on-site.',
+          'The GPS accuracy threshold is configurable in Attendance policy — raise it for sites with a weak signal indoors.',
+          'On a long shift the app can quietly note that the worker is still on-site (when they open the app). Those points show on the worker\'s map for the manager. No need to check out and back in for this.'
+        ]
+      },
+      {
+        date: '23–26 August 2026',
+        items: [
+          'Worker dossier: date of birth, personal ID code, contact email, specialty, skills, photo, contract — all on the worker\'s card.',
+          'Qualifications and certificates with expiry dates: a whole-team table and reminders in the bell ahead of time, before a date expires.',
+          'The admin menu is grouped by purpose — Setup, People, Time & attendance, Review, Reports.',
+          'This guide — in Russian and English, linked from the sign-in page and the header.',
+          'Reports and exports are always in English, regardless of the panel language, so the payroll file looks the same every time.'
+        ]
+      }
     ],
     backToLogin: '← Back to sign in',
     backToHome: '← Back to dashboard'
