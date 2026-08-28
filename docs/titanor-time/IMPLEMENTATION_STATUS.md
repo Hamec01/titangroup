@@ -34,8 +34,13 @@
   `_test-attendance-presence` 20/20, `_test-presence-pacing` 7/7,
   `_test-offline-idb-invariants` 32/32 (добавлена фаза v2→v3).
 - `tsc --noEmit` зелёный. Регрессии corrections / qualification-notifications / GPS steps 1,4 —
-  зелёные. **3 миграции (`20260828120000`, `130000`, `140000`) ещё НЕ применены на пилот** —
-  см. журнал T12, шаг 3.
+  зелёные.
+- **Задеплоено на пилот (`t97-pilot-75cdde5`, 2026-08-28).** Бэкап
+  `t97-pilot-20260828T122802Z-pre-75cdde5.dump`. 3 миграции применены на `titanor_time_t97`,
+  idempotent-повтор чист; `t97-pilot-app` пересоздан; `/api/ready`/`/api/health`/`/login` 200,
+  внешний HTTPS 200; счётчики строк без изменений (10/23/12); prod (`daa2edbb`) не тронут.
+- **Ветка запушена:** `origin/feature/titanor-time-foundation` = `75cdde5` (20 коммитов:
+  T10 A/B/C + T11 GPS 1–4 + T12 1–5).
 
 
 **`[2026-08-28]` T11 — улучшение GPS (4 шага, все готовы и на пилоте `t97-pilot-176d35e`).**

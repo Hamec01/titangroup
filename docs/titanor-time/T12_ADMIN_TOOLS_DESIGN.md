@@ -1,6 +1,7 @@
 # T12 · Инструменты админа + доводка GPS
 
-Статус: **в работе**. Дата: 2026-08-28. По списку правок владельца (утро 2026-08-28):
+Статус: **все 5 задач готовы и на пилоте `t97-pilot-75cdde5`; ветка запушена в origin.**
+Дата: 2026-08-28. По списку правок владельца (утро 2026-08-28):
 
 1. Уведомления «нужно утвердить» за каждую неделю + кнопка «Изменить часы» на карточке табеля
    (правка без причины, работник не уведомляется).
@@ -20,7 +21,21 @@
 | 1b | Кнопка «Изменить часы» — 1 клик, без причины, без плашки работнику, полный аудит | ✅ ГОТОВО. Коммит `543a339`. Миграция `20260828120000`. Тест `_test-admin-direct-edit` 22/22. |
 | 1a | Уведомление «нужно утвердить» на каждый сданный табель + разбивка по неделям в календарном бейдже | ✅ ГОТОВО. Коммит `d8e404e`. Миграция `20260828130000`. Тест `_test-timesheet-approval-notifications` 12/12. |
 | 2b | Авто-точка «на месте» при открытой смене (≥3ч, офлайн-safe), карта у админа | ✅ ГОТОВО. Коммит `dedf3a0`. Миграция `20260828140000`. Тесты `_test-attendance-presence` 20/20, `_test-presence-pacing` 7/7, `_test-offline-idb-invariants` 32/32. |
-| 3 | Деплой на пилот (3 миграции) + `git push` ветки в origin | ⬜ следующий шаг |
+| 3 | Деплой на пилот (3 миграции) + `git push` ветки в origin | ✅ ГОТОВО. `git push` — 20 коммитов в `origin/feature/titanor-time-foundation` (`41d2c04..75cdde5`). Пилот на образе `t97-pilot-75cdde5`. |
+
+**Пилот (`t97-pilot-75cdde5`, 2026-08-28).** Бэкап `t97-pilot-20260828T122802Z-pre-75cdde5.dump`.
+3 миграции (`20260828120000`, `130000`, `140000`) применены на `titanor_time_t97` через
+`prisma migrate deploy` (temp-контейнер из нового образа, host `prisma/` смонтирован ro,
+`--env-file` пилота); idempotent-повтор `No pending migrations`. Схема проверена: `ADMIN_EDIT` в
+enum, `CorrectionRequest.directEdit`, `AdminNotification.timesheetId`, таблица
+`ShiftPresenceSample`, частичный индекс `ux_admin_notification_active_timesheet` — все на месте.
+Контейнер `t97-pilot-app` пересоздан на новом образе; `/api/ready` + `/api/health` + `/login` 200,
+внешний HTTPS через Caddy 200. Счётчики строк без изменений
+(`AttendanceException`=10 / `ClockEvent`=23 / `Timesheet`=12), `ShiftPresenceSample`=0,
+`CorrectionRequest.directEdit` дефолт false на существующей строке. Prod-образ `daa2edbb…` /
+`titanor-time-app:latest` и контейнер `titanor-time-app-1` не тронуты (up 6 days healthy).
+Smoke: `POST /api/worker/attendance/presence` → 401, `GET /api/admin/review-queue` → 401,
+`/admin/attendance/exceptions?status=OPEN&type=&from=&to=` → 307 (login) — ни одного 500, лог чист.
 
 `tsc --noEmit` зелёный после каждого шага. Регрессии (corrections, qualification-notifications,
 GPS steps 1/4) — зелёные.
