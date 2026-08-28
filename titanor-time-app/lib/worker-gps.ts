@@ -79,6 +79,44 @@ function mapGeolocationError(error: GeolocationPositionError): ClientGpsUnavaila
 
 export type GeolocationPermissionState = 'granted' | 'prompt' | 'denied' | 'unsupported';
 
+// T12 GPS step 1 — "разрешить навсегда". iOS Safari's navigator.permissions.query({name:'geolocation'})
+// reports 'prompt' even when the site grant is actually live, and an indoor getCurrentPosition often
+// TIMEOUTs without a fix — the pre-T12 code kept re-showing the onboarding banner in both cases, so
+// the worker "allowed" and nothing changed. This one boolean records "the worker went through the
+// onboarding once on this device"; once set we run the watch silently and only flip to the blocked
+// banner on an *explicit* PERMISSION_DENIED from the OS. It is a UX hint only — never a coordinate,
+// never PII — so localStorage is fine here (unlike the fix buffer, which stays in memory).
+const GEO_ONBOARDED_KEY = 'titanor.geo.onboarded';
+
+export function isGeoOnboarded(): boolean {
+  try {
+    return typeof localStorage !== 'undefined' && localStorage.getItem(GEO_ONBOARDED_KEY) === '1';
+  } catch {
+    return false;
+  }
+}
+
+export function markGeoOnboarded(): void {
+  try {
+    if (typeof localStorage !== 'undefined') {
+      localStorage.setItem(GEO_ONBOARDED_KEY, '1');
+    }
+  } catch {
+    // Private mode / storage disabled — the banner logic still works, it just can't remember
+    // across reloads. No worse than the pre-T12 behaviour.
+  }
+}
+
+export function clearGeoOnboarded(): void {
+  try {
+    if (typeof localStorage !== 'undefined') {
+      localStorage.removeItem(GEO_ONBOARDED_KEY);
+    }
+  } catch {
+    // ignore
+  }
+}
+
 /** navigator.permissions is not everywhere (older iOS Safari); 'unsupported' means "just try". */
 export async function getGeolocationPermissionState(): Promise<GeolocationPermissionState> {
   if (typeof navigator === 'undefined' || !navigator.permissions || typeof navigator.permissions.query !== 'function') {
@@ -156,16 +194,22 @@ export function isGpsWatchActive(): boolean {
 }
 
 /** Start the single long-lived watch. Idempotent. The clock panel calls this once permission is
- * granted and clears it on unmount. */
-export function startGpsWatch(): void {
+ * granted and clears it on unmount. `onPermissionDenied` fires if the OS reports the grant was
+ * revoked while the watch is running (worker turned Location off mid-session) — the panel uses it
+ * to flip back to the blocked banner and forget the onboarding flag. */
+export function startGpsWatch(onPermissionDenied?: () => void): void {
   if (watchId !== null || typeof navigator === 'undefined' || !navigator.geolocation) {
     return;
   }
   watchId = navigator.geolocation.watchPosition(
     (pos) => pushFix(normalize(pos.coords)),
-    () => {
-      // Errors here are non-fatal — captureGpsSnapshot() surfaces the reason when a capture is
-      // actually needed. A transient POSITION_UNAVAILABLE while walking indoors is expected.
+    (err) => {
+      // A transient POSITION_UNAVAILABLE / TIMEOUT while walking indoors is expected and non-fatal —
+      // captureGpsSnapshot() surfaces those when a capture is actually needed. Only an explicit
+      // PERMISSION_DENIED means the grant is really gone.
+      if (err.code === err.PERMISSION_DENIED) {
+        onPermissionDenied?.();
+      }
     },
     { enableHighAccuracy: true, maximumAge: 0, timeout: 30_000 }
   );

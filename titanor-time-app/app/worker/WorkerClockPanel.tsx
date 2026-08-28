@@ -10,6 +10,9 @@ import {
   startGpsWatch,
   stopGpsWatch,
   currentBestFix,
+  isGeoOnboarded,
+  markGeoOnboarded,
+  clearGeoOnboarded,
   type GpsSnapshot,
   type GeolocationPermissionState
 } from '@/lib/worker-gps';
@@ -260,13 +263,43 @@ export function WorkerClockPanel({ initialClockState, assignments, workerName, t
   // ---- GPS steps 2+3 — resolve permission once, then keep one long-lived watch running while
   // this panel is mounted. The watch feeds worker-gps's best-fix buffer, so Check In/Out uses the
   // least-bad recent reading and the OS never re-prompts. ----
+  // Flip back to the blocked banner and forget the onboarding flag when the OS reports the grant is
+  // really gone (worker turned Location off after granting).
+  const handleGeoPermissionRevoked = useCallback(() => {
+    clearGeoOnboarded();
+    setGpsPermission('denied');
+    stopGpsWatch();
+  }, []);
+
   useEffect(() => {
     let cancelled = false;
     void getGeolocationPermissionState().then((state) => {
       if (cancelled) return;
-      setGpsPermission(state);
-      if (state === 'granted' || state === 'unsupported') {
-        startGpsWatch();
+      if (state === 'denied') {
+        // Explicit, trustworthy on every browser — always the blocked banner.
+        clearGeoOnboarded();
+        setGpsPermission('denied');
+        return;
+      }
+      if (state === 'granted') {
+        markGeoOnboarded();
+        setGpsPermission('granted');
+        startGpsWatch(handleGeoPermissionRevoked);
+        return;
+      }
+      // state is 'prompt' or 'unsupported'. On iOS Safari navigator.permissions reports 'prompt'
+      // even when the grant is live, so this is NOT proof the worker still needs to be asked. If
+      // they already completed onboarding on this device, trust that: run the watch silently and
+      // let handleGeoPermissionRevoked catch a real revocation. Only a fresh device (no flag) sees
+      // the onboarding banner.
+      if (isGeoOnboarded()) {
+        setGpsPermission('granted');
+        startGpsWatch(handleGeoPermissionRevoked);
+      } else {
+        setGpsPermission(state);
+        if (state === 'unsupported') {
+          startGpsWatch(handleGeoPermissionRevoked);
+        }
       }
     });
     const readout = window.setInterval(() => {
@@ -278,14 +311,37 @@ export function WorkerClockPanel({ initialClockState, assignments, workerName, t
       window.clearInterval(readout);
       stopGpsWatch();
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // A clock-action capture that comes back PERMISSION_DENIED is the OS actively refusing — surface
+  // the "blocked, fix it in settings" banner and forget the onboarding flag.
+  useEffect(() => {
+    if (gpsStatus === 'PERMISSION') {
+      clearGeoOnboarded();
+      setGpsPermission('denied');
+    }
+  }, [gpsStatus]);
 
   async function handleGrantGps(): Promise<void> {
     const result = await requestGeolocationPermission();
-    setGpsPermission(result.granted ? 'granted' : result.reason === 'PERMISSION_DENIED' ? 'denied' : 'prompt');
     if (result.granted) {
-      startGpsWatch();
+      markGeoOnboarded();
+      setGpsPermission('granted');
+      startGpsWatch(handleGeoPermissionRevoked);
+      return;
     }
+    if (result.reason === 'PERMISSION_DENIED') {
+      clearGeoOnboarded();
+      setGpsPermission('denied');
+      return;
+    }
+    // TIMEOUT / POSITION_UNAVAILABLE — the OS prompt was shown and the worker did NOT deny it; we
+    // just couldn't pull a fix right now (very common indoors). Treat onboarding as done so the
+    // banner stops re-appearing, and start the watch — it picks up a fix once there's signal.
+    markGeoOnboarded();
+    setGpsPermission('granted');
+    startGpsWatch(handleGeoPermissionRevoked);
   }
 
   async function handleRefineGps(): Promise<void> {

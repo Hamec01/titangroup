@@ -8,6 +8,9 @@ import {
   getGeolocationPermissionState,
   captureGpsSnapshot,
   currentBestFix,
+  isGeoOnboarded,
+  markGeoOnboarded,
+  clearGeoOnboarded,
   __resetGpsForTest,
   __pushFixForTest,
   MAX_ACCEPTABLE_ACCURACY_METERS
@@ -86,6 +89,48 @@ async function main() {
   check('captureGpsSnapshot returns the poor 1900 m fix (server will make a GPS exception)', poor.location?.accuracyMeters === 1900 && poor.gpsUnavailableReason === null, poor);
 
   Object.defineProperty(globalThis, 'navigator', { value: undefined, configurable: true, writable: true });
+
+  // --- T12 GPS step 1 — onboarding flag (localStorage-backed, must never throw) ---
+  check('isGeoOnboarded -> false without localStorage', isGeoOnboarded() === false);
+  markGeoOnboarded(); // no localStorage -> silently no-ops, must not throw
+  check('markGeoOnboarded without localStorage is a safe no-op', isGeoOnboarded() === false);
+
+  const store = new Map<string, string>();
+  Object.defineProperty(globalThis, 'localStorage', {
+    value: {
+      getItem: (k: string) => (store.has(k) ? store.get(k)! : null),
+      setItem: (k: string, v: string) => void store.set(k, String(v)),
+      removeItem: (k: string) => void store.delete(k)
+    },
+    configurable: true,
+    writable: true
+  });
+  check('isGeoOnboarded -> false before marking', isGeoOnboarded() === false);
+  markGeoOnboarded();
+  check('isGeoOnboarded -> true after markGeoOnboarded', isGeoOnboarded() === true);
+  clearGeoOnboarded();
+  check('isGeoOnboarded -> false after clearGeoOnboarded', isGeoOnboarded() === false);
+
+  Object.defineProperty(globalThis, 'localStorage', {
+    value: {
+      getItem: () => {
+        throw new Error('storage disabled');
+      },
+      setItem: () => {
+        throw new Error('storage disabled');
+      },
+      removeItem: () => {
+        throw new Error('storage disabled');
+      }
+    },
+    configurable: true,
+    writable: true
+  });
+  check('isGeoOnboarded swallows a throwing localStorage', isGeoOnboarded() === false);
+  markGeoOnboarded();
+  clearGeoOnboarded();
+  check('mark/clear swallow a throwing localStorage', true);
+  Object.defineProperty(globalThis, 'localStorage', { value: undefined, configurable: true, writable: true });
 
   console.log(JSON.stringify({ pass, fail }));
   process.exit(fail > 0 ? 1 : 0);
