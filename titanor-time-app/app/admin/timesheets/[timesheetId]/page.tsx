@@ -4,6 +4,7 @@ import { resolveServerSession } from '@/lib/server-session';
 import { getTimesheetCard } from '@/lib/admin-timesheets';
 import { RequestCorrectionForm } from './RequestCorrectionForm';
 import { StartCorrectionForm } from './StartCorrectionForm';
+import { DirectEditForm } from './DirectEditForm';
 import { ReturnTimesheetForm } from './ReturnTimesheetForm';
 import { ApproveTimesheetButton } from '../../review/ApproveTimesheetButton';
 import { workedMinutesFromIsoSegments, timesheetStatusLabel } from '@/lib/reporting/report-format';
@@ -114,6 +115,7 @@ export default async function AdminTimesheetCardPage({ params }: RouteParams) {
                   onDoneHref="/admin/review"
                   label={card.status === 'FOREMAN_APPROVED' ? localeText(locale, 'Final approve', 'Окончательно одобрить') : localeText(locale, 'Approve hours', 'Утвердить часы')}
                 />
+                <DirectEditForm timesheetId={card.timesheetId} />
                 {card.status === 'SUBMITTED' ? <StartCorrectionForm timesheetId={card.timesheetId} /> : null}
                 <ReturnTimesheetForm timesheetId={card.timesheetId} />
               </>

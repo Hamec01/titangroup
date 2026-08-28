@@ -60,11 +60,20 @@ export default async function AdminCorrectionDetailPage({ params }: RouteParams)
     <main className="setup-page">
       <div className="setup-card">
         <h1>{correction.employeeName}</h1>
-        {correction.timesheetStatus === 'SUBMITTED' || correction.timesheetStatus === 'FOREMAN_APPROVED' ? (
+        {correction.directEdit ? (
+          <p className="setup-subtitle">
+            {localeText(
+              locale,
+              'Direct hours edit by an administrator — no reason, the worker is not notified.',
+              'Прямая правка часов администратором — без причины, работник не уведомляется.'
+            )}
+          </p>
+        ) : correction.timesheetStatus === 'SUBMITTED' || correction.timesheetStatus === 'FOREMAN_APPROVED' ? (
           <p className="setup-subtitle">{localeText(locale, 'Admin edit of a timesheet still under review.', 'Исправление табеля, ещё находящегося на проверке.')}</p>
         ) : null}
         <p className="setup-subtitle">
-          {localeText(locale, 'Status:', 'Статус:')} {correctionStatusLabel(correction.status, locale)} · {localeText(locale, 'reason:', 'причина:')} {correction.reason}
+          {localeText(locale, 'Status:', 'Статус:')} {correctionStatusLabel(correction.status, locale)}
+          {correction.directEdit ? '' : ` · ${localeText(locale, 'reason:', 'причина:')} ${correction.reason}`}
         </p>
         {correction.overrideReason ? <p className="setup-subtitle">{localeText(locale, 'Override reason:', 'Причина переопределения:')} {correction.overrideReason}</p> : null}
 
@@ -108,6 +117,7 @@ export default async function AdminCorrectionDetailPage({ params }: RouteParams)
           status={correction.status}
           isSuperAdmin={session.user.roles.includes('SUPER_ADMIN')}
           timesheetStatus={correction.timesheetStatus}
+          directEdit={correction.directEdit}
         />
 
         <p>

@@ -49,12 +49,30 @@ export interface RequestCorrectionResult {
  */
 const CORRECTABLE_TIMESHEET_STATUSES = new Set(['SUBMITTED', 'FOREMAN_APPROVED', 'FINAL_APPROVED']);
 
-export async function requestCorrection(timesheetId: string, requestedByUserId: string, reason: string, requestId: string): Promise<RequestCorrectionResult | RequestCorrectionError> {
+/**
+ * T12 — `directEdit` turns this into a no-reason admin direct edit (only valid for the in-review
+ * path — SUBMITTED / FOREMAN_APPROVED). `reason` is stored empty, the CorrectionRequest row is
+ * flagged, and applyInReviewCorrection later freezes a source=ADMIN_EDIT version with no worker
+ * notice. A FINAL_APPROVED correction can never be a directEdit (decideCorrection ignores the flag).
+ */
+export async function requestCorrection(
+  timesheetId: string,
+  requestedByUserId: string,
+  reason: string,
+  requestId: string,
+  opts: { directEdit?: boolean } = {}
+): Promise<RequestCorrectionResult | RequestCorrectionError> {
+  const directEdit = opts.directEdit === true;
   const timesheet = await prisma.timesheet.findUnique({ where: { id: timesheetId }, select: { status: true } });
   if (!timesheet) {
     return { code: 'TIMESHEET_NOT_FOUND' };
   }
   if (!CORRECTABLE_TIMESHEET_STATUSES.has(timesheet.status)) {
+    return { code: 'INVALID_STATE_TRANSITION' };
+  }
+  // A direct edit only makes sense while the period is still open and the timesheet under review —
+  // never against a FINAL_APPROVED timesheet (that path has export coupling + four-eyes).
+  if (directEdit && timesheet.status === 'FINAL_APPROVED') {
     return { code: 'INVALID_STATE_TRANSITION' };
   }
 
@@ -68,17 +86,17 @@ export async function requestCorrection(timesheetId: string, requestedByUserId: 
 
   const created = await prisma.$transaction(async (tx) => {
     const request = await tx.correctionRequest.create({
-      data: { timesheetId, requestedByUserId, reason, status: 'PENDING' }
+      data: { timesheetId, requestedByUserId, reason: directEdit ? '' : reason, status: 'PENDING', directEdit }
     });
 
     await createAuditEvent(tx, {
       actorUserId: requestedByUserId,
-      eventType: 'CORRECTION_REQUESTED',
+      eventType: directEdit ? 'TIMESHEET_ADMIN_EDIT_STARTED' : 'CORRECTION_REQUESTED',
       entityType: 'CORRECTION_REQUEST',
       entityId: request.id,
       requestId,
       beforeValue: null,
-      afterValue: { id: request.id, timesheetId, reason }
+      afterValue: { id: request.id, timesheetId, reason: directEdit ? null : reason, directEdit }
     });
 
     return request;
@@ -791,6 +809,7 @@ export async function applyInReviewCorrection(
       select: {
         status: true,
         reason: true,
+        directEdit: true,
         draftOwner: { select: { id: true } },
         timesheet: { select: { status: true, currentVersionId: true, draft: { select: { id: true } } } }
       }
@@ -904,10 +923,12 @@ export async function applyInReviewCorrection(
 
     await tx.timesheetDraft.update({ where: { id: workerDraftId }, data: { basedOnVersionId: currentVersionId } });
 
-    // --- 2. Freeze via the normal submit path: new CORRECTION version, all scopes PENDING, status SUBMITTED ---
+    // --- 2. Freeze via the normal submit path: new version, all scopes PENDING, status SUBMITTED ---
+    // T12 — a directEdit freezes source=ADMIN_EDIT with no note, so the worker's period screen shows
+    // NO "Часы исправил администратор" notice; a normal correction stays source=CORRECTION + reason.
     const submit = await submitWorkerTimesheetCore(tx, employeeId, timesheetId, adminUserId, requestId, SubmissionSource.MANUAL, {
-      versionSource: 'CORRECTION',
-      versionNote: request.reason,
+      versionSource: request.directEdit ? 'ADMIN_EDIT' : 'CORRECTION',
+      versionNote: request.directEdit ? null : request.reason,
       forceScopesPending: true
     });
 
@@ -919,12 +940,12 @@ export async function applyInReviewCorrection(
 
     await createAuditEvent(tx, {
       actorUserId: adminUserId,
-      eventType: 'CORRECTION_APPROVED',
+      eventType: request.directEdit ? 'TIMESHEET_ADMIN_EDIT' : 'CORRECTION_APPROVED',
       entityType: 'CORRECTION_REQUEST',
       entityId: correctionRequestId,
       requestId,
       beforeValue: { status: 'SUBMITTED', timesheetStatus: request.timesheet.status },
-      afterValue: { status: 'APPROVED', resultingVersionId: submit.versionId, timesheetStatus: 'SUBMITTED', appliedInReview: true }
+      afterValue: { status: 'APPROVED', resultingVersionId: submit.versionId, timesheetStatus: 'SUBMITTED', appliedInReview: true, directEdit: request.directEdit }
     });
 
     return { resultingVersionId: submit.versionId, versionNumber: submit.versionNumber };
@@ -1380,6 +1401,7 @@ export interface CorrectionListItem {
   employeeName: string;
   status: string;
   reason: string;
+  directEdit: boolean;
   createdAt: string;
 }
 
@@ -1392,6 +1414,7 @@ export async function listCorrections(status?: string): Promise<CorrectionListIt
       timesheetId: true,
       status: true,
       reason: true,
+      directEdit: true,
       createdAt: true,
       timesheet: { select: { employeeId: true, employee: { select: { firstName: true, lastName: true } } } }
     }
@@ -1403,6 +1426,7 @@ export async function listCorrections(status?: string): Promise<CorrectionListIt
     employeeName: `${r.timesheet.employee.firstName} ${r.timesheet.employee.lastName}`,
     status: r.status,
     reason: r.reason,
+    directEdit: r.directEdit,
     createdAt: r.createdAt.toISOString()
   }));
 }
@@ -1417,6 +1441,8 @@ export interface CorrectionDetail {
   employeeName: string;
   status: string;
   reason: string;
+  /** T12 — no-reason admin direct edit (reason is empty, no worker notice on apply). */
+  directEdit: boolean;
   draftId: string | null;
   basedOnVersionId: string | null;
   openedByUserId: string | null;
@@ -1435,6 +1461,7 @@ export async function getCorrectionDetail(correctionRequestId: string): Promise<
       timesheetId: true,
       status: true,
       reason: true,
+      directEdit: true,
       draftId: true,
       decidedByUserId: true,
       resultingVersionId: true,
@@ -1483,6 +1510,7 @@ export async function getCorrectionDetail(correctionRequestId: string): Promise<
     employeeName: `${request.timesheet.employee.firstName} ${request.timesheet.employee.lastName}`,
     status: request.status,
     reason: request.reason,
+    directEdit: request.directEdit,
     draftId: request.draftId,
     basedOnVersionId: request.draftOwner?.basedOnVersionId ?? null,
     openedByUserId: request.draftOwner?.openedByUserId ?? null,

@@ -55,7 +55,7 @@ export default async function AdminCorrectionsPage() {
                   <td>
                     <Link href={`/admin/corrections/${item.id}`}>{correctionStatusLabel(item.status, locale)}</Link>
                   </td>
-                  <td>{item.reason}</td>
+                  <td>{item.directEdit ? <em>{localeText(locale, 'direct hours edit', 'прямая правка часов')}</em> : item.reason}</td>
                 </tr>
               ))}
             </tbody>

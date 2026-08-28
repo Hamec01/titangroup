@@ -76,6 +76,11 @@ enum DayType {
 enum TimesheetVersionSource {
   WORKER
   CORRECTION
+  // T12 (2026-08-28) — an admin's direct, no-reason edit of hours on a still-in-review timesheet.
+  // Distinct from CORRECTION so the worker's period screen shows NO "Часы исправил администратор"
+  // notice (getWorkerTimesheetSummary keys that notice off source=CORRECTION). Every such edit is
+  // still fully recorded in AuditEvent (actor + before/after).
+  ADMIN_EDIT
 }
 
 enum TimesheetReviewScopeType {
@@ -1221,6 +1226,11 @@ model CorrectionRequest {
   approvalOverride       Boolean                 @default(false)
   overrideReason         String?                 @db.Text
   pendingExport          Boolean                 @default(false)
+  // T12 (2026-08-28) — this "correction" is really a no-reason admin direct edit of a
+  // SUBMITTED/FOREMAN_APPROVED timesheet (`reason` is left empty). applyInReviewCorrection freezes
+  // it as TimesheetVersion(source=ADMIN_EDIT, note=null) and audits it as TIMESHEET_ADMIN_EDIT.
+  // Only ever true for the in-review apply path — a FINAL_APPROVED correction is never a directEdit.
+  directEdit             Boolean                 @default(false)
   // T8.4B — docs/titanor-time/T8_REPORTS_DESIGN.md Addendum "T8.4B" §BE. Which ExportBatch (always
   // kind=CORRECTION, same period as this request's Timesheet — enforced by
   // trg_correction_request_covered_batch_check, not expressible as a CHECK/FK) covered this

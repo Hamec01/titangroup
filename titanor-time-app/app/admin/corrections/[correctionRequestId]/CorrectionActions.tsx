@@ -32,9 +32,11 @@ interface CorrectionActionsProps {
   /** Task A — SUBMITTED/FOREMAN_APPROVED => this is an in-review admin edit (apply / discard),
    * not the FINAL_APPROVED four-eyes decision flow. */
   timesheetStatus: string;
+  /** T12 §1b — no-reason direct edit: same apply/discard flow, softer wording ("Сохранить"). */
+  directEdit?: boolean;
 }
 
-export function CorrectionActions({ correctionRequestId, status, isSuperAdmin, timesheetStatus }: CorrectionActionsProps) {
+export function CorrectionActions({ correctionRequestId, status, isSuperAdmin, timesheetStatus, directEdit = false }: CorrectionActionsProps) {
   const router = useRouter();
   const ru = useAppLocale() === 'RU';
   const [loading, setLoading] = useState<'open' | 'submit' | 'approve' | 'reject' | 'apply' | 'discard' | null>(null);
@@ -134,7 +136,15 @@ export function CorrectionActions({ correctionRequestId, status, isSuperAdmin, t
     if (status === 'APPROVED') {
       return (
         <div className="setup-card form">
-          <p className="setup-subtitle">{ru ? 'Изменения применены. Табель вернулся в очередь на утверждение.' : 'Changes applied. The timesheet is back in the review queue.'}</p>
+          <p className="setup-subtitle">
+            {directEdit
+              ? ru
+                ? 'Часы сохранены. Табель вернулся в очередь на утверждение.'
+                : 'Hours saved. The timesheet is back in the review queue.'
+              : ru
+                ? 'Изменения применены. Табель вернулся в очередь на утверждение.'
+                : 'Changes applied. The timesheet is back in the review queue.'}
+          </p>
           <button className="login-submit" type="button" onClick={() => router.push('/admin/review-scopes')}>
             {ru ? 'К очереди проверки' : 'To the review queue'}
           </button>
@@ -142,7 +152,17 @@ export function CorrectionActions({ correctionRequestId, status, isSuperAdmin, t
       );
     }
     if (status === 'REJECTED') {
-      return <p className="setup-subtitle">{ru ? 'Исправление отменено — табель не менялся.' : 'Correction discarded — the timesheet was not changed.'}</p>;
+      return (
+        <p className="setup-subtitle">
+          {directEdit
+            ? ru
+              ? 'Правка отменена — табель не менялся.'
+              : 'Edit discarded — the timesheet was not changed.'
+            : ru
+              ? 'Исправление отменено — табель не менялся.'
+              : 'Correction discarded — the timesheet was not changed.'}
+        </p>
+      );
     }
     return (
       <div className="setup-card form">
@@ -152,15 +172,39 @@ export function CorrectionActions({ correctionRequestId, status, isSuperAdmin, t
           </p>
         ) : null}
         <p className="setup-subtitle">
-          {ru
-            ? 'Измените дни ниже. «Применить изменения» создаст новую версию за вашей подписью, и табель вернётся в очередь на утверждение.'
-            : 'Edit the days below. “Apply changes” freezes a new version under your name and sends the timesheet back to the review queue.'}
+          {directEdit
+            ? ru
+              ? 'Измените дни ниже. «Сохранить часы» создаст новую версию за вашей подписью (работник не уведомляется), и табель вернётся в очередь на утверждение.'
+              : 'Edit the days below. “Save hours” freezes a new version under your name (the worker is not notified) and sends the timesheet back to the review queue.'
+            : ru
+              ? 'Измените дни ниже. «Применить изменения» создаст новую версию за вашей подписью, и табель вернётся в очередь на утверждение.'
+              : 'Edit the days below. “Apply changes” freezes a new version under your name and sends the timesheet back to the review queue.'}
         </p>
         <button className="login-submit" type="button" disabled={loading !== null} onClick={handleApplyInReview}>
-          {loading === 'apply' ? (ru ? 'Применение…' : 'Applying…') : (ru ? 'Применить изменения' : 'Apply changes')}
+          {loading === 'apply'
+            ? ru
+              ? 'Сохранение…'
+              : 'Saving…'
+            : directEdit
+              ? ru
+                ? 'Сохранить часы'
+                : 'Save hours'
+              : ru
+                ? 'Применить изменения'
+                : 'Apply changes'}
         </button>
         <button className="wk-clock-cancel-button" type="button" disabled={loading !== null} onClick={handleDiscard}>
-          {loading === 'discard' ? (ru ? 'Отмена…' : 'Discarding…') : (ru ? 'Отменить исправление' : 'Discard correction')}
+          {loading === 'discard'
+            ? ru
+              ? 'Отмена…'
+              : 'Discarding…'
+            : directEdit
+              ? ru
+                ? 'Отменить правку'
+                : 'Discard edit'
+              : ru
+                ? 'Отменить исправление'
+                : 'Discard correction'}
         </button>
       </div>
     );
