@@ -3289,6 +3289,16 @@ a.ov-summary-card:focus-visible {
   overflow: hidden;
 }
 
+/* MapLibre renders its popups on a white bubble regardless of the app theme; its default
+   stylesheet sets only the background, so the text inherits the dark-theme light colour and is
+   nearly invisible on white (worker locations map, geofence map). Force readable dark text. */
+.maplibregl-popup-content {
+  color: #1a1a1a;
+}
+.maplibregl-popup-content .maplibregl-popup-close-button {
+  color: #1a1a1a;
+}
+
 .geofence-address-search {
   margin-top: 1rem;
 }
