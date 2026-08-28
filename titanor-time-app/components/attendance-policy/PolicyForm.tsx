@@ -25,6 +25,7 @@ interface FormState {
   maxGpsAccuracyMeters: string;
   autoUnpaidBreakThresholdMinutes: string;
   autoUnpaidBreakMinutes: string;
+  autoCloseShiftFallbackHours: string;
 }
 
 interface Attempt {
@@ -40,7 +41,8 @@ function formStateFromPolicy(policy: PolicyView): FormState {
     maxShiftDurationHours: String(policy.maxShiftDurationHours),
     maxGpsAccuracyMeters: String(policy.maxGpsAccuracyMeters),
     autoUnpaidBreakThresholdMinutes: String(policy.autoUnpaidBreakThresholdMinutes),
-    autoUnpaidBreakMinutes: String(policy.autoUnpaidBreakMinutes)
+    autoUnpaidBreakMinutes: String(policy.autoUnpaidBreakMinutes),
+    autoCloseShiftFallbackHours: String(policy.autoCloseShiftFallbackHours)
   };
 }
 
@@ -94,6 +96,12 @@ function buildPatch(form: FormState, policy: PolicyView): { patch: PolicyPatchIn
     incompleteFields.push('autoUnpaidBreakMinutes');
   } else if (Number(form.autoUnpaidBreakMinutes) !== policy.autoUnpaidBreakMinutes) {
     patch.autoUnpaidBreakMinutes = Number(form.autoUnpaidBreakMinutes);
+  }
+
+  if (form.autoCloseShiftFallbackHours === '') {
+    incompleteFields.push('autoCloseShiftFallbackHours');
+  } else if (Number(form.autoCloseShiftFallbackHours) !== policy.autoCloseShiftFallbackHours) {
+    patch.autoCloseShiftFallbackHours = Number(form.autoCloseShiftFallbackHours);
   }
 
   return { patch, incompleteFields };
@@ -387,6 +395,27 @@ export function PolicyForm({ initialPolicy, canUpdate }: { initialPolicy: Policy
               : 'Safety net: used when a shift has no break of its own (e.g. an assignment with no schedule template). A template with its own break or the “lunch is paid” flag always wins. Default 30 min; 0 disables the fallback.'}
           </p>
           <FieldError fieldErrors={fieldErrors} field="autoUnpaidBreakMinutes" />
+        </div>
+
+        <div className="policy-field">
+          <label htmlFor="policy-auto-close-fallback">{ru ? 'Смена без ухода: расчётная длина, если в графике нет окончания (часы)' : 'Abandoned shift: estimated length when the template has no planned end (hours)'}</label>
+          <input
+            id="policy-auto-close-fallback"
+            name="autoCloseShiftFallbackHours"
+            type="number"
+            min={1}
+            max={24}
+            step={1}
+            value={form.autoCloseShiftFallbackHours}
+            onChange={(e) => onFieldChange('autoCloseShiftFallbackHours', e.target.value)}
+            disabled={fieldsDisabled}
+          />
+          <p className="policy-readonly-note">
+            {ru
+              ? 'Если работник не сделал уход и смена висит дольше «максимальной длительности смены», планировщик закрывает её плановым временем окончания из графика. Когда планового окончания нет (нет шаблона или это выходной) — берётся приход + столько часов. По умолчанию 8. Реальный уход, пришедший до авто-закрытия, всё равно закрывает смену обычным образом.'
+              : 'If a worker never checks out and the shift stays open past “maximum shift duration”, the scheduler closes it at the day’s planned end from the schedule. When there is no planned end (no template, or a day off) it uses check-in + this many hours. Default 8. A real check-out arriving before the auto-close still closes the shift normally.'}
+          </p>
+          <FieldError fieldErrors={fieldErrors} field="autoCloseShiftFallbackHours" />
         </div>
 
         {fieldErrors.body && <FieldError fieldErrors={fieldErrors} field="body" />}

@@ -42,6 +42,9 @@ const DOMAIN_ALLOWED_ACTIONS: Record<ExceptionTypeFilter, string[]> = {
   EXCESSIVE_CLOCK_SKEW: ['ACKNOWLEDGE_AS_VALID', 'DISMISS', 'REASON_EDIT'],
   CHECKOUT_CHRONOLOGY_ANOMALY: ['REASON_EDIT', 'DISMISS'],
   EXCESSIVE_SHIFT_DURATION: ['ACKNOWLEDGE_AS_VALID', 'DISMISS', 'REASON_EDIT'],
+  // The shift is already closed with hours in the timesheet — the admin corrects the end time on
+  // the timesheet card (directEdit) if needed, then dismisses. No shift-level action applies.
+  SHIFT_AUTO_CLOSED_MAX_DURATION: ['DISMISS'],
   PERIOD_BOUNDARY_SPAN: ['ACKNOWLEDGE_AS_VALID', 'DISMISS'],
   OVERLAPPING_SHIFT: ['DISMISS', 'REASON_EDIT']
 };
@@ -57,6 +60,7 @@ const DISMISS_ALLOWED_TYPES = new Set<ExceptionTypeFilter>([
   'EXCESSIVE_CLOCK_SKEW',
   'CHECKOUT_CHRONOLOGY_ANOMALY', // additionally requires a non-empty resolutionNote below
   'EXCESSIVE_SHIFT_DURATION',
+  'SHIFT_AUTO_CLOSED_MAX_DURATION',
   'PERIOD_BOUNDARY_SPAN',
   'OVERLAPPING_SHIFT'
 ]);

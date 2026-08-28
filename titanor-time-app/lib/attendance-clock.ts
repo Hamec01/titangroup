@@ -5,6 +5,7 @@ import { createAuditEvent } from '@/lib/audit';
 import { overlapCandidates, overlapExists, resolveOverlapTransition } from '@/lib/attendance-reported-projection';
 import { materializeClockShiftCore } from '@/lib/attendance-materializer';
 import { resolveMissingCheckoutAtCutoffOnLateCheckOut } from '@/lib/attendance-auto-submit';
+import { annotateAutoClosedShiftWithLateCheckOut } from '@/lib/attendance-abandoned-shift-annotate';
 
 // docs/titanor-time/T7A_1_ATTENDANCE_CLOCK_DESIGN.md §9.1/§9.2/§9.3/§9.1a — Online clock core
 // (T7A online clock core slice). Route files do HTTP/auth/CSRF/idempotency/validation mapping;
@@ -956,6 +957,9 @@ async function checkOutCore(tx: Prisma.TransactionClient, employeeId: string, ac
     await tx.attendanceException.create({
       data: { type: 'CHECKOUT_WITHOUT_OPEN_SHIFT', employeeId, timesheetId, payrollPeriodId, occurredAt: timeResult.effectiveAt, siteId: input.assumedSiteId, clockEventId: input.clientEventId, status: 'OPEN' }
     });
+    // A real Check Out arriving after the scheduler auto-closed this shift: stamp the true time onto
+    // the still-open SHIFT_AUTO_CLOSED_MAX_DURATION so the admin reconciles the provisional end.
+    await annotateAutoClosedShiftWithLateCheckOut(tx, employeeId, timeResult.effectiveAt, input.clientEventId);
     if (gpsResult.gpsVerification === 'VERIFIED_OUTSIDE') {
       await tx.attendanceException.create({
         data: { type: 'OUTSIDE_GEOFENCE_CHECKOUT', employeeId, timesheetId, payrollPeriodId, occurredAt: timeResult.effectiveAt, siteId: input.assumedSiteId, clockEventId: input.clientEventId, status: 'OPEN', detail: exceptionDetailForGps(gpsResult, geofence) }

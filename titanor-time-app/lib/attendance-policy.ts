@@ -14,7 +14,8 @@ const ALLOWED_PATCH_FIELDS = new Set([
   'maxShiftDurationHours',
   'maxGpsAccuracyMeters',
   'autoUnpaidBreakThresholdMinutes',
-  'autoUnpaidBreakMinutes'
+  'autoUnpaidBreakMinutes',
+  'autoCloseShiftFallbackHours'
 ]);
 
 export interface PolicyView {
@@ -29,6 +30,9 @@ export interface PolicyView {
   // T10-D — fallback unpaid-lunch minutes used when the plan carries no break of its own (e.g. an
   // assignment with no schedule template). 30 = Finnish norm; 0 disables the fallback.
   autoUnpaidBreakMinutes: number;
+  // Auto-close abandoned shift — fallback shift length (openedAt + N hours) when the template has
+  // no usable planned end for that day. CHECK 1..24, capped at maxShiftDurationHours.
+  autoCloseShiftFallbackHours: number;
   timezone: 'Europe/Helsinki'; // frozen at the DB level (ck_company_attendance_policy_timezone_frozen) — read-only.
   updatedAt: string;
   updatedByUserId: string | null;
@@ -55,6 +59,7 @@ interface PolicyRow {
   maxGpsAccuracyMeters: number;
   autoUnpaidBreakThresholdMinutes: number;
   autoUnpaidBreakMinutes: number;
+  autoCloseShiftFallbackHours: number;
   updatedAt: Date;
   updatedByUserId: string | null;
 }
@@ -67,6 +72,7 @@ const POLICY_SELECT = {
   maxGpsAccuracyMeters: true,
   autoUnpaidBreakThresholdMinutes: true,
   autoUnpaidBreakMinutes: true,
+  autoCloseShiftFallbackHours: true,
   updatedAt: true,
   updatedByUserId: true
 } as const;
@@ -80,6 +86,7 @@ function toView(row: PolicyRow): PolicyView {
     maxGpsAccuracyMeters: row.maxGpsAccuracyMeters,
     autoUnpaidBreakThresholdMinutes: row.autoUnpaidBreakThresholdMinutes,
     autoUnpaidBreakMinutes: row.autoUnpaidBreakMinutes,
+    autoCloseShiftFallbackHours: row.autoCloseShiftFallbackHours,
     timezone: 'Europe/Helsinki',
     updatedAt: row.updatedAt.toISOString(),
     updatedByUserId: row.updatedByUserId
@@ -102,6 +109,7 @@ export interface PolicyPatchInput {
   maxGpsAccuracyMeters?: number;
   autoUnpaidBreakThresholdMinutes?: number;
   autoUnpaidBreakMinutes?: number;
+  autoCloseShiftFallbackHours?: number;
 }
 
 export type ValidatePolicyPatchResult = { ok: true; value: PolicyPatchInput } | { ok: false; fieldErrors: Record<string, string[]> };
@@ -182,6 +190,15 @@ export function validatePolicyPatchInput(body: Record<string, unknown>): Validat
     }
   }
 
+  if ('autoCloseShiftFallbackHours' in body) {
+    const v = body.autoCloseShiftFallbackHours;
+    if (typeof v !== 'number' || !Number.isInteger(v) || v < 1 || v > 24) {
+      fieldErrors.autoCloseShiftFallbackHours = ['must be an integer between 1 and 24'];
+    } else {
+      value.autoCloseShiftFallbackHours = v;
+    }
+  }
+
   if (Object.keys(fieldErrors).length === 0 && Object.keys(value).length === 0) {
     fieldErrors.body = ['at least one field must be provided'];
   }
@@ -211,7 +228,8 @@ export async function updateCompanyAttendancePolicy(actorUserId: string, request
         ...(patch.maxShiftDurationHours !== undefined ? { maxShiftDurationHours: patch.maxShiftDurationHours } : {}),
         ...(patch.maxGpsAccuracyMeters !== undefined ? { maxGpsAccuracyMeters: patch.maxGpsAccuracyMeters } : {}),
         ...(patch.autoUnpaidBreakThresholdMinutes !== undefined ? { autoUnpaidBreakThresholdMinutes: patch.autoUnpaidBreakThresholdMinutes } : {}),
-        ...(patch.autoUnpaidBreakMinutes !== undefined ? { autoUnpaidBreakMinutes: patch.autoUnpaidBreakMinutes } : {})
+        ...(patch.autoUnpaidBreakMinutes !== undefined ? { autoUnpaidBreakMinutes: patch.autoUnpaidBreakMinutes } : {}),
+        ...(patch.autoCloseShiftFallbackHours !== undefined ? { autoCloseShiftFallbackHours: patch.autoCloseShiftFallbackHours } : {})
       },
       select: POLICY_SELECT
     });
@@ -223,7 +241,8 @@ export async function updateCompanyAttendancePolicy(actorUserId: string, request
       maxShiftDurationHours: row.maxShiftDurationHours,
       maxGpsAccuracyMeters: row.maxGpsAccuracyMeters,
       autoUnpaidBreakThresholdMinutes: row.autoUnpaidBreakThresholdMinutes,
-      autoUnpaidBreakMinutes: row.autoUnpaidBreakMinutes
+      autoUnpaidBreakMinutes: row.autoUnpaidBreakMinutes,
+      autoCloseShiftFallbackHours: row.autoCloseShiftFallbackHours
     });
 
     // Only the policy values — never id/singleton/updatedByUserId of the audit actor itself.

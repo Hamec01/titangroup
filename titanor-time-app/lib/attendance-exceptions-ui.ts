@@ -25,6 +25,7 @@ const EXCEPTION_TYPE_LABELS: Record<ExceptionTypeFilter, { en: string; ru: strin
   EXCESSIVE_CLOCK_SKEW: { en: 'Excessive clock skew', ru: 'Чрезмерное расхождение времени' },
   CHECKOUT_CHRONOLOGY_ANOMALY: { en: 'Checkout chronology anomaly', ru: 'Нарушение хронологии ухода' },
   EXCESSIVE_SHIFT_DURATION: { en: 'Excessive shift duration', ru: 'Чрезмерная длительность смены' },
+  SHIFT_AUTO_CLOSED_MAX_DURATION: { en: 'Shift auto-closed (no checkout)', ru: 'Смена закрыта автоматически (нет ухода)' },
   PERIOD_BOUNDARY_SPAN: { en: 'Period boundary span', ru: 'Смена пересекает границу периода' },
   OVERLAPPING_SHIFT: { en: 'Overlapping shift', ru: 'Пересечение смен' }
 };

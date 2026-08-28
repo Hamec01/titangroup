@@ -41,7 +41,14 @@ const EXCEPTION_DETAIL_ALLOWED_KEYS = new Set([
   'timesheetStatus',
   'triggeringClockShiftId',
   'cachedGeofenceVersionId',
-  'currentGeofenceVersionId'
+  'currentGeofenceVersionId',
+  // SHIFT_AUTO_CLOSED_MAX_DURATION (auto-close abandoned shift) — all non-PII: timestamps, a
+  // 'TEMPLATE'|'FALLBACK' tag, an internal clock-event id, and a fixed English note string.
+  'recordedEndAt',
+  'endSource',
+  'realCheckOutAt',
+  'realCheckOutClockEventId',
+  'note'
 ]);
 
 export function sanitizeExceptionDetail(raw: unknown): Record<string, unknown> | null {
@@ -102,6 +109,12 @@ function summaryForException(type: string, detail: Record<string, unknown> | nul
       return 'Check Out time was earlier than Check In and was adjusted';
     case 'EXCESSIVE_SHIFT_DURATION':
       return typeof detail?.durationHours === 'number' ? `Shift duration (${detail.durationHours.toFixed(1)}h) exceeded policy` : 'Shift duration exceeded policy';
+    case 'SHIFT_AUTO_CLOSED_MAX_DURATION':
+      return typeof detail?.realCheckOutAt === 'string'
+        ? 'Shift auto-closed at the planned end time — a real check-out arrived later'
+        : detail?.endSource === 'FALLBACK'
+          ? 'Shift auto-closed (no planned end in the template — estimated end used)'
+          : 'Shift auto-closed at the planned end time from the schedule';
     case 'PERIOD_BOUNDARY_SPAN':
       return 'Shift spans across a payroll period boundary';
     case 'OVERLAPPING_SHIFT':
@@ -153,6 +166,7 @@ export type ExceptionTypeFilter =
   | 'EXCESSIVE_CLOCK_SKEW'
   | 'CHECKOUT_CHRONOLOGY_ANOMALY'
   | 'EXCESSIVE_SHIFT_DURATION'
+  | 'SHIFT_AUTO_CLOSED_MAX_DURATION'
   | 'PERIOD_BOUNDARY_SPAN'
   | 'OVERLAPPING_SHIFT';
 
@@ -169,6 +183,7 @@ export const EXCEPTION_TYPE_VALUES: ExceptionTypeFilter[] = [
   'EXCESSIVE_CLOCK_SKEW',
   'CHECKOUT_CHRONOLOGY_ANOMALY',
   'EXCESSIVE_SHIFT_DURATION',
+  'SHIFT_AUTO_CLOSED_MAX_DURATION',
   'PERIOD_BOUNDARY_SPAN',
   'OVERLAPPING_SHIFT'
 ];

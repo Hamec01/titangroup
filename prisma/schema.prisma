@@ -197,6 +197,10 @@ enum AttendanceExceptionType {
   EXCESSIVE_SHIFT_DURATION
   PERIOD_BOUNDARY_SPAN
   OVERLAPPING_SHIFT
+  // A scheduler pass closed this shift because it stayed open longer than maxShiftDurationHours
+  // with no check-out. recordedEndAt is provisional (the template's planned end, or openedAt +
+  // autoCloseShiftFallbackHours) — a real late check-out revises it.
+  SHIFT_AUTO_CLOSED_MAX_DURATION
 }
 
 enum AttendanceExceptionStatus {
@@ -1531,7 +1535,9 @@ model EmployeeOpenShift {
 }
 
 // §2.1 п.6 — immutable with two narrow named exceptions (materializationState, sourceAssignmentId)
-// plus the FORCE_CLOSE_OPEN_SHIFT path (checkOutEventId stays NULL forever for that row).
+// plus the FORCE_CLOSE_OPEN_SHIFT path (checkOutEventId stays NULL forever for that row) and the
+// scheduler auto-close path (forceClosed* set, endAtProvisional true, checkOutEventId NULL — but a
+// real late check-out then revises recordedEndAt / endAtProvisional / checkOutEventId once).
 model ClockShift {
   id                                 String                         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   employeeId                         String                         @db.Uuid
@@ -1704,6 +1710,11 @@ model CompanyAttendancePolicy {
   // that sets its own plannedBreakMinutes or ticks plannedBreakPaid still wins. 0 disables the
   // fallback (template-only). CHECK 0..1440.
   autoUnpaidBreakMinutes      Int      @default(30)
+  // Auto-close abandoned shift (2026-08-28) — a shift open longer than maxShiftDurationHours with
+  // no check-out is closed by the scheduler at the day's planned end time from the template; this
+  // is the fallback duration (openedAt + N hours) when the template has no usable end. CHECK 1..24,
+  // capped at maxShiftDurationHours at compute time.
+  autoCloseShiftFallbackHours Int      @default(8)
   updatedByUserId             String?  @db.Uuid
   updatedAt                   DateTime @updatedAt @db.Timestamptz(6)
   createdAt                   DateTime @default(now()) @db.Timestamptz(6)

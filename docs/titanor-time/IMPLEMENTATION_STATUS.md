@@ -2,6 +2,31 @@
 
 Обновлено: 2026-08-28 Europe/Helsinki (T12 инструменты админа + доводка GPS)
 
+**`[2026-08-28]` Авто-закрытие забытой смены через 16 ч (`<sha>`, пилот `t97-pilot-<sha>`).**
+- Владелец: «если работник не сделал чек-аут — время в табель ставится автоматом, берётся из
+  шаблона; чек-аут уходит после 16 ч».
+- Миграции `20260828180000_add_shift_auto_close_enum` (+`SHIFT_AUTO_CLOSED_MAX_DURATION`),
+  `20260828181000_add_shift_auto_close` (`CompanyAttendancePolicy.autoCloseShiftFallbackHours`
+  DEFAULT 8, CHECK 1..24; partial unique index на исключении).
+- `lib/attendance-abandoned-shift.ts` — `runAbandonedShiftAutoCloseTick` (двухфазный проход, как
+  auto-submit): смены старше `maxShiftDurationHours` без ухода закрываются
+  `ClockShift`(forceClosed=SYSTEM, endAtProvisional, checkOutEventId NULL) с плановым окончанием
+  дня из шаблона (fallback: openedAt + autoCloseShiftFallbackHours, кап на maxShiftDurationHours),
+  инлайн-материализация, исключение `SHIFT_AUTO_CLOSED_MAX_DURATION`. `resolveAutoCloseEndAt` —
+  чистая, тестируемая. Проброшено в `scripts/attendance-auto-submit-scheduler.ts` (отдельный
+  try/catch-шаг).
+- `lib/attendance-abandoned-shift-annotate.ts` — `annotateAutoClosedShiftWithLateCheckOut`
+  (dep-light, без цикла на attendance-clock): поздний реальный уход (`CHECKOUT_WITHOUT_OPEN_SHIFT`
+  в `attendance-clock.ts` + `attendance-sync.ts`) дописывает `realCheckOutAt` в открытое
+  `SHIFT_AUTO_CLOSED_MAX_DURATION`. `ClockShift` неизменяем (`fn_clock_shift_immutable`) — правка
+  расчётного времени делается на табеле, не на смене (задокументировано как известное ограничение).
+- Исключение подключено: `attendance-exceptions.ts` (тип+summary+detail allowlist),
+  `attendance-exceptions-ui.ts` (label RU/EN), `attendance-exception-resolution.ts`
+  (`DOMAIN_ALLOWED_ACTIONS`/`DISMISS_ALLOWED_TYPES` → `['DISMISS']`).
+- `/admin/attendance/policy` — поле «Смена без ухода: расчётная длина (часы)».
+- `_test-abandoned-shift-auto-close` 19/19 (новый); `tsc` зелёный; регрессии clock/материализатор/
+  GPS/exception-list зелёные.
+
 **`[2026-08-28]` T10-D добивка — «обед оплачивается» + страховка «нет шаблона» (`a61763b`,
 пилот `t97-pilot-a61763b`).**
 - Первопричина жалобы владельца («у Andrei Sakki полные часы, обед словно оплачен»): его объект

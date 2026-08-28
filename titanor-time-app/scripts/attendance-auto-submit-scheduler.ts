@@ -1,5 +1,6 @@
 import { prisma } from '../lib/prisma';
 import { runAttendanceAutoSubmitTick } from '../lib/attendance-auto-submit';
+import { runAbandonedShiftAutoCloseTick } from '../lib/attendance-abandoned-shift';
 import { runAttendanceLocationRetention } from '../lib/attendance-location-retention';
 import { writeHeartbeat } from '../lib/attendance-scheduler-heartbeat';
 import { resolveIntervalSecondsOrExit, sleep, logSafe, runOneTickCore, maybeRunRetentionCore } from '../lib/attendance-scheduler-runtime';
@@ -44,6 +45,18 @@ async function main(): Promise<void> {
 
   while (!shuttingDown) {
     await runOneTickCore((now) => runAttendanceAutoSubmitTick({ now }), writeHeartbeat, logSafe);
+    if (shuttingDown) {
+      break;
+    }
+
+    // Auto-close abandoned shifts — one independent try/catch'd step per iteration, never sharing a
+    // transaction with the auto-submit tick. Never logs the raw Error (same PII/secret reasoning).
+    try {
+      const closeResult = await runAbandonedShiftAutoCloseTick({ now: new Date() });
+      logSafe({ event: 'abandoned_shift_auto_close', outcome: 'ok', scanned: closeResult.scanned, closed: closeResult.closed, closedFromTemplate: closeResult.closedFromTemplate, closedFromFallback: closeResult.closedFromFallback, skipped: closeResult.skippedNoLongerEligible, failed: closeResult.failed });
+    } catch {
+      logSafe({ event: 'abandoned_shift_auto_close', outcome: 'top_level_error', errorCode: 'ABANDONED_SHIFT_AUTO_CLOSE_TOP_LEVEL_ERROR' });
+    }
     if (shuttingDown) {
       break;
     }

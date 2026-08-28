@@ -5,6 +5,7 @@ import { createAuditEvent } from '@/lib/audit';
 import { overlapCandidates, overlapExists, resolveOverlapTransition } from '@/lib/attendance-reported-projection';
 import { materializeClockShiftCore } from '@/lib/attendance-materializer';
 import { resolveMissingCheckoutAtCutoffOnLateCheckOut } from '@/lib/attendance-auto-submit';
+import { annotateAutoClosedShiftWithLateCheckOut } from '@/lib/attendance-abandoned-shift-annotate';
 import {
   evaluateGpsReading,
   loadMaxGpsAccuracyMeters,
@@ -685,6 +686,10 @@ async function insertAndApplyCheckOut(
     await tx.attendanceException.create({
       data: { type: 'CHECKOUT_WITHOUT_OPEN_SHIFT', employeeId, timesheetId, payrollPeriodId, occurredAt: timeResult.effectiveAt, siteId: event.assumedSiteId!, clockEventId: event.clientEventId, status: 'OPEN' }
     });
+    // A real Check Out that arrives after the scheduler already auto-closed this shift: stamp the
+    // true time onto the still-open SHIFT_AUTO_CLOSED_MAX_DURATION so the admin reconciles the
+    // provisional (template) end against it. The ClockShift itself is immutable.
+    await annotateAutoClosedShiftWithLateCheckOut(tx, employeeId, timeResult.effectiveAt, event.clientEventId);
     let exceptionType = 'CHECKOUT_WITHOUT_OPEN_SHIFT';
     if (gpsResult.gpsVerification === 'VERIFIED_OUTSIDE') {
       await tx.attendanceException.create({
