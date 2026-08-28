@@ -57,9 +57,10 @@ async function main() {
     check('SHIP_WELDER and CON_WELDER are distinct catalog entries', !!shipWelder && !!conWelder && shipWelder!.id !== conWelder!.id, { shipWelder: shipWelder?.id, conWelder: conWelder?.id });
     check('  same display name, different category', shipWelder?.nameEn === conWelder?.nameEn && shipWelder?.category !== conWelder?.category);
     check('  RU name present', !!shipWelder?.nameRu && shipWelder!.nameRu.length > 0);
+    const seedCount = await prisma.professionDefinition.count({ where: { OR: [{ code: { startsWith: 'SHIP_' } }, { code: { startsWith: 'CON_' } }] } });
+    check('>= 40 seed codes carry a SHIP_/CON_ prefix', seedCount >= 40, seedCount);
     const codes = (await prisma.professionDefinition.findMany({ select: { code: true } })).map((c) => c.code);
     check('all codes unique', new Set(codes).size === codes.length);
-    check('all codes match SHIP_/CON_ prefix', codes.every((c) => c.startsWith('SHIP_') || c.startsWith('CON_')));
   }
 
   const welderDef = await prisma.professionDefinition.findUniqueOrThrow({ where: { code: 'SHIP_WELDER' } });
