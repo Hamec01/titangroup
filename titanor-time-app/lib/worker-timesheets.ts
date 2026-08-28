@@ -664,6 +664,14 @@ export async function patchWorkerTimesheetDay(
       }
       const adjustmentDrafts: AdjustmentDraft[] = [];
       const clockAdjustmentReasons = input.clockAdjustmentReasons ?? {};
+      // T12/T10 (2026-08-28, owner decision) — a worker fixing their OWN timesheet before sending
+      // it is not interrogated: no reason is required. We still write the ClockShiftAdjustment
+      // audit row (so the admin sees the worker changed the recorded time and can sort it out),
+      // just with a default reason when the worker didn't type one.
+      const workerAdjustmentReason = (originId: string): string => {
+        const typed = clockAdjustmentReasons[originId];
+        return typed && typed.trim().length > 0 ? typed.trim() : 'Изменено работником при подготовке табеля';
+      };
 
       for (const { segment, sourceAssignmentId } of resolvedSegments) {
         const originId = segment.originClockShiftFragmentId;
@@ -675,10 +683,7 @@ export async function patchWorkerTimesheetDay(
         if (provenanceValuesEqual(lastKnown, after)) {
           continue;
         }
-        const reason = clockAdjustmentReasons[originId];
-        if (!reason || reason.trim().length === 0) {
-          return { code: 'VALIDATION_ERROR', fieldErrors: { [`clockAdjustmentReasons.${originId}`]: ['required when changing a clock-origin segment'] } };
-        }
+        const reason = workerAdjustmentReason(originId);
         const frag = fragmentsById.get(originId)!;
         const recorded: ProvenanceValues = { startAt: frag.recordedStartAt, endAt: frag.recordedEndAt, siteId: frag.siteId, workAreaId: frag.workAreaId, sourceAssignmentId: frag.sourceAssignmentId };
         adjustmentDrafts.push({
@@ -695,16 +700,12 @@ export async function patchWorkerTimesheetDay(
           if (seenOriginIds.has(originId)) {
             continue;
           }
-          const reason = clockAdjustmentReasons[originId];
-          if (!reason || reason.trim().length === 0) {
-            return { code: 'VALIDATION_ERROR', fieldErrors: { [`clockAdjustmentReasons.${originId}`]: ['required when removing a clock-origin segment'] } };
-          }
           adjustmentDrafts.push({
             clockShiftFragmentId: originId,
             changeType: 'REMOVED',
             before: { startAt: prev.startAt, endAt: prev.endAt, siteId: prev.siteId, workAreaId: prev.workAreaId, sourceAssignmentId: prev.sourceAssignmentId },
             after: null,
-            reason
+            reason: workerAdjustmentReason(originId)
           });
         }
       }

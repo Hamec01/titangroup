@@ -77,8 +77,8 @@ export const COMMON_STRINGS: Record<AppLocale, CommonStrings> = {
     statusSubmitted: 'Submitted — awaiting review',
     statusForemanApproved: 'Review complete — awaiting final approval',
     statusFinalApproved: 'Finalized',
-    returnedForCorrectionTitle: 'Returned for correction',
-    returnedReasonUnavailable: 'This timesheet was returned, but the reason could not be loaded. Contact your admin if this persists.',
+    returnedForCorrectionTitle: 'Open for edits again',
+    returnedReasonUnavailable: 'Your timesheet is open for edits again. Review the hours and send it when it looks right — your manager will take it from there.',
     returnedAtPrefix: 'Returned',
     unknownSite: 'Unknown site',
     generalNonSite: 'General / non-site'
@@ -113,8 +113,8 @@ export const COMMON_STRINGS: Record<AppLocale, CommonStrings> = {
     statusSubmitted: 'Отправлен — ожидает проверки',
     statusForemanApproved: 'Проверка завершена — ожидает окончательного утверждения',
     statusFinalApproved: 'Утверждён окончательно',
-    returnedForCorrectionTitle: 'Возвращён на исправление',
-    returnedReasonUnavailable: 'Табель был возвращён, но причину не удалось загрузить. Если это повторяется, обратитесь к администратору.',
+    returnedForCorrectionTitle: 'Табель снова открыт для правок',
+    returnedReasonUnavailable: 'Табель снова открыт для изменений. Проверьте часы и отправьте, когда всё будет в порядке — дальше разберётся руководитель.',
     returnedAtPrefix: 'Возвращён',
     unknownSite: 'Неизвестный объект',
     generalNonSite: 'Общее / вне объекта'

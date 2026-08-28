@@ -5,6 +5,7 @@ import { getTimesheetCard } from '@/lib/admin-timesheets';
 import { RequestCorrectionForm } from './RequestCorrectionForm';
 import { StartCorrectionForm } from './StartCorrectionForm';
 import { DirectEditForm } from './DirectEditForm';
+import { DiscardOpenEditButton } from './DiscardOpenEditButton';
 import { ReturnTimesheetForm } from './ReturnTimesheetForm';
 import { ApproveTimesheetButton } from '../../review/ApproveTimesheetButton';
 import { workedMinutesFromIsoSegments, timesheetStatusLabel } from '@/lib/reporting/report-format';
@@ -102,10 +103,11 @@ export default async function AdminTimesheetCardPage({ params }: RouteParams) {
           <>
             {card.openCorrectionRequestId ? (
               <div className="setup-card form">
-                <p className="setup-subtitle">{localeText(locale, 'An admin correction is open — apply or discard it before approving.', 'Открыта корректировка администратора — примените или отмените её перед утверждением.')}</p>
+                <p className="setup-subtitle">{localeText(locale, 'An edit is open on this timesheet. Continue it, or discard it to approve the hours as they are.', 'По этому табелю открыта правка. Продолжите её — или отмените, чтобы утвердить часы как есть.')}</p>
                 <Link className="login-submit" href={`/admin/corrections/${card.openCorrectionRequestId}`}>
-                  {localeText(locale, 'Continue editing', 'Продолжить исправление')}
+                  {localeText(locale, 'Continue editing', 'Продолжить правку')}
                 </Link>
+                <DiscardOpenEditButton correctionRequestId={card.openCorrectionRequestId} />
               </div>
             ) : (
               <>

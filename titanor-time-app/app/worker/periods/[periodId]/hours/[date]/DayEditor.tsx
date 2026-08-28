@@ -71,20 +71,7 @@ function dayLabel(date: string, locale: 'EN' | 'RU'): string {
   return new Intl.DateTimeFormat(locale === 'RU' ? 'ru-RU' : 'en-GB', { timeZone: 'Europe/Helsinki', weekday: 'long', day: 'numeric', month: 'long' }).format(new Date(`${date}T00:00:00.000Z`));
 }
 
-function hasClockGeneratedChange(initialSegments: InitialSegment[], currentSegments: EditableSegment[]): boolean {
-  const clockOriginSegments = initialSegments.filter((segment) => segment.originClockShiftFragmentId !== null);
-  return clockOriginSegments.some((initial) => {
-    const current = currentSegments.find((segment) => segment.originClockShiftFragmentId === initial.originClockShiftFragmentId);
-    return (
-      !current ||
-      current.assignmentKey !== assignmentKeyOf(initial.siteId, initial.workAreaId) ||
-      current.startAt !== isoToHelsinkiTime(initial.startAt) ||
-      current.endAt !== isoToHelsinkiTime(initial.endAt)
-    );
-  });
-}
-
-function describeError(code: string | undefined, fieldErrors: Record<string, string[]> | undefined, t: WorkerStrings): string {
+function describeError(code: string | undefined, _fieldErrors: Record<string, string[]> | undefined, t: WorkerStrings): string {
   switch (code) {
     case 'WORK_SEGMENT_OVERLAP':
       return t.errWorkSegmentOverlap;
@@ -99,11 +86,10 @@ function describeError(code: string | undefined, fieldErrors: Record<string, str
     case 'DRAFT_NOT_EDITABLE':
       return t.errDraftNotEditable;
     case 'VALIDATION_ERROR':
-      return fieldErrors
-        ? Object.entries(fieldErrors)
-            .map(([field, messages]) => `${field}: ${messages.join(', ')}`)
-            .join('; ')
-        : t.errInvalidInput;
+      // Never surface raw server field paths to the worker (that produced the "clockAdjustment
+      // Reasons.<uuid>: required…" string). A plain-language line is enough — the admin sees the
+      // real detail.
+      return t.errInvalidInput;
     default:
       return t.errCouldNotSaveDay;
   }
@@ -135,12 +121,10 @@ export default function DayEditor({
     }))
   );
   const [confirmedZero, setConfirmedZero] = useState(initialConfirmedZero);
-  const [clockAdjustmentReason, setClockAdjustmentReason] = useState('');
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const isAbsenceDay = initialDayType !== 'WORK';
-  const clockOriginChanged = hasClockGeneratedChange(initialSegments, segments);
 
   function addSegment() {
     if (assignmentOptions.length === 0) {
@@ -177,15 +161,8 @@ export default function DayEditor({
     setSaving(true);
     setError(null);
 
-    const clockOriginSegments = initialSegments.filter((segment) => segment.originClockShiftFragmentId !== null);
-    const normalizedReason = clockAdjustmentReason.trim();
-    if (clockOriginChanged && normalizedReason.length === 0) {
-      setError(t.clockAdjustmentReasonRequired);
-      setSaving(false);
-      return;
-    }
-
     try {
+      // T12/T10 — a worker fixing their own timesheet before sending it is not asked for a reason.
       const body = {
         confirmedZero: segments.length === 0 ? confirmedZero : false,
         segments: segments.map((s) => {
@@ -198,14 +175,7 @@ export default function DayEditor({
             originClockShiftFragmentId: s.originClockShiftFragmentId,
             breaks: s.breaks.map((b) => ({ startAt: helsinkiTimeToIso(date, b.startAt), endAt: helsinkiTimeToIso(date, b.endAt), paid: b.paid }))
           };
-        }),
-        ...(normalizedReason.length > 0
-          ? {
-              clockAdjustmentReasons: Object.fromEntries(
-                clockOriginSegments.map((segment) => [segment.originClockShiftFragmentId as string, normalizedReason])
-              )
-            }
-          : {})
+        })
       };
       const res = await fetch(`/api/worker/timesheets/${timesheetId}/days/${date}`, {
         method: 'PATCH',
@@ -302,24 +272,6 @@ export default function DayEditor({
             <button type="button" className="wk-secondary-button" onClick={addSegment} disabled={saving || assignmentOptions.length === 0}>
               {t.addInterval}
             </button>
-
-            {initialSegments.some((segment) => segment.originClockShiftFragmentId !== null) && clockOriginChanged ? (
-              <div className="wk-field">
-                <label htmlFor="clock-adjustment-reason">{t.clockAdjustmentReasonLabel}</label>
-                <textarea
-                  id="clock-adjustment-reason"
-                  rows={3}
-                  maxLength={2000}
-                  value={clockAdjustmentReason}
-                  onChange={(event) => setClockAdjustmentReason(event.target.value)}
-                  disabled={saving}
-                  aria-describedby="clock-adjustment-help"
-                />
-                <p id="clock-adjustment-help" className="wk-readonly-note">
-                  {t.clockAdjustmentReasonHelp}
-                </p>
-              </div>
-            ) : null}
           </>
         )}
 

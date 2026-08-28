@@ -180,6 +180,49 @@ async function main() {
     check('normal correction DOES surface adminCorrection', !('code' in summary) && summary.adminCorrection?.reason === 'Worker mistyped the end time', 'code' in summary ? summary : summary.adminCorrection);
   }
 
+  // ============ 4. T12 — a stale open edit is re-seeded from the current version on re-open ============
+  {
+    const t = await makeSubmittedTimesheet(admin, 'S');
+    const v1 = (await prisma.timesheet.findUniqueOrThrow({ where: { id: t.timesheetId }, select: { currentVersionId: true } })).currentVersionId!;
+
+    const req = await requestCorrection(t.timesheetId, admin, '', randomUUID(), { directEdit: true });
+    const reqId = (req as { id: string }).id;
+    await openCorrectionDraft(reqId, admin, randomUUID());
+    const draft1 = await prisma.correctionDraft.findFirstOrThrow({ where: { correctionRequestId: reqId }, select: { id: true, basedOnVersionId: true } });
+    check('draft opened against v1', draft1.basedOnVersionId === v1);
+
+    // Simulate the timesheet advancing to a new version while this edit sat open (worker was
+    // returned it and resubmitted): freeze a second version whose single day has different hours.
+    await prisma.timesheetReviewScope.updateMany({ where: { timesheetVersionId: v1 }, data: { status: 'RETURNED' } });
+    await prisma.timesheet.update({ where: { id: t.timesheetId }, data: { status: 'RETURNED' } });
+    const draft = await prisma.timesheetDraft.findFirstOrThrow({ where: { timesheetId: t.timesheetId }, select: { id: true } });
+    await prisma.timesheetDraftDay.deleteMany({ where: { draftId: draft.id } });
+    await prisma.timesheetDraftPlannedShift.deleteMany({ where: { draftId: draft.id } });
+    const dayBase = new Date(`${t.date}T00:00:00.000Z`);
+    await prisma.timesheetDraftPlannedShift.create({
+      data: { draftId: draft.id, employeeId: t.employeeId, date: dayBase, siteId: t.siteId, sourceAssignmentId: t.assignmentId, plannedStartAt: at(t.date, 7), plannedEndAt: at(t.date, 12), plannedBreakMinutes: 0 }
+    });
+    const dd = await prisma.timesheetDraftDay.create({ data: { draftId: draft.id, date: dayBase, dayType: 'WORK', confirmedZero: false } });
+    await prisma.timesheetDraftSegment.create({ data: { draftDayId: dd.id, draftId: draft.id, employeeId: t.employeeId, date: dayBase, startAt: at(t.date, 7), endAt: at(t.date, 12), siteId: t.siteId, sourceAssignmentId: t.assignmentId } });
+    await prisma.$transaction(async (tx) => {
+      await tx.$queryRaw`SELECT id FROM "Employee" WHERE id = ${t.employeeId}::uuid FOR UPDATE`;
+      await tx.$queryRaw`SELECT id FROM "Timesheet" WHERE id = ${t.timesheetId}::uuid FOR UPDATE`;
+      await tx.$queryRaw`SELECT id FROM "TimesheetDraft" WHERE id = ${draft.id}::uuid FOR UPDATE`;
+      await submitWorkerTimesheetCore(tx, t.employeeId, t.timesheetId, admin, randomUUID(), SubmissionSource.MANUAL);
+    });
+    const v2 = (await prisma.timesheet.findUniqueOrThrow({ where: { id: t.timesheetId }, select: { currentVersionId: true } })).currentVersionId!;
+    check('timesheet advanced to a new version', v2 !== v1);
+
+    // Re-open the stale edit — it must re-seed from v2.
+    await openCorrectionDraft(reqId, admin, randomUUID());
+    const draft2 = await prisma.correctionDraft.findFirstOrThrow({ where: { correctionRequestId: reqId }, select: { id: true, basedOnVersionId: true } });
+    check('re-open re-points the draft at v2', draft2.basedOnVersionId === v2, draft2.basedOnVersionId);
+    const seg = await prisma.correctionDraftSegment.findFirstOrThrow({ where: { draftId: draft2.id }, select: { endAt: true } });
+    check('re-seeded draft has v2 hours (end 12:00, not v1 15:00)', seg.endAt.toISOString() === atIso(t.date, 12), seg.endAt.toISOString());
+    const reseedAudit = await prisma.auditEvent.findFirst({ where: { entityType: 'CORRECTION_REQUEST', entityId: reqId, eventType: 'CORRECTION_DRAFT_RESEEDED' }, select: { id: true } });
+    check('a CORRECTION_DRAFT_RESEEDED audit event was written', !!reseedAudit);
+  }
+
   console.log(JSON.stringify({ pass, fail }));
   await prisma.$disconnect();
   process.exit(fail > 0 ? 1 : 0);

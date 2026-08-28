@@ -117,91 +117,114 @@ export interface OpenCorrectionDraftResult {
   status: 'DRAFT_OPEN';
 }
 
+/** Copy a TimesheetVersion's day/segment/break content into a (freshly emptied) CorrectionDraft —
+ * the correction's starting point. Mirrors lib/review-scopes.ts's reinitializeDraftFromVersion. */
+async function seedCorrectionDraftFromVersion(tx: Prisma.TransactionClient, draftId: string, employeeId: string, versionId: string): Promise<void> {
+  await tx.correctionDraftDay.deleteMany({ where: { draftId } });
+
+  const days = await tx.timesheetDay.findMany({
+    where: { timesheetVersionId: versionId },
+    select: {
+      date: true,
+      dayType: true,
+      confirmedZero: true,
+      sourceAbsenceId: true,
+      note: true,
+      segments: {
+        select: {
+          siteId: true,
+          workAreaId: true,
+          sourceAssignmentId: true,
+          startAt: true,
+          endAt: true,
+          originClockShiftFragmentId: true,
+          breaks: { select: { startAt: true, endAt: true, paid: true } }
+        }
+      }
+    }
+  });
+
+  for (const day of days) {
+    const newDay = await tx.correctionDraftDay.create({
+      data: { draftId, date: day.date, dayType: day.dayType, confirmedZero: day.confirmedZero, sourceAbsenceId: day.sourceAbsenceId, note: day.note }
+    });
+    for (const seg of day.segments) {
+      const newSegment = await tx.correctionDraftSegment.create({
+        data: {
+          draftDayId: newDay.id,
+          draftId,
+          employeeId,
+          date: day.date,
+          startAt: seg.startAt,
+          endAt: seg.endAt,
+          siteId: seg.siteId,
+          workAreaId: seg.workAreaId,
+          sourceAssignmentId: seg.sourceAssignmentId,
+          // §15 п.8 — keep clock provenance so it isn't lost the moment the draft is opened.
+          originClockShiftFragmentId: seg.originClockShiftFragmentId
+        }
+      });
+      if (seg.breaks.length > 0) {
+        await tx.correctionDraftBreakSegment.createMany({
+          data: seg.breaks.map((b) => ({ draftSegmentId: newSegment.id, startAt: b.startAt, endAt: b.endAt, paid: b.paid }))
+        });
+      }
+    }
+  }
+}
+
 /**
  * PENDING → DRAFT_OPEN: creates the CorrectionDraft, fixes basedOnVersionId to the timesheet's
- * current (FINAL_APPROVED) version, and copies that version's day/segment/break content in as
- * the starting point — mirrors lib/review-scopes.ts's reinitializeDraftFromVersion, minus the
- * planned-shift step (no CorrectionDraftPlannedShift table exists). Already DRAFT_OPEN → returns
- * the existing draft unchanged (idempotent re-open, not an error) — anything else (SUBMITTED,
- * APPROVED, REJECTED) is not re-openable from here.
+ * current version, and copies that version's content in as the starting point.
+ *
+ * Already DRAFT_OPEN: idempotent re-open — BUT if the timesheet's current version has moved on
+ * since the draft was opened (T12 — the worker was returned the timesheet and resubmitted a new
+ * version while a stale admin edit sat open), the draft is re-seeded from the new current version
+ * so "Продолжить исправление" never shows content that disagrees with the timesheet card.
+ * Anything else (SUBMITTED, APPROVED, REJECTED) is not re-openable from here.
  */
 export async function openCorrectionDraft(correctionRequestId: string, actorUserId: string, requestId: string): Promise<OpenCorrectionDraftResult | OpenCorrectionDraftError> {
   const request = await prisma.correctionRequest.findUnique({
     where: { id: correctionRequestId },
-    select: { id: true, status: true, draftId: true, timesheetId: true, timesheet: { select: { employeeId: true, currentVersionId: true } } }
+    select: { id: true, status: true, draftId: true, timesheetId: true, timesheet: { select: { employeeId: true, currentVersionId: true } }, draftOwner: { select: { id: true, basedOnVersionId: true } } }
   });
   if (!request) {
     return { code: 'NOT_FOUND' };
   }
-  if (request.status === 'DRAFT_OPEN' && request.draftId) {
-    return { correctionRequestId, draftId: request.draftId, status: 'DRAFT_OPEN' };
+  const currentVersionId = request.timesheet.currentVersionId;
+  const employeeId = request.timesheet.employeeId;
+
+  if (request.status === 'DRAFT_OPEN' && request.draftOwner) {
+    if (currentVersionId && request.draftOwner.basedOnVersionId !== currentVersionId) {
+      await prisma.$transaction(async (tx) => {
+        await tx.$queryRaw`SELECT id FROM "CorrectionRequest" WHERE id = ${correctionRequestId}::uuid FOR UPDATE`;
+        await seedCorrectionDraftFromVersion(tx, request.draftOwner!.id, employeeId, currentVersionId);
+        await tx.correctionDraft.update({ where: { id: request.draftOwner!.id }, data: { basedOnVersionId: currentVersionId } });
+        await createAuditEvent(tx, {
+          actorUserId,
+          eventType: 'CORRECTION_DRAFT_RESEEDED',
+          entityType: 'CORRECTION_REQUEST',
+          entityId: correctionRequestId,
+          requestId,
+          beforeValue: { basedOnVersionId: request.draftOwner!.basedOnVersionId },
+          afterValue: { basedOnVersionId: currentVersionId }
+        });
+      });
+    }
+    return { correctionRequestId, draftId: request.draftOwner.id, status: 'DRAFT_OPEN' };
   }
-  if (request.status !== 'PENDING' || !request.timesheet.currentVersionId) {
+  if (request.status !== 'PENDING' || !currentVersionId) {
     return { code: 'INVALID_STATE_TRANSITION' };
   }
 
-  const basedOnVersionId = request.timesheet.currentVersionId;
-  const employeeId = request.timesheet.employeeId;
+  const basedOnVersionId = currentVersionId;
 
   const draftId = await prisma.$transaction(async (tx) => {
     const draft = await tx.correctionDraft.create({
       data: { correctionRequestId, employeeId, basedOnVersionId, openedByUserId: actorUserId }
     });
-
-    const days = await tx.timesheetDay.findMany({
-      where: { timesheetVersionId: basedOnVersionId },
-      select: {
-        date: true,
-        dayType: true,
-        confirmedZero: true,
-        sourceAbsenceId: true,
-        note: true,
-        segments: {
-          select: {
-            siteId: true,
-            workAreaId: true,
-            sourceAssignmentId: true,
-            startAt: true,
-            endAt: true,
-            originClockShiftFragmentId: true,
-            breaks: { select: { startAt: true, endAt: true, paid: true } }
-          }
-        }
-      }
-    });
-
-    for (const day of days) {
-      const newDay = await tx.correctionDraftDay.create({
-        data: { draftId: draft.id, date: day.date, dayType: day.dayType, confirmedZero: day.confirmedZero, sourceAbsenceId: day.sourceAbsenceId, note: day.note }
-      });
-      for (const seg of day.segments) {
-        const newSegment = await tx.correctionDraftSegment.create({
-          data: {
-            draftDayId: newDay.id,
-            draftId: draft.id,
-            employeeId,
-            date: day.date,
-            startAt: seg.startAt,
-            endAt: seg.endAt,
-            siteId: seg.siteId,
-            workAreaId: seg.workAreaId,
-            sourceAssignmentId: seg.sourceAssignmentId,
-            // §15 п.8 — without this, clock provenance is lost the moment a correction draft is
-            // opened, before the worker/admin ever touches the day (same lesson as
-            // reinitializeDraftFromVersion, lib/review-scopes.ts).
-            originClockShiftFragmentId: seg.originClockShiftFragmentId
-          }
-        });
-        if (seg.breaks.length > 0) {
-          await tx.correctionDraftBreakSegment.createMany({
-            data: seg.breaks.map((b) => ({ draftSegmentId: newSegment.id, startAt: b.startAt, endAt: b.endAt, paid: b.paid }))
-          });
-        }
-      }
-    }
-
+    await seedCorrectionDraftFromVersion(tx, draft.id, employeeId, basedOnVersionId);
     await tx.correctionRequest.update({ where: { id: correctionRequestId }, data: { draftId: draft.id, status: 'DRAFT_OPEN' } });
-
     await createAuditEvent(tx, {
       actorUserId,
       eventType: 'CORRECTION_DRAFT_OPENED',
@@ -211,7 +234,6 @@ export async function openCorrectionDraft(correctionRequestId: string, actorUser
       beforeValue: { status: 'PENDING' },
       afterValue: { status: 'DRAFT_OPEN', draftId: draft.id, basedOnVersionId }
     });
-
     return draft.id;
   });
 
