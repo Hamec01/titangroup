@@ -83,6 +83,7 @@ async function main() {
   check('notification is in the admin feed', !!item, list.map((n) => n.type));
   check('  type is TIMESHEET_AWAITING_APPROVAL', item?.type === 'TIMESHEET_AWAITING_APPROVAL');
   check('  carries the period start/end for the week label', item?.periodStartDate === a.start && !!item?.periodEndDate, item);
+  check('  first submission -> timesheetIsRevision false', item?.timesheetIsRevision === false, item?.timesheetIsRevision);
   check('  severity WARNING', item?.severity === 'WARNING');
 
   // 4. Approving (status change away from SUBMITTED/FOREMAN_APPROVED) resolves it.

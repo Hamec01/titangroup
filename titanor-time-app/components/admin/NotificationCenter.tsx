@@ -24,6 +24,7 @@ interface NotificationItem {
   timesheetId: string | null;
   periodStartDate: string | null;
   periodEndDate: string | null;
+  timesheetIsRevision: boolean;
 }
 
 function formatWeek(startDate: string | null, endDate: string | null, locale: 'EN' | 'RU'): string {
@@ -49,6 +50,9 @@ function BellIcon() {
 function summaryLine(item: NotificationItem, locale: 'EN' | 'RU', daysWord: (n: number) => string): string {
   if (item.type === 'TIMESHEET_AWAITING_APPROVAL') {
     const week = formatWeek(item.periodStartDate, item.periodEndDate, locale);
+    if (item.timesheetIsRevision) {
+      return locale === 'RU' ? `внёс правки в табель за неделю ${week} — нужно утвердить` : `revised the timesheet for ${week} — needs approval`;
+    }
     return locale === 'RU' ? `сдал табель за неделю ${week} — нужно утвердить` : `submitted the timesheet for ${week} — needs approval`;
   }
   const name = locale === 'RU' && item.qualificationNameRu ? item.qualificationNameRu : item.qualificationName ?? '';
@@ -208,9 +212,14 @@ export function NotificationCenter({ strings, locale }: { strings: AdminStrings;
                     <p className="notif-drawer-item-name">{item.employeeName}</p>
                     <p className="notif-drawer-item-detail">{summaryLine(item, locale, ruDays)}</p>
                     {item.expiresOn ? <p className="notif-drawer-item-date">{item.expiresOn}</p> : null}
-                    <button type="button" className="notif-drawer-item-link" onClick={() => handleView(item)}>
-                      {item.type === 'TIMESHEET_AWAITING_APPROVAL' ? (locale === 'RU' ? 'Открыть табель' : 'Open timesheet') : strings.notificationViewWorker} →
-                    </button>
+                    <div className="notif-drawer-item-actions">
+                      <button type="button" className="notif-drawer-item-link" onClick={() => handleView(item)}>
+                        {item.type === 'TIMESHEET_AWAITING_APPROVAL' ? (locale === 'RU' ? 'Открыть табель' : 'Open timesheet') : strings.notificationViewWorker} →
+                      </button>
+                      <button type="button" className="notif-drawer-item-hide" onClick={() => handleDismiss(item.id)}>
+                        {locale === 'RU' ? 'Убрать' : 'Dismiss'}
+                      </button>
+                    </div>
                   </li>
                 ))}
               </ul>

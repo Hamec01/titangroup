@@ -127,6 +127,28 @@ async function main() {
     check('reopen on an already-DRAFT timesheet is a no-op ok', 'code' in r && r.code === 'REOPENED', r);
   }
 
+  // --- 6. FINAL_APPROVED + the draft already carries leftover planned shifts (the pilot case) ---
+  {
+    const t = await makeSubmittedTimesheet(admin, new Date(new Date().getTime() + 2 * 86400000));
+    // simulate a prior reinitialize having left planned shifts behind, then final-approve
+    const v = (await prisma.timesheet.findUniqueOrThrow({ where: { id: t.timesheetId }, select: { currentVersionId: true } })).currentVersionId!;
+    const ps = await prisma.timesheetPlannedShift.findFirstOrThrow({ where: { timesheetVersionId: v }, select: { date: true, siteId: true, sourceAssignmentId: true, templateVersionDayId: true, plannedStartAt: true, plannedEndAt: true, plannedBreakMinutes: true } });
+    await prisma.timesheetDraftPlannedShift.create({
+      data: { draftId: t.draftId, employeeId: t.employeeId, date: ps.date, siteId: ps.siteId, sourceAssignmentId: ps.sourceAssignmentId, templateVersionDayId: ps.templateVersionDayId, plannedStartAt: ps.plannedStartAt, plannedEndAt: ps.plannedEndAt, plannedBreakMinutes: ps.plannedBreakMinutes }
+    });
+    await prisma.timesheetReviewScope.updateMany({ where: { timesheetVersionId: v }, data: { status: 'APPROVED' } });
+    await prisma.timesheet.update({ where: { id: t.timesheetId }, data: { status: 'FINAL_APPROVED' } });
+
+    const r = await reopenWorkerTimesheetForEdits(t.employeeId, t.timesheetId, admin, randomUUID());
+    check('FINAL_APPROVED reopen ok despite leftover draft planned shifts', 'code' in r && r.code === 'REOPENED', r);
+    const after = await prisma.timesheet.findUniqueOrThrow({ where: { id: t.timesheetId }, select: { status: true } });
+    check('  -> DRAFT', after.status === 'DRAFT');
+    const psCount = await prisma.timesheetDraftPlannedShift.count({ where: { draftId: t.draftId } });
+    check('  draft planned shifts re-seeded exactly once (no duplicates)', psCount >= 1, psCount);
+    const dayCount = await prisma.timesheetDraftDay.count({ where: { draftId: t.draftId } });
+    check('  draft day rows present to edit', dayCount >= 1, dayCount);
+  }
+
   console.log(JSON.stringify({ pass, fail }));
   await prisma.$disconnect();
   process.exit(fail > 0 ? 1 : 0);

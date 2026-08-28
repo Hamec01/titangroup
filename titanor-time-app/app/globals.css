@@ -306,6 +306,30 @@ button:disabled {
   outline: none;
 }
 
+/* T12 — an explicit "Убрать / Dismiss" button beside the drawer item's open-link. */
+.notif-drawer-item-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 6px;
+}
+.notif-drawer-item-hide {
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--accent-light);
+  font-size: 0.78rem;
+  cursor: pointer;
+  padding: 3px 10px;
+}
+.notif-drawer-item-hide:hover,
+.notif-drawer-item-hide:focus-visible {
+  color: var(--white);
+  border-color: var(--accent-light);
+  outline: none;
+}
+
 .notif-toast-stack {
   position: fixed;
   top: 16px;

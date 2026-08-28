@@ -146,6 +146,9 @@ export interface AdminNotificationView {
   timesheetId: string | null;
   periodStartDate: string | null;
   periodEndDate: string | null;
+  /** T12 — the current version is > 1: the worker (or a late clock sync) resubmitted after an
+   *  earlier submission, so the alert reads "внёс правки" rather than "сдал табель". */
+  timesheetIsRevision: boolean;
 }
 
 function formatDate(date: Date): string {
@@ -171,7 +174,7 @@ export async function listActiveNotificationsForAdmin(userId: string): Promise<A
       timesheetId: true,
       employee: { select: { firstName: true, lastName: true, employeeNumber: true } },
       employeeQualification: { select: { name: true, expiresOn: true, definition: { select: { nameRu: true } } } },
-      timesheet: { select: { period: { select: { startDate: true, endDate: true } } } }
+      timesheet: { select: { period: { select: { startDate: true, endDate: true } }, currentVersion: { select: { versionNumber: true } } } }
     }
   });
 
@@ -189,7 +192,8 @@ export async function listActiveNotificationsForAdmin(userId: string): Promise<A
     createdAt: row.createdAt.toISOString(),
     timesheetId: row.timesheetId,
     periodStartDate: row.timesheet?.period.startDate ? formatDate(row.timesheet.period.startDate) : null,
-    periodEndDate: row.timesheet?.period.endDate ? formatDate(row.timesheet.period.endDate) : null
+    periodEndDate: row.timesheet?.period.endDate ? formatDate(row.timesheet.period.endDate) : null,
+    timesheetIsRevision: (row.timesheet?.currentVersion?.versionNumber ?? 1) > 1
   }));
 }
 
