@@ -309,8 +309,9 @@ export function AdminWorkerProfileForm({ employeeId, initialProfile }: AdminWork
 
       <form onSubmit={handleSave} className="worker-work-setup" aria-busy={saving}>
         <div className="login-field">
-          <label htmlFor="admin-profile-specialty">{localeText(locale, 'Specialty', 'Специальность')}</label>
+          <label htmlFor="admin-profile-specialty">{localeText(locale, 'Specialty (free text, legacy)', 'Специальность (свободный текст, устар.)')}</label>
           <input id="admin-profile-specialty" type="text" maxLength={120} value={specialty} onChange={(e) => setSpecialty(e.target.value)} disabled={saving} />
+          <p className="setup-subtitle">{localeText(locale, 'Use the Professions block above instead — this stays only for old records.', 'Используйте блок «Профессии» выше — это поле осталось только для старых записей.')}</p>
           {fieldErrors.specialty ? <p className="field-error">{fieldErrors.specialty.join(', ')}</p> : null}
         </div>
         <div className="login-field">

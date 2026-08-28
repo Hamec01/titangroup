@@ -1,5 +1,6 @@
 import { prisma } from '@/lib/prisma';
 import { getEmployeeProfilePersonalIdentityCode } from '@/lib/employee-profile';
+import { listEmployeeProfessions, type EmployeeProfessionView } from '@/lib/professions';
 import { computeQualificationExpiryStatus, type QualificationExpiryStatus, type QualificationStatusColor } from '@/lib/qualification-expiry';
 import { helsinkiCalendarDateAsUtcMidnight } from '@/lib/attendance-clock';
 import { readEmployeeUpload } from '@/lib/employee-files';
@@ -40,6 +41,9 @@ export interface WorkerDossierData {
   addressPostalCode: string | null;
   addressCity: string | null;
   addressCountry: string | null;
+  /** T13 — professions (trade / speciality). Catalog and custom, category kept for grouping. */
+  professions: EmployeeProfessionView[];
+  /** Legacy free-text field, kept read-only until the owner decides to remove it (T13). */
   specialty: string | null;
   skills: string | null;
   photo: Buffer | null;
@@ -96,6 +100,8 @@ export async function getWorkerDossierData(employeeId: string): Promise<WorkerDo
 
   const today = helsinkiCalendarDateAsUtcMidnight(new Date());
 
+  const professions = await listEmployeeProfessions(employeeId);
+
   const [photo, qualifications, personalIdentityCode] = await Promise.all([
     employee.profile?.photoPath ? readEmployeeUpload(employee.profile.photoPath) : Promise.resolve(null),
     Promise.all(
@@ -134,6 +140,7 @@ export async function getWorkerDossierData(employeeId: string): Promise<WorkerDo
     addressPostalCode: employee.profile?.addressPostalCode ?? null,
     addressCity: employee.profile?.addressCity ?? null,
     addressCountry: employee.profile?.addressCountry ?? null,
+    professions,
     specialty: employee.profile?.specialty ?? null,
     skills: employee.profile?.skills ?? null,
     photo,

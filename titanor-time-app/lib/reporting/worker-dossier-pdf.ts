@@ -213,7 +213,11 @@ export async function buildWorkerDossierPdf(data: WorkerDossierData, locale: App
 
   // --- Work information ---
   y = drawSectionTitle(doc, t(locale, 'WORK INFORMATION', 'РАБОЧАЯ ИНФОРМАЦИЯ'), x, y);
-  y = drawFieldRow(doc, t(locale, 'Profession / Specialty', 'Профессия / Специальность'), dash(data.specialty), x, y, contentWidth);
+  const professionNames = data.professions.map((p) => (locale === 'RU' ? p.nameRu ?? p.nameEn : p.nameEn));
+  y = drawFieldRow(doc, t(locale, 'Professions', 'Профессии'), professionNames.length > 0 ? professionNames.join(', ') : '—', x, y, contentWidth);
+  if (data.specialty && data.specialty.trim().length > 0) {
+    y = drawFieldRow(doc, t(locale, 'Specialty (legacy)', 'Специальность (устар.)'), data.specialty, x, y, contentWidth);
+  }
   y = drawFieldRow(doc, t(locale, 'Employment contract', 'Трудовой договор'), data.contractAttached ? t(locale, 'Attached', 'Прикреплён') : t(locale, 'Not attached', 'Не прикреплён'), x, y, contentWidth);
   y = ensureSpace(doc, y, 14);
   doc.font('DejaVu-Bold').fontSize(9).text(`${t(locale, 'Skills', 'Навыки')}: `, x, y);

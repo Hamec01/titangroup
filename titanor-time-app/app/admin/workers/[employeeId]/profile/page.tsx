@@ -3,7 +3,9 @@ import { redirect } from 'next/navigation';
 import { resolveServerSession } from '@/lib/server-session';
 import { hasPermission } from '@/lib/permissions';
 import { getEmployeeProfileView } from '@/lib/employee-profile';
+import { listEmployeeProfessions, listProfessionCatalog } from '@/lib/professions';
 import { AdminWorkerProfileForm } from './AdminWorkerProfileForm';
+import { EmployeeProfessionsEditor } from '@/components/professions/EmployeeProfessionsEditor';
 import { resolveAppLocale } from '@/lib/i18n/server';
 import { localeText } from '@/lib/i18n/locale';
 
@@ -28,7 +30,12 @@ export default async function AdminWorkerProfilePage({ params }: { params: Promi
   }
 
   const { employeeId } = await params;
-  const profile = await getEmployeeProfileView(employeeId, true);
+  const canManageProfessions = await hasPermission(session.user.roles, 'worker.profession.manage');
+  const [profile, professions, professionCatalog] = await Promise.all([
+    getEmployeeProfileView(employeeId, true),
+    listEmployeeProfessions(employeeId),
+    listProfessionCatalog()
+  ]);
   if (!profile) {
     return (
       <main className="setup-page">
@@ -48,6 +55,9 @@ export default async function AdminWorkerProfilePage({ params }: { params: Promi
           <Link href={`/admin/workers/${employeeId}`}>← {localeText(locale, 'Back to worker', 'Назад к работнику')}</Link>
         </p>
         <h1>{localeText(locale, 'Worker profile & documents', 'Профиль и документы работника')}</h1>
+        {canManageProfessions ? (
+          <EmployeeProfessionsEditor employeeId={employeeId} initialProfessions={professions} catalog={professionCatalog} />
+        ) : null}
         <AdminWorkerProfileForm employeeId={employeeId} initialProfile={profile} />
       </div>
     </main>
