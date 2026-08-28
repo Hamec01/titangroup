@@ -2,7 +2,17 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { captureGpsSnapshot, evaluateZoneProximity, type GpsSnapshot } from '@/lib/worker-gps';
+import {
+  captureGpsSnapshot,
+  evaluateZoneProximity,
+  getGeolocationPermissionState,
+  requestGeolocationPermission,
+  startGpsWatch,
+  stopGpsWatch,
+  currentBestFix,
+  type GpsSnapshot,
+  type GeolocationPermissionState
+} from '@/lib/worker-gps';
 import { ensureDeviceBootstrapped, retryBootstrap, type BootstrapOutcome } from '@/lib/offline-outbox/device';
 import { enqueueCheckIn, enqueueCheckOut, enqueueSwitchSite, EnqueueError } from '@/lib/offline-outbox/outbox';
 import { runSyncOnce, tryRefreshClockState, type ClockStateWire, type SyncRunOutcome } from '@/lib/offline-outbox/sync-runner';
@@ -152,6 +162,10 @@ export function WorkerClockPanel({ initialClockState, assignments, workerName, t
   const [statusMessage, setStatusMessage] = useState<StatusMessage | null>(null);
   const [gpsStatus, setGpsStatus] = useState<GpsUiState>('IDLE');
   const [zoneStatus, setZoneStatus] = useState<ZoneStatus>('UNKNOWN');
+  // GPS steps 2+3 — one-time permission + a long-lived watch feeding a best-fix buffer.
+  const [gpsPermission, setGpsPermission] = useState<GeolocationPermissionState | null>(null);
+  const [bestAccuracyM, setBestAccuracyM] = useState<number | null>(null);
+  const [refiningGps, setRefiningGps] = useState(false);
   const [selectedAssignmentId, setSelectedAssignmentId] = useState<string | null>(() => {
     if (assignments.length === 0) return null;
     const primary = assignments.find((a) => a.isPrimary);
@@ -242,6 +256,49 @@ export function WorkerClockPanel({ initialClockState, assignments, workerName, t
   useEffect(() => {
     setIsOnline(navigator.onLine);
   }, []);
+
+  // ---- GPS steps 2+3 — resolve permission once, then keep one long-lived watch running while
+  // this panel is mounted. The watch feeds worker-gps's best-fix buffer, so Check In/Out uses the
+  // least-bad recent reading and the OS never re-prompts. ----
+  useEffect(() => {
+    let cancelled = false;
+    void getGeolocationPermissionState().then((state) => {
+      if (cancelled) return;
+      setGpsPermission(state);
+      if (state === 'granted' || state === 'unsupported') {
+        startGpsWatch();
+      }
+    });
+    const readout = window.setInterval(() => {
+      const fix = currentBestFix(90_000);
+      setBestAccuracyM(fix ? fix.accuracyMeters : null);
+    }, 3000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(readout);
+      stopGpsWatch();
+    };
+  }, []);
+
+  async function handleGrantGps(): Promise<void> {
+    const result = await requestGeolocationPermission();
+    setGpsPermission(result.granted ? 'granted' : result.reason === 'PERMISSION_DENIED' ? 'denied' : 'prompt');
+    if (result.granted) {
+      startGpsWatch();
+    }
+  }
+
+  async function handleRefineGps(): Promise<void> {
+    if (refiningGps) return;
+    setRefiningGps(true);
+    try {
+      const snap = await captureGpsSnapshot();
+      setBestAccuracyM(snap.location ? snap.location.accuracyMeters : null);
+      if (snap.location) setGpsStatus('READY');
+    } finally {
+      setRefiningGps(false);
+    }
+  }
 
   // ---- Sync triggers: online event, visibilitychange/resume, bounded timer ----
   useEffect(() => {
@@ -355,18 +412,17 @@ export function WorkerClockPanel({ initialClockState, assignments, workerName, t
       return;
     }
     let cancelled = false;
-    async function check() {
-      setZoneStatus((prev) => (prev === 'INSIDE' || prev === 'OUTSIDE' || prev === 'LOW_ACCURACY' || prev === 'UNAVAILABLE' ? prev : 'CHECKING'));
-      const snapshot = await captureGpsSnapshot();
+    function check() {
+      // GPS steps 2+3 — the long-lived watch already keeps worker-gps's best-fix buffer fresh, so
+      // the "in zone" badge reads it passively instead of firing its own getCurrentPosition every
+      // 30 s. A one-shot capture still happens at the actual Check In/Out.
+      const fix = currentBestFix(90_000);
       if (cancelled) {
         return;
       }
-      // Narrowed non-null just above — TS doesn't carry that narrowing into a nested function
-      // declaration invoked later, since `geofence` could in principle be reassigned by then (it
-      // can't; it's `const`).
-      setZoneStatus(snapshot.location ? evaluateZoneProximity(snapshot.location, geofence!) : 'UNAVAILABLE');
+      setZoneStatus(fix ? evaluateZoneProximity(fix, geofence!) : 'CHECKING');
     }
-    void check();
+    check();
     const interval = window.setInterval(() => {
       if (document.visibilityState === 'visible') {
         void check();
@@ -622,6 +678,22 @@ export function WorkerClockPanel({ initialClockState, assignments, workerName, t
 
   return (
     <div className="wk-card wk-clock-home-card">
+      {gpsPermission === 'prompt' && (
+        <div className="wk-return-notice" role="status">
+          <h2 className="wk-return-notice-title">{t.gpsGrantTitle}</h2>
+          <p className="wk-return-reason-text">{t.gpsGrantBody}</p>
+          <button type="button" className="wk-action-button" onClick={() => void handleGrantGps()}>
+            {t.gpsGrantButton}
+          </button>
+        </div>
+      )}
+      {gpsPermission === 'denied' && (
+        <div className="wk-return-notice" role="alert">
+          <h2 className="wk-return-notice-title">{t.gpsDeniedTitle}</h2>
+          <p className="wk-return-reason-text">{t.gpsDeniedBody}</p>
+        </div>
+      )}
+
       <button type="button" className="wk-status-card" onClick={() => setStatusSheetOpen(true)}>
         <div className="wk-status-card-head">
           <div>
@@ -667,6 +739,21 @@ export function WorkerClockPanel({ initialClockState, assignments, workerName, t
         <button type="button" className="wk-inline-secondary" onClick={() => setAssignmentSheetOpen(true)} disabled={busy}>
           {t.changeWorkplace}
         </button>
+      )}
+
+      {(gpsPermission === 'granted' || gpsPermission === 'unsupported' || gpsPermission === null) && (
+        <p className="wk-gps-accuracy">
+          {bestAccuracyM === null
+            ? t.gpsAccuracyUnknown
+            : bestAccuracyM <= 75
+              ? t.gpsAccuracyGood(Math.round(bestAccuracyM))
+              : t.gpsAccuracyPoor(Math.round(bestAccuracyM))}
+          {bestAccuracyM !== null && bestAccuracyM > 75 ? (
+            <button type="button" className="wk-inline-secondary" onClick={() => void handleRefineGps()} disabled={refiningGps}>
+              {refiningGps ? t.gpsRefining : t.gpsRefine}
+            </button>
+          ) : null}
+        </p>
       )}
 
       <div className={`wk-main-action-wrap ${isClockedIn ? 'in' : 'out'}`}>

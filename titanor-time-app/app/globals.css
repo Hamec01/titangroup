@@ -1399,6 +1399,16 @@ button:disabled {
   font-size: 0.9rem;
 }
 
+.wk-gps-accuracy {
+  margin: 4px 0 0;
+  color: var(--text-soft);
+  font-size: 0.85rem;
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
 .wk-return-notice {
   border: 1px solid rgba(253, 164, 175, 0.35);
   background: rgba(253, 164, 175, 0.08);

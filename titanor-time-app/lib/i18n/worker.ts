@@ -58,6 +58,17 @@ export interface WorkerStrings {
   statusGpsPermission: string;
   statusGpsUnavailable: string;
   statusGpsWillCheck: string;
+  // GPS steps 2+3
+  gpsGrantTitle: string;
+  gpsGrantBody: string;
+  gpsGrantButton: string;
+  gpsDeniedTitle: string;
+  gpsDeniedBody: string;
+  gpsAccuracyUnknown: string;
+  gpsAccuracyGood: (m: number) => string;
+  gpsAccuracyPoor: (m: number) => string;
+  gpsRefine: string;
+  gpsRefining: string;
   statusZone: string;
   statusZoneChecking: string;
   statusZoneInside: string;
@@ -315,6 +326,16 @@ export const WORKER_STRINGS: Record<AppLocale, WorkerStrings> = {
     statusGpsPermission: 'Permission needed',
     statusGpsUnavailable: 'Unavailable',
     statusGpsWillCheck: 'Checked at clock action',
+    gpsGrantTitle: 'Allow location once',
+    gpsGrantBody: 'Titanor Time checks your location when you clock in and out. Tap Allow, and choose "Allow while using the app" (not "Allow once") — then you will not be asked again.',
+    gpsGrantButton: 'Allow location',
+    gpsDeniedTitle: 'Location is blocked',
+    gpsDeniedBody: 'Open your phone settings → this app / browser → Location, and set it to "While using". Then reopen this screen.',
+    gpsAccuracyUnknown: 'Getting GPS signal…',
+    gpsAccuracyGood: (m: number) => `GPS accuracy ±${m} m — good`,
+    gpsAccuracyPoor: (m: number) => `GPS accuracy ±${m} m — weak signal`,
+    gpsRefine: 'Improve',
+    gpsRefining: 'Improving…',
     statusZone: 'Zone',
     statusZoneChecking: 'Checking…',
     statusZoneInside: 'In work zone',
@@ -559,6 +580,16 @@ export const WORKER_STRINGS: Record<AppLocale, WorkerStrings> = {
     statusGpsPermission: 'Нужен доступ',
     statusGpsUnavailable: 'Недоступно',
     statusGpsWillCheck: 'Проверяется при отметке',
+    gpsGrantTitle: 'Разрешите геолокацию один раз',
+    gpsGrantBody: 'Titanor Time проверяет ваше местоположение при отметке прихода и ухода. Нажмите «Разрешить» и выберите «Разрешить при использовании приложения» (не «Один раз») — тогда приложение больше не будет спрашивать.',
+    gpsGrantButton: 'Разрешить геолокацию',
+    gpsDeniedTitle: 'Геолокация запрещена',
+    gpsDeniedBody: 'Откройте настройки телефона → это приложение / браузер → Геолокация, и выберите «При использовании». Затем снова откройте этот экран.',
+    gpsAccuracyUnknown: 'Получаем сигнал GPS…',
+    gpsAccuracyGood: (m: number) => `Точность GPS ±${m} м — хорошая`,
+    gpsAccuracyPoor: (m: number) => `Точность GPS ±${m} м — слабый сигнал`,
+    gpsRefine: 'Уточнить',
+    gpsRefining: 'Уточняем…',
     statusZone: 'Зона',
     statusZoneChecking: 'Проверяем…',
     statusZoneInside: 'В рабочей зоне',
