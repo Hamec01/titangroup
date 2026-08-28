@@ -6,6 +6,12 @@ import type { AppLocale } from './locale';
 // what the mobile worker app and foreman review step look like, even though they don't touch
 // those directly. Kept as a data module (not JSX) so the content itself stays easy to review/edit
 // without touching component code.
+//
+// Last brought current: 2026-08-28 (T12). Covers: grouped admin nav, the notification bell +
+// review-queue badge, the worker dossier / qualifications matrix, the unified "Awaiting approval"
+// screen with one-click approve, the three ways to change a timesheet (return / direct edit /
+// formal correction), marking sick-leave/vacation from review, the configurable GPS accuracy
+// threshold, and the mid-shift presence check in the worker app.
 
 export interface GuideItem {
   title: string;
@@ -56,7 +62,7 @@ export const GUIDE_CONTENT: Record<AppLocale, GuideContent> = {
     roles: [
       {
         title: 'Панель администратора',
-        text: 'Полный доступ: настройка объектов и графиков, работники, назначения, проверка табелей, отчёты и выгрузки. Именно этой панели посвящена основная часть инструкции ниже.'
+        text: 'Полный доступ: настройка объектов и графиков, работники и их допуски, назначения, проверка и утверждение табелей, отчёты и выгрузки. Именно этой панели посвящена основная часть инструкции ниже.'
       },
       {
         title: 'Панель прораба',
@@ -88,7 +94,11 @@ export const GUIDE_CONTENT: Record<AppLocale, GuideContent> = {
       },
       {
         title: '5. Работник',
-        text: 'Добавьте сотрудника в разделе «Работники → Работники»: имя, фамилия, при необходимости телефон. Табельный номер система может присвоить автоматически. Сразу после создания можно выдать код или QR-код активации — по нему работник установит и войдёт в мобильное приложение. На iPhone приложение нужно устанавливать только через встроенный браузер Safari — через другие браузеры (например, Chrome на iOS) установка на iPhone не сработает.'
+        text: 'Добавьте сотрудника в разделе «Работники → Работники»: имя, фамилия, при необходимости телефон. Табельный номер система может присвоить автоматически. На карточке работника можно заполнить досье (дата рождения, личный код, контактный email, специальность, навыки, фото, договор). Сразу после создания можно выдать код или QR-код активации — по нему работник установит и войдёт в мобильное приложение. На iPhone приложение нужно устанавливать только через встроенный браузер Safari — через другие браузеры (например, Chrome на iOS) установка на iPhone не сработает.'
+      },
+      {
+        title: '5б. Допуски и сертификаты (необязательно)',
+        text: 'Если для работы нужны допуски или удостоверения с ограниченным сроком (электробезопасность, работа на высоте и т. п.), заведите их на карточке работника: тип допуска, срок действия, отметка о проверке. Общая картина по всем работникам — в разделе «Работники → Допуски и сертификаты». Когда срок приближается или истёк, система заранее показывает уведомление в колокольчике в шапке.'
       },
       {
         title: '6. Назначение',
@@ -107,7 +117,8 @@ export const GUIDE_CONTENT: Record<AppLocale, GuideContent> = {
     today: [
       '«Сегодня» открывается сразу после входа — это главный экран для повседневной работы. В таблице по каждому работнику видно: статус (работает / закончил / не начинал), объект, время прихода и ухода, сколько отработано сегодня, есть ли проблемы.',
       'Строка разбита на отдельные кликабельные ячейки: клик по имени открывает редактирование профиля, по статусу — быструю проверку, по объекту — назначения этого работника, по приходу/уходу/сегодня — историю по дням за последние недели, по проблемам — список проблем этого работника. Кнопка «Открыть →» открывает полную карточку работника целиком.',
-      'Сверху есть поиск по имени/объекту и сводные показатели (сколько работников активны, сколько сейчас на смене, сколько требуют внимания). Ниже, в раскрывающихся блоках — сведения по табелям и техническим конфликтам, если они есть.'
+      'Сверху есть поиск по имени/объекту и сводные показатели (сколько работников активны, сколько сейчас на смене, сколько требуют внимания). Ниже, в раскрывающихся блоках — сведения по табелям и техническим конфликтам, если они есть.',
+      'В шапке справа — две иконки со счётчиками. Колокольчик: уведомления, которые требуют внимания (истекающие допуски и сертификаты работников; «работник сдал табель за неделю — нужно утвердить»). Календарь: сколько табелей ждёт вашего утверждения, с разбивкой по неделям — клик открывает очередь «На утверждении». Рядом — переключатель языка RU/EN и ссылка «Инструкция» (эта страница).'
     ],
     referenceTitle: 'Разделы меню — что где находится',
     referenceIntro: 'Меню администратора сгруппировано по смыслу — каждая группа открывается по клику и содержит связанные разделы.',
@@ -126,7 +137,8 @@ export const GUIDE_CONTENT: Record<AppLocale, GuideContent> = {
       {
         title: 'Работники',
         items: [
-          { title: 'Работники', text: 'Полный список сотрудников с их статусом трудоустройства, текущим назначением и статусом активации мобильного приложения. Отсюда же можно выдать или перевыдать код/QR-код активации.' },
+          { title: 'Работники', text: 'Полный список сотрудников с их статусом трудоустройства, текущим назначением и статусом активации мобильного приложения. Отсюда же можно выдать или перевыдать код/QR-код активации, а на карточке — заполнить досье работника.' },
+          { title: 'Допуски и сертификаты', text: 'Матрица «работник × тип допуска»: по каждому работнику видно срок действия и статус (действует / истекает скоро / истёк / срок не указан), с поиском и фильтрами. Сами допуски заводятся на карточке работника; типы допусков — общий справочник компании. Приближение или истечение срока попадает в колокольчик уведомлений.' },
           { title: 'Назначения', text: 'Связь «работник + объект (+ рабочая зона) + шаблон графика» на период времени. У работника может быть одно основное назначение и несколько дополнительных; завершённое назначение не удаляется, а остаётся в истории.' },
           { title: 'Пользователи', text: 'Учётные записи для входа в систему помимо мобильного приложения работника — в первую очередь прорабы, а также дополнительные администраторы. Отсюда же выдаются коды активации для новых учётных записей.' }
         ]
@@ -135,16 +147,17 @@ export const GUIDE_CONTENT: Record<AppLocale, GuideContent> = {
         title: 'Учёт времени',
         items: [
           { title: 'Расчётные периоды', text: 'Периоды (обычно неделя или две недели), создаются автоматически на основе циклов отправки табеля. В рамках периода отработанное время собирается в табель, который затем проходит проверку.' },
-          { title: 'Табели', text: 'Табели, готовые к окончательному одобрению после проверки прорабом, а также уже окончательно одобренные — с карточки одобренного табеля можно запросить исправление.' },
-          { title: 'Проблемы учёта', text: 'Автоматически обнаруженные несоответствия в отметках прихода/ухода — например, не подтверждён GPS, нет отметки ухода, пересекаются две смены. Каждую проблему нужно решить: отклонить как несущественную, подтвердить данные как верные либо исправить конкретное время или объект.' },
-          { title: 'Правила учёта', text: 'Общие настройки компании: через сколько дней после окончания периода и в какое время неотправленный табель отправляется автоматически, сколько ждать перед повторным открытием табеля при поздней синхронизации, максимально допустимая длительность одной смены.' }
+          { title: 'Табели', text: 'Список всех табелей по статусам. С карточки табеля доступны действия в зависимости от статуса. У отправленного на проверку: утвердить часы; вернуть работнику с причиной; «Изменить часы» — быстрая правка администратором без причины, работник не получает уведомление; «Исправить часы / отметить больничный, отпуск» — правка с причиной, которую работник видит. У окончательно одобренного — запросить исправление.' },
+          { title: 'Проблемы учёта', text: 'Автоматически обнаруженные несоответствия в отметках прихода/ухода — например, не подтверждён GPS, нет отметки ухода, пересекаются две смены. Для проблем с GPS в карточке показывается расстояние от точки работника до центра геозоны и мини-карта — видно, был ли работник рядом с объектом, даже если точность низкая. Каждую проблему нужно решить: отклонить как несущественную, подтвердить данные как верные либо исправить конкретное время или объект.' },
+          { title: 'Правила учёта', text: 'Общие настройки компании: через сколько дней после окончания периода и в какое время неотправленный табель отправляется автоматически; сколько ждать перед повторным открытием табеля при поздней синхронизации; максимально допустимая длительность одной смены; максимальная точность GPS (в метрах), при которой система считает геозону подтверждённой — её можно поднять для объекта со слабым сигналом внутри помещений.' }
         ]
       },
       {
         title: 'Проверка',
         items: [
-          { title: 'Табели на проверку', text: 'Очередь отправленных табелей (по объектам и не привязанным к объекту данным), ожидающих, чтобы прораб или администратор их одобрил либо вернул работнику с указанием причины.' },
-          { title: 'Исправления', text: 'Процесс изменения табеля, который уже прошёл окончательное одобрение. Запускается с карточки такого табеля, требует указания причины и проходит отдельное одобрение, прежде чем измененные данные станут окончательными.' }
+          { title: 'На утверждении', text: 'Один экран со всеми табелями, ожидающими вашего утверждения, по всем открытым периодам. Фильтр по объекту, сортировка, «только с замечаниями». По «чистым» табелям (без проблем и расхождений план ≠ факт) — кнопка утверждения в один клик; по остальным — «Открыть» ведёт на карточку. Отдельный раскрывающийся блок «Ещё не сдали» — кто пока не отправил табель.' },
+          { title: 'Проверка по разделам', text: 'Детальная проверка табеля по частям — по каждому объекту отдельно и по данным вне объекта: каждый раздел можно одобрить или вернуть отдельно. Используется, когда по табелю нужно разобраться подробнее, чем в один клик.' },
+          { title: 'Исправления', text: 'Изменение табеля, который уже прошёл окончательное одобрение. Запускается с карточки такого табеля, требует причины и проходит отдельное одобрение, прежде чем изменённые данные станут окончательными. Для табеля, который ещё на проверке, отдельное «исправление» не нужно — используйте «Изменить часы» или верните работнику.' }
         ]
       },
       {
@@ -157,15 +170,19 @@ export const GUIDE_CONTENT: Record<AppLocale, GuideContent> = {
     ],
     workerAppTitle: 'Мобильное приложение работника (кратко)',
     workerApp: [
-      'Работник получает ссылку или QR-код активации от администратора (раздел «Работники → Работники»), переходит по ней и устанавливает приложение на телефон.',
-      'В приложении одна главная кнопка «Приход» / «Уход» — при нажатии проверяется геолокация, чтобы подтвердить, что работник действительно на объекте. Приложение продолжает работать и без интернета — данные отправятся на сервер, как только связь появится.',
+      'Работник получает ссылку или QR-код активации от администратора (раздел «Работники → Работники»), переходит по ней и устанавливает приложение на телефон. На iPhone — только через встроенный браузер Safari.',
+      'При первом входе приложение один раз просит разрешить геолокацию — нужно выбрать «Разрешить при использовании приложения» (не «Один раз»), тогда оно больше спрашивать не будет.',
+      'В приложении одна главная кнопка «Приход» / «Уход» — при нажатии проверяется геолокация и показывается её точность. Приложение продолжает работать и без интернета — данные отправятся на сервер, как только связь появится.',
+      'Если смена длинная, приложение может ещё раз проверить местоположение в течение смены (когда работник его открывает) — эти точки видны администратору на карте работника. Отдельно закрывать и открывать смену для этого не нужно.',
       'Работник видит список часов по дням за текущий период и в конце периода отправляет табель на проверку. Если табель не отправлен вовремя, система может отправить его автоматически — это настраивается в разделе «Правила учёта».'
     ],
     tipsTitle: 'На что обратить внимание',
     tips: [
       'Без хотя бы одного объекта, шаблона графика, работника и назначения экран «Сегодня» останется пустым — эти четыре шага обязательны.',
       'Без настроенной геозоны на объекте отметки прихода/ухода не будут проверяться по местоположению.',
-      '«Исправление» можно запросить только для уже окончательно одобренного табеля. Если табель ещё не одобрен, его нужно просто вернуть работнику через раздел «Проверка» — с указанием причины возврата.',
+      'Табель на проверке можно поправить тремя способами: вернуть работнику с причиной (он переделает сам), «Изменить часы» (быстрая правка администратором без причины, работник не уведомляется) или «Исправить часы» с причиной, которую работник увидит. Отдельный процесс «Исправление» нужен только для уже окончательно одобренного табеля.',
+      'Больничный, отпуск или неоплачиваемый день можно проставить прямо в редакторе табеля при проверке — отдельный одобренный запрос на отсутствие для этого больше не обязателен.',
+      'Допуски и сертификаты с истекающим сроком система показывает в колокольчике заранее — не дожидаясь, пока они станут недействительны.',
       'Рабочую зону и шаблон графика, которые уже используются, нельзя удалить — только отключить: так сохраняется история по уже отработанному времени, но их больше нельзя выбрать для новых назначений.',
       'Изменение цикла отправки табеля задним числом ограничено, если по текущему периоду уже есть данные — такие изменения обычно применяются с ближайшей будущей границы периода.'
     ],
@@ -183,7 +200,7 @@ export const GUIDE_CONTENT: Record<AppLocale, GuideContent> = {
     roles: [
       {
         title: 'Admin panel',
-        text: 'Full access: setting up sites and schedules, workers, assignments, timesheet review, reports and exports. Most of the guide below is about this panel.'
+        text: 'Full access: setting up sites and schedules, workers and their qualifications, assignments, timesheet review and approval, reports and exports. Most of the guide below is about this panel.'
       },
       {
         title: 'Foreman panel',
@@ -215,7 +232,11 @@ export const GUIDE_CONTENT: Record<AppLocale, GuideContent> = {
       },
       {
         title: '5. Worker',
-        text: 'Add an employee under People → Workers: first name, last name, phone if needed. The system can assign an employee number automatically. Right after creation you can issue an activation code or QR code — the worker uses it to install and log into the mobile app. On iPhone, the app must be installed through the built-in Safari browser only — installing from another browser (e.g. Chrome on iOS) will not work on iPhone.'
+        text: 'Add an employee under People → Workers: first name, last name, phone if needed. The system can assign an employee number automatically. The worker\'s own card is where you fill in the dossier (date of birth, personal ID code, contact email, specialty, skills, photo, contract). Right after creation you can issue an activation code or QR code — the worker uses it to install and log into the mobile app. On iPhone, the app must be installed through the built-in Safari browser only — installing from another browser (e.g. Chrome on iOS) will not work on iPhone.'
+      },
+      {
+        title: '5b. Qualifications and certificates (optional)',
+        text: 'If the work requires permits or certificates with an expiry date (electrical safety, working at height, etc.), add them on the worker\'s card: qualification type, expiry date, a verified flag. The whole-team picture is under People → Qualifications. When an expiry date is approaching or has passed, the system shows a notification in the bell in the header ahead of time.'
       },
       {
         title: '6. Assignment',
@@ -234,7 +255,8 @@ export const GUIDE_CONTENT: Record<AppLocale, GuideContent> = {
     today: [
       '"Today" opens right after sign-in — it\'s the main screen for day-to-day work. For each worker, the table shows: status (working / finished / not started), site, check-in and check-out time, hours worked today, and whether there are issues.',
       'Each row is split into separate clickable cells: clicking the name opens profile editing, the status cell opens a quick status check, the site cell opens that worker\'s assignments, check-in/check-out/today open a day-by-day history for recent weeks, and the issues cell opens that worker\'s issue list. The "Open →" button opens the worker\'s full profile.',
-      'At the top there\'s a search box (by name/site) and summary counters (active workers, currently working, needing attention). Below, in expandable panels, are timesheet details and any technical conflicts, if there are any.'
+      'At the top there\'s a search box (by name/site) and summary counters (active workers, currently working, needing attention). Below, in expandable panels, are timesheet details and any technical conflicts, if there are any.',
+      'The header has two counter icons on the right. The bell: notifications that need attention (workers\' expiring qualifications and certificates; "a worker submitted the timesheet for a week — needs approval"). The calendar: how many timesheets are waiting for your approval, broken down by week — clicking it opens the "Awaiting approval" queue. Next to them is the RU/EN language switch and the "Guide" link (this page).'
     ],
     referenceTitle: 'Menu sections — what\'s where',
     referenceIntro: 'The admin menu is grouped by purpose — each group opens on click and contains related sections.',
@@ -253,7 +275,8 @@ export const GUIDE_CONTENT: Record<AppLocale, GuideContent> = {
       {
         title: 'People',
         items: [
-          { title: 'Workers', text: 'The full employee list with employment status, current assignment, and mobile-app activation status. Activation codes/QR codes can be issued or reissued from here.' },
+          { title: 'Workers', text: 'The full employee list with employment status, current assignment, and mobile-app activation status. Activation codes/QR codes can be issued or reissued from here, and the worker\'s card is where the dossier is filled in.' },
+          { title: 'Qualifications', text: 'A "worker × qualification type" matrix: for each worker it shows the expiry date and status (valid / expiring soon / expired / expiry not set), with search and filters. The qualifications themselves are added on the worker\'s card; the list of qualification types is a company-wide catalog. An approaching or passed expiry shows up in the notification bell.' },
           { title: 'Assignments', text: 'The link between "worker + site (+ work area) + schedule template" for a date range. A worker can have one primary assignment and several secondary ones; a finished assignment isn\'t deleted, it stays in history.' },
           { title: 'Users', text: 'System accounts for signing in besides the worker mobile app — mainly foremen, plus additional administrators. Activation codes for new accounts are also issued from here.' }
         ]
@@ -262,16 +285,17 @@ export const GUIDE_CONTENT: Record<AppLocale, GuideContent> = {
         title: 'Time & attendance',
         items: [
           { title: 'Payroll periods', text: 'Periods (usually a week or two weeks), created automatically from submission cycles. Worked time within a period is collected into a timesheet, which then goes through review.' },
-          { title: 'Timesheets', text: 'Timesheets ready for final approval after foreman review, plus already-finalized ones — a correction can be requested from an already-approved timesheet\'s own card.' },
-          { title: 'Attendance issues', text: 'Automatically detected inconsistencies in check-in/check-out — for example, GPS not verified, a missing checkout, two overlapping shifts. Each issue needs to be resolved: dismissed as not significant, acknowledged as valid data, or corrected (a specific time or site fixed).' },
-          { title: 'Attendance policy', text: 'Company-wide settings: how many days after a period ends, and at what time, an unsubmitted timesheet is submitted automatically; how long to wait before reopening a timesheet after a late sync; the maximum allowed length of a single shift.' }
+          { title: 'Timesheets', text: 'The full list of timesheets by status. The actions on a timesheet\'s card depend on its status. For one submitted for review: approve hours; return it to the worker with a reason; "Edit hours" — a quick admin edit with no reason, the worker is not notified; "Edit hours / mark sick leave, vacation" — an edit with a reason the worker sees. For an already-finalized one — request a correction.' },
+          { title: 'Attendance issues', text: 'Automatically detected inconsistencies in check-in/check-out — for example, GPS not verified, a missing checkout, two overlapping shifts. For GPS issues the card shows the distance from the worker\'s point to the geofence centre and a mini-map — you can see whether the worker was near the site even when accuracy is poor. Each issue needs to be resolved: dismissed as not significant, acknowledged as valid data, or corrected (a specific time or site fixed).' },
+          { title: 'Attendance policy', text: 'Company-wide settings: how many days after a period ends, and at what time, an unsubmitted timesheet is submitted automatically; how long to wait before reopening a timesheet after a late sync; the maximum allowed length of a single shift; the maximum GPS accuracy (in metres) at which the system treats the geofence as confirmed — raise it for a site with a weak signal indoors.' }
         ]
       },
       {
         title: 'Review',
         items: [
-          { title: 'Timesheet review', text: 'The queue of submitted timesheets (by site, and non-site-scoped data), waiting for a foreman or admin to approve them or return them to the worker with a reason.' },
-          { title: 'Corrections', text: 'The process of changing a timesheet that\'s already been finally approved. Started from that timesheet\'s own card, requires a reason, and goes through its own approval before the changed data becomes final.' }
+          { title: 'Awaiting approval', text: 'One screen with every timesheet waiting for your approval, across all open periods. Filter by site, sort, "only with issues". Clean timesheets (no issues, no plan ≠ actual mismatch) get a one-click approve button; the rest have an "Open" link to the card. A separate expandable "Not submitted yet" panel shows who hasn\'t sent a timesheet.' },
+          { title: 'By-scope review', text: 'Detailed review of a timesheet in parts — per site, and for non-site data: each part can be approved or returned separately. Used when a timesheet needs a closer look than a single click.' },
+          { title: 'Corrections', text: 'Changing a timesheet that\'s already been finally approved. Started from that timesheet\'s own card, requires a reason, and goes through its own approval before the changed data becomes final. A timesheet still under review doesn\'t need a separate "correction" — use "Edit hours" or return it to the worker.' }
         ]
       },
       {
@@ -284,15 +308,19 @@ export const GUIDE_CONTENT: Record<AppLocale, GuideContent> = {
     ],
     workerAppTitle: 'The worker mobile app (brief overview)',
     workerApp: [
-      'The worker gets an activation link or QR code from the administrator (People → Workers), opens it, and installs the app on their phone.',
-      'The app has one main Check In / Check Out button — pressing it checks location to confirm the worker is actually at the site. The app keeps working without internet too; data is sent to the server as soon as a connection is available.',
+      'The worker gets an activation link or QR code from the administrator (People → Workers), opens it, and installs the app on their phone. On iPhone — through the built-in Safari browser only.',
+      'On first launch the app asks for location permission once — the worker should choose "Allow while using the app" (not "Allow once"), and it won\'t ask again.',
+      'The app has one main Check In / Check Out button — pressing it checks location and shows its accuracy. The app keeps working without internet too; data is sent to the server as soon as a connection is available.',
+      'On a long shift the app may check location again during the shift (when the worker opens it) — those points are visible to the administrator on the worker\'s map. Nothing needs to be clocked out and back in for this.',
       'The worker sees a day-by-day list of hours for the current period and submits their timesheet at the end of the period. If it isn\'t submitted in time, the system can submit it automatically — configurable under Attendance policy.'
     ],
     tipsTitle: 'Worth knowing',
     tips: [
       'Without at least one site, one schedule template, one worker, and one assignment, the "Today" screen will stay empty — those four steps are required.',
       'Without a configured geofence on a site, check-in/check-out won\'t be verified by location.',
-      'A "correction" can only be requested for an already finally-approved timesheet. If a timesheet isn\'t approved yet, just return it to the worker from Review — with a reason.',
+      'A timesheet under review can be changed three ways: return it to the worker with a reason (they redo it themselves), "Edit hours" (a quick admin edit with no reason, the worker isn\'t notified), or "Edit hours" with a reason the worker will see. The separate "Correction" process is only needed for an already finally-approved timesheet.',
+      'Sick leave, vacation, or an unpaid day can be set right in the timesheet editor during review — a separate approved absence request is no longer required for that.',
+      'The system shows expiring qualifications and certificates in the bell ahead of time — before they actually become invalid.',
       'A work area or schedule template that\'s already in use can\'t be deleted — only deactivated: this keeps the history of time already logged, while removing it from future assignment choices.',
       'Changing a submission cycle retroactively is limited if the current period already has data — such changes are usually applied from the nearest future period boundary.'
     ],
