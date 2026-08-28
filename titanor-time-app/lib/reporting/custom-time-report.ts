@@ -4,6 +4,7 @@ import type { WorkedTimeSegmentInput } from '@/lib/reporting/worked-time';
 import { computeSegmentMs, msToMinutes } from '@/lib/reporting/worked-time';
 import { resolveCanonicalSource } from '@/lib/reporting/canonical-source';
 import { buildCanonicalDailyBuckets, type CanonicalDailyBucket } from '@/lib/reporting/canonical-daily-buckets';
+import { loadPlannedUnpaidBreakBySourceAndDate, loadAutoUnpaidBreakThresholdMinutes } from '@/lib/reporting/auto-break';
 
 // Part A (flexible time report export) — task spec §3. Reuses the EXACT canonical reporting
 // core T8.1-T8.4 use (lib/reporting/worked-time.ts, canonical-source.ts,
@@ -96,6 +97,7 @@ interface RawSegment extends WorkedTimeSegmentInput {
   siteId: string;
   workAreaId: string | null;
   date: Date;
+  plannedUnpaidBreakMinutes: number;
 }
 
 export async function getCustomTimeReport(params: CustomReportParams): Promise<CustomTimeReport> {
@@ -165,9 +167,16 @@ export async function getCustomTimeReport(params: CustomReportParams): Promise<C
       return emptyReport(params);
     }
 
+    // T10-D — planned UNPAID break per source+date + the company threshold.
+    const [plannedUnpaidByKey, autoBreakThresholdMinutes] = await Promise.all([
+      loadPlannedUnpaidBreakBySourceAndDate({ versionIds, draftIds }, tx),
+      loadAutoUnpaidBreakThresholdMinutes(tx)
+    ]);
+    const isoDay = (d: Date): string => d.toISOString().slice(0, 10);
+
     const rawSegments: RawSegment[] = [
-      ...draftSegments.map((s) => ({ employeeId: draftIdToTimesheet.get(s.draftId)!.employeeId, timesheetVersionId: null, siteId: s.siteId, workAreaId: s.workAreaId, date: s.date, startAt: s.startAt, endAt: s.endAt, breaks: s.breaks })),
-      ...versionSegments.map((s) => ({ employeeId: versionIdToTimesheet.get(s.timesheetVersionId)!.employeeId, timesheetVersionId: s.timesheetVersionId, siteId: s.siteId, workAreaId: s.workAreaId, date: s.date, startAt: s.startAt, endAt: s.endAt, breaks: s.breaks }))
+      ...draftSegments.map((s) => ({ employeeId: draftIdToTimesheet.get(s.draftId)!.employeeId, timesheetVersionId: null, siteId: s.siteId, workAreaId: s.workAreaId, date: s.date, startAt: s.startAt, endAt: s.endAt, breaks: s.breaks, plannedUnpaidBreakMinutes: plannedUnpaidByKey.get(`${s.draftId}:${isoDay(s.date)}`) ?? 0 })),
+      ...versionSegments.map((s) => ({ employeeId: versionIdToTimesheet.get(s.timesheetVersionId)!.employeeId, timesheetVersionId: s.timesheetVersionId, siteId: s.siteId, workAreaId: s.workAreaId, date: s.date, startAt: s.startAt, endAt: s.endAt, breaks: s.breaks, plannedUnpaidBreakMinutes: plannedUnpaidByKey.get(`${s.timesheetVersionId}:${isoDay(s.date)}`) ?? 0 }))
     ];
 
     const employeeIdSet = new Set(rawSegments.map((s) => s.employeeId));
@@ -220,7 +229,7 @@ export async function getCustomTimeReport(params: CustomReportParams): Promise<C
     });
 
     // --- Canonical (employeeId, siteId, date) buckets — round once, sum only already-rounded numbers above (§3/§4). ---
-    const buckets: CanonicalDailyBucket[] = buildCanonicalDailyBuckets(rawSegments);
+    const buckets: CanonicalDailyBucket[] = buildCanonicalDailyBuckets(rawSegments, { grossThresholdMinutes: autoBreakThresholdMinutes });
 
     const summaryKey = (employeeId: string, siteId: string) => `${employeeId}:${siteId}`;
     const summaryMap = new Map<string, CustomReportSummaryRow>();

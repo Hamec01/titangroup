@@ -799,6 +799,12 @@ model WorkScheduleTemplateVersionDay {
   plannedStartTime    DateTime?                    @db.Time(0)
   plannedEndTime      DateTime?                    @db.Time(0)
   plannedBreakMinutes Int
+  // T10-D (2026-08-28) — is the planned break PAID? Default false = Finnish norm (unpaid lunch):
+  // a long worked day with no break logged has plannedBreakMinutes auto-deducted from worked time
+  // (docs/titanor-time/T10_DEF_PLAN.md §D). true = the customer pays the lunch — no auto-deduction.
+  // Copied onto Timesheet(Draft)PlannedShift when the plan is materialized, so reports never have
+  // to join back to the template.
+  plannedBreakPaid    Boolean                      @default(false)
   createdAt           DateTime                     @default(now()) @db.Timestamptz(6)
   templateVersion     WorkScheduleTemplateVersion  @relation(fields: [templateVersionId], references: [id], onDelete: Cascade, onUpdate: Cascade)
   draftPlannedShifts  TimesheetDraftPlannedShift[]
@@ -989,6 +995,9 @@ model TimesheetDraftPlannedShift {
   plannedStartAt       DateTime?                       @db.Timestamptz(6)
   plannedEndAt         DateTime?                       @db.Timestamptz(6)
   plannedBreakMinutes  Int                             @default(0)
+  // T10-D — see WorkScheduleTemplateVersionDay.plannedBreakPaid. Copied from the template day
+  // (or the worker-draft planned shift) at plan-materialization time.
+  plannedBreakPaid     Boolean                         @default(false)
   createdAt            DateTime                        @default(now()) @db.Timestamptz(6)
   draft                TimesheetDraft                  @relation(fields: [draftId, employeeId], references: [id, employeeId], onDelete: Cascade, onUpdate: Cascade)
   site                 WorkSite                        @relation(fields: [siteId], references: [id], onDelete: Restrict, onUpdate: Cascade)
@@ -1107,6 +1116,8 @@ model TimesheetPlannedShift {
   plannedStartAt       DateTime?                       @db.Timestamptz(6)
   plannedEndAt         DateTime?                       @db.Timestamptz(6)
   plannedBreakMinutes  Int                             @default(0)
+  // T10-D — see WorkScheduleTemplateVersionDay.plannedBreakPaid. Frozen with the version.
+  plannedBreakPaid     Boolean                         @default(false)
   createdAt            DateTime                        @default(now()) @db.Timestamptz(6)
   timesheetVersion     TimesheetVersion                @relation(fields: [timesheetVersionId, employeeId], references: [id, employeeId], onDelete: Restrict, onUpdate: Cascade)
   site                 WorkSite                        @relation(fields: [siteId], references: [id], onDelete: Restrict, onUpdate: Cascade)
@@ -1680,6 +1691,11 @@ model CompanyAttendancePolicy {
   // the previous hard-coded MAX_ACCEPTABLE_ACCURACY_METERS; a site with chronically poor indoor
   // signal (e.g. a shipyard) can be raised here rather than in code.
   maxGpsAccuracyMeters        Int      @default(75)
+  // T10-D (2026-08-28) — a worked day whose GROSS duration is at least this many minutes AND that
+  // has no break logged gets its planned (unpaid) break auto-deducted from worked time
+  // (docs/titanor-time/T10_DEF_PLAN.md §D). 360 = Finnish 6 h norm. 0 = always auto-deduct (no
+  // threshold). CHECK 0..1440.
+  autoUnpaidBreakThresholdMinutes Int  @default(360)
   updatedByUserId             String?  @db.Uuid
   updatedAt                   DateTime @updatedAt @db.Timestamptz(6)
   createdAt                   DateTime @default(now()) @db.Timestamptz(6)

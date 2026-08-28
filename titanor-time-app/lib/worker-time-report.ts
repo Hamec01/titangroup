@@ -1,6 +1,7 @@
 import { Prisma } from '@prisma/client';
 import { prisma } from '@/lib/prisma';
-import { computeSegmentMs, sumWorkedTimeMs, msToMinutes, type WorkedTimeSegmentInput } from '@/lib/reporting/worked-time';
+import { computeDayWorkedMs, msToMinutes, type WorkedTimeSegmentInput } from '@/lib/reporting/worked-time';
+import { loadVersionPlannedUnpaidBreakByDate, loadDraftPlannedUnpaidBreakByDate, loadAutoUnpaidBreakThresholdMinutes } from '@/lib/reporting/auto-break';
 import { resolveCanonicalSource } from '@/lib/reporting/canonical-source';
 
 // docs/titanor-time/T8_REPORTS_DESIGN.md — T8.1 Admin Worker Time Report. This module owns the
@@ -88,7 +89,10 @@ interface SiteAccumulator {
   dates: Set<string>;
 }
 
-function groupSegments(segments: RawSegment[]): { sites: WorkerTimeReportSiteBucket[]; total: WorkerTimeReportTotal } {
+function groupSegments(
+  segments: RawSegment[],
+  autoBreak: { plannedUnpaidByDate: Map<string, number>; grossThresholdMinutes: number }
+): { sites: WorkerTimeReportSiteBucket[]; total: WorkerTimeReportTotal } {
   if (segments.length === 0) {
     return { sites: [], total: ZERO_TOTAL };
   }
@@ -114,7 +118,11 @@ function groupSegments(segments: RawSegment[]): { sites: WorkerTimeReportSiteBuc
   const bySite = new Map<string, SiteAccumulator>();
   for (const bucket of byBucket.values()) {
     // Round once per (siteId, date) bucket — never per segment, never at the site or total level.
-    const ms = sumWorkedTimeMs(bucket.segments.map((s) => computeSegmentMs(s)));
+    // T10-D: computeDayWorkedMs applies the automatic unpaid-lunch deduction at this day level.
+    const ms = computeDayWorkedMs(bucket.segments, {
+      plannedUnpaidBreakMinutes: autoBreak.plannedUnpaidByDate.get(bucket.date) ?? 0,
+      grossThresholdMinutes: autoBreak.grossThresholdMinutes
+    });
     const dayGrossMinutes = msToMinutes(ms.grossMs);
     const dayPaidBreakMinutes = msToMinutes(ms.paidBreakMs);
     const dayUnpaidBreakMinutes = msToMinutes(ms.unpaidBreakMs);
@@ -236,7 +244,15 @@ export async function getWorkerTimeReport(employeeId: string, periodId: string):
       rawSegments = segments.map((s) => ({ siteId: s.siteId, siteName: s.site.name, date: s.date, startAt: s.startAt, endAt: s.endAt, breaks: s.breaks }));
     }
 
-    const { sites, total } = groupSegments(rawSegments);
+    // T10-D — automatic unpaid-lunch inputs for this one timesheet's source.
+    const [plannedUnpaidByDate, grossThresholdMinutes] = await Promise.all([
+      source.dataSource === 'DRAFT'
+        ? loadDraftPlannedUnpaidBreakByDate([source.draftId!], tx)
+        : loadVersionPlannedUnpaidBreakByDate([source.versionId!], tx),
+      loadAutoUnpaidBreakThresholdMinutes(tx)
+    ]);
+
+    const { sites, total } = groupSegments(rawSegments, { plannedUnpaidByDate, grossThresholdMinutes });
 
     const timesheetDto: WorkerTimeReportTimesheet = {
       id: timesheet.id,

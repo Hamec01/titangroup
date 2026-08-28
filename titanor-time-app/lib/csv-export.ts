@@ -3,6 +3,7 @@ import { prisma } from '@/lib/prisma';
 import { createAuditEvent } from '@/lib/audit';
 import { UUID_PATTERN } from '@/lib/attendance-exceptions';
 import { buildCanonicalDailyBuckets, type CanonicalDailyBucketSegmentInput } from '@/lib/reporting/canonical-daily-buckets';
+import { loadPlannedUnpaidBreakBySourceAndDate, loadAutoUnpaidBreakThresholdMinutes } from '@/lib/reporting/auto-break';
 
 // docs/titanor-time/T8_REPORTS_DESIGN.md Addendum "T8.4B" — single owner of CSV_V1 generation,
 // FULL/CORRECTION export-batch creation, and read access (list/detail/download). Every byte-format
@@ -302,6 +303,14 @@ export async function createExportBatch(periodId: string, actorUserId: string, r
     ]);
     const employeeById = new Map(employees.map((e) => [e.id, e]));
 
+    // T10-D — planned UNPAID break per version+date + the company threshold, for the automatic
+    // unpaid-lunch deduction inside buildCanonicalDailyBuckets.
+    const [plannedUnpaidByKey, autoBreakThresholdMinutes] = await Promise.all([
+      loadPlannedUnpaidBreakBySourceAndDate({ versionIds, draftIds: [] }, tx),
+      loadAutoUnpaidBreakThresholdMinutes(tx)
+    ]);
+    const isoDay = (d: Date): string => d.toISOString().slice(0, 10);
+
     // §BD — canonical (employeeId, siteId, date) bucket, shared with T8.3.
     const bucketInputs: CanonicalDailyBucketSegmentInput[] = segments.map((s) => ({
       employeeId: versionIdToEmployeeId.get(s.timesheetVersionId)!,
@@ -310,9 +319,10 @@ export async function createExportBatch(periodId: string, actorUserId: string, r
       date: s.date,
       startAt: s.startAt,
       endAt: s.endAt,
-      breaks: s.breaks
+      breaks: s.breaks,
+      plannedUnpaidBreakMinutes: plannedUnpaidByKey.get(`${s.timesheetVersionId}:${isoDay(s.date)}`) ?? 0
     }));
-    const buckets = buildCanonicalDailyBuckets(bucketInputs);
+    const buckets = buildCanonicalDailyBuckets(bucketInputs, { grossThresholdMinutes: autoBreakThresholdMinutes });
 
     const siteIds = [...new Set(buckets.map((b) => b.siteId))];
     const sites = siteIds.length > 0 ? await tx.workSite.findMany({ where: { id: { in: siteIds } }, select: { id: true, name: true } }) : [];

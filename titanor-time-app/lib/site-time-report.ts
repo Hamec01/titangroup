@@ -2,7 +2,8 @@ import { Prisma } from '@prisma/client';
 import { prisma } from '@/lib/prisma';
 import { getForemanSiteIds } from '@/lib/foreman-review';
 import { UUID_PATTERN } from '@/lib/attendance-exceptions';
-import { computeSegmentMs, sumWorkedTimeMs, msToMinutes, type WorkedTimeSegmentInput } from '@/lib/reporting/worked-time';
+import { computeDayWorkedMs, msToMinutes, type WorkedTimeSegmentInput } from '@/lib/reporting/worked-time';
+import { loadPlannedUnpaidBreakBySourceAndDate, loadAutoUnpaidBreakThresholdMinutes } from '@/lib/reporting/auto-break';
 import { resolveCanonicalSource } from '@/lib/reporting/canonical-source';
 
 // docs/titanor-time/T8_REPORTS_DESIGN.md Addendum "T8.2A Site Time Report APIs" — this module owns
@@ -155,9 +156,11 @@ const ZERO_WORKER_TOTAL: SiteTimeReportWorkerTotal = { workedDayCount: 0, grossM
 interface RawSegment extends WorkedTimeSegmentInput {
   employeeId: string;
   date: Date;
+  /** T10-D — planned UNPAID break for this (employee, date), in minutes; 0 if paid / no plan. */
+  plannedUnpaidBreakMinutes: number;
 }
 
-function buildDays(segments: RawSegment[]): { days: SiteTimeReportDay[]; total: SiteTimeReportWorkerTotal } {
+function buildDays(segments: RawSegment[], grossThresholdMinutes: number): { days: SiteTimeReportDay[]; total: SiteTimeReportWorkerTotal } {
   if (segments.length === 0) {
     return { days: [], total: ZERO_WORKER_TOTAL };
   }
@@ -175,8 +178,11 @@ function buildDays(segments: RawSegment[]): { days: SiteTimeReportDay[]; total: 
 
   const days: SiteTimeReportDay[] = [];
   for (const [date, daySegments] of byDate) {
-    // §D п.1 — sum in ms per day, round once here.
-    const ms = sumWorkedTimeMs(daySegments.map((s) => computeSegmentMs(s)));
+    // §D п.1 — sum in ms per day, round once here. T10-D auto unpaid-lunch applied at day level.
+    const ms = computeDayWorkedMs(daySegments, {
+      plannedUnpaidBreakMinutes: daySegments.reduce((max, s) => Math.max(max, s.plannedUnpaidBreakMinutes), 0),
+      grossThresholdMinutes
+    });
     days.push({
       date,
       grossMinutes: msToMinutes(ms.grossMs),
@@ -288,9 +294,30 @@ export async function getSiteTimeReport(siteId: string, periodId: string, pagina
         : Promise.resolve([])
     ]);
 
+    // T10-D — planned UNPAID break per source+date + the company threshold.
+    const [plannedUnpaidByKey, autoBreakThresholdMinutes] = await Promise.all([
+      loadPlannedUnpaidBreakBySourceAndDate({ versionIds, draftIds }, tx),
+      loadAutoUnpaidBreakThresholdMinutes(tx)
+    ]);
+    const isoDay = (d: Date): string => d.toISOString().slice(0, 10);
+
     const rawSegments: RawSegment[] = [
-      ...draftSegments.map((s) => ({ employeeId: draftIdToEmployeeId.get(s.draftId)!, date: s.date, startAt: s.startAt, endAt: s.endAt, breaks: s.breaks })),
-      ...versionSegments.map((s) => ({ employeeId: versionIdToEmployeeId.get(s.timesheetVersionId)!, date: s.date, startAt: s.startAt, endAt: s.endAt, breaks: s.breaks }))
+      ...draftSegments.map((s) => ({
+        employeeId: draftIdToEmployeeId.get(s.draftId)!,
+        date: s.date,
+        startAt: s.startAt,
+        endAt: s.endAt,
+        breaks: s.breaks,
+        plannedUnpaidBreakMinutes: plannedUnpaidByKey.get(`${s.draftId}:${isoDay(s.date)}`) ?? 0
+      })),
+      ...versionSegments.map((s) => ({
+        employeeId: versionIdToEmployeeId.get(s.timesheetVersionId)!,
+        date: s.date,
+        startAt: s.startAt,
+        endAt: s.endAt,
+        breaks: s.breaks,
+        plannedUnpaidBreakMinutes: plannedUnpaidByKey.get(`${s.timesheetVersionId}:${isoDay(s.date)}`) ?? 0
+      }))
     ];
 
     const segmentsByEmployee = new Map<string, RawSegment[]>();
@@ -347,7 +374,7 @@ export async function getSiteTimeReport(siteId: string, periodId: string, pagina
       const source = t ? sourceByTimesheetId.get(t.id)! : null;
       const timesheetDto: SiteTimeReportTimesheet | null =
         t && source ? { id: t.id, status: t.status, dataSource: source.dataSource, versionNumber: source.versionNumber, submissionSource: source.submissionSource } : null;
-      const { days, total } = buildDays(segmentsByEmployee.get(employee.id) ?? []);
+      const { days, total } = buildDays(segmentsByEmployee.get(employee.id) ?? [], autoBreakThresholdMinutes);
       const participantExpectedRaw = participantByEmployee.get(employee.id);
       return {
         employee: { id: employee.id, employeeNumber: employee.employeeNumber, firstName: employee.firstName, lastName: employee.lastName },

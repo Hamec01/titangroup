@@ -1,4 +1,9 @@
-import { computeSegmentMs, sumWorkedTimeMs, msToMinutes, type WorkedTimeBreakInput } from './worked-time';
+import { computeDayWorkedMs, msToMinutes, type WorkedTimeBreakInput } from './worked-time';
+
+// T10-D — the Finnish 6 h default for the "long enough to have taken a lunch" threshold, used when
+// a caller doesn't pass one (kept in sync with CompanyAttendancePolicy.autoUnpaidBreakThresholdMinutes's
+// default). A caller that has the policy loaded should always pass grossThresholdMinutes explicitly.
+export const DEFAULT_AUTO_UNPAID_BREAK_THRESHOLD_MINUTES = 360;
 
 // docs/titanor-time/T8_REPORTS_DESIGN.md Addendum "T8.4B" §BD — the single reusable
 // (employeeId, siteId, date) grouping + rounding step shared by T8.3 (lib/period-time-report.ts)
@@ -15,6 +20,10 @@ export interface CanonicalDailyBucketSegmentInput {
   startAt: Date;
   endAt: Date;
   breaks: WorkedTimeBreakInput[];
+  /** T10-D — the planned UNPAID break for this (employee, site, date), in minutes. 0 (the default)
+   *  when the plan marks the break paid or there is no plan. Redundant across a bucket's segments —
+   *  the builder takes the max within the bucket. */
+  plannedUnpaidBreakMinutes?: number;
 }
 
 export interface CanonicalDailyBucket {
@@ -27,6 +36,9 @@ export interface CanonicalDailyBucket {
   paidBreakMinutes: number;
   unpaidBreakMinutes: number;
   workedMinutes: number;
+  /** T10-D — the part of unpaidBreakMinutes that was auto-deducted (no break logged, day long
+   *  enough, plan carries an unpaid break). 0 otherwise. Already inside unpaidBreakMinutes. */
+  autoUnpaidBreakMinutes: number;
   segmentCount: number;
 }
 
@@ -35,12 +47,20 @@ function formatDate(date: Date): string {
 }
 
 /**
- * Groups segments by (employeeId, siteId, date), sums milliseconds within each bucket via
- * computeSegmentMs()/sumWorkedTimeMs() (lib/reporting/worked-time.ts — no formula copy), and rounds
- * to minutes exactly once per bucket via msToMinutes(). Callers must never re-round a sum of these
- * already-rounded bucket numbers at a higher grouping level (T8_REPORTS_DESIGN.md §2 п.2-3).
+ * Groups segments by (employeeId, siteId, date), computes DAY-level worked time within each bucket
+ * via computeDayWorkedMs() (lib/reporting/worked-time.ts — no formula copy) — including the T10-D
+ * automatic unpaid-lunch deduction — and rounds to minutes exactly once per bucket via
+ * msToMinutes(). Callers must never re-round a sum of these already-rounded bucket numbers at a
+ * higher grouping level (T8_REPORTS_DESIGN.md §2 п.2-3).
+ *
+ * `grossThresholdMinutes` is CompanyAttendancePolicy.autoUnpaidBreakThresholdMinutes — a caller
+ * that has the policy loaded should pass it; the default matches the column default.
  */
-export function buildCanonicalDailyBuckets(segments: CanonicalDailyBucketSegmentInput[]): CanonicalDailyBucket[] {
+export function buildCanonicalDailyBuckets(
+  segments: CanonicalDailyBucketSegmentInput[],
+  opts: { grossThresholdMinutes?: number } = {}
+): CanonicalDailyBucket[] {
+  const grossThresholdMinutes = opts.grossThresholdMinutes ?? DEFAULT_AUTO_UNPAID_BREAK_THRESHOLD_MINUTES;
   const bucketMap = new Map<
     string,
     { employeeId: string; timesheetVersionId: string | null; siteId: string; date: string; segments: CanonicalDailyBucketSegmentInput[] }
@@ -59,7 +79,8 @@ export function buildCanonicalDailyBuckets(segments: CanonicalDailyBucketSegment
 
   const buckets: CanonicalDailyBucket[] = [];
   for (const bucket of bucketMap.values()) {
-    const ms = sumWorkedTimeMs(bucket.segments.map((s) => computeSegmentMs(s)));
+    const plannedUnpaidBreakMinutes = bucket.segments.reduce((max, s) => Math.max(max, s.plannedUnpaidBreakMinutes ?? 0), 0);
+    const ms = computeDayWorkedMs(bucket.segments, { plannedUnpaidBreakMinutes, grossThresholdMinutes });
     buckets.push({
       employeeId: bucket.employeeId,
       timesheetVersionId: bucket.timesheetVersionId,
@@ -69,6 +90,7 @@ export function buildCanonicalDailyBuckets(segments: CanonicalDailyBucketSegment
       paidBreakMinutes: msToMinutes(ms.paidBreakMs),
       unpaidBreakMinutes: msToMinutes(ms.unpaidBreakMs),
       workedMinutes: msToMinutes(ms.workedMs),
+      autoUnpaidBreakMinutes: msToMinutes(ms.autoUnpaidBreakMs),
       segmentCount: bucket.segments.length
     });
   }

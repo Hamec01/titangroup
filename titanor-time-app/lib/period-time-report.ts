@@ -4,6 +4,7 @@ import { UUID_PATTERN } from '@/lib/attendance-exceptions';
 import type { WorkedTimeSegmentInput } from '@/lib/reporting/worked-time';
 import { resolveCanonicalSource } from '@/lib/reporting/canonical-source';
 import { buildCanonicalDailyBuckets } from '@/lib/reporting/canonical-daily-buckets';
+import { loadPlannedUnpaidBreakBySourceAndDate, loadAutoUnpaidBreakThresholdMinutes } from '@/lib/reporting/auto-break';
 
 // docs/titanor-time/T8_REPORTS_DESIGN.md Addendum "T8.3A Company Payroll Period Report API" — this
 // module owns company population (§Q), site population (§R), canonical-source resolution (§S,
@@ -127,6 +128,7 @@ interface RawSegment extends WorkedTimeSegmentInput {
   timesheetVersionId: string | null;
   siteId: string;
   date: Date;
+  plannedUnpaidBreakMinutes: number;
 }
 
 interface SiteAccumulator {
@@ -224,16 +226,42 @@ export async function getPeriodTimeReport(periodId: string, pagination: { page: 
         : Promise.resolve([])
     ]);
 
+    // T10-D — planned UNPAID break per source+date, and the company auto-deduct threshold, for the
+    // automatic unpaid-lunch deduction inside buildCanonicalDailyBuckets.
+    const [plannedUnpaidByKey, autoBreakThresholdMinutes] = await Promise.all([
+      loadPlannedUnpaidBreakBySourceAndDate({ versionIds, draftIds }, tx),
+      loadAutoUnpaidBreakThresholdMinutes(tx)
+    ]);
+    const isoDay = (d: Date): string => d.toISOString().slice(0, 10);
+
     const rawSegments: RawSegment[] = [
-      ...draftSegments.map((s) => ({ employeeId: draftIdToEmployeeId.get(s.draftId)!, timesheetVersionId: null, siteId: s.siteId, date: s.date, startAt: s.startAt, endAt: s.endAt, breaks: s.breaks })),
-      ...versionSegments.map((s) => ({ employeeId: versionIdToEmployeeId.get(s.timesheetVersionId)!, timesheetVersionId: s.timesheetVersionId, siteId: s.siteId, date: s.date, startAt: s.startAt, endAt: s.endAt, breaks: s.breaks }))
+      ...draftSegments.map((s) => ({
+        employeeId: draftIdToEmployeeId.get(s.draftId)!,
+        timesheetVersionId: null,
+        siteId: s.siteId,
+        date: s.date,
+        startAt: s.startAt,
+        endAt: s.endAt,
+        breaks: s.breaks,
+        plannedUnpaidBreakMinutes: plannedUnpaidByKey.get(`${s.draftId}:${isoDay(s.date)}`) ?? 0
+      })),
+      ...versionSegments.map((s) => ({
+        employeeId: versionIdToEmployeeId.get(s.timesheetVersionId)!,
+        timesheetVersionId: s.timesheetVersionId,
+        siteId: s.siteId,
+        date: s.date,
+        startAt: s.startAt,
+        endAt: s.endAt,
+        breaks: s.breaks,
+        plannedUnpaidBreakMinutes: plannedUnpaidByKey.get(`${s.timesheetVersionId}:${isoDay(s.date)}`) ?? 0
+      }))
     ];
 
     // §T — canonical rounding bucket (employeeId, siteId, date), shared with CSV_V1 via
     // lib/reporting/canonical-daily-buckets.ts (T8_REPORTS_DESIGN.md Addendum "T8.4B" §BD). Sum ms
     // within the bucket, round once via msToMinutes. Every higher level below is only ever a sum of
     // these already-rounded bucket numbers, never a second ms-level round.
-    const roundedBuckets = buildCanonicalDailyBuckets(rawSegments);
+    const roundedBuckets = buildCanonicalDailyBuckets(rawSegments, { grossThresholdMinutes: autoBreakThresholdMinutes });
 
     const workedEmployeeIds = new Set(roundedBuckets.map((b) => b.employeeId));
     const workedEmployeeIdsBySite = new Map<string, Set<string>>();
