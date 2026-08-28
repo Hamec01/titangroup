@@ -6,6 +6,7 @@ import { createAuditEvent } from '@/lib/audit';
 import { overlapCandidates, overlapExists, resolveOverlapTransition } from '@/lib/attendance-reported-projection';
 import { computePlannedShiftForAssignmentDate, toTemplateWeekday, helsinkiWallClockToUtc, type TemplateDayInput } from '@/lib/periods';
 import { reinitializeDraftFromVersion } from '@/lib/review-scopes';
+import { autoCloseOpenCorrectionsForTimesheet } from '@/lib/corrections';
 
 // docs/titanor-time/T7A_1_ATTENDANCE_CLOCK_DESIGN.md §9.4/§9.5 — materializeClockShift. Called
 // inline from online Check Out (§9.2 step k) and Switch Site (§9.3), or from the internal catch-up
@@ -389,6 +390,8 @@ async function projectFragments(tx: Prisma.TransactionClient, clockShiftId: stri
       if (draft.basedOnVersionId !== timesheet.currentVersionId && timesheet.currentVersionId) {
         await reinitializeDraftFromVersion(tx, draft.id, employeeId, timesheet.currentVersionId);
       }
+      // T12 — a late clock sync moved the timesheet; any open admin edit is now on a stale version.
+      await autoCloseOpenCorrectionsForTimesheet(tx, fragment.timesheetId, requestId, null, 'TIMESHEET_REOPENED');
       await createAuditEvent(tx, {
         actorUserId: actorId,
         eventType: 'TIMESHEET_SYSTEM_REOPENED',

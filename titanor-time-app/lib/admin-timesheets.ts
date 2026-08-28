@@ -1,6 +1,7 @@
 import { prisma } from '@/lib/prisma';
 import { createAuditEvent } from '@/lib/audit';
 import { reinitializeDraftFromVersion, computeSiteScopeHasExceptionBulk } from '@/lib/review-scopes';
+import { autoCloseOpenCorrectionsForTimesheet } from '@/lib/corrections';
 import { helsinkiToday } from '@/lib/workers';
 import { computeDayWorkedMs, msToMinutes } from '@/lib/reporting/worked-time';
 import { loadVersionPlannedUnpaidBreakByDate, loadAutoUnpaidBreakThresholdMinutes } from '@/lib/reporting/auto-break';
@@ -637,6 +638,9 @@ export async function returnTimesheetOverride(timesheetId: string, actorUserId: 
     // §15 п.3 — same requirement as scope.return: a human return (admin override included) must
     // set lastReturnedReason=HUMAN_REVIEW_RETURN, never leave it NULL.
     await tx.timesheet.update({ where: { id: timesheetId }, data: { status: 'RETURNED', lastReturnedReason: 'HUMAN_REVIEW_RETURN' } });
+
+    // T12 — returning to the worker invalidates any open admin edit (it's on the version being left).
+    await autoCloseOpenCorrectionsForTimesheet(tx, timesheetId, requestId, actorUserId, 'TIMESHEET_RETURNED');
 
     await createAuditEvent(tx, {
       actorUserId,

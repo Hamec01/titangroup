@@ -45,6 +45,33 @@ export default async function AdminCorrectionDetailPage({ params }: RouteParams)
   const { correctionRequestId } = await params;
   const correction = await getCorrectionDetail(correctionRequestId);
 
+  // T12 — a REJECTED / APPROVED correction is history: its draft is a stale snapshot of whatever
+  // version it was opened against (which is why it could show a "missing Friday"). Never render it
+  // as if it were editable — show a one-line outcome and point back to the live timesheet.
+  if (correction && (correction.status === 'REJECTED' || correction.status === 'APPROVED')) {
+    const applied = correction.status === 'APPROVED';
+    return (
+      <main className="setup-page">
+        <div className="setup-card">
+          <h1>{correction.employeeName}</h1>
+          <p className="setup-subtitle">
+            {applied
+              ? localeText(locale, 'This edit was applied — the timesheet now shows the new version.', 'Эта правка применена — в табеле теперь новая версия.')
+              : localeText(locale, 'This edit was discarded — nothing was changed. It may have been on an out-of-date version.', 'Эта правка отменена — ничего не изменено. Возможно, она была на устаревшей версии табеля.')}
+          </p>
+          <p>
+            <Link className="login-submit" href={`/admin/timesheets/${correction.timesheetId}`}>
+              {localeText(locale, 'Open the timesheet', 'Открыть табель')}
+            </Link>
+          </p>
+          <p>
+            <Link href="/admin/corrections">{localeText(locale, 'Back to corrections', 'К списку корректировок')}</Link>
+          </p>
+        </div>
+      </main>
+    );
+  }
+
   if (!correction) {
     return (
       <main className="setup-page">

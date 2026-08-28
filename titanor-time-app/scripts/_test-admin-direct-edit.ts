@@ -9,6 +9,7 @@ import { randomUUID } from 'node:crypto';
 import { prisma } from '../lib/prisma';
 import { submitWorkerTimesheetCore, getWorkerTimesheetSummary } from '../lib/worker-timesheets';
 import { requestCorrection, openCorrectionDraft, patchCorrectionDraftDay, submitCorrection, applyInReviewCorrection } from '../lib/corrections';
+import { returnTimesheetOverride } from '../lib/admin-timesheets';
 import { SubmissionSource } from '@prisma/client';
 
 let pass = 0;
@@ -221,6 +222,22 @@ async function main() {
     check('re-seeded draft has v2 hours (end 12:00, not v1 15:00)', seg.endAt.toISOString() === atIso(t.date, 12), seg.endAt.toISOString());
     const reseedAudit = await prisma.auditEvent.findFirst({ where: { entityType: 'CORRECTION_REQUEST', entityId: reqId, eventType: 'CORRECTION_DRAFT_RESEEDED' }, select: { id: true } });
     check('a CORRECTION_DRAFT_RESEEDED audit event was written', !!reseedAudit);
+  }
+
+  // ============ 5. T12 — returning the timesheet auto-closes an open admin edit ============
+  {
+    const t = await makeSubmittedTimesheet(admin, 'C');
+    const req = await requestCorrection(t.timesheetId, admin, '', randomUUID(), { directEdit: true });
+    const reqId = (req as { id: string }).id;
+    await openCorrectionDraft(reqId, admin, randomUUID());
+    check('correction is DRAFT_OPEN before the return', (await prisma.correctionRequest.findUniqueOrThrow({ where: { id: reqId }, select: { status: true } })).status === 'DRAFT_OPEN');
+
+    const returned = await returnTimesheetOverride(t.timesheetId, admin, 'redo it', randomUUID());
+    check('returnTimesheetOverride ok', !('code' in returned), returned);
+    const crAfter = await prisma.correctionRequest.findUniqueOrThrow({ where: { id: reqId }, select: { status: true } });
+    check('open correction auto-closed to REJECTED on return', crAfter.status === 'REJECTED', crAfter);
+    const autoAudit = await prisma.auditEvent.findFirst({ where: { entityType: 'CORRECTION_REQUEST', entityId: reqId, eventType: 'CORRECTION_AUTO_CLOSED' }, select: { afterValue: true } });
+    check('CORRECTION_AUTO_CLOSED audit event written', !!autoAudit);
   }
 
   console.log(JSON.stringify({ pass, fail }));
