@@ -464,6 +464,7 @@ model Employee {
   profile               EmployeeProfile?
   qualifications        EmployeeQualification[]
   adminNotifications    AdminNotification[]
+  shiftPresenceSamples  ShiftPresenceSample[]
 }
 
 // Worker Profile feature (2026-08-24 plan) — optional, self-service worker info plus an
@@ -735,6 +736,7 @@ model WorkSite {
   clockShiftFragments      ClockShiftFragment[]
   attendanceExceptions     AttendanceException[]
   exportItems              ExportItem[]
+  shiftPresenceSamples     ShiftPresenceSample[]
 
   @@index([cityId])
   @@index([active])
@@ -1460,13 +1462,44 @@ model ClockEvent {
   @@index([groupId])
 }
 
-// §2.1 п.4 — immutable until 90-day retention delete. Sole holder of raw GPS coordinates (§4.3).
+// §2.1 п.4 — immutable until 90-day retention delete. Sole holder of raw Check In/Out GPS
+// coordinates (§4.3).
 model ClockEventLocation {
   clockEventId String     @id @db.Uuid
   latitude     Decimal    @db.Decimal(8, 6)
   longitude    Decimal    @db.Decimal(9, 6)
   createdAt    DateTime   @default(now()) @db.Timestamptz(6)
   clockEvent   ClockEvent @relation(fields: [clockEventId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+}
+
+// T12 §2b (2026-08-28) — opportunistic "still on site" GPS sample taken WHILE a shift is open, not
+// at a Check In/Out. The worker PWA captures one when it is foregrounded and >3h have passed since
+// the last sample of the current shift (a full-background timer is impossible on iOS web); it
+// queues offline and syncs later. Gives the admin periodic location evidence across a long shift
+// without gating the shift on it. Raw coordinates, same 90-day retention as ClockEventLocation
+// (runAttendanceLocationRetention sweeps both). `clientSampleId` is the client-generated
+// idempotency key for retried syncs.
+model ShiftPresenceSample {
+  id                String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  clientSampleId    String    @unique @db.Uuid
+  employeeId        String    @db.Uuid
+  siteId            String?   @db.Uuid
+  openShiftId       String?   @db.Uuid
+  capturedAt        DateTime  @db.Timestamptz(6)
+  serverReceivedAt  DateTime  @default(now()) @db.Timestamptz(6)
+  capturedOffline   Boolean
+  latitude          Decimal   @db.Decimal(8, 6)
+  longitude         Decimal   @db.Decimal(9, 6)
+  accuracyMeters    Decimal   @db.Decimal(6, 1)
+  geofenceVersionId String?   @db.Uuid
+  insideGeofence    Boolean?
+  clockSkewMs       BigInt?
+  createdAt         DateTime  @default(now()) @db.Timestamptz(6)
+  employee          Employee  @relation(fields: [employeeId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  site              WorkSite? @relation(fields: [siteId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+
+  @@index([employeeId, capturedAt])
+  @@index([siteId, capturedAt])
 }
 
 // §2.1 п.5 — mutable, exactly 0 or 1 row per Employee (employeeId is the PK, not a separate id).

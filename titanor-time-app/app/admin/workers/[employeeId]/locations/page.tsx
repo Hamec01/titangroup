@@ -26,10 +26,29 @@ export default async function WorkerLocationsPage({ params }: { params: Promise<
       <p><Link href={`/admin/workers/${employeeId}`}>← {localeText(locale, 'Back to worker', 'Назад к работнику')}</Link></p>
       <h1>{localeText(locale, 'Check In/Out locations', 'Места Check In/Out')} — {view.employee.name}</h1>
       <p className="setup-subtitle">{localeText(locale, `Last 7 days · raw coordinates retained for ${view.retentionDays} days · every view is audited.`, `Последние 7 дней · точные координаты хранятся ${view.retentionDays} дней · каждый просмотр записывается в аудит.`)}</p>
-      {view.items.length ? <WorkerLocationMap items={view.items} /> : <p>{localeText(locale, 'No retained GPS coordinates. Events marked “GPS not verified” may not contain a point to show.', 'Сохранённых GPS-координат нет. События с отметкой «GPS не подтверждён» могут не содержать точки для показа.')}</p>}
+      {view.items.length || view.presenceSamples.length ? <WorkerLocationMap items={view.items} presenceSamples={view.presenceSamples} /> : <p>{localeText(locale, 'No retained GPS coordinates. Events marked “GPS not verified” may not contain a point to show.', 'Сохранённых GPS-координат нет. События с отметкой «GPS не подтверждён» могут не содержать точки для показа.')}</p>}
       <ul className="setup-list">
         {view.items.map((item) => <li key={item.clockEventId} className="setup-item setup-item-column"><strong>{item.operationType === 'CHECK_IN' ? 'Check In' : 'Check Out'} · {item.siteName}</strong><span>{new Date(item.effectiveAt).toLocaleString(locale === 'RU' ? 'ru-RU' : 'en-GB', { timeZone: 'Europe/Helsinki' })} · {item.verification} · {localeText(locale, 'accuracy', 'точность')} {item.accuracyMeters ?? localeText(locale, 'unknown', 'неизвестна')} {localeText(locale, 'm', 'м')}</span></li>)}
       </ul>
+      {view.presenceSamples.length ? (
+        <>
+          <h2>{localeText(locale, 'During the shift (auto samples)', 'Во время смены (авто-точки)')}</h2>
+          <p className="setup-subtitle">{localeText(locale, 'Captured automatically while a shift was open, whenever the app was foregrounded after 3h+.', 'Снимаются автоматически при открытой смене, когда приложение открывают спустя 3+ часа.')}</p>
+          <ul className="setup-list">
+            {view.presenceSamples.map((s) => (
+              <li key={s.id} className="setup-item setup-item-column">
+                <strong>{s.siteName ?? '—'} · {new Date(s.capturedAt).toLocaleString(locale === 'RU' ? 'ru-RU' : 'en-GB', { timeZone: 'Europe/Helsinki' })}</strong>
+                <span>
+                  {s.insideGeofence === true ? localeText(locale, 'in zone', 'в зоне') : s.insideGeofence === false ? localeText(locale, 'outside zone', 'вне зоны') : localeText(locale, 'zone unknown', 'зона не определена')}
+                  {' · '}
+                  {localeText(locale, 'accuracy', 'точность')} {s.accuracyMeters} {localeText(locale, 'm', 'м')}
+                  {s.capturedOffline ? ` · ${localeText(locale, 'offline', 'офлайн')}` : ''}
+                </span>
+              </li>
+            ))}
+          </ul>
+        </>
+      ) : null}
     </div></main>
   );
 }

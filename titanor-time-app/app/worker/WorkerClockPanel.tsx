@@ -19,6 +19,8 @@ import {
 import { ensureDeviceBootstrapped, retryBootstrap, type BootstrapOutcome } from '@/lib/offline-outbox/device';
 import { enqueueCheckIn, enqueueCheckOut, enqueueSwitchSite, EnqueueError } from '@/lib/offline-outbox/outbox';
 import { runSyncOnce, tryRefreshClockState, type ClockStateWire, type SyncRunOutcome } from '@/lib/offline-outbox/sync-runner';
+import { enqueuePresenceSample, lastPresenceCaptureMs, shouldCapturePresence } from '@/lib/offline-outbox/presence';
+import { runPresenceSyncOnce } from '@/lib/offline-outbox/presence-sync';
 import { getAllOutboxEvents, type OutboxEventRecord, type CachedAssignment } from '@/lib/offline-outbox/db';
 import { projectClockState } from '@/lib/offline-outbox/projection';
 import { subscribeOutboxChanges } from '@/lib/offline-outbox/broadcast';
@@ -361,6 +363,7 @@ export function WorkerClockPanel({ initialClockState, assignments, workerName, t
     function handleOnline() {
       setIsOnline(true);
       void triggerSync();
+      void runPresenceSyncOnce();
     }
     function handleOffline() {
       setIsOnline(false);
@@ -439,6 +442,56 @@ export function WorkerClockPanel({ initialClockState, assignments, workerName, t
     const interval = setInterval(() => setNowTick(Date.now()), 1000);
     return () => clearInterval(interval);
   }, [projected.state]);
+
+  // ---- T12 §2b — opportunistic "still on site" GPS sample during an open shift ----
+  // A full-background timer is impossible in an iOS PWA, so this is the realistic version: whenever
+  // the app becomes visible AND a shift is open AND >3h have passed since the last sample, take one
+  // GPS fix and queue it (offline-safe). It never gates anything — pure evidence for the admin.
+  const presenceInFlightRef = useRef(false);
+  useEffect(() => {
+    const isClockedIn = projected.state === 'CLOCKED_IN';
+    const ready = bootstrap?.kind === 'READY';
+
+    async function maybeCapturePresence(): Promise<void> {
+      if (!isClockedIn || presenceInFlightRef.current || !ready) {
+        return;
+      }
+      presenceInFlightRef.current = true;
+      try {
+        const last = await lastPresenceCaptureMs();
+        if (!shouldCapturePresence(last, Date.now())) {
+          void runPresenceSyncOnce(); // still flush anything already queued
+          return;
+        }
+        const snap = await captureGpsSnapshot();
+        if (snap.location) {
+          await enqueuePresenceSample({
+            latitude: snap.location.latitude,
+            longitude: snap.location.longitude,
+            accuracyMeters: snap.location.accuracyMeters,
+            capturedAt: new Date().toISOString(),
+            capturedOffline: !navigator.onLine
+          });
+        }
+        void runPresenceSyncOnce();
+      } catch {
+        // A presence sample is never worth surfacing an error for.
+      } finally {
+        presenceInFlightRef.current = false;
+      }
+    }
+
+    function onVisible(): void {
+      if (document.visibilityState === 'visible') {
+        void maybeCapturePresence();
+      }
+    }
+
+    void maybeCapturePresence(); // also check right now (e.g. just clocked in, or app already open 3h+)
+    document.addEventListener('visibilitychange', onVisible);
+    return () => document.removeEventListener('visibilitychange', onVisible);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [projected.state, bootstrap?.kind]);
 
   function cachedGeofenceVersionIdFor(siteId: string): string | null {
     return cachedAssignments.find((a) => a.siteId === siteId)?.geofenceVersionId ?? null;

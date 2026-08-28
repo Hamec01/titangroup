@@ -11,11 +11,16 @@ import { prisma } from '@/lib/prisma';
 
 export interface LocationRetentionResult {
   deletedCount: number;
+  /** T12 §2b — ShiftPresenceSample carries raw coordinates too, same 90-day window. */
+  presenceDeletedCount: number;
 }
 
 export async function runAttendanceLocationRetention(): Promise<LocationRetentionResult> {
   const deletedCount = await prisma.$executeRaw`
     DELETE FROM "ClockEventLocation" WHERE "createdAt" < now() - interval '90 days'
   `;
-  return { deletedCount };
+  const presenceDeletedCount = await prisma.$executeRaw`
+    DELETE FROM "ShiftPresenceSample" WHERE "createdAt" < now() - interval '90 days'
+  `;
+  return { deletedCount, presenceDeletedCount };
 }

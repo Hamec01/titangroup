@@ -2,11 +2,11 @@
 
 import { useEffect, useRef } from 'react';
 import type { Map as MapLibreMap, Marker as MapLibreMarker } from 'maplibre-gl';
-import type { AdminGpsEvent } from '@/lib/attendance-gps-admin';
+import type { AdminGpsEvent, AdminPresenceSample } from '@/lib/attendance-gps-admin';
 import { useAppLocale } from '@/components/i18n/AppLocaleProvider';
 import { localeText } from '@/lib/i18n/locale';
 
-export function WorkerLocationMap({ items }: { items: AdminGpsEvent[] }) {
+export function WorkerLocationMap({ items, presenceSamples = [] }: { items: AdminGpsEvent[]; presenceSamples?: AdminPresenceSample[] }) {
   const locale = useAppLocale();
   const container = useRef<HTMLDivElement>(null);
   const mapRef = useRef<MapLibreMap | null>(null);
@@ -16,7 +16,7 @@ export function WorkerLocationMap({ items }: { items: AdminGpsEvent[] }) {
     let cancelled = false;
     void import('maplibre-gl').then(({ default: maplibregl }) => {
       if (cancelled || !container.current) return;
-      const first = items[0];
+      const first = items[0] ?? presenceSamples[0];
       const map = new maplibregl.Map({
         container: container.current,
         style: 'https://tiles.openfreemap.org/styles/liberty',
@@ -32,6 +32,16 @@ export function WorkerLocationMap({ items }: { items: AdminGpsEvent[] }) {
           .addTo(map);
         markers.current.push(marker);
       }
+      // T12 §2b — mid-shift presence samples: amber, smaller scale, distinct from Check In/Out.
+      for (const s of presenceSamples) {
+        const zone = s.insideGeofence === true ? (locale === 'RU' ? 'в зоне' : 'in zone') : s.insideGeofence === false ? (locale === 'RU' ? 'вне зоны' : 'outside zone') : locale === 'RU' ? 'зона не определена' : 'zone unknown';
+        const label = `${locale === 'RU' ? 'Во время смены' : 'During shift'} · ${s.siteName ?? ''} · ${new Date(s.capturedAt).toLocaleString(locale === 'RU' ? 'ru-RU' : 'en-GB')} · ±${s.accuracyMeters} ${locale === 'RU' ? 'м' : 'm'} · ${zone}${s.capturedOffline ? (locale === 'RU' ? ' · офлайн' : ' · offline') : ''}`;
+        const marker = new maplibregl.Marker({ color: '#e0a400', scale: 0.7 })
+          .setLngLat([Number(s.longitude), Number(s.latitude)])
+          .setPopup(new maplibregl.Popup({ offset: 14 }).setText(label))
+          .addTo(map);
+        markers.current.push(marker);
+      }
       mapRef.current = map;
     });
     return () => {
@@ -41,6 +51,6 @@ export function WorkerLocationMap({ items }: { items: AdminGpsEvent[] }) {
       mapRef.current?.remove();
       mapRef.current = null;
     };
-  }, [items, locale]);
+  }, [items, presenceSamples, locale]);
   return <div ref={container} className="geofence-map" aria-label={localeText(locale, 'Map of retained worker Check In and Check Out locations', 'Карта сохранённых мест Check In и Check Out работника')} />;
 }

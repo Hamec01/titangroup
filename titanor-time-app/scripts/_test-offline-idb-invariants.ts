@@ -1,5 +1,5 @@
-// docs/titanor-time/T8_PWA_DESIGN.md §F.4/§F.5 — permanent regression for the IndexedDB v1->v2
-// upgrade and the new workerReadSnapshots store's invariants (task's Group A, scenarios 1-13).
+// docs/titanor-time/T8_PWA_DESIGN.md §F.4/§F.5 — permanent regression for the IndexedDB upgrade
+// (v1->v2 workerReadSnapshots; T12 §2b v2->v3 presenceOutbox) and the new stores' invariants.
 // Pure Node, no browser, no server, no disposable Postgres — uses `fake-indexeddb` (phantom/
 // ephemeral devDependency, installed via `npm install fake-indexeddb --no-save`, same convention as
 // `playwright` in scripts/_test-export-ui.ts — never added to package.json, tsconfig.build.json
@@ -34,13 +34,14 @@ async function phaseCleanInstall() {
   const db = await import('../lib/offline-outbox/db');
   const snap = await import('../lib/offline-outbox/read-snapshots');
 
-  // 1: clean install creates v2, all four stores.
+  // 1: clean install creates v3, all five stores.
   const conn = await db.getDb();
-  check('1: clean install opens at DB_VERSION 2', conn.version === 2, conn.version);
+  check('1: clean install opens at DB_VERSION 3', conn.version === 3, conn.version);
   check('1b: clockOutbox store exists', conn.objectStoreNames.contains(db.STORE_CLOCK_OUTBOX));
   check('1c: localClockState store exists', conn.objectStoreNames.contains(db.STORE_LOCAL_CLOCK_STATE));
   check('1d: deviceState store exists', conn.objectStoreNames.contains(db.STORE_DEVICE_STATE));
   check('1e: workerReadSnapshots store exists', conn.objectStoreNames.contains(db.STORE_WORKER_READ_SNAPSHOTS));
+  check('1f: presenceOutbox store exists', conn.objectStoreNames.contains(db.STORE_PRESENCE_OUTBOX));
 
   // Seed a device identity (writeWorkerReadSnapshot needs one to bind to).
   const deviceState = { singleton: db.SINGLETON_KEY, deviceInstallationId: 'device-1', bootstrapped: true, nextDeviceSequence: 0, contextAssignments: null, contextFetchedAt: null, paused: null, ownerUserId: 'user-a', lastAuthenticatedUserId: 'user-a' };
@@ -172,13 +173,14 @@ async function phaseV1Upgrade() {
   v1Conn.close();
 
   // Now import THIS project's real db.ts for the first time in this process — its getDb() opens
-  // with DB_VERSION=2 against the SAME (fake) database name, triggering a real onupgradeneeded from
-  // 1 -> 2, exercising the actual shipped upgrade code path, not a copy of it.
+  // with DB_VERSION=3 against the SAME (fake) database name, triggering a real onupgradeneeded from
+  // 1 -> 3 (both the v2 and v3 blocks run), exercising the actual shipped upgrade code path.
   const db = await import('../lib/offline-outbox/db');
   const conn = await db.getDb();
 
-  check('2: upgrading a real v1 fixture opens at DB_VERSION 2', conn.version === 2, conn.version);
+  check('2: upgrading a real v1 fixture opens at DB_VERSION 3', conn.version === 3, conn.version);
   check('2b: workerReadSnapshots store now exists', conn.objectStoreNames.contains(db.STORE_WORKER_READ_SNAPSHOTS));
+  check('2c: presenceOutbox store now exists', conn.objectStoreNames.contains(db.STORE_PRESENCE_OUTBOX));
 
   const allOutbox = await db.getAllOutboxEvents();
   check('3: pending outbox event preserved', allOutbox.some((e) => e.clientEventId === 'evt-pending' && e.state === 'PENDING'), allOutbox.map((e) => e.clientEventId));
@@ -194,6 +196,72 @@ async function phaseV1Upgrade() {
 
   const localClockStateAfter = await db.getLocalClockState();
   check('7: local clock state preserved', localClockStateAfter?.state === 'CLOCKED_OUT' && localClockStateAfter?.updatedAt === '2026-01-01T07:00:00.000Z', localClockStateAfter);
+
+  console.log(JSON.stringify({ pass, fail }));
+  process.exit(fail > 0 ? 1 : 0);
+}
+
+async function phaseV2Upgrade() {
+  // T12 §2b — a real pre-existing v2 database (four stores, with data) meets the new v3-aware code:
+  // the presenceOutbox store is added, every existing row is untouched.
+  // @ts-expect-error — see phaseCleanInstall's note on fake-indexeddb/auto's exports map.
+  await import('fake-indexeddb/auto');
+  const idbModule = await import('fake-indexeddb');
+  const indexedDB = idbModule.default ?? (idbModule as unknown as { indexedDB: IDBFactory }).indexedDB ?? (globalThis as unknown as { indexedDB: IDBFactory }).indexedDB;
+  const DB_NAME = 'titanor-time-outbox';
+
+  const v2Conn = await new Promise<IDBDatabase>((resolve, reject) => {
+    const req = indexedDB.open(DB_NAME, 2);
+    req.onupgradeneeded = () => {
+      const d = req.result;
+      const outboxStore = d.createObjectStore('clockOutbox', { keyPath: 'clientEventId' });
+      outboxStore.createIndex('by-state', 'state');
+      outboxStore.createIndex('by-nextAttemptAt', 'nextAttemptAt');
+      d.createObjectStore('localClockState', { keyPath: 'singleton' });
+      d.createObjectStore('deviceState', { keyPath: 'singleton' });
+      const snapshotStore = d.createObjectStore('workerReadSnapshots', { keyPath: 'key' });
+      snapshotStore.createIndex('by-capturedAt', 'capturedAt');
+    };
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(req.error);
+  });
+
+  const pendingEvent = { clientEventId: 'evt-p', deviceSequence: 1, groupId: null, operationType: 'CHECK_IN', siteId: 'site-1', assumedSiteId: null, workAreaId: null, clientCapturedAt: '2026-01-01T08:00:00.000Z', capturedOffline: true, gps: null, gpsUnavailableReason: null, cachedGeofenceVersionId: null, deviceInstallationId: 'device-v2', payloadVersion: 1, payloadHash: 'h', state: 'PENDING', retryCount: 0, nextAttemptAt: '2026-01-01T08:00:00.000Z', lastErrorCode: null, createdAt: '2026-01-01T08:00:00.000Z', ackedAt: null };
+  const deviceStateV2 = { singleton: 'singleton', deviceInstallationId: 'device-v2', bootstrapped: true, nextDeviceSequence: 2, contextAssignments: null, contextFetchedAt: null, paused: null, ownerUserId: 'user-a', lastAuthenticatedUserId: 'user-a' };
+  const snapshotV2 = { key: 'user-a::periods-list', routeKind: 'periods-list', payloadVersion: 1, ownerUserId: 'user-a', deviceInstallationId: 'device-v2', capturedAt: '2026-01-01T07:30:00.000Z', payload: { periods: [] } };
+  await new Promise<void>((resolve, reject) => {
+    const tx = v2Conn.transaction(['clockOutbox', 'deviceState', 'workerReadSnapshots'], 'readwrite');
+    tx.objectStore('clockOutbox').put(pendingEvent);
+    tx.objectStore('deviceState').put(deviceStateV2);
+    tx.objectStore('workerReadSnapshots').put(snapshotV2);
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error);
+  });
+  v2Conn.close();
+
+  const db = await import('../lib/offline-outbox/db');
+  const conn = await db.getDb();
+  check('v2: upgrading a real v2 fixture opens at DB_VERSION 3', conn.version === 3, conn.version);
+  check('v2b: presenceOutbox store now exists', conn.objectStoreNames.contains(db.STORE_PRESENCE_OUTBOX));
+  check('v2c: presenceOutbox starts empty', (await db.getAllPresenceSamples()).length === 0);
+
+  const allOutbox = await db.getAllOutboxEvents();
+  check('v2d: existing outbox row untouched', allOutbox.length === 1 && allOutbox[0].clientEventId === 'evt-p' && allOutbox[0].state === 'PENDING', allOutbox);
+  const deviceAfter = await db.getDeviceState();
+  check('v2e: deviceState untouched (id + ownerUserId)', deviceAfter?.deviceInstallationId === 'device-v2' && deviceAfter?.ownerUserId === 'user-a', deviceAfter);
+  const snap = await import('../lib/offline-outbox/read-snapshots');
+  const s = await snap.getWorkerReadSnapshot('user-a::periods-list');
+  check('v2f: workerReadSnapshots row untouched', !!s && s.ownerUserId === 'user-a', s);
+
+  // presenceOutbox is writable/readable and by-state indexed
+  const rec = { clientSampleId: '11111111-1111-4111-8111-111111111111', latitude: 60.1, longitude: 24.9, accuracyMeters: 30, capturedAt: '2026-01-01T10:00:00.000Z', capturedOffline: false, deviceInstallationId: 'device-v2', state: 'PENDING', retryCount: 0, createdAt: '2026-01-01T10:00:00.000Z', ackedAt: null, lastErrorCode: null };
+  {
+    const tx = conn.transaction([db.STORE_PRESENCE_OUTBOX], 'readwrite');
+    tx.objectStore(db.STORE_PRESENCE_OUTBOX).put(rec);
+    await db.txDone(tx);
+  }
+  const all = await db.getAllPresenceSamples();
+  check('v2g: presenceOutbox is readable/writable', all.length === 1 && all[0].clientSampleId === rec.clientSampleId, all);
 
   console.log(JSON.stringify({ pass, fail }));
   process.exit(fail > 0 ? 1 : 0);
@@ -221,16 +289,21 @@ async function main() {
   if (PHASE === 'v1-upgrade') {
     return phaseV1Upgrade();
   }
+  if (PHASE === 'v2-upgrade') {
+    return phaseV2Upgrade();
+  }
 
   // Orchestrator — spawns each phase as its own isolated child process.
   console.log('=== phase: clean-install ===');
   const r1 = runChildPhase('clean-install');
   console.log('=== phase: v1-upgrade ===');
   const r2 = runChildPhase('v1-upgrade');
+  console.log('=== phase: v2-upgrade ===');
+  const r3 = runChildPhase('v2-upgrade');
 
-  const totalPass = r1.pass + r2.pass;
-  const totalFail = r1.fail + r2.fail;
-  console.log(`\n${totalPass} passed, ${totalFail} failed (scenarios 1-13)`);
+  const totalPass = r1.pass + r2.pass + r3.pass;
+  const totalFail = r1.fail + r2.fail + r3.fail;
+  console.log(`\n${totalPass} passed, ${totalFail} failed`);
   process.exit(totalFail > 0 ? 1 : 0);
 }
 

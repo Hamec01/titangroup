@@ -1,16 +1,19 @@
 // docs/titanor-time/T7A_1_ATTENDANCE_CLOCK_DESIGN.md §6 — the exact three-store IndexedDB schema.
 // docs/titanor-time/T8_PWA_DESIGN.md §F.4 (T8.8) — v1 -> v2 adds a fourth store, workerReadSnapshots,
-// without touching the three v1 stores at all. Browser-only: never imported by any server-only
-// module, never imports Prisma/node:crypto/next server code itself. A small native IndexedDB layer,
-// no new runtime dependency.
+// without touching the three v1 stores at all.
+// docs/titanor-time/T12_ADMIN_TOOLS_DESIGN.md §2b — v2 -> v3 adds a fifth store, presenceOutbox,
+// again purely additive (guarded createObjectStore, no touch to any existing store or row).
+// Browser-only: never imported by any server-only module, never imports Prisma/node:crypto/next
+// server code itself. A small native IndexedDB layer, no new runtime dependency.
 
 export const DB_NAME = 'titanor-time-outbox';
-export const DB_VERSION = 2;
+export const DB_VERSION = 3;
 
 export const STORE_CLOCK_OUTBOX = 'clockOutbox';
 export const STORE_LOCAL_CLOCK_STATE = 'localClockState';
 export const STORE_DEVICE_STATE = 'deviceState';
 export const STORE_WORKER_READ_SNAPSHOTS = 'workerReadSnapshots';
+export const STORE_PRESENCE_OUTBOX = 'presenceOutbox';
 
 export type ClientGpsUnavailableReason = 'PERMISSION_DENIED' | 'TIMEOUT' | 'POSITION_UNAVAILABLE';
 export type OutboxGpsUnavailableReason = ClientGpsUnavailableReason | 'LOW_ACCURACY';
@@ -120,6 +123,26 @@ export interface WorkerReadSnapshotRecord {
   payload: unknown;
 }
 
+// T12 §2b — one opportunistic "still on site" GPS sample, taken while a shift is open. Queued
+// offline exactly like a clock event, but on a separate, much simpler track: no deviceSequence, no
+// grouping, no projection — a presence sample never changes "where am I", it is pure evidence.
+export type PresenceSampleState = 'PENDING' | 'SENDING' | 'ACKED' | 'FAILED_TERMINAL';
+
+export interface PresenceSampleRecord {
+  clientSampleId: string;
+  latitude: number;
+  longitude: number;
+  accuracyMeters: number;
+  capturedAt: string;
+  capturedOffline: boolean;
+  deviceInstallationId: string;
+  state: PresenceSampleState;
+  retryCount: number;
+  createdAt: string;
+  ackedAt: string | null;
+  lastErrorCode: string | null;
+}
+
 const SINGLETON_KEY = 'singleton' as const;
 export { SINGLETON_KEY };
 
@@ -155,6 +178,14 @@ export function getDb(): Promise<IDBDatabase> {
         if (!db.objectStoreNames.contains(STORE_WORKER_READ_SNAPSHOTS)) {
           const snapshotStore = db.createObjectStore(STORE_WORKER_READ_SNAPSHOTS, { keyPath: 'key' });
           snapshotStore.createIndex('by-capturedAt', 'capturedAt');
+        }
+        // v2 -> v3 (T12 §2b) — additive only, same as the v2 block: a new empty store, nothing
+        // above is touched. onupgradeneeded runs once per version step, so a device on v1 gets
+        // both the v2 and this v3 block in one open().
+        if (!db.objectStoreNames.contains(STORE_PRESENCE_OUTBOX)) {
+          const presenceStore = db.createObjectStore(STORE_PRESENCE_OUTBOX, { keyPath: 'clientSampleId' });
+          presenceStore.createIndex('by-state', 'state');
+          presenceStore.createIndex('by-capturedAt', 'capturedAt');
         }
       };
       request.onsuccess = () => resolve(request.result);
@@ -204,4 +235,10 @@ export async function getOutboxEventsByState(state: OutboxEventState): Promise<O
   const db = await getDb();
   const tx = db.transaction([STORE_CLOCK_OUTBOX], 'readonly');
   return requestToPromise(tx.objectStore(STORE_CLOCK_OUTBOX).index('by-state').getAll(state));
+}
+
+export async function getAllPresenceSamples(): Promise<PresenceSampleRecord[]> {
+  const db = await getDb();
+  const tx = db.transaction([STORE_PRESENCE_OUTBOX], 'readonly');
+  return requestToPromise(tx.objectStore(STORE_PRESENCE_OUTBOX).getAll());
 }
