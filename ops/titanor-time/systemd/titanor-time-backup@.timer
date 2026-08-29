@@ -1,0 +1,17 @@
+# Titanor Time — daily backup timer (roadmap R01).
+#   sudo systemctl enable --now titanor-time-backup@pilot.timer
+#
+# 04:10 UTC is deliberately AFTER the existing titanorgroup-backup.timer (03:30 local) so the two
+# do not contend for the s3fs upload path at the same minute.
+
+[Unit]
+Description=Run the Titanor Time %i backup daily
+
+[Timer]
+OnCalendar=*-*-* 04:10:00 UTC
+Persistent=true
+RandomizedDelaySec=15m
+Unit=titanor-time-backup@%i.service
+
+[Install]
+WantedBy=timers.target

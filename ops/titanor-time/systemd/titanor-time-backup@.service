@@ -1,0 +1,26 @@
+# Titanor Time — scheduled backup (roadmap R01).
+# Templated by environment: %i is "pilot" or "prod".
+#   sudo systemctl enable --now titanor-time-backup@pilot.timer
+#
+# Config for each instance lives in /etc/titanor-time/backup-%i.env (mode 0600, root:root) and is
+# the ONLY place container/db/uploads/target paths and rotation are set — the unit itself is
+# environment-agnostic. See ops/titanor-time/systemd/backup-pilot.env.example.
+
+[Unit]
+Description=Titanor Time %i backup
+Wants=docker.service
+After=docker.service network-online.target
+# The off-box copy targets the s3fs mount (systemd auto-generates mnt-250gb.mount from fstab).
+After=mnt-250gb.mount
+# On failure run the notifier with the same instance name — it must not print secrets.
+OnFailure=titanor-time-backup-failed@%i.service
+
+[Service]
+Type=oneshot
+User=deploy
+Group=deploy
+EnvironmentFile=/etc/titanor-time/backup-%i.env
+ExecStart=/bin/bash -lc '${TT_BACKUP_SCRIPT:-/home/deploy/projects/titanorgroup-worktrees/titanor-time-foundation/ops/titanor-time/backup-titanor-time.sh} scheduled'
+Nice=10
+IOSchedulingClass=idle
+TimeoutStartSec=1800

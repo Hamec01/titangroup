@@ -1,0 +1,16 @@
+# Titanor Time — backup failure notifier (roadmap R01).
+# Invoked by OnFailure= of titanor-time-backup@%i.service. Writes a marker file and a systemd
+# journal line only — NO email/SMTP (owner decision), NO secrets, NO row content. The owner /
+# monitoring watches for the marker file and the journal.
+#
+# If a real alert channel is added later (a webhook, a monitoring push), extend the ExecStart
+# script — it must still never include DATABASE_URL, tokens, or backup contents in the message.
+
+[Unit]
+Description=Titanor Time %i backup FAILED notifier
+
+[Service]
+Type=oneshot
+User=deploy
+Group=deploy
+ExecStart=/bin/bash -lc 'ts=$(date -u +%%Y-%%m-%%dT%%H:%%M:%%SZ); mkdir -p /home/deploy/backups/titanor-time-%i; echo "$ts backup FAILED for env=%i — see: journalctl -u titanor-time-backup@%i.service -n 50" | tee -a /home/deploy/backups/titanor-time-%i/BACKUP_FAILED.log; logger -t titanor-time-backup "backup FAILED for env=%i"'
