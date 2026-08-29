@@ -78,9 +78,18 @@ export default async function AdminAttendanceExceptionsPage({ searchParams }: Ro
     outcome = { kind: 'ok', result };
   }
 
+  const canBulkAcknowledgeGps = await hasPermission(session.user.roles, 'attendance.exception.resolve.all');
+
   return (
     <main className="setup-page">
-      <ExceptionsListView basePath={BASE_PATH} title={localeText(locale, 'Attendance exceptions', 'Исключения учёта')} rawQuery={rawQuery} outcome={outcome} locale={locale} />
+      <ExceptionsListView
+        basePath={BASE_PATH}
+        title={localeText(locale, 'Attendance exceptions', 'Исключения учёта')}
+        rawQuery={rawQuery}
+        outcome={outcome}
+        locale={locale}
+        canBulkAcknowledgeGps={canBulkAcknowledgeGps}
+      />
     </main>
   );
 }

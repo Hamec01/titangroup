@@ -11,6 +11,7 @@ import {
   buildExceptionsQueryString
 } from '@/lib/attendance-exceptions-ui';
 import type { AppLocale } from '@/lib/i18n/locale';
+import { BulkAckGpsButton } from './BulkAckGpsButton';
 
 // docs/titanor-time/T7A_1_ATTENDANCE_CLOCK_DESIGN.md §11/§12.1/§12.3 — T7A.8C.1. Pure presentation:
 // given already-validated filters and an already-scoped ExceptionListResult (or a validation
@@ -40,11 +41,20 @@ interface Props {
   rawQuery: ExceptionsListRawQuery;
   outcome: ExceptionsListOutcome;
   locale: AppLocale;
+  /** T14.5c — admin holding attendance.exception.resolve.all: show the "acknowledge all GPS
+   * not verified in this filter" action when the filter is narrowed to a site / employee /
+   * payroll period. Never set for the foreman list. */
+  canBulkAcknowledgeGps?: boolean;
 }
 
-export function ExceptionsListView({ basePath, title, rawQuery, outcome, locale }: Props) {
+export function ExceptionsListView({ basePath, title, rawQuery, outcome, locale, canBulkAcknowledgeGps = false }: Props) {
   const ru = locale === 'RU';
   const statusValue = rawQuery.status ?? 'OPEN';
+  const showBulkAckGps =
+    canBulkAcknowledgeGps &&
+    outcome.kind !== 'invalid' &&
+    statusValue === 'OPEN' &&
+    (!!rawQuery.siteId || !!rawQuery.employeeId || !!rawQuery.payrollPeriodId);
 
   return (
     <div className="setup-card worker-card exc-card">
@@ -92,6 +102,12 @@ export function ExceptionsListView({ basePath, title, rawQuery, outcome, locale 
           </Link>
         </div>
       </form>
+
+      {showBulkAckGps && (
+        <BulkAckGpsButton
+          filter={{ siteId: rawQuery.siteId, employeeId: rawQuery.employeeId, payrollPeriodId: rawQuery.payrollPeriodId, from: rawQuery.from, to: rawQuery.to }}
+        />
+      )}
 
       {outcome.kind === 'invalid' ? (
         <p className="login-error" role="alert">

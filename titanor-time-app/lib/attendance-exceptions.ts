@@ -138,7 +138,7 @@ export interface ForemanScope {
 /** The set of siteIds an exception is provably linked to, collected from every relation that
  * carries one — never derived from AttendanceException.siteId alone, since some types (notably
  * OVERLAPPING_SHIFT) leave it NULL while still having a real site via clockShift/relatedClockShift. */
-function siteScopeWhereClauses(siteIds: string[]): Prisma.AttendanceExceptionWhereInput[] {
+export function siteScopeWhereClauses(siteIds: string[]): Prisma.AttendanceExceptionWhereInput[] {
   return [
     { siteId: { in: siteIds } },
     { clockEvent: { siteId: { in: siteIds } } },

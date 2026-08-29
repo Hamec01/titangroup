@@ -3,7 +3,7 @@ import { prisma } from '@/lib/prisma';
 import { createAuditEvent } from '@/lib/audit';
 import { getForemanSiteIds } from '@/lib/foreman-review';
 import { helsinkiCalendarDateAsUtcMidnight } from '@/lib/attendance-clock';
-import { actorDisplayName, UUID_PATTERN, type ExceptionTypeFilter } from '@/lib/attendance-exceptions';
+import { actorDisplayName, siteScopeWhereClauses, UUID_PATTERN, type ExceptionTypeFilter } from '@/lib/attendance-exceptions';
 
 // docs/titanor-time/T7A_1_ATTENDANCE_CLOCK_DESIGN.md §8.5 (resolver pattern) / §9.7
 // (CONFIRM_SOURCE_ASSIGNMENT, full algorithm) / §9.8 (PAIR_ORPHAN_EVENTS full validation) / §9.9
@@ -1284,5 +1284,86 @@ export async function forceCloseOpenShift(exceptionId: string, explicitEndAt: Da
         resolutionNote: reason
       }
     };
+  });
+}
+
+// ---------------------------------------------------------------------------------------------
+// T14.5c (2026-08-29) — bulk ACKNOWLEDGE_AS_VALID, GPS_NOT_VERIFIED only.
+//
+// Clears a backlog of "GPS не подтверждён" exceptions at a site where the phone reliably can't
+// get a fix (a shipyard hull) — the admin filters the list to that site (or an employee / a
+// payroll period) and accepts every still-OPEN GPS_NOT_VERIFIED in one go. Deliberately narrow:
+//   - GPS_NOT_VERIFIED only, OPEN only, ADMIN only (the route requires attendance.exception.
+//     resolve.all and passes no foreman scope);
+//   - at least one narrowing filter is required — never an unscoped "resolve everything";
+//   - capped at BULK_ACK_MAX; over that, the admin must narrow the filter;
+//   - one set-based updateMany (no per-Employee lock — a concurrent single-resolve either wins
+//     first, leaving the row already RESOLVED and skipped by the `status: 'OPEN'` guard, or waits
+//     for our row lock and then re-evaluates), plus ONE summary audit event carrying every id.
+// ---------------------------------------------------------------------------------------------
+
+const BULK_ACK_MAX = 500;
+const BULK_ACK_NOTE = 'Массово принято: отметки на объекте, где часто нет сигнала GPS.';
+
+export interface BulkAckGpsFilters {
+  siteId?: string;
+  employeeId?: string;
+  payrollPeriodId?: string;
+  occurredFrom?: Date;
+  occurredTo?: Date;
+}
+
+export type BulkAckGpsOutcome =
+  | { kind: 'OK'; acknowledgedCount: number }
+  | { kind: 'NO_SCOPE' }
+  | { kind: 'TOO_MANY'; matched: number; max: number }
+  | { kind: 'NONE_MATCHED' };
+
+export async function bulkAcknowledgeGpsNotVerified(filters: BulkAckGpsFilters, actorUserId: string, requestId: string): Promise<BulkAckGpsOutcome> {
+  if (!filters.siteId && !filters.employeeId && !filters.payrollPeriodId) {
+    return { kind: 'NO_SCOPE' };
+  }
+
+  const and: Prisma.AttendanceExceptionWhereInput[] = [{ type: 'GPS_NOT_VERIFIED' }, { status: 'OPEN' }];
+  if (filters.employeeId) and.push({ employeeId: filters.employeeId });
+  if (filters.payrollPeriodId) and.push({ payrollPeriodId: filters.payrollPeriodId });
+  if (filters.occurredFrom && filters.occurredTo) and.push({ occurredAt: { gte: filters.occurredFrom, lte: filters.occurredTo } });
+  if (filters.siteId) and.push({ OR: siteScopeWhereClauses([filters.siteId]) });
+  const where: Prisma.AttendanceExceptionWhereInput = { AND: and };
+
+  return prisma.$transaction(async (tx) => {
+    const ids = (await tx.attendanceException.findMany({ where, select: { id: true }, take: BULK_ACK_MAX + 1 })).map((r) => r.id);
+    if (ids.length === 0) {
+      return { kind: 'NONE_MATCHED' as const };
+    }
+    if (ids.length > BULK_ACK_MAX) {
+      return { kind: 'TOO_MANY' as const, matched: ids.length, max: BULK_ACK_MAX };
+    }
+
+    const resolvedAt = new Date();
+    const updated = await tx.attendanceException.updateMany({
+      where: { id: { in: ids }, status: 'OPEN' },
+      data: { status: 'RESOLVED', resolvedByUserId: actorUserId, resolvedAt, resolutionNote: BULK_ACK_NOTE }
+    });
+
+    await createAuditEvent(tx, {
+      actorUserId,
+      eventType: 'ATTENDANCE_EXCEPTION_ACKNOWLEDGED_AS_VALID',
+      entityType: 'ATTENDANCE_EXCEPTION',
+      entityId: ids[0],
+      requestId,
+      beforeValue: { status: 'OPEN', type: 'GPS_NOT_VERIFIED' },
+      afterValue: {
+        status: 'RESOLVED',
+        type: 'GPS_NOT_VERIFIED',
+        resolutionAction: 'ACKNOWLEDGE_AS_VALID',
+        bulk: true,
+        acknowledgedCount: updated.count,
+        exceptionIds: ids,
+        filter: { siteId: filters.siteId ?? null, employeeId: filters.employeeId ?? null, payrollPeriodId: filters.payrollPeriodId ?? null }
+      }
+    });
+
+    return { kind: 'OK' as const, acknowledgedCount: updated.count };
   });
 }
