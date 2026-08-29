@@ -7,11 +7,13 @@ import type { AppLocale } from './locale';
 // those directly. Kept as a data module (not JSX) so the content itself stays easy to review/edit
 // without touching component code.
 //
-// Last brought current: 2026-08-29 (T13.1–T13.11). Covers: grouped admin nav, the notification
+// Last brought current: 2026-08-29 (T13.1–T13.11, T14). Covers: grouped admin nav, the notification
 // bell + review-queue badge, the worker dossier, the workforce matrix (professions + qualification
 // filters + PDF/CSV export), worker professions, the unified "Awaiting approval" screen, the three
 // ways to change a timesheet, marking sick-leave/vacation from review, the configurable GPS
-// accuracy threshold, the mid-shift presence check, and the Customer working-hours report.
+// accuracy threshold, the mid-shift presence check, the Customer working-hours report, and (T14)
+// GPS offline resilience: the "wait for GPS / check in anyway" prompt, the approximate last-good
+// location, the per-site "GPS often unavailable" flag, and the filter-scoped bulk-acknowledge.
 // The iOS geolocation note (permission must be re-granted every launch) is in workerApp + the GPS
 // changelog entry.
 //
@@ -189,6 +191,7 @@ export const GUIDE_CONTENT: Record<AppLocale, GuideContent> = {
       'Работник получает ссылку или QR-код активации от администратора (раздел «Работники → Работники»), переходит по ней и устанавливает приложение на телефон. На iPhone — только через встроенный браузер Safari.',
       'Приложение просит разрешить геолокацию. На Android достаточно выбрать «Разрешить при использовании приложения» (не «Один раз») — дальше оно не переспрашивает. На iPhone и iPad из-за ограничений Apple разрешение приходится подтверждать при каждом запуске приложения — это нормально, обойти нельзя, просто нажмите «Разрешить» и продолжайте.',
       'В приложении одна главная кнопка «Приход» / «Уход» — при нажатии проверяется геолокация и показывается её точность. Приложение продолжает работать и без интернета — данные отправятся на сервер, как только связь появится.',
+      'Если телефон не поймал GPS (внутри корпуса судна, в цеху, без интернета), после нажатия «Приход» появится сообщение «подождите ~15 секунд» и кнопка «Всё равно отметить». Отметка сохраняется в любом случае — приход и уход никогда не блокируются из-за GPS.',
       'Если смена длинная, приложение может ещё раз проверить местоположение в течение смены (когда работник его открывает) — эти точки видны администратору на карте работника. Отдельно закрывать и открывать смену для этого не нужно.',
       'Работник видит список часов по дням за текущий период и в конце периода отправляет табель на проверку. Если табель не отправлен вовремя, система может отправить его автоматически — это настраивается в разделе «Правила учёта».'
     ],
@@ -205,6 +208,15 @@ export const GUIDE_CONTENT: Record<AppLocale, GuideContent> = {
     changelogTitle: 'Что нового',
     changelogIntro: 'Коротко — что менялось в системе за последнее время. Самое свежее сверху.',
     changelog: [
+      {
+        date: 'GPS без сигнала, 29 августа 2026',
+        items: [
+          'Приход и уход без GPS. Если работник нажал «Приход», а телефон ещё не поймал спутники (внутри корпуса судна, в цеху, без интернета), появляется сообщение «подождите около 15 секунд» и кнопка «Всё равно отметить». Отметка и часы сохраняются в любом случае — GPS теперь никогда не мешает отметиться.',
+          'Приблизительное местоположение. Когда свежего GPS нет, приложение прикладывает последнюю известную координату телефона (не старше 30 минут) с пометкой «приблизительно» и возрастом («≈ 8 мин назад»). В проблеме учёта такая точка показана на карте серой пунктирной меткой — это не проверка по геозоне, а просто ориентир, где примерно был человек.',
+          'Галочка у объекта «Здесь часто нет сигнала GPS» (в карточке объекта). Для таких объектов офлайн-отметки без координат больше не попадают в список проблем — система принимает их сама, и это видно в журнале.',
+          'Кнопка «Принять все „GPS не подтверждён" по фильтру» на экране проблем учёта: выберите объект (или работника, или период) и разом примите все накопившиеся отметки без координат.'
+        ]
+      },
       {
         date: '29 августа 2026',
         items: [
@@ -380,6 +392,7 @@ export const GUIDE_CONTENT: Record<AppLocale, GuideContent> = {
       'The worker gets an activation link or QR code from the administrator (People → Workers), opens it, and installs the app on their phone. On iPhone — through the built-in Safari browser only.',
       'The app asks for location permission. On Android, choosing "Allow while using the app" (not "Allow once") is enough — it won\'t ask again. On iPhone and iPad, Apple\'s restrictions mean the permission has to be granted every time the app is opened — this is normal and can\'t be avoided; the worker just taps "Allow" and continues.',
       'The app has one main Check In / Check Out button — pressing it checks location and shows its accuracy. The app keeps working without internet too; data is sent to the server as soon as a connection is available.',
+      'If the phone has no GPS fix (inside a ship hull, a covered hall, offline), tapping "Check in" shows a "please wait ~15 seconds" message and a "Check in anyway" button. The check-in is saved either way — GPS never blocks clocking in or out.',
       'On a long shift the app may check location again during the shift (when the worker opens it) — those points are visible to the administrator on the worker\'s map. Nothing needs to be clocked out and back in for this.',
       'The worker sees a day-by-day list of hours for the current period and submits their timesheet at the end of the period. If it isn\'t submitted in time, the system can submit it automatically — configurable under Attendance policy.'
     ],
@@ -396,6 +409,15 @@ export const GUIDE_CONTENT: Record<AppLocale, GuideContent> = {
     changelogTitle: 'What\'s new',
     changelogIntro: 'A short list of what has changed in the system recently. Newest first.',
     changelog: [
+      {
+        date: 'GPS with no signal, 29 August 2026',
+        items: [
+          'Check in / out with no GPS. If the worker taps "Check in" while the phone still has no satellite fix (inside a ship hull, a covered hall, offline), a "please wait about 15 seconds" message appears with a "Check in anyway" button. The check-in and the hours are saved either way — GPS can no longer stop someone clocking in.',
+          'Approximate location. When there is no fresh fix, the app attaches the phone\'s last known location (no older than 30 minutes) marked "approximate" with its age ("≈ 8 min old"). On an exception it shows on the map as a grey dashed marker — not a geofence check, just a rough "where the person was".',
+          'A per-site "GPS is often unavailable here" checkbox (on the site card). For those sites, offline check-ins with no coordinate no longer land in the exception queue — the system accepts them itself, and it is recorded in the audit log.',
+          'An "Acknowledge all GPS not verified in this filter" button on the exceptions screen: pick a site (or a worker, or a period) and clear the whole backlog of no-coordinate check-ins at once.'
+        ]
+      },
       {
         date: '29 August 2026',
         items: [

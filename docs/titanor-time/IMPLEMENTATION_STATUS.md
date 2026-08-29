@@ -1,6 +1,49 @@
 # Titanor Time — Implementation Status
 
-Обновлено: 2026-08-29 Europe/Helsinki (T13.4–T13.11 — workforce matrix + отчёт заказчику)
+Обновлено: 2026-08-29 Europe/Helsinki (T14 — GPS offline resilience)
+
+**`[2026-08-29]` T14 — GPS offline resilience (по заказу владельца: офлайн-отметки в корпусах судов на верфи Meyer Turku).**
+Проблема: работник офлайн жмёт «Приход» внутри стального корпуса — спутники закрыты, Wi-Fi/сети
+нет, `getCurrentPosition` отваливается по таймауту без координаты. Каждая такая отметка → отдельное
+`GPS_NOT_VERIFIED` в очереди на разбор. Отметка и часы при этом пишутся корректно (система не
+блокирует приход/уход на GPS) — задача про доказательства и про разгрузку очереди.
+- **T14.1 + T14.2 (`00b95be`)** — `ClockEventLocation` получил `isApproximate` / `fixAgeSeconds` /
+  `capturedAfterEventSeconds` + CHECK `ck_clock_event_location_approx_shape` (migration
+  `20260829170000`); `WorkSite.gpsOftenUnavailable` (default false). `lib/worker-gps.ts`:
+  `captureGpsSnapshot` теперь после провала свежего замера пробует OS-кэш (`maximumAge` до 15 мин)
+  и один last-good fix, который устройство хранит в `localStorage` (TTL 30 мин, одна координата,
+  только это устройство) — возвращает `approximate: true` + `fixAgeSeconds`. `_test-worker-gps` 31/31.
+- **T14.3 (`067a8aa`)** — экран работника: если свежего точного fix нет, «Приход»/«Уход»/«Смена»
+  показывают сообщение «подождите ~15 сек» + отсчёт + кнопка «Всё равно отметить» (abort →
+  `captureGpsSnapshot({ maxWaitMs: 15000, signal })`). Приблизительный fix идёт через новое поле
+  `gpsApproximate` офлайн-outbox/wire (не как `gps`) — сервер никогда не проверяет устаревшую точку
+  по геозоне (раньше stale-fix мог отклонить приход как `OUTSIDE_GEOFENCE`). Migration
+  `20260829180000` ослабил CHECK: approximate без возраста разрешён (OS-кэш неизвестного возраста).
+  `_test-gps-offline-resilience-schema` 9/9.
+- **T14.4 (`2fbb586`)** — сервер `/sync` принимает `gpsApproximate` (`validateApproximateGpsPayload`
+  в `attendance-clock.ts`, зеркалит CHECK), пишет как approximate `ClockEventLocation`; событие
+  остаётся `NOT_VERIFIED`. **Не входит в offline payload hash** (provenance, не координата — retry
+  и pre-send back-fill остаются hash-стабильными). `GPS_NOT_VERIFIED` вообще без координаты (plain
+  `TIMEOUT`/`POSITION_UNAVAILABLE`, не `LOW_ACCURACY`, не промах геозоны) на объекте с
+  `gpsOftenUnavailable` создаётся сразу `RESOLVED` (ACKNOWLEDGE_AS_VALID, actor SYSTEM, один audit
+  event). `_test-gps-approximate-sync` 21/21 (реальный route-handler путь).
+- **T14.5a (`3e971f7`)** — `PATCH /api/admin/sites/:id` принимает `gpsOftenUnavailable` (partial
+  update как `active`), в `SITE_UPDATED` audit; чекбокс в `SiteEditForm`. `_test-site-gps-flag` 11/11.
+- **T14.5b (`f61d21a`)** — `getAttendanceExceptionDetail.gpsLocation` несёт `isApproximate` /
+  возраст (за `attendance.gps.read.raw`); `ExceptionDetailView` — строка «Местоположение —
+  Приблизительно, ≈ N мин назад» + `ExceptionGpsMap` рисует серую пунктирную метку + кольцо
+  неопределённости вместо красной. `_test-gps-exception-detail` 23/23.
+- **T14.5c (`0a1181f`)** — `POST /api/admin/attendance/exceptions/bulk-acknowledge-gps`:
+  ACKNOWLEDGE_AS_VALID всех OPEN `GPS_NOT_VERIFIED` по СУЖЕННОМУ фильтру (siteId/employeeId/
+  payrollPeriodId + опц. даты). ADMIN (`read.all` + `resolve.all`), без foreman scope; отказ на
+  unscoped вызов; cap 500; один set-based `updateMany` + один summary audit event со всеми id.
+  Кнопка в `ExceptionsListView` при статусе OPEN + суженном фильтре. `_test-bulk-ack-gps` 13/13.
+- **Не сделано (отложено):** back-fill координаты в момент синка, если GPS поймался ПОСЛЕ
+  постановки события в очередь (item 3 — владелец пометил «тоже можно прикрутить», не обязательно).
+  Схема (`capturedAfterEventSeconds`) и сервер уже готовы принять — чистый будущий шаг.
+- Все этапы: `tsc` + `next build` зелёные; регрессия GPS/attendance/offline (`_test-worker-gps`,
+  `_test-gps-*`, `_test-exception-list-query` 12/12, `_test-offline-idb-invariants` 32/0,
+  `_test-attendance-presence` 20/20) — зелёная.
 
 **`[2026-08-29]` T13.4–T13.11 — Workforce Matrix + экспорт + отчёт заказчику по часам.**
 - **T13.4–T13.6 (`19404cf`)** — матрица допусков стала матрицей работников. `/admin/workforce`
