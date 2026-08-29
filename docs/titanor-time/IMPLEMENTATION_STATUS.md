@@ -1,6 +1,37 @@
 # Titanor Time — Implementation Status
 
-Обновлено: 2026-08-29 Europe/Helsinki (T13.1–T13.3 — профессии)
+Обновлено: 2026-08-29 Europe/Helsinki (T13.4–T13.11 — workforce matrix + отчёт заказчику)
+
+**`[2026-08-29]` T13.4–T13.11 — Workforce Matrix + экспорт + отчёт заказчику по часам.**
+- **T13.4–T13.6 (`19404cf`)** — матрица допусков стала матрицей работников. `/admin/workforce`
+  (`/admin/qualifications` → 301-редирект): фильтры категория профессии / профессия / допуск /
+  статус срока / объект / verification / **занятость** (active = `Employment.active` + окно
+  `[startDate, endDate]` покрывает Хельсинки-сегодня); сорт по имени / табельному / профессии /
+  объекту, стабильный tiebreak. Строка получила `active`, `professions[]`, `currentSites[]`.
+  `GET /api/admin/workforce/export?…&format=PDF|CSV` — вся отфильтрованная выборка, лимит
+  `MAX_WORKFORCE_EXPORT_ROWS=2000` → `400 REPORT_TOO_LARGE`; GET/stateless, без UUID/ДР/адреса/
+  телефона/договора/фото. `_test-workforce-matrix` 17/17.
+- **T13.7 (`9f40ab4`)** — фикс `workedDays` в произвольном отчёте: подытог работника =
+  `COUNT DISTINCT date` по выбранным объектам, общий итог = `COUNT DISTINCT (employeeId, date)`
+  (раньше суммировались per-(работник,объект) счётчики — работник на 2 объектах в один день
+  считался за 2). Подытог объекта не менялся. `_test-worked-days` 8/8; canonical 20/20 без
+  изменений.
+- **T13.7b + T13.11 (`4d24469`)** — Customer Project Working Hours.
+  `resolveCustomerReadiness` — по всем покрывающим табелям: `CUSTOMER_FINAL` только если все
+  `FINAL_APPROVED`; `SUBMITTED`/`FOREMAN_APPROVED`/`DRAFT`/`RETURNED` с данными → blocker с
+  именем/периодом/ссылкой; пустой черновик → `noData`. Ведётся сегментами (историческое
+  назначение видно). `custom-time-report.ts` получил `dailyRows` (одна на работник×объект×дата).
+  `GET /api/admin/reports/customer/export` — `?preview=1` → JSON готовности + отчёт; `mode=FINAL`
+  → `409` со списком blocker'ов если не готово; `mode=PREVIEW` → внутренний не-финальный вариант.
+  PDF (логотип Titanor, имя из env `COMPANY_LEGAL_NAME`/`BUSINESS_ID`/`ADDRESS`, «FINAL APPROVED»,
+  DAILY-таблица, без денег/подписи/TES/invoice) + CSV (BOM/CRLF/формула-guard, `row_type`,
+  десятичные часы). Финальная выгрузка пишет lightweight `REPORT_EXPORTED` AuditEvent (без
+  имён/часов). Вкладка «Часы заказчику» в `AdminReportTabs`; `/admin/reports/customer` с
+  предпросмотром готовности. `_test-customer-hours` 11/11. Поисковый multi-select (T13.10) —
+  отдельно; пока обычный `<select multiple>`.
+- Все этапы: `tsc` + `next build` зелёные. TES-контур (T13.8/9/12) отложен по решению владельца.
+
+
 
 **`[2026-08-29]` T13 — Профессии + Workforce Matrix + отчёты по часам (серия, TES отложен).**
 Мастер-дизайн: артефакт `https://claude.ai/code/artifact/a9e7afc2-d316-477d-b237-08916492e430`
