@@ -100,7 +100,7 @@ export const ADMIN_NAV: Record<AppLocale, AdminNavStrings> = {
         label: 'People',
         items: [
           { href: '/admin/workers', label: 'Workers' },
-          { href: '/admin/qualifications', label: 'Qualifications' },
+          { href: '/admin/workforce', label: 'Workforce matrix' },
           { href: '/admin/assignments', label: 'Assignments' },
           { href: '/admin/users', label: 'Users' }
         ]
@@ -154,7 +154,7 @@ export const ADMIN_NAV: Record<AppLocale, AdminNavStrings> = {
         label: 'Работники',
         items: [
           { href: '/admin/workers', label: 'Работники' },
-          { href: '/admin/qualifications', label: 'Допуски и сертификаты' },
+          { href: '/admin/workforce', label: 'Работники — матрица' },
           { href: '/admin/assignments', label: 'Назначения' },
           { href: '/admin/users', label: 'Пользователи' }
         ]
