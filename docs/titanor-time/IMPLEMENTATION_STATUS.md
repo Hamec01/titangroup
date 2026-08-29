@@ -28,9 +28,17 @@
   `GET /api/worker/notifications` + `POST .../:id/dismiss` (право `timesheet.read.own`).
   `_test-worker-notifications` 15/15.
 - Все этапы: `tsc` + `next build` зелёные. Прод не тронут.
+- **Задеплоено на пилот `t97-pilot-43e2d26`** (app + scheduler, 2026-08-29 ~17:00 UTC, владелец
+  выполнил `deploy-43e2d26.sh`). БД `t97-pilot-db` **88 → 92** (`20260829170000` / `180000` /
+  `190000` / `200000`), idempotent-повтор чист. Бэкап
+  `t97-pilot-20260829T163841Z-pre-43e2d26.dump`. `/api/ready` `/api/health` `/login` = 200
+  (внутр. + внешний HTTPS), планировщик тикает; новые роуты отдают 401 (не 404). Прод
+  (`titanor-time-app-1`, `daa2edbb`, restarts 0) и `:latest` не тронуты. Счётчики строк после
+  деплоя: AttendanceException 27 / ClockEvent 33 / ClockEventLocation 27 / Timesheet 12 /
+  WorkSite 3 / WorkerNotification 0 — небольшой прирост vs утренний снимок = обычная активность
+  пилота за день, не эффект миграций (только DDL). Rollback-контейнеры `…-pre-43e2d26` сохранены.
 - **Не сделано:** возврат табеля на доработку как отдельный тип уведомления (инфра готова, тип
-  добавляется без пересборки); деплой T14 + T15 на пилот (миграция против живой БД заблокирована
-  auto-gate — нужна команда владельца или permission rule).
+  добавляется без пересборки); T14 item 3 — back-fill координаты при синке.
 
 **`[2026-08-29]` T14 — GPS offline resilience (по заказу владельца: офлайн-отметки в корпусах судов на верфи Meyer Turku).**
 Проблема: работник офлайн жмёт «Приход» внутри стального корпуса — спутники закрыты, Wi-Fi/сети
@@ -74,6 +82,7 @@
 - Все этапы: `tsc` + `next build` зелёные; регрессия GPS/attendance/offline (`_test-worker-gps`,
   `_test-gps-*`, `_test-exception-list-query` 12/12, `_test-offline-idb-invariants` 32/0,
   `_test-attendance-presence` 20/20) — зелёная.
+- **Задеплоено на пилот вместе с T15** — см. запись T15 ниже (`t97-pilot-43e2d26`, БД 88 → 92).
 
 **`[2026-08-29]` T13.4–T13.11 — Workforce Matrix + экспорт + отчёт заказчику по часам.**
 - **T13.4–T13.6 (`19404cf`)** — матрица допусков стала матрицей работников. `/admin/workforce`
