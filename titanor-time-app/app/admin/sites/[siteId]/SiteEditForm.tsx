@@ -24,6 +24,7 @@ export function SiteEditForm({ site }: { site: SiteDetail }) {
   const [address, setAddress] = useState(site.address ?? '');
   const [description, setDescription] = useState(site.description ?? '');
   const [active, setActive] = useState(site.active);
+  const [gpsOftenUnavailable, setGpsOftenUnavailable] = useState(site.gpsOftenUnavailable);
   const [loading, setLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
@@ -66,7 +67,8 @@ export function SiteEditForm({ site }: { site: SiteDetail }) {
           cityId: cityId || null,
           address: address || null,
           description: description || null,
-          active
+          active,
+          gpsOftenUnavailable
         })
       });
 
@@ -160,6 +162,22 @@ export function SiteEditForm({ site }: { site: SiteDetail }) {
               onChange={(event) => setActive(event.target.checked)}
             />{' '}
             {localeText(locale, 'Active (uncheck to close this site)', 'Активен (снимите флажок, чтобы закрыть объект)')}
+          </label>
+        </div>
+        <div className="login-field">
+          <label htmlFor="site-edit-gps-often-unavailable">
+            <input
+              id="site-edit-gps-often-unavailable"
+              type="checkbox"
+              disabled={loading}
+              checked={gpsOftenUnavailable}
+              onChange={(event) => setGpsOftenUnavailable(event.target.checked)}
+            />{' '}
+            {localeText(
+              locale,
+              'GPS is often unavailable here (auto-accept offline check-ins with no location — for ship hulls, covered halls)',
+              'Здесь часто нет сигнала GPS (офлайн-отметки без координат принимаются автоматически — для корпусов судов, крытых цехов)'
+            )}
           </label>
         </div>
         {errorMessage ? (

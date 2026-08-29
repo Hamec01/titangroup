@@ -71,13 +71,14 @@ export async function PATCH(request: NextRequest, { params }: RouteParams): Prom
     return jsonError(400, { code: 'VALIDATION_ERROR', message: 'Request body must be valid JSON.' }, requestId);
   }
   const bodyObject = rawBody && typeof rawBody === 'object' ? (rawBody as Record<string, unknown>) : {};
-  const { version, name, cityId, address, description, active } = bodyObject as {
+  const { version, name, cityId, address, description, active, gpsOftenUnavailable } = bodyObject as {
     version?: unknown;
     name?: unknown;
     cityId?: unknown;
     address?: unknown;
     description?: unknown;
     active?: unknown;
+    gpsOftenUnavailable?: unknown;
   };
 
   const fieldErrors: Record<string, string[]> = {};
@@ -88,7 +89,7 @@ export async function PATCH(request: NextRequest, { params }: RouteParams): Prom
   // Partial update: only fields present in the body are validated/written.
   // defaultForemanUserId is deliberately not editable here — assigning a
   // foreman is its own workflow (T6.9), not a generic field edit.
-  const data: { name?: string; cityId?: string | null; address?: string | null; description?: string | null; active?: boolean } = {};
+  const data: { name?: string; cityId?: string | null; address?: string | null; description?: string | null; active?: boolean; gpsOftenUnavailable?: boolean } = {};
 
   if (name !== undefined) {
     if (typeof name !== 'string' || name.trim().length === 0 || name.trim().length > MAX_NAME_LENGTH) {
@@ -130,6 +131,14 @@ export async function PATCH(request: NextRequest, { params }: RouteParams): Prom
       fieldErrors.active = ['invalid'];
     } else {
       data.active = active;
+    }
+  }
+
+  if (gpsOftenUnavailable !== undefined) {
+    if (typeof gpsOftenUnavailable !== 'boolean') {
+      fieldErrors.gpsOftenUnavailable = ['invalid'];
+    } else {
+      data.gpsOftenUnavailable = gpsOftenUnavailable;
     }
   }
 
@@ -178,6 +187,7 @@ export async function PATCH(request: NextRequest, { params }: RouteParams): Prom
         address: site.address,
         description: site.description,
         active: site.active,
+        gpsOftenUnavailable: site.gpsOftenUnavailable,
         version: site.version
       }
     });
@@ -205,6 +215,7 @@ export async function PATCH(request: NextRequest, { params }: RouteParams): Prom
       address: updated.address,
       description: updated.description,
       active: updated.active,
+      gpsOftenUnavailable: updated.gpsOftenUnavailable,
       version: updated.version,
       createdAt: updated.createdAt.toISOString(),
       updatedAt: updated.updatedAt.toISOString()

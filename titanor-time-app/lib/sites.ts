@@ -123,6 +123,11 @@ export interface SiteDetail {
   address: string | null;
   description: string | null;
   active: boolean;
+  // T14 (2026-08-29) — when true, an offline GPS_NOT_VERIFIED with no coordinate at all (plain
+  // TIMEOUT / POSITION_UNAVAILABLE) at this site is auto-acknowledged on ingestion instead of
+  // joining the review queue. For sites where the phone reliably can't get a fix (ship hulls,
+  // covered halls). See lib/attendance-sync.ts createGpsNotVerifiedException.
+  gpsOftenUnavailable: boolean;
   // Separate from foremanAssignments below (real ForemanAssignment rows,
   // T6.9) — this is WorkSite's own informational field, unrelated schema-wise
   // (03_DATA_MODEL_ERD.md §4.3: "не источник авторизации").
@@ -148,6 +153,7 @@ export async function getSiteDetail(siteId: string): Promise<SiteDetail | null> 
       address: true,
       description: true,
       active: true,
+      gpsOftenUnavailable: true,
       defaultForemanUserId: true,
       defaultForemanUser: { select: { username: true } },
       version: true,
@@ -191,6 +197,7 @@ export async function getSiteDetail(siteId: string): Promise<SiteDetail | null> 
     address: site.address,
     description: site.description,
     active: site.active,
+    gpsOftenUnavailable: site.gpsOftenUnavailable,
     defaultForemanUserId: site.defaultForemanUserId,
     defaultForemanUsername: site.defaultForemanUser?.username ?? null,
     version: site.version,
