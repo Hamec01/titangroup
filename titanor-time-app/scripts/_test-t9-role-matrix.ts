@@ -57,10 +57,19 @@ async function main() {
   const noSuperAdminOnlyRouteExists = true; // see comment above — documented, not invented.
   check('ADMIN: no SUPER_ADMIN-only route exists in the implemented surface to falsely pass as denied', noSuperAdminOnlyRouteExists);
 
+  // Language-independent markers of the shared access-denied render:
+  //   <main class="setup-page"><p class="login-error" role="alert">{localized}</p></main>
+  // and the absence of the real admin chrome (<nav class="admin-nav">). The assertions below check
+  // structure/result, never a specific translation of the denial text.
+  const deniedAlert = (html: string) => /class="[^"]*\blogin-error\b/.test(html) && html.includes('role="alert"');
+  const renderedAdminChrome = (html: string) => html.includes('admin-nav');
+
   // ---- FOREMAN: /foreman/** only, assigned sites/workers only, /admin/** denied ----
-  const foremanAdminPage = await fetch(`${BASE}/admin/setup`, { headers: { Cookie: `tt_session=${fx.foreman.cookie}` } });
+  const foremanAdminPage = await fetch(`${BASE}/admin/setup`, { headers: { Cookie: `tt_session=${fx.foreman.cookie}` }, redirect: 'manual' });
   const foremanAdminPageText = await foremanAdminPage.text();
-  check('FOREMAN: /admin/setup renders in-page Access denied, not a redirect', foremanAdminPage.status === 200 && foremanAdminPageText.includes('Access denied'));
+  check('FOREMAN: /admin/setup renders the in-page denial alert, not a redirect, no admin chrome',
+    foremanAdminPage.status === 200 && deniedAlert(foremanAdminPageText) && !renderedAdminChrome(foremanAdminPageText),
+    { status: foremanAdminPage.status });
   const foremanAdminApi = await jsonFetch(`${BASE}/api/admin/workers`, { headers: authHeaders(fx.foreman.cookie) });
   check('FOREMAN: admin API -> 403', foremanAdminApi.status === 403 && foremanAdminApi.body?.error?.code === 'FORBIDDEN', foremanAdminApi);
 
@@ -72,11 +81,16 @@ async function main() {
   check('FOREMAN: NOT-assigned site (Gamma) report -> 404, not a data leak', foremanForeignSiteReport.status === 404, foremanForeignSiteReport);
 
   // ---- WORKER: /worker/** own data only, admin/foreman denied, employeeId substitution blocked ----
-  const workerAdminPage = await fetch(`${BASE}/admin/setup`, { headers: { Cookie: `tt_session=${fx.workerA.cookie}` } });
+  const workerAdminPage = await fetch(`${BASE}/admin/setup`, { headers: { Cookie: `tt_session=${fx.workerA.cookie}` }, redirect: 'manual' });
   const workerAdminPageText = await workerAdminPage.text();
-  check('WORKER: /admin/setup denied (in-page, not a data leak)', workerAdminPage.status === 200 && workerAdminPageText.includes('Access denied'));
+  check('WORKER: /admin/setup denied in-page (login-error alert, no admin chrome, no data leak)',
+    workerAdminPage.status === 200 && deniedAlert(workerAdminPageText) && !renderedAdminChrome(workerAdminPageText),
+    { status: workerAdminPage.status });
   const workerForemanPage = await fetch(`${BASE}/foreman`, { headers: { Cookie: `tt_session=${fx.workerA.cookie}` }, redirect: 'manual' });
-  check('WORKER: /foreman denied or redirected away, never rendered as foreman content', workerForemanPage.status !== 200 || (await workerForemanPage.text()).includes('Access denied'));
+  const workerForemanText = workerForemanPage.status === 200 ? await workerForemanPage.text() : '';
+  check('WORKER: /foreman never renders reviewer content — redirected away or in-page login-error denial',
+    workerForemanPage.status !== 200 || deniedAlert(workerForemanText),
+    { status: workerForemanPage.status });
   const workerOwnContext = await jsonFetch(`${BASE}/api/worker/context`, { headers: authHeaders(fx.workerA.cookie) });
   check('WORKER: own /api/worker/context readable', workerOwnContext.status === 200);
   const workerAdminApi = await jsonFetch(`${BASE}/api/admin/workers`, { headers: authHeaders(fx.workerA.cookie) });
@@ -160,8 +174,10 @@ async function main() {
     await page.waitForURL(/\/foreman/, { timeout: 15000 });
 
     await page.goto(`${BASE}/admin/workers`, { waitUntil: 'networkidle' });
-    const bodyText = await page.locator('body').innerText();
-    check('UI: FOREMAN visiting /admin/workers sees Access denied, not the worker table', bodyText.includes('Access denied') && !bodyText.includes('Login username'));
+    const deniedAlertCount = await page.locator('p.login-error[role="alert"]').count();
+    const adminNavCount = await page.locator('.admin-nav').count();
+    check('UI: FOREMAN visiting /admin/workers sees the in-page denial alert, not the admin nav/table',
+      deniedAlertCount === 1 && adminNavCount === 0, { deniedAlertCount, adminNavCount });
 
     await browser.close();
   }
