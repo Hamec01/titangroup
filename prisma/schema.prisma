@@ -310,18 +310,18 @@ enum WorkerNotificationSeverity {
 // T15.3 — one worker's notifications. `employeeId` is the subject; the paired User (the account
 // that logs into the worker app) does the dismissing, recorded in WorkerNotificationDismissal.
 model WorkerNotification {
-  id              String                       @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  id              String                        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   type            WorkerNotificationType
   severity        WorkerNotificationSeverity
-  employeeId      String                       @db.Uuid
-  payrollPeriodId String?                      @db.Uuid
-  timesheetId     String?                      @db.Uuid
-  deadlineAt      DateTime?                    @db.Timestamptz(6)
-  createdAt       DateTime                     @default(now()) @db.Timestamptz(6)
-  resolvedAt      DateTime?                    @db.Timestamptz(6)
-  employee        Employee                     @relation(fields: [employeeId], references: [id], onDelete: Cascade, onUpdate: Cascade)
-  payrollPeriod   PayrollPeriod?               @relation(fields: [payrollPeriodId], references: [id], onDelete: Cascade, onUpdate: Cascade)
-  timesheet       Timesheet?                   @relation(fields: [timesheetId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  employeeId      String                        @db.Uuid
+  payrollPeriodId String?                       @db.Uuid
+  timesheetId     String?                       @db.Uuid
+  deadlineAt      DateTime?                     @db.Timestamptz(6)
+  createdAt       DateTime                      @default(now()) @db.Timestamptz(6)
+  resolvedAt      DateTime?                     @db.Timestamptz(6)
+  employee        Employee                      @relation(fields: [employeeId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  payrollPeriod   PayrollPeriod?                @relation(fields: [payrollPeriodId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  timesheet       Timesheet?                    @relation(fields: [timesheetId], references: [id], onDelete: Cascade, onUpdate: Cascade)
   dismissals      WorkerNotificationDismissal[]
 
   @@index([employeeId, resolvedAt, createdAt(sort: Desc)])
@@ -472,14 +472,14 @@ model UserSession {
 // HMAC-SHA256 with PASSWORD_RESET_TOKEN_HMAC_KEY. Tokens are retained after
 // use/revocation for a short audit trail instead of being silently deleted.
 model PasswordResetToken {
-  id          String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  userId      String    @db.Uuid
-  tokenHash   String    @unique @db.VarChar(64)
-  expiresAt   DateTime  @db.Timestamptz(6)
-  usedAt      DateTime? @db.Timestamptz(6)
-  revokedAt   DateTime? @db.Timestamptz(6)
-  createdAt   DateTime  @default(now()) @db.Timestamptz(6)
-  user        User      @relation(fields: [userId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  id        String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId    String    @db.Uuid
+  tokenHash String    @unique @db.VarChar(64)
+  expiresAt DateTime  @db.Timestamptz(6)
+  usedAt    DateTime? @db.Timestamptz(6)
+  revokedAt DateTime? @db.Timestamptz(6)
+  createdAt DateTime  @default(now()) @db.Timestamptz(6)
+  user      User      @relation(fields: [userId], references: [id], onDelete: Restrict, onUpdate: Cascade)
 
   @@index([userId, createdAt(sort: Desc)])
   @@index([expiresAt])
@@ -569,35 +569,35 @@ model Employee {
 // Employee row everything else joins against. onDelete: Cascade is a safety net, not an
 // expected path — Employee is never hard-deleted in this system (deactivation only).
 model EmployeeProfile {
-  id                       String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  employeeId               String    @unique @db.Uuid
-  dateOfBirth              DateTime? @db.Date
-  specialty                String?   @db.VarChar(120)
-  skills                   String?   @db.Text
-  photoPath                String?
-  contractPath             String?
-  contractUploadedByUserId String?   @db.Uuid
-  contractUploadedAt       DateTime? @db.Timestamptz(6)
+  id                            String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  employeeId                    String    @unique @db.Uuid
+  dateOfBirth                   DateTime? @db.Date
+  specialty                     String?   @db.VarChar(120)
+  skills                        String?   @db.Text
+  photoPath                     String?
+  contractPath                  String?
+  contractUploadedByUserId      String?   @db.Uuid
+  contractUploadedAt            DateTime? @db.Timestamptz(6)
   // Worker Dossier feature (2026-08-26 plan). henkilötunnus is sensitive personal data — never
   // stored in plaintext. personalIdentityCodeEncrypted holds an AES-256-GCM ciphertext (base64,
   // lib/personal-data-encryption.ts); personalIdentityCodeLast4 is a display-only cache of the
   // final 4 characters (individual number + checksum) so masked UI ("••••••-••••1234") never
   // needs to decrypt just to render a list. Both are set/cleared together — never one without
   // the other.
-  personalIdentityCodeEncrypted String? @db.Text
-  personalIdentityCodeLast4     String? @db.VarChar(4)
+  personalIdentityCodeEncrypted String?   @db.Text
+  personalIdentityCodeLast4     String?   @db.VarChar(4)
   // Distinct from User.email (the login/account field) — this is the worker's HR/contact email
   // for the dossier, never written to automatically from account email.
-  contactEmail             String?   @db.VarChar(255)
-  addressStreet            String?   @db.VarChar(255)
-  addressPostalCode        String?   @db.VarChar(32)
-  addressCity              String?   @db.VarChar(120)
-  addressCountry           String?   @db.VarChar(120)
-  version                  Int       @default(1)
-  createdAt                DateTime  @default(now()) @db.Timestamptz(6)
-  updatedAt                DateTime  @updatedAt @db.Timestamptz(6)
-  employee                 Employee  @relation(fields: [employeeId], references: [id], onDelete: Cascade, onUpdate: Cascade)
-  contractUploadedByUser   User?     @relation("EmployeeProfileContractUploadedBy", fields: [contractUploadedByUserId], references: [id], onDelete: SetNull, onUpdate: Cascade)
+  contactEmail                  String?   @db.VarChar(255)
+  addressStreet                 String?   @db.VarChar(255)
+  addressPostalCode             String?   @db.VarChar(32)
+  addressCity                   String?   @db.VarChar(120)
+  addressCountry                String?   @db.VarChar(120)
+  version                       Int       @default(1)
+  createdAt                     DateTime  @default(now()) @db.Timestamptz(6)
+  updatedAt                     DateTime  @updatedAt @db.Timestamptz(6)
+  employee                      Employee  @relation(fields: [employeeId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  contractUploadedByUser        User?     @relation("EmployeeProfileContractUploadedBy", fields: [contractUploadedByUserId], references: [id], onDelete: SetNull, onUpdate: Cascade)
 }
 
 // FK directly to Employee (not nested under EmployeeProfile) so a worker can add a card
@@ -608,23 +608,23 @@ model EmployeeProfile {
 // keeps holding the display name (catalog nameEn/nameRu snapshot, or free text for custom
 // entries) so every existing reader of `.name` keeps working unchanged.
 model EmployeeQualification {
-  id                 String                          @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  employeeId         String                          @db.Uuid
-  definitionId       String?                         @db.Uuid
-  name               String                          @db.VarChar(120)
-  certificateNumber  String?                         @db.VarChar(80)
-  issuer             String?                         @db.VarChar(160)
-  issuedOn           DateTime?                       @db.Date
-  expiresOn          DateTime?                       @db.Date
+  id                 String                         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  employeeId         String                         @db.Uuid
+  definitionId       String?                        @db.Uuid
+  name               String                         @db.VarChar(120)
+  certificateNumber  String?                        @db.VarChar(80)
+  issuer             String?                        @db.VarChar(160)
+  issuedOn           DateTime?                      @db.Date
+  expiresOn          DateTime?                      @db.Date
   photoPath          String?
   verificationState  QualificationVerificationState @default(SELF_REPORTED)
-  verifiedAt         DateTime?                       @db.Timestamptz(6)
-  verifiedByUserId   String?                         @db.Uuid
-  createdAt          DateTime                        @default(now()) @db.Timestamptz(6)
-  updatedAt          DateTime                        @updatedAt @db.Timestamptz(6)
-  employee           Employee                        @relation(fields: [employeeId], references: [id], onDelete: Cascade, onUpdate: Cascade)
-  definition         QualificationDefinition?        @relation(fields: [definitionId], references: [id], onDelete: Restrict, onUpdate: Cascade)
-  verifiedByUser     User?                           @relation("EmployeeQualificationVerifiedBy", fields: [verifiedByUserId], references: [id], onDelete: SetNull, onUpdate: Cascade)
+  verifiedAt         DateTime?                      @db.Timestamptz(6)
+  verifiedByUserId   String?                        @db.Uuid
+  createdAt          DateTime                       @default(now()) @db.Timestamptz(6)
+  updatedAt          DateTime                       @updatedAt @db.Timestamptz(6)
+  employee           Employee                       @relation(fields: [employeeId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  definition         QualificationDefinition?       @relation(fields: [definitionId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  verifiedByUser     User?                          @relation("EmployeeQualificationVerifiedBy", fields: [verifiedByUserId], references: [id], onDelete: SetNull, onUpdate: Cascade)
   adminNotifications AdminNotification[]
 
   @@index([employeeId])
@@ -636,19 +636,19 @@ model EmployeeQualification {
 // different qualification. FI has no translated catalog yet (§10 of the owner spec): UI must
 // fall back to nameEn/descriptionEn for locale=FI rather than inventing a translation.
 model QualificationDefinition {
-  id                     String                   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  code                   String                   @unique @db.VarChar(64)
-  category               String                   @db.VarChar(64)
+  id                     String                  @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  code                   String                  @unique @db.VarChar(64)
+  category               String                  @db.VarChar(64)
   scope                  QualificationScope
-  nameEn                 String                   @db.VarChar(160)
-  nameRu                 String                   @db.VarChar(160)
-  descriptionEn          String?                  @db.Text
-  descriptionRu          String?                  @db.Text
+  nameEn                 String                  @db.VarChar(160)
+  nameRu                 String                  @db.VarChar(160)
+  descriptionEn          String?                 @db.Text
+  descriptionRu          String?                 @db.Text
   expiryMode             QualificationExpiryMode
-  isActive               Boolean                  @default(true)
-  sortOrder              Int                      @default(0)
-  createdAt              DateTime                 @default(now()) @db.Timestamptz(6)
-  updatedAt              DateTime                 @updatedAt @db.Timestamptz(6)
+  isActive               Boolean                 @default(true)
+  sortOrder              Int                     @default(0)
+  createdAt              DateTime                @default(now()) @db.Timestamptz(6)
+  updatedAt              DateTime                @updatedAt @db.Timestamptz(6)
   employeeQualifications EmployeeQualification[]
 
   @@index([scope, isActive, sortOrder])
@@ -1627,9 +1627,9 @@ model ClockEvent {
 // §2.1 п.4 — immutable until 90-day retention delete. Sole holder of raw Check In/Out GPS
 // coordinates (§4.3).
 model ClockEventLocation {
-  clockEventId String     @id @db.Uuid
-  latitude     Decimal    @db.Decimal(8, 6)
-  longitude    Decimal    @db.Decimal(9, 6)
+  clockEventId              String     @id @db.Uuid
+  latitude                  Decimal    @db.Decimal(8, 6)
+  longitude                 Decimal    @db.Decimal(9, 6)
   // T14 (2026-08-29) — GPS offline resilience. A fresh fix at the moment of the clock event has
   // isApproximate=false and both age columns null (the normal case). When the device could not
   // get a fresh fix (indoors / in a ship hull / offline), the client may instead attach the last
@@ -1640,11 +1640,11 @@ model ClockEventLocation {
   // the admin map as a dashed "approximate" marker, never as a verified location.
   // CHECK ck_clock_event_location_approx_shape (migration 20260829180000): the two age columns
   // are non-negative and mutually exclusive, and only an approximate fix may carry an age.
-  isApproximate             Boolean  @default(false)
+  isApproximate             Boolean    @default(false)
   fixAgeSeconds             Int?
   capturedAfterEventSeconds Int?
-  createdAt    DateTime   @default(now()) @db.Timestamptz(6)
-  clockEvent   ClockEvent @relation(fields: [clockEventId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  createdAt                 DateTime   @default(now()) @db.Timestamptz(6)
+  clockEvent                ClockEvent @relation(fields: [clockEventId], references: [id], onDelete: Cascade, onUpdate: Cascade)
 }
 
 // T12 §2b (2026-08-28) — opportunistic "still on site" GPS sample taken WHILE a shift is open, not
@@ -1845,40 +1845,40 @@ model ClockEventIdConflict {
 
 // §2.1 п.11 — mutable, singleton (singleton column + CHECK + UNIQUE, §4.4). Seeded by this migration.
 model CompanyAttendancePolicy {
-  id                          String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  singleton                   Boolean  @unique @default(true)
-  timezone                    String   @default("Europe/Helsinki") @db.VarChar(64)
+  id                              String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  singleton                       Boolean  @unique @default(true)
+  timezone                        String   @default("Europe/Helsinki") @db.VarChar(64)
   // T12 (2026-08-28) — default 1 = the worker gets the whole cycle + one grace day; the timesheet
   // auto-submits and locks at cutoffTime on (periodEnd + this many days). Weekly Mon–Sun → the
   // following Monday 23:59 (8 editable days); biweekly → day 15 (15 days).
-  cutoffDaysAfterPeriodEnd    Int      @default(1)
-  cutoffTime                  DateTime @default(dbgenerated("'23:59:00'::time")) @db.Time(0)
-  systemReopenDebounceMinutes Int      @default(30)
-  maxShiftDurationHours       Int      @default(16)
+  cutoffDaysAfterPeriodEnd        Int      @default(1)
+  cutoffTime                      DateTime @default(dbgenerated("'23:59:00'::time")) @db.Time(0)
+  systemReopenDebounceMinutes     Int      @default(30)
+  maxShiftDurationHours           Int      @default(16)
   // GPS step 4 (T11) — server-side geofence-verification accuracy gate. A reading with
   // accuracyMeters above this becomes GPS_NOT_VERIFIED (reason LOW_ACCURACY). Default 75 keeps
   // the previous hard-coded MAX_ACCEPTABLE_ACCURACY_METERS; a site with chronically poor indoor
   // signal (e.g. a shipyard) can be raised here rather than in code.
-  maxGpsAccuracyMeters        Int      @default(75)
+  maxGpsAccuracyMeters            Int      @default(75)
   // T10-D (2026-08-28) — a worked day whose GROSS duration is at least this many minutes AND that
   // has no break logged gets its planned (unpaid) break auto-deducted from worked time
   // (docs/titanor-time/T10_DEF_PLAN.md §D). 360 = Finnish 6 h norm. 0 = always auto-deduct (no
   // threshold). CHECK 0..1440.
-  autoUnpaidBreakThresholdMinutes Int  @default(360)
+  autoUnpaidBreakThresholdMinutes Int      @default(360)
   // T10-D safety net (2026-08-28) — used when a day's planned break is 0 and not marked paid
   // (typically a SiteAssignment with no schedule template). 30 = Finnish lunch norm. A template
   // that sets its own plannedBreakMinutes or ticks plannedBreakPaid still wins. 0 disables the
   // fallback (template-only). CHECK 0..1440.
-  autoUnpaidBreakMinutes      Int      @default(30)
+  autoUnpaidBreakMinutes          Int      @default(30)
   // Auto-close abandoned shift (2026-08-28) — a shift open longer than maxShiftDurationHours with
   // no check-out is closed by the scheduler at the day's planned end time from the template; this
   // is the fallback duration (openedAt + N hours) when the template has no usable end. CHECK 1..24,
   // capped at maxShiftDurationHours at compute time.
-  autoCloseShiftFallbackHours Int      @default(8)
-  updatedByUserId             String?  @db.Uuid
-  updatedAt                   DateTime @updatedAt @db.Timestamptz(6)
-  createdAt                   DateTime @default(now()) @db.Timestamptz(6)
-  updatedByUser               User?    @relation("CompanyAttendancePolicyUpdatedBy", fields: [updatedByUserId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  autoCloseShiftFallbackHours     Int      @default(8)
+  updatedByUserId                 String?  @db.Uuid
+  updatedAt                       DateTime @updatedAt @db.Timestamptz(6)
+  createdAt                       DateTime @default(now()) @db.Timestamptz(6)
+  updatedByUser                   User?    @relation("CompanyAttendancePolicyUpdatedBy", fields: [updatedByUserId], references: [id], onDelete: Restrict, onUpdate: Cascade)
 }
 
 // §2.1 п.12 — append-only. Identity is (timesheetId, systemReopenGeneration), not cutoffAt.
