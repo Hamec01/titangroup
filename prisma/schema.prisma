@@ -791,6 +791,13 @@ model WorkSite {
   address                  String?
   description              String?                      @db.Text
   active                   Boolean                      @default(true)
+  // T14 (2026-08-29) — set for a site where GPS is routinely unavailable (inside a ship hull, a
+  // covered assembly hall, a basement). A GPS_NOT_VERIFIED exception whose reason is a plain
+  // TIMEOUT / POSITION_UNAVAILABLE (no coordinate at all) at such a site is created already
+  // resolved (ACKNOWLEDGE_AS_VALID, actor = SYSTEM) instead of adding to the review queue.
+  // A geofence-verification failure with a real coordinate (worker was measurably elsewhere) is
+  // NOT auto-resolved by this flag.
+  gpsOftenUnavailable      Boolean                      @default(false)
   defaultForemanUserId     String?                      @db.Uuid
   version                  Int                          @default(1)
   currentGeofenceVersionId String?                      @db.Uuid
@@ -1560,6 +1567,16 @@ model ClockEventLocation {
   clockEventId String     @id @db.Uuid
   latitude     Decimal    @db.Decimal(8, 6)
   longitude    Decimal    @db.Decimal(9, 6)
+  // T14 (2026-08-29) — GPS offline resilience. A fresh fix at the moment of the clock event has
+  // isApproximate=false and both age columns null (the normal case). When the device could not
+  // get a fresh fix (indoors / in a ship hull / offline), the client may instead attach the last
+  // good fix it still had — isApproximate=true, fixAgeSeconds = how old that fix was. If a good
+  // fix only arrived AFTER the event was already queued (the worker walked back outside), the
+  // background back-fill attaches it with capturedAfterEventSeconds set. These points render on
+  // the admin map as a dashed "approximate" marker, never as a verified location.
+  isApproximate             Boolean  @default(false)
+  fixAgeSeconds             Int?
+  capturedAfterEventSeconds Int?
   createdAt    DateTime   @default(now()) @db.Timestamptz(6)
   clockEvent   ClockEvent @relation(fields: [clockEventId], references: [id], onDelete: Cascade, onUpdate: Cascade)
 }

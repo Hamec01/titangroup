@@ -8,11 +8,15 @@ import {
   getGeolocationPermissionState,
   captureGpsSnapshot,
   currentBestFix,
+  hasFreshGoodFix,
+  loadPersistedFix,
+  clearPersistedFix,
   isGeoOnboarded,
   markGeoOnboarded,
   clearGeoOnboarded,
   __resetGpsForTest,
   __pushFixForTest,
+  __setPersistedFixForTest,
   MAX_ACCEPTABLE_ACCURACY_METERS
 } from '../lib/worker-gps';
 
@@ -131,6 +135,65 @@ async function main() {
   clearGeoOnboarded();
   check('mark/clear swallow a throwing localStorage', true);
   Object.defineProperty(globalThis, 'localStorage', { value: undefined, configurable: true, writable: true });
+
+  // --- T14 — offline resilience: persisted last-good fix + approximate flag + abort ---
+  {
+    const store = new Map<string, string>();
+    Object.defineProperty(globalThis, 'localStorage', {
+      value: {
+        getItem: (k: string) => (store.has(k) ? store.get(k)! : null),
+        setItem: (k: string, v: string) => void store.set(k, String(v)),
+        removeItem: (k: string) => void store.delete(k)
+      },
+      configurable: true,
+      writable: true
+    });
+    // a geolocation that ALWAYS times out with no fix (indoors + offline)
+    const deadGeo: Record<string, unknown> = {
+      getCurrentPosition: (_ok: unknown, err: (e: unknown) => void) => err({ code: 3, TIMEOUT: 3, PERMISSION_DENIED: 1, POSITION_UNAVAILABLE: 2 }),
+      watchPosition: () => 9,
+      clearWatch: () => {}
+    };
+    Object.defineProperty(globalThis, 'navigator', { value: { geolocation: deadGeo }, configurable: true, writable: true });
+
+    __resetGpsForTest();
+    check('hasFreshGoodFix -> false with an empty buffer', hasFreshGoodFix() === false);
+    __pushFixForTest({ latitude: 60.4441, longitude: 22.2081, accuracyMeters: 20 });
+    check('hasFreshGoodFix -> true after a 20 m fix', hasFreshGoodFix() === true);
+
+    // pushFix persisted that good fix
+    const persisted = loadPersistedFix();
+    check('a good fix is persisted to localStorage', !!persisted && persisted.location.accuracyMeters === 20, persisted);
+
+    // a wildly inaccurate fix is NOT persisted as "last good"
+    clearPersistedFix();
+    __pushFixForTest({ latitude: 60.44, longitude: 22.2, accuracyMeters: 1500 });
+    check('a 1500 m fix is NOT persisted', loadPersistedFix() === null);
+
+    // capture with an empty buffer + no live fix + a persisted fix 8 min old -> approximate
+    __resetGpsForTest();
+    __setPersistedFixForTest({ latitude: 60.4438, longitude: 22.208, accuracyMeters: 30 }, 8 * 60_000);
+    const approx = await captureGpsSnapshot({ maxWaitMs: 300 });
+    check('captureGpsSnapshot falls back to the persisted fix, approximate=true', approx.location?.latitude === 60.4438 && approx.approximate === true, approx);
+    check('  fixAgeSeconds ~ 480 (8 min)', typeof approx.fixAgeSeconds === 'number' && approx.fixAgeSeconds >= 470 && approx.fixAgeSeconds <= 490, approx.fixAgeSeconds);
+
+    // persisted fix older than the 30-min TTL is ignored
+    __resetGpsForTest();
+    __setPersistedFixForTest({ latitude: 60.4438, longitude: 22.208, accuracyMeters: 30 }, 45 * 60_000);
+    const tooOld = await captureGpsSnapshot({ maxWaitMs: 300 });
+    check('a persisted fix older than 30 min is not used -> null + TIMEOUT', tooOld.location === null && tooOld.gpsUnavailableReason === 'TIMEOUT', tooOld);
+
+    // abort signal -> returns immediately with the best available (a buffered fix here)
+    __resetGpsForTest();
+    __pushFixForTest({ latitude: 60.4441, longitude: 22.2081, accuracyMeters: 900 }); // poor but present
+    const ac = new AbortController();
+    ac.abort();
+    const aborted = await captureGpsSnapshot({ signal: ac.signal, maxWaitMs: 20_000 });
+    check('aborted capture returns the buffered fix immediately, not null', aborted.location?.accuracyMeters === 900 && aborted.approximate === false, aborted);
+
+    Object.defineProperty(globalThis, 'navigator', { value: undefined, configurable: true, writable: true });
+    Object.defineProperty(globalThis, 'localStorage', { value: undefined, configurable: true, writable: true });
+  }
 
   console.log(JSON.stringify({ pass, fail }));
   process.exit(fail > 0 ? 1 : 0);
