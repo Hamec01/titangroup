@@ -8,14 +8,15 @@ import type { AppLocale } from '@/lib/i18n/locale';
 // blocks. FOREMAN's site report (SiteTimeReportView for role="foreman") never renders this — it has
 // exactly one report type and zero admin URLs.
 
-export type AdminReportTab = 'worker' | 'site' | 'period' | 'export' | 'custom';
+export type AdminReportTab = 'worker' | 'site' | 'period' | 'export' | 'custom' | 'customer';
 
 const TABS: { key: AdminReportTab; href: string; label: { en: string; ru: string } }[] = [
   { key: 'worker', href: '/admin/reports', label: { en: 'By worker', ru: 'По работнику' } },
   { key: 'site', href: '/admin/reports/sites', label: { en: 'By site', ru: 'По объекту' } },
   { key: 'period', href: '/admin/reports/periods', label: { en: 'By period', ru: 'По периоду' } },
   { key: 'export', href: '/admin/export', label: { en: 'CSV exports', ru: 'Выгрузки CSV' } },
-  { key: 'custom', href: '/admin/reports/custom', label: { en: 'Custom report', ru: 'Произвольный отчёт' } }
+  { key: 'custom', href: '/admin/reports/custom', label: { en: 'Custom report', ru: 'Произвольный отчёт' } },
+  { key: 'customer', href: '/admin/reports/customer', label: { en: 'Customer hours', ru: 'Часы заказчику' } }
 ];
 
 export function AdminReportTabs({ active, locale }: { active: AdminReportTab; locale: AppLocale }) {

@@ -60,6 +60,23 @@ export interface CustomReportSummaryRow {
   workedDays: number;
 }
 
+// T13.7/T13.13/T13.16 — the DAILY row: one per (employee, site, calendar date). Canonical bucket
+// numbers (rounded once). firstStartAt / lastEndAt are the earliest / latest segment ISO instants
+// on that day at that site (for display; never re-summed).
+export interface CustomReportDailyRow {
+  date: string;
+  employee: CustomReportEmployee;
+  site: CustomReportSite;
+  firstStartAt: string | null;
+  lastEndAt: string | null;
+  grossMinutes: number;
+  paidBreakMinutes: number;
+  unpaidBreakMinutes: number;
+  workedMinutes: number;
+  segmentCount: number;
+  timesheetStatus: string;
+}
+
 export interface CustomReportTotals {
   grossMinutes: number;
   paidBreakMinutes: number;
@@ -75,6 +92,7 @@ export interface CustomTimeReport {
   employees: CustomReportEmployee[];
   sites: CustomReportSite[];
   detailRows: CustomReportDetailRow[];
+  dailyRows: CustomReportDailyRow[];
   summaryRows: CustomReportSummaryRow[];
   employeeSubtotals: { employee: CustomReportEmployee; totals: CustomReportTotals }[];
   siteSubtotals: { site: CustomReportSite; totals: CustomReportTotals }[];
@@ -231,6 +249,39 @@ export async function getCustomTimeReport(params: CustomReportParams): Promise<C
     // --- Canonical (employeeId, siteId, date) buckets — round once, sum only already-rounded numbers above (§3/§4). ---
     const buckets: CanonicalDailyBucket[] = buildCanonicalDailyBuckets(rawSegments, { grossThresholdMinutes: autoBreakThresholdMinutes });
 
+    // --- DAILY rows: one per (employee, site, date) canonical bucket, with first/last segment time.
+    const detailByDayKey = new Map<string, CustomReportDetailRow[]>();
+    for (const dr of detailRows) {
+      const key = `${dr.employee.id}:${dr.site.id}:${dr.date}`;
+      const arr = detailByDayKey.get(key);
+      if (arr) arr.push(dr);
+      else detailByDayKey.set(key, [dr]);
+    }
+    const dailyRows: CustomReportDailyRow[] = buckets
+      .map((b) => {
+        const employee = employeeById.get(b.employeeId)!;
+        const site = siteById.get(b.siteId)!;
+        const key = `${b.employeeId}:${b.siteId}:${b.date}`;
+        const daySegments = detailByDayKey.get(key) ?? [];
+        const starts = daySegments.map((s) => s.startAt).sort();
+        const ends = daySegments.map((s) => s.endAt).sort();
+        const status = daySegments[0]?.timesheetStatus ?? '';
+        return {
+          date: b.date,
+          employee: { id: employee.id, employeeNumber: employee.employeeNumber, firstName: employee.firstName, lastName: employee.lastName },
+          site: { id: site.id, name: site.name },
+          firstStartAt: starts[0] ?? null,
+          lastEndAt: ends[ends.length - 1] ?? null,
+          grossMinutes: b.grossMinutes,
+          paidBreakMinutes: b.paidBreakMinutes,
+          unpaidBreakMinutes: b.unpaidBreakMinutes,
+          workedMinutes: b.workedMinutes,
+          segmentCount: b.segmentCount,
+          timesheetStatus: status
+        };
+      })
+      .sort((a, b) => (a.date !== b.date ? (a.date < b.date ? -1 : 1) : a.employee.lastName.localeCompare(b.employee.lastName) || a.employee.firstName.localeCompare(b.employee.firstName) || a.site.name.localeCompare(b.site.name)));
+
     const summaryKey = (employeeId: string, siteId: string) => `${employeeId}:${siteId}`;
     const summaryMap = new Map<string, CustomReportSummaryRow>();
     for (const bucket of buckets) {
@@ -316,6 +367,7 @@ export async function getCustomTimeReport(params: CustomReportParams): Promise<C
       employees: [...employeeById.values()].map((e) => ({ id: e.id, employeeNumber: e.employeeNumber, firstName: e.firstName, lastName: e.lastName })),
       sites: [...siteById.values()].map((s) => ({ id: s.id, name: s.name })),
       detailRows,
+      dailyRows,
       summaryRows,
       employeeSubtotals: [...employeeSubtotalsMap.values()].sort((a, b) => a.employee.lastName.localeCompare(b.employee.lastName) || a.employee.firstName.localeCompare(b.employee.firstName)),
       siteSubtotals: [...siteSubtotalsMap.values()].sort((a, b) => a.site.name.localeCompare(b.site.name)),
@@ -332,6 +384,7 @@ function emptyReport(params: CustomReportParams): CustomTimeReport {
     employees: [],
     sites: [],
     detailRows: [],
+    dailyRows: [],
     summaryRows: [],
     employeeSubtotals: [],
     siteSubtotals: [],
