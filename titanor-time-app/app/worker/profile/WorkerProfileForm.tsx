@@ -28,7 +28,6 @@ export function WorkerProfileForm({ initialProfile }: WorkerProfileFormProps) {
 
   const [version, setVersion] = useState(initialProfile.version);
   const [dateOfBirth, setDateOfBirth] = useState(initialProfile.dateOfBirth ?? '');
-  const [specialty, setSpecialty] = useState(initialProfile.specialty ?? '');
   const [skills, setSkills] = useState(initialProfile.skills ?? '');
   const [contactEmail, setContactEmail] = useState(initialProfile.contactEmail ?? '');
   const [addressStreet, setAddressStreet] = useState(initialProfile.addressStreet ?? '');
@@ -96,7 +95,9 @@ export function WorkerProfileForm({ initialProfile }: WorkerProfileFormProps) {
         body: JSON.stringify({
           version,
           dateOfBirth: dateOfBirth === '' ? null : dateOfBirth,
-          specialty: specialty.trim() === '' ? null : specialty.trim(),
+          // T16 — the legacy free-text `specialty` field is no longer editable in the worker app
+          // (replaced by the multi-select "Профессии" block); a partial PATCH just omits it, so
+          // any admin-set legacy value is preserved.
           skills: skills.trim() === '' ? null : skills.trim(),
           contactEmail: contactEmail.trim() === '' ? null : contactEmail.trim(),
           addressStreet: addressStreet.trim() === '' ? null : addressStreet.trim(),
@@ -268,11 +269,6 @@ export function WorkerProfileForm({ initialProfile }: WorkerProfileFormProps) {
       </section>
 
       <form onSubmit={handleSave} className="worker-work-setup" aria-busy={saving}>
-        <div className="login-field">
-          <label htmlFor="profile-specialty">{t.profileSpecialtyLabel}</label>
-          <input id="profile-specialty" type="text" maxLength={120} placeholder={t.profileSpecialtyPlaceholder} value={specialty} onChange={(e) => setSpecialty(e.target.value)} disabled={saving} />
-          {fieldErrors.specialty ? <p className="field-error">{fieldErrors.specialty.join(', ')}</p> : null}
-        </div>
         <div className="login-field">
           <label htmlFor="profile-skills">{t.profileSkillsLabel}</label>
           <textarea id="profile-skills" maxLength={2000} placeholder={t.profileSkillsPlaceholder} value={skills} onChange={(e) => setSkills(e.target.value)} disabled={saving} />

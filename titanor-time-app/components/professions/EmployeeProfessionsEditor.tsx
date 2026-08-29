@@ -6,6 +6,8 @@ import { localeText } from '@/lib/i18n/locale';
 import type { EmployeeProfessionView, ProfessionCatalogGroup } from '@/lib/professions';
 
 const CSRF_HEADER_VALUE = 'titanor-time';
+// Sentinel value for the "type your own" entry at the bottom of the profession <select>.
+const OTHER_OPTION = '__other__';
 
 const CATEGORY_LABEL: Record<'SHIPBUILDING' | 'CONSTRUCTION', { en: string; ru: string }> = {
   SHIPBUILDING: { en: 'Shipbuilding', ru: 'Судостроение' },
@@ -149,34 +151,40 @@ export function EmployeeProfessionsEditor({
       {adding ? (
         <form onSubmit={handleAdd} aria-busy={busy}>
           <div className="login-field">
-            <label htmlFor="prof-mode">{localeText(locale, 'Add from', 'Добавить из')}</label>
-            <select id="prof-mode" value={mode} onChange={(e) => setMode(e.target.value as 'CATALOG' | 'OTHER')} disabled={busy}>
-              <option value="CATALOG">{localeText(locale, 'Catalog', 'Каталог')}</option>
-              <option value="OTHER">{localeText(locale, 'Other (custom)', 'Другое (своё)')}</option>
+            <label htmlFor="prof-catalog">{localeText(locale, 'Profession', 'Профессия')}</label>
+            <select
+              id="prof-catalog"
+              value={mode === 'OTHER' ? OTHER_OPTION : definitionId}
+              onChange={(e) => {
+                if (e.target.value === OTHER_OPTION) {
+                  setMode('OTHER');
+                  setDefinitionId('');
+                } else {
+                  setMode('CATALOG');
+                  setDefinitionId(e.target.value);
+                }
+              }}
+              disabled={busy}
+            >
+              <option value="">{localeText(locale, '— choose —', '— выберите —')}</option>
+              {catalog.map((group) => (
+                <optgroup key={group.category} label={ru ? CATEGORY_LABEL[group.category].ru : CATEGORY_LABEL[group.category].en}>
+                  {group.professions.map((prof) => (
+                    <option key={prof.id} value={prof.id}>
+                      {ru ? prof.nameRu : prof.nameEn}
+                    </option>
+                  ))}
+                </optgroup>
+              ))}
+              <option value={OTHER_OPTION}>{localeText(locale, '✎ Other — type your own', '✎ Другая — вписать свою')}</option>
             </select>
           </div>
 
-          {mode === 'CATALOG' ? (
-            <div className="login-field">
-              <label htmlFor="prof-catalog">{localeText(locale, 'Profession', 'Профессия')}</label>
-              <select id="prof-catalog" value={definitionId} onChange={(e) => setDefinitionId(e.target.value)} disabled={busy}>
-                <option value="">{localeText(locale, '— choose —', '— выберите —')}</option>
-                {catalog.map((group) => (
-                  <optgroup key={group.category} label={ru ? CATEGORY_LABEL[group.category].ru : CATEGORY_LABEL[group.category].en}>
-                    {group.professions.map((prof) => (
-                      <option key={prof.id} value={prof.id}>
-                        {ru ? prof.nameRu : prof.nameEn}
-                      </option>
-                    ))}
-                  </optgroup>
-                ))}
-              </select>
-            </div>
-          ) : (
+          {mode === 'OTHER' ? (
             <>
               <div className="login-field">
                 <label htmlFor="prof-custom-name">{localeText(locale, 'Profession name', 'Название профессии')}</label>
-                <input id="prof-custom-name" type="text" maxLength={120} value={customName} onChange={(e) => setCustomName(e.target.value)} disabled={busy} />
+                <input id="prof-custom-name" type="text" maxLength={120} autoFocus placeholder={localeText(locale, 'e.g. Rope access technician', 'например, Промышленный альпинист')} value={customName} onChange={(e) => setCustomName(e.target.value)} disabled={busy} />
               </div>
               <div className="login-field">
                 <label htmlFor="prof-custom-category">{localeText(locale, 'Category', 'Категория')}</label>
@@ -186,7 +194,7 @@ export function EmployeeProfessionsEditor({
                 </select>
               </div>
             </>
-          )}
+          ) : null}
 
           {error ? (
             <p className="login-error" role="alert">

@@ -67,7 +67,6 @@ export default async function WorkerProfilePage() {
         <ConnectivityBanner />
         <h1>{t.profileTitle}</h1>
         {account ? <AccountSettingsForm initialEmail={account.email} username={account.username} roles={account.roles} /> : null}
-        <WorkerProfileForm initialProfile={profile} />
         {canManageProfessions ? (
           <EmployeeProfessionsEditor
             employeeId={session.user.employeeId}
@@ -77,6 +76,7 @@ export default async function WorkerProfilePage() {
             catalog={professionCatalog}
           />
         ) : null}
+        <WorkerProfileForm initialProfile={profile} />
       </div>
     </main>
   );
