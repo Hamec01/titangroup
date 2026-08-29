@@ -276,14 +276,38 @@ export async function getCustomTimeReport(params: CustomReportParams): Promise<C
         s = { site: row.site, totals: emptyTotals() };
         siteSubtotalsMap.set(row.site.id, s);
       }
+      // Minutes: sum of already-rounded (employee, site) rows (§T8 rounding rules) — fine to add up.
       for (const totals of [e.totals, s.totals, grandTotal]) {
         totals.grossMinutes += row.grossMinutes;
         totals.paidBreakMinutes += row.paidBreakMinutes;
         totals.unpaidBreakMinutes += row.unpaidBreakMinutes;
         totals.workedMinutes += row.workedMinutes;
-        totals.workedDays += row.workedDays;
       }
+      // workedDays for the SITE subtotal = COUNT DISTINCT (employeeId, date) at this site; since
+      // each (employee, site) row already carries that employee's distinct-date count at this
+      // site, summing across employees is correct here.
+      s.totals.workedDays += row.workedDays;
     }
+
+    // T13.7 (docs/titanor-time/T13 §12) — workedDays for the EMPLOYEE subtotal is COUNT DISTINCT
+    // date ACROSS the selected sites (a worker on two sites the same day = one worked day), and
+    // the GRAND TOTAL is COUNT DISTINCT (employeeId, date). Summing the per-(employee, site) row
+    // counts overcounts both — compute them straight from the canonical buckets instead.
+    const employeeDateSets = new Map<string, Set<string>>();
+    const grandKeys = new Set<string>();
+    for (const bucket of buckets) {
+      let set = employeeDateSets.get(bucket.employeeId);
+      if (!set) {
+        set = new Set<string>();
+        employeeDateSets.set(bucket.employeeId, set);
+      }
+      set.add(bucket.date);
+      grandKeys.add(`${bucket.employeeId}|${bucket.date}`);
+    }
+    for (const [employeeId, entry] of employeeSubtotalsMap) {
+      entry.totals.workedDays = employeeDateSets.get(employeeId)?.size ?? 0;
+    }
+    grandTotal.workedDays = grandKeys.size;
 
     return {
       dateFrom: formatDate(params.dateFrom),
