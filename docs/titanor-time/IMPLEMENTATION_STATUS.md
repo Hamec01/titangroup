@@ -1,6 +1,36 @@
 # Titanor Time — Implementation Status
 
-Обновлено: 2026-08-29 Europe/Helsinki (T14 — GPS offline resilience)
+Обновлено: 2026-08-29 Europe/Helsinki (T15 — worker professions + notification center)
+
+**`[2026-08-29]` T15 — правки по списку владельца: профессии у работника, уведомления работника, фикс «Действие требует внимания».**
+- **T15.1 (`665d26b`)** — на экране работника залипало «Действие требует внимания» с
+  окончательно отклонённой сервером отметкой (`FAILED_TERMINAL` в outbox, у работника не было
+  способа убрать). Теперь у каждой строки кнопка **«Убрать»** + пояснение «сервер не принял,
+  отметьтесь заново». `dismissFailedEvent` удаляет только `FAILED_TERMINAL` (никогда
+  `PENDING`/`SENDING`); проекция «где я» это состояние не читает. `_test-offline-idb-invariants` 37/37.
+- **T15.2 (`569e5a5`)** — работник сам управляет своими профессиями с `/worker/profile`: тот же
+  редактор (каталог / «Другое»), без лимита, дубли блокируются. Новое право
+  `worker.profession.manage.own` → WORKER (миграция `20260829190000`);
+  `GET/POST /api/worker/professions` + `DELETE .../:id` (employeeId только из сессии;
+  `removeEmployeeProfession` сверяет владельца → чужой id = 404). Админ сохраняет полный контроль
+  (`worker.profession.manage`, не менялось). `EmployeeProfessionsEditor` получил props
+  `apiBase`/`ownProfile` и переиспользован. `_test-worker-professions` 17/17; регрессия
+  `_test-professions-api` 23/23, `-schema` 20/20, `-dossier` 9/9.
+- **T15.3 (`79909c8`)** — Worker Notification Center: 🔔 рядом с меню ☰, бейдж, сворачиваемая
+  панель со сбрасываемыми уведомлениями. Первый тип — `TIMESHEET_DEADLINE_APPROACHING`: у текущего
+  OPEN-периода табель ещё черновик (`DRAFT`/`RETURNED`) и до cutoff ≤ 3 дней (или уже прошёл).
+  Клиент считает «N дней до сдачи» / «просрочено — уйдёт автоматически» из `deadlineAt`.
+  Сбрасывается по аккаунту; при эскалации `INFO → WARNING` (cutoff прошёл) сбросы очищаются и
+  уведомление показывается снова один раз. Резолвится при отправке табеля / закрытии периода.
+  Модели `WorkerNotification`/`WorkerNotificationDismissal` + partial unique index
+  `ux_worker_notification_active_period` (миграция `20260829200000`, register §16).
+  `lib/worker-notifications.ts` — генерация ленивая на GET (без планировщика).
+  `GET /api/worker/notifications` + `POST .../:id/dismiss` (право `timesheet.read.own`).
+  `_test-worker-notifications` 15/15.
+- Все этапы: `tsc` + `next build` зелёные. Прод не тронут.
+- **Не сделано:** возврат табеля на доработку как отдельный тип уведомления (инфра готова, тип
+  добавляется без пересборки); деплой T14 + T15 на пилот (миграция против живой БД заблокирована
+  auto-gate — нужна команда владельца или permission rule).
 
 **`[2026-08-29]` T14 — GPS offline resilience (по заказу владельца: офлайн-отметки в корпусах судов на верфи Meyer Turku).**
 Проблема: работник офлайн жмёт «Приход» внутри стального корпуса — спутники закрыты, Wi-Fi/сети

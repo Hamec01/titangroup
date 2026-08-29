@@ -7,7 +7,7 @@ import type { AppLocale } from './locale';
 // those directly. Kept as a data module (not JSX) so the content itself stays easy to review/edit
 // without touching component code.
 //
-// Last brought current: 2026-08-29 (T13.1–T13.11, T14). Covers: grouped admin nav, the notification
+// Last brought current: 2026-08-29 (T13.1–T13.11, T14, T15). Covers: grouped admin nav, the notification
 // bell + review-queue badge, the worker dossier, the workforce matrix (professions + qualification
 // filters + PDF/CSV export), worker professions, the unified "Awaiting approval" screen, the three
 // ways to change a timesheet, marking sick-leave/vacation from review, the configurable GPS
@@ -193,7 +193,9 @@ export const GUIDE_CONTENT: Record<AppLocale, GuideContent> = {
       'В приложении одна главная кнопка «Приход» / «Уход» — при нажатии проверяется геолокация и показывается её точность. Приложение продолжает работать и без интернета — данные отправятся на сервер, как только связь появится.',
       'Если телефон не поймал GPS (внутри корпуса судна, в цеху, без интернета), после нажатия «Приход» появится сообщение «подождите ~15 секунд» и кнопка «Всё равно отметить». Отметка сохраняется в любом случае — приход и уход никогда не блокируются из-за GPS.',
       'Если смена длинная, приложение может ещё раз проверить местоположение в течение смены (когда работник его открывает) — эти точки видны администратору на карте работника. Отдельно закрывать и открывать смену для этого не нужно.',
-      'Работник видит список часов по дням за текущий период и в конце периода отправляет табель на проверку. Если табель не отправлен вовремя, система может отправить его автоматически — это настраивается в разделе «Правила учёта».'
+      'Работник видит список часов по дням за текущий период и в конце периода отправляет табель на проверку. Если табель не отправлен вовремя, система может отправить его автоматически — это настраивается в разделе «Правила учёта».',
+      'Рядом с меню есть колокольчик с уведомлениями. Главное — напоминание, сколько дней осталось сдать табель. Ненужное уведомление можно убрать.',
+      'На странице «Профиль» работник может сам указать свои профессии (специальности) — из списка или своим текстом.'
     ],
     tipsTitle: 'На что обратить внимание',
     tips: [
@@ -208,6 +210,14 @@ export const GUIDE_CONTENT: Record<AppLocale, GuideContent> = {
     changelogTitle: 'Что нового',
     changelogIntro: 'Коротко — что менялось в системе за последнее время. Самое свежее сверху.',
     changelog: [
+      {
+        date: 'Приложение работника, 29 августа 2026',
+        items: [
+          'Профессии — теперь и в приложении работника. Работник сам может добавить свои специальности на странице «Профиль» (из каталога или своим текстом, сколько нужно). Администратор по-прежнему может править профессии любого работника со своей стороны.',
+          'Уведомления у работника. Рядом с меню (☰) появился колокольчик. Первое уведомление — «сколько дней осталось сдать табель»: приходит за 3 дня до срока, а если срок прошёл — напоминает, что табель скоро уйдёт автоматически. Уведомление можно убрать (как в админке), но если оно стало срочным — покажется снова один раз.',
+          'Исправлено: под кнопкой «Приход» могло залипать «Действие требует внимания» по отметке, которую сервер не принял. Теперь рядом есть кнопка «Убрать», и коротко написано, что делать (отметиться заново).'
+        ]
+      },
       {
         date: 'GPS без сигнала, 29 августа 2026',
         items: [
@@ -394,7 +404,9 @@ export const GUIDE_CONTENT: Record<AppLocale, GuideContent> = {
       'The app has one main Check In / Check Out button — pressing it checks location and shows its accuracy. The app keeps working without internet too; data is sent to the server as soon as a connection is available.',
       'If the phone has no GPS fix (inside a ship hull, a covered hall, offline), tapping "Check in" shows a "please wait ~15 seconds" message and a "Check in anyway" button. The check-in is saved either way — GPS never blocks clocking in or out.',
       'On a long shift the app may check location again during the shift (when the worker opens it) — those points are visible to the administrator on the worker\'s map. Nothing needs to be clocked out and back in for this.',
-      'The worker sees a day-by-day list of hours for the current period and submits their timesheet at the end of the period. If it isn\'t submitted in time, the system can submit it automatically — configurable under Attendance policy.'
+      'The worker sees a day-by-day list of hours for the current period and submits their timesheet at the end of the period. If it isn\'t submitted in time, the system can submit it automatically — configurable under Attendance policy.',
+      'There is a notification bell next to the menu. The main notice is a reminder of how many days are left to submit the timesheet. An unwanted notice can be dismissed.',
+      'On the "Profile" page the worker can set their own professions (trade specialities) — from a list or as free text.'
     ],
     tipsTitle: 'Worth knowing',
     tips: [
@@ -409,6 +421,14 @@ export const GUIDE_CONTENT: Record<AppLocale, GuideContent> = {
     changelogTitle: 'What\'s new',
     changelogIntro: 'A short list of what has changed in the system recently. Newest first.',
     changelog: [
+      {
+        date: 'Worker app, 29 August 2026',
+        items: [
+          'Professions — now in the worker app too. A worker can add their own trade specialities on the "Profile" page (from the catalog or as free text, as many as needed). The administrator can still manage any worker\'s professions from their side.',
+          'Worker notifications. A bell appeared next to the menu (☰). The first notice is "days left to submit your timesheet": it shows 3 days before the deadline, and once the deadline passes it reminds you the timesheet will be submitted automatically. A notice can be dismissed (like in the admin), but if it becomes urgent it comes back once.',
+          'Fixed: an "Action needs attention" notice for a check-in the server did not accept could stick under the "Check in" button. It now has a "Dismiss" button and a short line on what to do (check in again).'
+        ]
+      },
       {
         date: 'GPS with no signal, 29 August 2026',
         items: [
