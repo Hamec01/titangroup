@@ -151,6 +151,8 @@ export function WorkerClockPanel({ initialClockState, assignments, workerName, t
   // T14 — the "finding your location" prompt: `null` when not waiting, otherwise the seconds left.
   const [gpsWaitSecondsLeft, setGpsWaitSecondsLeft] = useState<number | null>(null);
   const gpsWaitAbortRef = useRef<AbortController | null>(null);
+  // T17 — modal shown when a good GPS fix puts the worker outside the site geofence on Check In.
+  const [outsideZonePrompt, setOutsideZonePrompt] = useState<{ siteName: string; resolve: (proceed: boolean) => void } | null>(null);
   const [selectedAssignmentId, setSelectedAssignmentId] = useState<string | null>(() => {
     if (assignments.length === 0) return null;
     const primary = assignments.find((a) => a.isPrimary);
@@ -557,6 +559,28 @@ export function WorkerClockPanel({ initialClockState, assignments, workerName, t
     gpsWaitAbortRef.current?.abort();
   }
 
+  // T17 — the worker taps Check In and a good GPS fix puts them outside the site geofence. Check In
+  // is never blocked (the server opens the shift and files a review flag either way), but the
+  // worker gets a MODAL choice first — it cannot be swiped/tapped away, one of the two buttons must
+  // be pressed. `true` = go ahead and check in; `false` = don't (they'll walk closer first).
+  function confirmOutsideZone(siteName: string, snapshot: GpsSnapshot, siteId: string): Promise<boolean> {
+    if (!snapshot.location || snapshot.approximate) {
+      return Promise.resolve(true); // no reliable fix -> nothing to warn about, just proceed
+    }
+    const geofence = cachedGeofenceFor(siteId);
+    if (!geofence || evaluateZoneProximity(snapshot.location, geofence) !== 'OUTSIDE') {
+      return Promise.resolve(true);
+    }
+    return new Promise<boolean>((resolve) => {
+      setOutsideZonePrompt({ siteName, resolve });
+    });
+  }
+
+  function answerOutsideZone(proceed: boolean) {
+    outsideZonePrompt?.resolve(proceed);
+    setOutsideZonePrompt(null);
+  }
+
   async function handleCheckIn() {
     if (busyRef.current || !deviceReady || !selectedAssignmentId) {
       return;
@@ -573,6 +597,10 @@ export function WorkerClockPanel({ initialClockState, assignments, workerName, t
       const gpsSnapshot: GpsSnapshot = await runGpsCapture();
       setGpsStatus(resolveGpsUiState(gpsSnapshot));
       setLocating(false);
+      if (!(await confirmOutsideZone(assignment.siteName, gpsSnapshot, assignment.siteId))) {
+        setStatusMessage(null);
+        return;
+      }
       const gpsFields = outboxGpsFields(gpsSnapshot);
       await enqueueCheckIn({
         siteId: assignment.siteId,
@@ -660,6 +688,10 @@ export function WorkerClockPanel({ initialClockState, assignments, workerName, t
       const gpsSnapshot: GpsSnapshot = await runGpsCapture();
       setGpsStatus(resolveGpsUiState(gpsSnapshot));
       setLocating(false);
+      if (!(await confirmOutsideZone(target.siteName, gpsSnapshot, target.siteId))) {
+        setStatusMessage(null);
+        return;
+      }
       const gpsFields = outboxGpsFields(gpsSnapshot);
       await enqueueSwitchSite({
         oldAssumedSiteId: projected.siteId,
@@ -1071,6 +1103,26 @@ export function WorkerClockPanel({ initialClockState, assignments, workerName, t
             <button type="button" className="wk-clock-cancel-button" onClick={() => setStatusSheetOpen(false)}>
               {t.close}
             </button>
+          </div>
+        </>
+      )}
+
+      {outsideZonePrompt && (
+        <>
+          {/* T17 — deliberately NOT dismissible: no backdrop onClick, no Escape, no ✕. One of the
+              two buttons must be pressed. */}
+          <div className="wk-overlay-backdrop" aria-hidden="true" />
+          <div className="wk-overlay-sheet" role="alertdialog" aria-modal="true" aria-label={t.outsideZoneTitle}>
+            <p className="wk-overlay-title">{t.outsideZoneTitle}</p>
+            <p className="wk-return-reason-text">{t.outsideZoneBody(outsideZonePrompt.siteName)}</p>
+            <div className="wk-switch-actions">
+              <button type="button" className="wk-action-button" onClick={() => answerOutsideZone(true)}>
+                {t.outsideZoneProceed}
+              </button>
+              <button type="button" className="wk-clock-cancel-button" onClick={() => answerOutsideZone(false)}>
+                {t.outsideZoneCancel}
+              </button>
+            </div>
           </div>
         </>
       )}

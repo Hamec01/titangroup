@@ -14,6 +14,7 @@ function pick(locale: AppLocale, en: string, ru: string): string {
 
 const EXCEPTION_TYPE_LABELS: Record<ExceptionTypeFilter, { en: string; ru: string }> = {
   GPS_NOT_VERIFIED: { en: 'GPS not verified', ru: 'GPS не подтверждён' },
+  OUTSIDE_GEOFENCE_CHECKIN: { en: 'Checked in outside geofence', ru: 'Приход зафиксирован вне геозоны' },
   OUTSIDE_GEOFENCE_CHECKOUT: { en: 'Checked out outside geofence', ru: 'Уход зафиксирован вне геозоны' },
   SITE_MISMATCH_CHECKOUT: { en: 'Site mismatch at checkout', ru: 'Несовпадение объекта при уходе' },
   DOUBLE_CHECK_IN: { en: 'Double check-in', ru: 'Повторный приход' },

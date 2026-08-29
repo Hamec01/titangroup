@@ -74,6 +74,11 @@ export interface WorkerStrings {
   gpsWaitBody: (seconds: number) => string;
   gpsWaitProceed: string;
   savedApproxLocation: string;
+  // T17 — modal shown when the GPS fix is outside the site geofence on Check In (not dismissible)
+  outsideZoneTitle: string;
+  outsideZoneBody: (siteName: string) => string;
+  outsideZoneProceed: string;
+  outsideZoneCancel: string;
   statusZone: string;
   statusZoneChecking: string;
   statusZoneInside: string;
@@ -351,6 +356,11 @@ export const WORKER_STRINGS: Record<AppLocale, WorkerStrings> = {
     gpsWaitBody: (seconds: number) => `Please wait about ${seconds} more second${seconds === 1 ? '' : 's'} — the phone hasn't got a GPS fix yet. Indoors or in a hull this can take a while.`,
     gpsWaitProceed: 'Clock in anyway',
     savedApproxLocation: 'Saved with an approximate location — the phone had no fresh GPS fix.',
+    outsideZoneTitle: 'You are outside the work zone',
+    outsideZoneBody: (siteName: string) =>
+      `Your GPS location is outside the work zone of “${siteName}”. Move closer and try again, or check in anyway — the check-in is saved and your manager sees a note about the zone.`,
+    outsideZoneProceed: 'Check in anyway',
+    outsideZoneCancel: 'Not yet',
     statusZone: 'Zone',
     statusZoneChecking: 'Checking…',
     statusZoneInside: 'In work zone',
@@ -615,6 +625,11 @@ export const WORKER_STRINGS: Record<AppLocale, WorkerStrings> = {
     gpsWaitBody: (seconds: number) => `Прошу подождать ещё около ${seconds} сек — телефон пока не получил координаты GPS. В помещении или внутри корпуса это может занять время.`,
     gpsWaitProceed: 'Всё равно отметить',
     savedApproxLocation: 'Сохранено с приблизительным местоположением — телефон не получил свежих координат GPS.',
+    outsideZoneTitle: 'Вы за пределами рабочей зоны',
+    outsideZoneBody: (siteName: string) =>
+      `Ваше местоположение по GPS вне рабочей зоны объекта «${siteName}». Подойдите ближе и попробуйте снова — или отметьте приход всё равно: отметка сохранится, а руководитель увидит пометку о зоне.`,
+    outsideZoneProceed: 'Отметить приход',
+    outsideZoneCancel: 'Ещё не отмечать',
     statusZone: 'Зона',
     statusZoneChecking: 'Проверяем…',
     statusZoneInside: 'В рабочей зоне',

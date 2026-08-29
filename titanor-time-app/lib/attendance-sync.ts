@@ -440,16 +440,18 @@ class DeviceRevokedSignal extends Error {}
 // ---------------------------------------------------------------------------------------------
 // Preflight (§9.11 runPreflight) — decidable WITHOUT mutation and WITHOUT knowing
 // EmployeeOpenShift state. For CHECK_IN: site/workArea existence + GPS/geofence evaluation against
-// the CURRENT geofence of event.siteId (never the client's cachedGeofenceVersionId) — the single
-// business-terminal rule (VERIFIED_OUTSIDE) lives here, exactly mirroring online §9.1 step 2. For
-// CHECK_OUT: only assumedSiteId existence — Check Out is never geofence-terminal (§5.4/§9.2), its
-// real GPS evaluation happens later, against the AUTHORITATIVE site from EmployeeOpenShift, inside
-// insertAndApplyCheckOut — exactly mirroring online checkOutCore's own ordering.
+// the CURRENT geofence of event.siteId (never the client's cachedGeofenceVersionId). T17 — a
+// Check In is NO LONGER geofence-terminal: a VERIFIED_OUTSIDE reading opens the shift like any
+// other and creates an OUTSIDE_GEOFENCE_CHECKIN review flag (see insertAndApplyCheckIn), matching
+// how Check Out already behaves. Only a structurally invalid event / unknown site is terminal.
+// For CHECK_OUT: only assumedSiteId existence — Check Out is never geofence-terminal (§5.4/§9.2),
+// its real GPS evaluation happens later, against the AUTHORITATIVE site from EmployeeOpenShift,
+// inside insertAndApplyCheckOut — exactly mirroring online checkOutCore's own ordering.
 // ---------------------------------------------------------------------------------------------
 
 interface PreflightResult {
   terminal: boolean;
-  code?: 'VALIDATION_ERROR' | 'OUTSIDE_GEOFENCE';
+  code?: 'VALIDATION_ERROR';
   checkInGps?: { gpsResult: GpsEvaluation; geofence: ClockGeofence | null };
 }
 
@@ -470,9 +472,6 @@ async function runPreflight(tx: Prisma.TransactionClient, event: SyncEventInput)
     }
     const geofence = await loadCurrentGeofence(tx, event.siteId);
     const gpsResult = evaluateGpsReading(event.gps, geofence, await loadMaxGpsAccuracyMeters(tx));
-    if (gpsResult.gpsVerification === 'VERIFIED_OUTSIDE') {
-      return { terminal: true, code: 'OUTSIDE_GEOFENCE' };
-    }
     return { terminal: false, checkInGps: { gpsResult, geofence } };
   }
 
@@ -673,6 +672,16 @@ async function insertAndApplyCheckIn(
       });
       exceptionType = exceptionType ?? 'STALE_ASSIGNMENT';
     }
+  }
+
+  // T17 — a good GPS fix that lands outside the site geofence: the shift still opens (above), this
+  // is only a review flag. Mirrors OUTSIDE_GEOFENCE_CHECKOUT. Applies to a normal Check In and to a
+  // DOUBLE_CHECK_IN alike.
+  if (gpsResult.gpsVerification === 'VERIFIED_OUTSIDE') {
+    await tx.attendanceException.create({
+      data: { type: 'OUTSIDE_GEOFENCE_CHECKIN', employeeId, timesheetId, payrollPeriodId, occurredAt: timeResult.effectiveAt, siteId: event.siteId, clockEventId: event.clientEventId, status: 'OPEN', detail: exceptionDetailForGps(gpsResult, geofence) }
+    });
+    exceptionType = exceptionType ?? 'OUTSIDE_GEOFENCE_CHECKIN';
   }
 
   if (timeResult.exception === 'EXCESSIVE_CLOCK_SKEW') {

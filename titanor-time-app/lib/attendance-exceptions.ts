@@ -87,6 +87,8 @@ function summaryForException(type: string, detail: Record<string, unknown> | nul
   switch (type) {
     case 'GPS_NOT_VERIFIED':
       return 'GPS location could not be verified';
+    case 'OUTSIDE_GEOFENCE_CHECKIN':
+      return typeof detail?.distanceMeters === 'number' ? `Checked in ${detail.distanceMeters}m outside the site geofence` : 'Checked in outside the site geofence';
     case 'OUTSIDE_GEOFENCE_CHECKOUT':
       return typeof detail?.distanceMeters === 'number' ? `Checked out ${detail.distanceMeters}m outside the site geofence` : 'Checked out outside the site geofence';
     case 'SITE_MISMATCH_CHECKOUT':
@@ -155,6 +157,7 @@ export function siteScopeWhereClauses(siteIds: string[]): Prisma.AttendanceExcep
 export type ExceptionStatusFilter = 'OPEN' | 'RESOLVED' | 'DISMISSED';
 export type ExceptionTypeFilter =
   | 'GPS_NOT_VERIFIED'
+  | 'OUTSIDE_GEOFENCE_CHECKIN'
   | 'OUTSIDE_GEOFENCE_CHECKOUT'
   | 'SITE_MISMATCH_CHECKOUT'
   | 'DOUBLE_CHECK_IN'
@@ -172,6 +175,7 @@ export type ExceptionTypeFilter =
 
 export const EXCEPTION_TYPE_VALUES: ExceptionTypeFilter[] = [
   'GPS_NOT_VERIFIED',
+  'OUTSIDE_GEOFENCE_CHECKIN',
   'OUTSIDE_GEOFENCE_CHECKOUT',
   'SITE_MISMATCH_CHECKOUT',
   'DOUBLE_CHECK_IN',

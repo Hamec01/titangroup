@@ -185,6 +185,11 @@ enum TimesheetReturnReason {
 enum AttendanceExceptionType {
   GPS_NOT_VERIFIED
   OUTSIDE_GEOFENCE_CHECKOUT
+  // T17 (2026-08-29) — a Check In whose GPS fix is a good reading but lands outside the site
+  // geofence. Was a hard rejection (the check-in never registered, the clock never started, and
+  // the worker only learned of it after the offline sync). It is now accepted like any other
+  // review flag: the shift opens, hours run, this exception goes to the admin queue.
+  OUTSIDE_GEOFENCE_CHECKIN
   SITE_MISMATCH_CHECKOUT
   DOUBLE_CHECK_IN
   CHECKOUT_WITHOUT_OPEN_SHIFT

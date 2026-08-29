@@ -1,6 +1,32 @@
 # Titanor Time — Implementation Status
 
-Обновлено: 2026-08-29 Europe/Helsinki (T16 — чистка UI приложения работника)
+Обновлено: 2026-08-29 Europe/Helsinki (T17 — Check In никогда не блокируется по геозоне)
+
+**`[2026-08-29]` T17 — Check In больше не отклоняется из-за GPS/геозоны (по заказу владельца: приход «сбрасывался» и ошибка приходила поздно/не приходила).**
+Раньше: приход с хорошим GPS-fix, но вне геозоны (`VERIFIED_OUTSIDE`) → **REJECTED терминально**:
+ни `ClockEvent`, ни открытой смены, часы не шли; т.к. всё идёт через offline-outbox, работник
+узнавал о провале только после синка (или до T15/T16 — вообще не узнавал).
+- **Сервер** (`attendance-sync.ts` `runPreflight` + `insertAndApplyCheckIn`; `attendance-clock.ts`
+  `checkInCore` — офлайн и онлайн пути): `VERIFIED_OUTSIDE` на приходе больше НЕ терminal — смена
+  открывается как обычно, создаётся флаг `OUTSIDE_GEOFENCE_CHECKIN` (OPEN, `detail` с
+  distance/accuracy/threshold), ровно как `OUTSIDE_GEOFENCE_CHECKOUT` на уходе. `processingState`
+  = ACCEPTED (флаг — сигнал на разбор, не блок). Материализацию часов флаг не блокирует
+  (блокирует только `OVERLAPPING_SHIFT`). `OutsideGeofenceSignal` больше не бросается —
+  catch в `performCheckIn`/`performSwitchSite` недостижимы (оставлены для exhaustive switch).
+  Новый enum `AttendanceExceptionType.OUTSIDE_GEOFENCE_CHECKIN` (migration `20260829210000`,
+  `ALTER TYPE ADD VALUE`). Добавлен в матрицу разрешения (ACKNOWLEDGE_AS_VALID + DISMISS),
+  `EXCEPTION_TYPE_VALUES`, лейблы RU/EN.
+- **Клиент** (`WorkerClockPanel.tsx`): при «Приход»/«Смена», если свежий (не приблизительный)
+  GPS-fix по кэшированной геозоне = OUTSIDE → **модалка без возможности смахнуть** (нет клика по
+  фону, нет Escape, нет ✕): «Вы за пределами рабочей зоны «X»…» + две кнопки
+  «Отметить приход» / «Ещё не отмечать». «Отметить» → приход уходит (сервер примет + флаг).
+  «Ещё не отмечать» → приход не делается (работник подойдёт ближе). Часы никогда не блокируются
+  на сервере — модалка это только предупреждение с обязательным выбором.
+- `_test-checkin-never-blocked` 12/12 (outside CHECK_IN → ACCEPTED + флаг + открытая смена;
+  CHECK_OUT → смена закрылась, не заблокирована; switch-site с outside новым объектом → обе
+  половины ACCEPTED). Регрессия `_test-gps-approximate-sync` 21/21, `_test-gps-exception-detail`
+  23/23, `_test-exception-list-query` 12/12, `_test-bulk-ack-gps` 13/13, `_test-pilot-pair-orphan`
+  (на чистой БД). `tsc` + `next build` зелёные.
 
 **`[2026-08-29]` T16 — правки по пилоту (владелец на телефоне): убрать дубли форм и «Действие требует внимания» с главного экрана, добавить pull-to-refresh.**
 - **T16.1 (`4c1a06c`)** — на «Профиль» было два поля: старое свободное «Специальность» и новый

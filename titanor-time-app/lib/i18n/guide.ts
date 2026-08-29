@@ -7,7 +7,7 @@ import type { AppLocale } from './locale';
 // those directly. Kept as a data module (not JSX) so the content itself stays easy to review/edit
 // without touching component code.
 //
-// Last brought current: 2026-08-29 (T13.1–T13.11, T14, T15). Covers: grouped admin nav, the notification
+// Last brought current: 2026-08-29 (T13.1–T13.11, T14–T17). Covers: grouped admin nav, the notification
 // bell + review-queue badge, the worker dossier, the workforce matrix (professions + qualification
 // filters + PDF/CSV export), worker professions, the unified "Awaiting approval" screen, the three
 // ways to change a timesheet, marking sick-leave/vacation from review, the configurable GPS
@@ -213,9 +213,10 @@ export const GUIDE_CONTENT: Record<AppLocale, GuideContent> = {
       {
         date: 'Приложение работника, 29 августа 2026',
         items: [
-          'Профессии — теперь и в приложении работника. Работник сам может добавить свои специальности на странице «Профиль» (из каталога или своим текстом, сколько нужно). Администратор по-прежнему может править профессии любого работника со своей стороны.',
-          'Уведомления у работника. Рядом с меню (☰) появился колокольчик. Первое уведомление — «сколько дней осталось сдать табель»: приходит за 3 дня до срока, а если срок прошёл — напоминает, что табель скоро уйдёт автоматически. Уведомление можно убрать (как в админке), но если оно стало срочным — покажется снова один раз.',
-          'Исправлено: под кнопкой «Приход» могло залипать «Действие требует внимания» по отметке, которую сервер не принял. Теперь рядом есть кнопка «Убрать», и коротко написано, что делать (отметиться заново).'
+          'Приход больше нельзя «сломать». Раньше, если GPS показывал работника вне рабочей зоны, приход просто отклонялся — часы не шли, а ошибка приходила с опозданием. Теперь приход всегда фиксируется и часы идут; если работник вне зоны — на экране появляется окно с выбором «Отметить приход» или «Ещё не отмечать» (окно нельзя смахнуть, нужно выбрать). Руководитель видит пометку «приход вне геозоны» для проверки.',
+          'Профессии — теперь и в приложении работника. Работник сам может добавить свои специальности на странице «Профиль» (из каталога или своим текстом, сколько нужно). В списке профессий последний пункт — «✎ Другая — вписать свою». Старое поле «Специальность» убрано (администратор по-прежнему правит профессии со своей стороны).',
+          'Уведомления у работника. Рядом с меню (☰) появился колокольчик. В нём: «сколько дней осталось сдать табель» (за 3 дня до срока, потом — «уйдёт автоматически»), и каждая отметка, которую сервер не принял — с причиной и кнопкой «Убрать». С главного экрана «Действие требует внимания» убрано полностью.',
+          'Обновление приложения «потянуть вниз». На любой странице приложения потяните её вниз от самого верха и подержите пару секунд — приложение обновится до последней версии, не нужно закрывать и открывать заново.'
         ]
       },
       {
@@ -424,9 +425,10 @@ export const GUIDE_CONTENT: Record<AppLocale, GuideContent> = {
       {
         date: 'Worker app, 29 August 2026',
         items: [
-          'Professions — now in the worker app too. A worker can add their own trade specialities on the "Profile" page (from the catalog or as free text, as many as needed). The administrator can still manage any worker\'s professions from their side.',
-          'Worker notifications. A bell appeared next to the menu (☰). The first notice is "days left to submit your timesheet": it shows 3 days before the deadline, and once the deadline passes it reminds you the timesheet will be submitted automatically. A notice can be dismissed (like in the admin), but if it becomes urgent it comes back once.',
-          'Fixed: an "Action needs attention" notice for a check-in the server did not accept could stick under the "Check in" button. It now has a "Dismiss" button and a short line on what to do (check in again).'
+          'Check In can no longer be "broken". Before, if GPS put the worker outside the work zone, the check-in was simply rejected — the clock didn\'t start and the error arrived late. Now the check-in always registers and the hours run; if the worker is outside the zone a dialog appears with "Check in" or "Not yet" (it cannot be swiped away, one must be chosen). The manager sees a "checked in outside geofence" note for review.',
+          'Professions — now in the worker app too. A worker adds their own trade specialities on the "Profile" page (from the catalog or as free text, as many as needed). The last item in the profession list is "✎ Other — type your own". The old "Specialty" field was removed (the admin still manages professions from their side).',
+          'Worker notifications. A bell next to the menu (☰): "days left to submit your timesheet" (3 days before the deadline, then "will be submitted automatically"), and every check-in the server did not accept — with its reason and a "Dismiss" button. The "Action needs attention" block is gone from the main screen entirely.',
+          'Pull-to-refresh. On any page of the app, drag it down from the very top and hold for a couple of seconds — the app updates to the latest version without closing and reopening it.'
         ]
       },
       {

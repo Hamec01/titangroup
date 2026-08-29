@@ -786,9 +786,11 @@ async function checkInCore(tx: Prisma.TransactionClient, employeeId: string, act
   const geofence = await loadCurrentGeofence(tx, input.siteId);
   const gpsResult = evaluateGpsReading(input.gps, geofence, await loadMaxGpsAccuracyMeters(tx));
 
-  if (gpsResult.gpsVerification === 'VERIFIED_OUTSIDE') {
-    throw new OutsideGeofenceSignal();
-  }
+  // T17 — a Check In is no longer geofence-terminal. A good fix outside the geofence
+  // (VERIFIED_OUTSIDE) opens the shift like any other and files an OUTSIDE_GEOFENCE_CHECKIN review
+  // flag below, exactly like Check Out already does. `OutsideGeofenceSignal` is no longer thrown
+  // from here (its catch sites in performCheckIn / performSwitchSite are now unreachable — kept so
+  // the switches stay exhaustive).
 
   const openShift = await tx.employeeOpenShift.findUnique({ where: { employeeId }, select: { employeeId: true } });
   const serverReceivedAt = new Date();
@@ -829,6 +831,10 @@ async function checkInCore(tx: Prisma.TransactionClient, employeeId: string, act
     if (gpsResult.gpsVerification === 'NOT_VERIFIED') {
       await tx.attendanceException.create({
         data: { type: 'GPS_NOT_VERIFIED', employeeId, timesheetId, payrollPeriodId, occurredAt: timeResult.effectiveAt, siteId: input.siteId, clockEventId: input.clientEventId, status: 'OPEN', detail: exceptionDetailForGps(gpsResult, geofence) }
+      });
+    } else if (gpsResult.gpsVerification === 'VERIFIED_OUTSIDE') {
+      await tx.attendanceException.create({
+        data: { type: 'OUTSIDE_GEOFENCE_CHECKIN', employeeId, timesheetId, payrollPeriodId, occurredAt: timeResult.effectiveAt, siteId: input.siteId, clockEventId: input.clientEventId, status: 'OPEN', detail: exceptionDetailForGps(gpsResult, geofence) }
       });
     }
     if (timeResult.exception === 'EXCESSIVE_CLOCK_SKEW') {
@@ -884,6 +890,11 @@ async function checkInCore(tx: Prisma.TransactionClient, employeeId: string, act
   if (gpsResult.gpsVerification === 'NOT_VERIFIED') {
     await tx.attendanceException.create({
       data: { type: 'GPS_NOT_VERIFIED', employeeId, timesheetId, payrollPeriodId, occurredAt: timeResult.effectiveAt, siteId: input.siteId, clockEventId: input.clientEventId, status: 'OPEN', detail: exceptionDetailForGps(gpsResult, geofence) }
+    });
+  } else if (gpsResult.gpsVerification === 'VERIFIED_OUTSIDE') {
+    // T17 — the shift is already open above; a wrong-location fix is only a review flag now.
+    await tx.attendanceException.create({
+      data: { type: 'OUTSIDE_GEOFENCE_CHECKIN', employeeId, timesheetId, payrollPeriodId, occurredAt: timeResult.effectiveAt, siteId: input.siteId, clockEventId: input.clientEventId, status: 'OPEN', detail: exceptionDetailForGps(gpsResult, geofence) }
     });
   }
   if (!sourceAssignmentId) {
