@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from 'next';
 import type { ReactNode } from 'react';
 import { ServiceWorkerRegistration } from '@/components/worker-pwa/ServiceWorkerRegistration';
+import { PullToRefresh } from '@/components/worker-pwa/PullToRefresh';
 import { WorkerAppNavigation } from '@/components/worker-pwa/WorkerAppNavigation';
 import { resolveServerSession } from '@/lib/server-session';
 import { resolveAppLocale } from '@/lib/i18n/server';
@@ -42,6 +43,7 @@ export default async function WorkerLayout({ children }: { children: ReactNode }
       <ServiceWorkerRegistration />
       {workerSession ? (
         <div className="wk-app-shell">
+          <PullToRefresh />
           <WorkerAppNavigation username={workerSession.user.username} />
           <div className="wk-app-content">{children}</div>
         </div>

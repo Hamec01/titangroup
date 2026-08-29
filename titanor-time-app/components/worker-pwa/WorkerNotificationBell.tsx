@@ -3,20 +3,30 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAppLocale } from '@/components/i18n/AppLocaleProvider';
-import { localeText } from '@/lib/i18n/locale';
+import { WORKER_STRINGS, describeWorkerErrorCode } from '@/lib/i18n/worker';
+import { getAllOutboxEvents } from '@/lib/offline-outbox/db';
+import { dismissFailedEvent } from '@/lib/offline-outbox/outbox';
+import { subscribeOutboxChanges } from '@/lib/offline-outbox/broadcast';
 
 const CSRF_HEADER_VALUE = 'titanor-time';
 const POLL_INTERVAL_MS = 5 * 60 * 1000;
 const DAY_MS = 86_400_000;
 
-interface WorkerNotificationItem {
+interface ServerNotification {
   id: string;
   type: 'TIMESHEET_DEADLINE_APPROACHING';
   severity: 'INFO' | 'WARNING';
   deadlineAt: string | null;
   periodStartDate: string | null;
   periodEndDate: string | null;
-  createdAt: string;
+}
+
+// A permanently-failed Check In/Out lives only in this bell now (T15/T16 moved it off the clock
+// screen). It comes from the device's IndexedDB outbox, not the server.
+interface FailedActionItem {
+  clientEventId: string;
+  operationType: 'CHECK_IN' | 'CHECK_OUT';
+  errorCode: string | null;
 }
 
 function ruDays(n: number): string {
@@ -33,9 +43,7 @@ function formatWeek(start: string | null, end: string | null, ru: boolean): stri
   return `${fmt(start)} – ${fmt(end)}`;
 }
 
-// The headline line for one notice — computed client-side from `deadlineAt` so "N days left"
-// stays live between polls.
-function deadlineLine(item: WorkerNotificationItem, ru: boolean, now: number): string {
+function deadlineLine(item: ServerNotification, ru: boolean, now: number): string {
   const week = formatWeek(item.periodStartDate, item.periodEndDate, ru);
   if (!item.deadlineAt) {
     return ru ? `Сдайте табель за неделю ${week}` : `Submit your timesheet for ${week}`;
@@ -50,44 +58,63 @@ function deadlineLine(item: WorkerNotificationItem, ru: boolean, now: number): s
   if (days <= 1) {
     return ru ? `Последний день сдать табель за неделю ${week}` : `Last day to submit the timesheet for ${week}`;
   }
-  return ru
-    ? `${ruDays(days)} до сдачи табеля за неделю ${week}`
-    : `${days} days left to submit the timesheet for ${week}`;
+  return ru ? `${ruDays(days)} до сдачи табеля за неделю ${week}` : `${days} days left to submit the timesheet for ${week}`;
 }
 
 export function WorkerNotificationBell() {
   const locale = useAppLocale();
   const ru = locale === 'RU';
+  const t = WORKER_STRINGS[locale];
   const router = useRouter();
-  const [items, setItems] = useState<WorkerNotificationItem[]>([]);
+  const [serverItems, setServerItems] = useState<ServerNotification[]>([]);
+  const [failedItems, setFailedItems] = useState<FailedActionItem[]>([]);
   const [open, setOpen] = useState(false);
   const [nowTick, setNowTick] = useState(() => Date.now());
   const panelRef = useRef<HTMLDivElement>(null);
   const bellRef = useRef<HTMLButtonElement>(null);
 
-  const load = useCallback(async () => {
+  const loadServer = useCallback(async () => {
     try {
       const res = await fetch('/api/worker/notifications', { credentials: 'same-origin' });
       if (!res.ok) return;
       const body = await res.json();
-      setItems(Array.isArray(body.items) ? body.items : []);
+      setServerItems(Array.isArray(body.items) ? body.items : []);
     } catch {
-      // Offline / server hiccup — the bell is a non-blocking convenience.
+      // offline / hiccup — non-blocking
+    }
+  }, []);
+
+  const loadFailed = useCallback(async () => {
+    try {
+      const all = await getAllOutboxEvents();
+      setFailedItems(
+        all
+          .filter((r) => r.state === 'FAILED_TERMINAL')
+          .map((r) => ({ clientEventId: r.clientEventId, operationType: r.operationType, errorCode: r.lastErrorCode }))
+      );
+    } catch {
+      // IndexedDB unavailable — just no failed items
     }
   }, []);
 
   useEffect(() => {
-    void load();
-    const onFocus = () => void load();
+    void loadServer();
+    void loadFailed();
+    const onFocus = () => {
+      void loadServer();
+      void loadFailed();
+    };
     window.addEventListener('focus', onFocus);
-    const poll = window.setInterval(() => void load(), POLL_INTERVAL_MS);
+    const poll = window.setInterval(() => void loadServer(), POLL_INTERVAL_MS);
     const tick = window.setInterval(() => setNowTick(Date.now()), 60_000);
+    const unsub = subscribeOutboxChanges(() => void loadFailed());
     return () => {
       window.removeEventListener('focus', onFocus);
       window.clearInterval(poll);
       window.clearInterval(tick);
+      unsub();
     };
-  }, [load]);
+  }, [loadServer, loadFailed]);
 
   useEffect(() => {
     if (!open) return;
@@ -107,16 +134,21 @@ export function WorkerNotificationBell() {
     };
   }, [open]);
 
-  async function dismiss(id: string): Promise<void> {
-    setItems((prev) => prev.filter((n) => n.id !== id));
+  async function dismissServer(id: string): Promise<void> {
+    setServerItems((prev) => prev.filter((n) => n.id !== id));
     try {
-      await fetch(`/api/worker/notifications/${id}/dismiss`, {
-        method: 'POST',
-        credentials: 'same-origin',
-        headers: { 'X-Requested-With': CSRF_HEADER_VALUE }
-      });
+      await fetch(`/api/worker/notifications/${id}/dismiss`, { method: 'POST', credentials: 'same-origin', headers: { 'X-Requested-With': CSRF_HEADER_VALUE } });
     } catch {
-      // best-effort; a failed dismiss just means it comes back on the next poll
+      // best-effort
+    }
+  }
+
+  async function dismissFailed(clientEventId: string): Promise<void> {
+    setFailedItems((prev) => prev.filter((f) => f.clientEventId !== clientEventId));
+    try {
+      await dismissFailedEvent(clientEventId);
+    } catch {
+      // best-effort
     }
   }
 
@@ -125,8 +157,8 @@ export function WorkerNotificationBell() {
     router.push('/worker/periods');
   }
 
-  const count = items.length;
-  const hasWarning = items.some((n) => n.severity === 'WARNING');
+  const count = serverItems.length + failedItems.length;
+  const hasWarning = failedItems.length > 0 || serverItems.some((n) => n.severity === 'WARNING');
 
   return (
     <div className="wk-notif-wrap">
@@ -162,14 +194,26 @@ export function WorkerNotificationBell() {
             <p className="wk-notif-empty">{ru ? 'Пока ничего нового.' : 'Nothing new.'}</p>
           ) : (
             <ul className="wk-notif-list">
-              {items.map((item) => (
-                <li key={item.id} className={`wk-notif-item ${item.severity === 'WARNING' ? 'warn' : ''}`}>
+              {failedItems.map((item) => (
+                <li key={`f-${item.clientEventId}`} className="wk-notif-item warn">
+                  <p className="wk-notif-item-scope">{item.operationType === 'CHECK_IN' ? t.checkIn : t.checkOut}</p>
+                  <p className="wk-notif-item-text">{describeWorkerErrorCode(item.errorCode ?? undefined, t)}</p>
+                  <p className="wk-notif-item-sub">{t.dismissFailedActionHint}</p>
+                  <div className="wk-notif-item-actions">
+                    <button type="button" className="wk-notif-item-hide" onClick={() => void dismissFailed(item.clientEventId)}>
+                      {ru ? 'Убрать' : 'Dismiss'}
+                    </button>
+                  </div>
+                </li>
+              ))}
+              {serverItems.map((item) => (
+                <li key={`s-${item.id}`} className={`wk-notif-item ${item.severity === 'WARNING' ? 'warn' : ''}`}>
                   <p className="wk-notif-item-text">{deadlineLine(item, ru, nowTick)}</p>
                   <div className="wk-notif-item-actions">
                     <button type="button" className="wk-notif-item-link" onClick={openTimesheet}>
                       {ru ? 'Открыть табель' : 'Open timesheet'} →
                     </button>
-                    <button type="button" className="wk-notif-item-hide" onClick={() => void dismiss(item.id)}>
+                    <button type="button" className="wk-notif-item-hide" onClick={() => void dismissServer(item.id)}>
                       {ru ? 'Убрать' : 'Dismiss'}
                     </button>
                   </div>

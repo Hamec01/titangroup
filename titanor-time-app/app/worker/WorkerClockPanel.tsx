@@ -18,7 +18,7 @@ import {
   type GeolocationPermissionState
 } from '@/lib/worker-gps';
 import { ensureDeviceBootstrapped, retryBootstrap, type BootstrapOutcome } from '@/lib/offline-outbox/device';
-import { enqueueCheckIn, enqueueCheckOut, enqueueSwitchSite, dismissFailedEvent, EnqueueError } from '@/lib/offline-outbox/outbox';
+import { enqueueCheckIn, enqueueCheckOut, enqueueSwitchSite, EnqueueError } from '@/lib/offline-outbox/outbox';
 import type { OutboxGps, OutboxApproximateGps, OutboxGpsUnavailableReason } from '@/lib/offline-outbox/db';
 import { runSyncOnce, tryRefreshClockState, type ClockStateWire, type SyncRunOutcome } from '@/lib/offline-outbox/sync-runner';
 import { enqueuePresenceSample, lastPresenceCaptureMs, shouldCapturePresence } from '@/lib/offline-outbox/presence';
@@ -30,7 +30,7 @@ import { warmOfflineShellCache } from '@/lib/offline-outbox/pwa-warm-cache';
 import { WorkerLink } from '@/components/worker-pwa/WorkerLink';
 import { formatWorkedDuration } from '@/lib/reporting/report-format';
 import { useAppLocale } from '@/components/i18n/AppLocaleProvider';
-import { WORKER_STRINGS, type WorkerStrings } from '@/lib/i18n/worker';
+import { WORKER_STRINGS, describeWorkerErrorCode, type WorkerStrings } from '@/lib/i18n/worker';
 
 // docs/titanor-time/T7A_1_ATTENDANCE_CLOCK_DESIGN.md §6/§7/§9.11 (T7A.7B — offline outbox client).
 // Every Check In/Out/Switch Site action now writes to the IndexedDB outbox FIRST (one atomic
@@ -62,36 +62,7 @@ function assignmentKey(siteId: string, workAreaId: string | null): string {
   return `${siteId}::${workAreaId ?? ''}`;
 }
 
-function describeErrorCode(code: string | undefined, t: WorkerStrings): string {
-  switch (code) {
-    case 'OUTSIDE_GEOFENCE':
-      return t.errOutsideGeofence;
-    case 'VALIDATION_ERROR':
-      return t.errValidation;
-    case 'CLIENT_EVENT_ID_REUSED':
-    case 'DEVICE_SEQUENCE_REUSED':
-      return t.errDeviceRecordConflict;
-    case 'SWITCH_SITE_GROUP_FAILED':
-    case 'SWITCH_SITE_GROUP_INVALID':
-      return t.errSwitchSiteFailed;
-    case 'RATE_LIMITED':
-      return t.errRateLimited;
-    case 'NOT_AUTHENTICATED':
-      return t.errSessionExpired;
-    case 'FORBIDDEN':
-    case 'NO_EMPLOYEE_PROFILE':
-      return t.errNoPermission;
-    case 'DEVICE_NOT_OWNED':
-      return t.errDeviceNotOwned;
-    case 'DEVICE_REVOKED':
-      return t.errDeviceRevoked;
-    case 'SYNC_PROTOCOL_ERROR':
-    case 'NETWORK_ERROR':
-      return t.errCouldNotReachServer;
-    default:
-      return t.errActionNeedsAttention;
-  }
-}
+const describeErrorCode = describeWorkerErrorCode;
 
 function formatDuration(ms: number): string {
   const totalSeconds = Math.floor(ms / 1000);
@@ -214,9 +185,10 @@ export function WorkerClockPanel({ initialClockState, assignments, workerName, t
           setOffsetMs(new Date(outcome.clockState.serverNow).getTime() - Date.now());
           setNowTick(Date.now());
         }
-        if (outcome.failedCount > 0) {
-          setStatusMessage({ kind: 'error', text: t.syncOneOrMoreNeedAttention });
-        } else if (outcome.ackedCount > 0) {
+        // T15 — a permanently-failed action is surfaced only in the notification bell now (its own
+        // "needs attention" list), never as a message on the clock screen. `router.refresh()` still
+        // runs on a successful ack so the rest of the page reflects the new server state.
+        if (outcome.failedCount === 0 && outcome.ackedCount > 0) {
           setStatusMessage({ kind: 'info', text: t.synced });
           router.refresh();
         }
@@ -424,7 +396,6 @@ export function WorkerClockPanel({ initialClockState, assignments, workerName, t
 
   // Live shift duration tick while (projected) clocked in.
   const pendingSorted = useMemo(() => outboxRecords.filter((r) => r.state === 'PENDING' || r.state === 'SENDING').sort((a, b) => a.deviceSequence - b.deviceSequence), [outboxRecords]);
-  const failedRecords = useMemo(() => outboxRecords.filter((r) => r.state === 'FAILED_TERMINAL'), [outboxRecords]);
 
   const cachedAssignments: CachedAssignment[] = bootstrap && bootstrap.kind === 'READY' ? (bootstrap.deviceState.contextAssignments ?? []) : [];
   const nameLookups = useMemo(() => {
@@ -713,11 +684,6 @@ export function WorkerClockPanel({ initialClockState, assignments, workerName, t
     }
   }
 
-  async function handleDismissFailed(clientEventId: string): Promise<void> {
-    await dismissFailedEvent(clientEventId);
-    await refreshOutboxSnapshot();
-  }
-
   function handleEnqueueError(err: unknown) {
     if (err instanceof EnqueueError) {
       setStatusMessage({ kind: 'error', text: err.code === 'SEQUENCE_OVERFLOW' ? err.message : t.offlineSetupNotReady, code: err.code });
@@ -775,13 +741,7 @@ export function WorkerClockPanel({ initialClockState, assignments, workerName, t
   const activeSiteName = projected.state === 'CLOCKED_IN' ? projected.siteName : selectedAssignment?.siteName ?? null;
   const activeWorkAreaName = projected.state === 'CLOCKED_IN' ? projected.workAreaName : selectedAssignment?.workAreaName ?? null;
 
-  const syncSummary = syncing
-    ? t.syncing
-    : failedRecords.length > 0
-      ? t.statusNeedsAttention
-      : pendingCount > 0
-        ? t.statusWaitingCount(pendingCount)
-        : t.statusSynced;
+  const syncSummary = syncing ? t.syncing : pendingCount > 0 ? t.statusWaitingCount(pendingCount) : t.statusSynced;
 
   const gpsSummary = gpsStatus === 'CHECKING'
     ? t.statusGpsChecking
@@ -880,7 +840,7 @@ export function WorkerClockPanel({ initialClockState, assignments, workerName, t
             <strong>{isOnline ? t.online : t.offline}</strong>
           </p>
           <p>
-            <span className={`wk-status-dot ${failedRecords.length > 0 ? 'warn' : pendingCount > 0 ? 'amber' : 'online'}`} aria-hidden="true" />
+            <span className={`wk-status-dot ${pendingCount > 0 ? 'amber' : 'online'}`} aria-hidden="true" />
             <span>{t.statusSync}</span>
             <strong>{syncSummary}</strong>
           </p>
@@ -984,23 +944,8 @@ export function WorkerClockPanel({ initialClockState, assignments, workerName, t
         </p>
       )}
 
-      {failedRecords.length > 0 && (
-        <div className="wk-return-notice" aria-live="polite">
-          <p className="wk-return-notice-title">{t.actionNeedsAttention}</p>
-          <ul className="wk-return-reason-list">
-            {failedRecords.map((r) => (
-              <li key={r.clientEventId} className="wk-return-reason-item">
-                <span className="wk-return-reason-scope">{r.operationType === 'CHECK_IN' ? t.checkIn : t.checkOut}</span>
-                <span className="wk-return-reason-text">{describeErrorCode(r.lastErrorCode ?? undefined, t)}</span>
-                <button type="button" className="wk-inline-secondary" onClick={() => void handleDismissFailed(r.clientEventId)}>
-                  {t.dismissFailedAction}
-                </button>
-              </li>
-            ))}
-          </ul>
-          <p className="wk-return-reason-text">{t.dismissFailedActionHint}</p>
-        </div>
-      )}
+      {/* T15 — a permanently-failed check-in/out used to render a red banner here. It now lives
+          only in the notification bell (WorkerNotificationBell), never on the clock screen. */}
 
       <section className="wk-time-preview" aria-labelledby="wk-time-preview-title">
         <div className="wk-time-preview-heading">

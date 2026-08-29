@@ -821,3 +821,36 @@ export function dayTypeLabel(dayType: string, locale: AppLocale): string {
   const key = dayType.toUpperCase();
   return WORKER_STRINGS[locale].dayTypeLabels[key] ?? dayType.replace('_', ' ').toLowerCase();
 }
+
+/** Worker-facing sentence for a sync/enqueue error code — shared by the clock panel and the
+ *  notification bell (T15 moved the "needs attention" list into the bell). */
+export function describeWorkerErrorCode(code: string | undefined, t: WorkerStrings): string {
+  switch (code) {
+    case 'OUTSIDE_GEOFENCE':
+      return t.errOutsideGeofence;
+    case 'VALIDATION_ERROR':
+      return t.errValidation;
+    case 'CLIENT_EVENT_ID_REUSED':
+    case 'DEVICE_SEQUENCE_REUSED':
+      return t.errDeviceRecordConflict;
+    case 'SWITCH_SITE_GROUP_FAILED':
+    case 'SWITCH_SITE_GROUP_INVALID':
+      return t.errSwitchSiteFailed;
+    case 'RATE_LIMITED':
+      return t.errRateLimited;
+    case 'NOT_AUTHENTICATED':
+      return t.errSessionExpired;
+    case 'FORBIDDEN':
+    case 'NO_EMPLOYEE_PROFILE':
+      return t.errNoPermission;
+    case 'DEVICE_NOT_OWNED':
+      return t.errDeviceNotOwned;
+    case 'DEVICE_REVOKED':
+      return t.errDeviceRevoked;
+    case 'SYNC_PROTOCOL_ERROR':
+    case 'NETWORK_ERROR':
+      return t.errCouldNotReachServer;
+    default:
+      return t.errActionNeedsAttention;
+  }
+}
