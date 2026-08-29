@@ -10,6 +10,7 @@ import {
   evaluateGpsReading,
   loadMaxGpsAccuracyMeters,
   validateGpsPayload,
+  validateApproximateGpsPayload,
   loadCurrentGeofence,
   exceptionDetailForGps,
   resolveTimesheetForInstant,
@@ -18,6 +19,7 @@ import {
   isValidUuid,
   parseIsoInstant,
   type ClockGpsReading,
+  type ApproximateGpsReading,
   type ClockGeofence,
   type GpsEvaluation,
   type EffectiveTimeResult
@@ -136,6 +138,10 @@ export interface SyncEventInput {
   clientCapturedAt: Date;
   cachedGeofenceVersionId: string | null;
   gps: ClockGpsReading;
+  /** T14 — a stale/cached coordinate the device attached when it had no fresh fix. Never verified;
+   *  stored as an approximate ClockEventLocation. Not part of the offline payload hash (provenance
+   *  metadata — a retry / pre-send back-fill must stay hash-stable). */
+  gpsApproximate: ApproximateGpsReading | null;
 }
 
 type EventFieldValidation =
@@ -248,6 +254,11 @@ function validateSyncEventBody(raw: unknown): EventFieldValidation {
     Object.assign(fieldErrors, gps.fieldErrors);
   }
 
+  const gpsApproximate = validateApproximateGpsPayload(r.gpsApproximate, 'gpsApproximate');
+  if (!gpsApproximate.ok) {
+    Object.assign(fieldErrors, gpsApproximate.fieldErrors);
+  }
+
   if (Object.keys(fieldErrors).length > 0) {
     // Business-field failure — still FIFO-placeable (all four structural fields above are valid).
     // Placeholder values are never read for a real decision: runPreflight's fieldsValid check
@@ -265,14 +276,15 @@ function validateSyncEventBody(raw: unknown): EventFieldValidation {
         workAreaId,
         clientCapturedAt: clientCapturedAt ?? new Date(0),
         cachedGeofenceVersionId,
-        gps: gps.ok ? gps.value : INVALID_EVENT_GPS
+        gps: gps.ok ? gps.value : INVALID_EVENT_GPS,
+        gpsApproximate: null
       }
     };
   }
 
   return {
     ok: true,
-    value: { clientEventId, deviceSequence, groupId, operationType: operationType!, fieldsValid: true, siteId: siteId!, assumedSiteId, workAreaId, clientCapturedAt: clientCapturedAt!, cachedGeofenceVersionId, gps: gps.ok ? gps.value : INVALID_EVENT_GPS }
+    value: { clientEventId, deviceSequence, groupId, operationType: operationType!, fieldsValid: true, siteId: siteId!, assumedSiteId, workAreaId, clientCapturedAt: clientCapturedAt!, cachedGeofenceVersionId, gps: gps.ok ? gps.value : INVALID_EVENT_GPS, gpsApproximate: gpsApproximate.ok ? gpsApproximate.value : null }
   };
 }
 
@@ -501,6 +513,67 @@ async function tryInsertClockEvent(tx: Prisma.TransactionClient, data: Prisma.Cl
   return result.count === 1;
 }
 
+// ---------------------------------------------------------------------------------------------
+// T14 (2026-08-29) — GPS offline resilience.
+// ---------------------------------------------------------------------------------------------
+
+const SYSTEM_GPS_OFTEN_UNAVAILABLE_NOTE =
+  'Автоматически принято: объект отмечен как место, где часто нет сигнала GPS. Отметка сохранена без координат.';
+
+/** A fresh in-gate fix is stored verbatim (unchanged behaviour). Otherwise, if the device attached
+ * an APPROXIMATE point (its last-good / OS-cached fix), it is stored as an approximate
+ * ClockEventLocation — `evaluateGpsReading` still returned `location: null`, so the event stays
+ * NOT_VERIFIED; this point only ever renders as a dashed "approximate" marker on the admin map. */
+async function writeEventLocation(tx: Prisma.TransactionClient, clockEventId: string, gpsResult: GpsEvaluation, approximate: ApproximateGpsReading | null): Promise<void> {
+  if (gpsResult.location) {
+    await tx.clockEventLocation.create({ data: { clockEventId, latitude: gpsResult.location.latitude, longitude: gpsResult.location.longitude } });
+    return;
+  }
+  if (approximate) {
+    await tx.clockEventLocation.create({
+      data: {
+        clockEventId,
+        latitude: approximate.latitude,
+        longitude: approximate.longitude,
+        isApproximate: true,
+        fixAgeSeconds: approximate.fixAgeSeconds,
+        capturedAfterEventSeconds: approximate.capturedAfterEventSeconds
+      }
+    });
+  }
+}
+
+/** Creates a GPS_NOT_VERIFIED exception. When the device got NO coordinate at all (a plain
+ * TIMEOUT / POSITION_UNAVAILABLE — never LOW_ACCURACY, never a real geofence miss) at a site the
+ * admin flagged `gpsOftenUnavailable`, the exception is created already resolved
+ * (ACKNOWLEDGE_AS_VALID, system actor) instead of joining the review queue. */
+async function createGpsNotVerifiedException(
+  tx: Prisma.TransactionClient,
+  data: Prisma.AttendanceExceptionUncheckedCreateInput,
+  gpsResult: GpsEvaluation,
+  siteId: string,
+  requestId: string
+): Promise<void> {
+  const noCoordinate = gpsResult.location === null && (gpsResult.gpsUnavailableReason === 'TIMEOUT' || gpsResult.gpsUnavailableReason === 'POSITION_UNAVAILABLE');
+  const site = noCoordinate ? await tx.workSite.findUnique({ where: { id: siteId }, select: { gpsOftenUnavailable: true } }) : null;
+  if (site?.gpsOftenUnavailable) {
+    const created = await tx.attendanceException.create({
+      data: { ...data, status: 'RESOLVED', resolvedAt: new Date(), resolvedByUserId: null, resolutionNote: SYSTEM_GPS_OFTEN_UNAVAILABLE_NOTE }
+    });
+    await createAuditEvent(tx, {
+      actorUserId: null,
+      eventType: 'ATTENDANCE_EXCEPTION_ACKNOWLEDGED_AS_VALID',
+      entityType: 'ATTENDANCE_EXCEPTION',
+      entityId: created.id,
+      requestId,
+      beforeValue: null,
+      afterValue: { status: 'RESOLVED', type: 'GPS_NOT_VERIFIED', resolutionAction: 'ACKNOWLEDGE_AS_VALID', auto: 'GPS_OFTEN_UNAVAILABLE_SITE' }
+    });
+    return;
+  }
+  await tx.attendanceException.create({ data });
+}
+
 interface CheckInEffectResult {
   processingState: 'ACCEPTED' | 'NEEDS_REVIEW';
   exceptionType?: string;
@@ -560,9 +633,7 @@ async function insertAndApplyCheckIn(
     return { inserted: false, payloadHash, hashInput };
   }
 
-  if (gpsResult.location) {
-    await tx.clockEventLocation.create({ data: { clockEventId: event.clientEventId, latitude: gpsResult.location.latitude, longitude: gpsResult.location.longitude } });
-  }
+  await writeEventLocation(tx, event.clientEventId, gpsResult, event.gpsApproximate);
 
   let exceptionType: string | undefined;
 
@@ -572,9 +643,13 @@ async function insertAndApplyCheckIn(
     });
     exceptionType = 'DOUBLE_CHECK_IN';
     if (gpsResult.gpsVerification === 'NOT_VERIFIED') {
-      await tx.attendanceException.create({
-        data: { type: 'GPS_NOT_VERIFIED', employeeId, timesheetId, payrollPeriodId, occurredAt: timeResult.effectiveAt, siteId: event.siteId, clockEventId: event.clientEventId, status: 'OPEN', detail: exceptionDetailForGps(gpsResult, geofence) }
-      });
+      await createGpsNotVerifiedException(
+        tx,
+        { type: 'GPS_NOT_VERIFIED', employeeId, timesheetId, payrollPeriodId, occurredAt: timeResult.effectiveAt, siteId: event.siteId, clockEventId: event.clientEventId, detail: exceptionDetailForGps(gpsResult, geofence) },
+        gpsResult,
+        event.siteId,
+        requestId
+      );
     }
   } else {
     // sourceAssignmentId was already resolved above, before the ClockEvent insert — reused here
@@ -583,9 +658,13 @@ async function insertAndApplyCheckIn(
       data: { employeeId, openedByClockEventId: event.clientEventId, siteId: event.siteId, workAreaId: event.workAreaId, sourceAssignmentId, openedAt: timeResult.effectiveAt }
     });
     if (gpsResult.gpsVerification === 'NOT_VERIFIED') {
-      await tx.attendanceException.create({
-        data: { type: 'GPS_NOT_VERIFIED', employeeId, timesheetId, payrollPeriodId, occurredAt: timeResult.effectiveAt, siteId: event.siteId, clockEventId: event.clientEventId, status: 'OPEN', detail: exceptionDetailForGps(gpsResult, geofence) }
-      });
+      await createGpsNotVerifiedException(
+        tx,
+        { type: 'GPS_NOT_VERIFIED', employeeId, timesheetId, payrollPeriodId, occurredAt: timeResult.effectiveAt, siteId: event.siteId, clockEventId: event.clientEventId, detail: exceptionDetailForGps(gpsResult, geofence) },
+        gpsResult,
+        event.siteId,
+        requestId
+      );
       exceptionType = 'GPS_NOT_VERIFIED';
     }
     if (!sourceAssignmentId) {
@@ -680,9 +759,7 @@ async function insertAndApplyCheckOut(
     if (!inserted) {
       return { inserted: false, payloadHash, hashInput };
     }
-    if (gpsResult.location) {
-      await tx.clockEventLocation.create({ data: { clockEventId: event.clientEventId, latitude: gpsResult.location.latitude, longitude: gpsResult.location.longitude } });
-    }
+    await writeEventLocation(tx, event.clientEventId, gpsResult, event.gpsApproximate);
     await tx.attendanceException.create({
       data: { type: 'CHECKOUT_WITHOUT_OPEN_SHIFT', employeeId, timesheetId, payrollPeriodId, occurredAt: timeResult.effectiveAt, siteId: event.assumedSiteId!, clockEventId: event.clientEventId, status: 'OPEN' }
     });
@@ -696,9 +773,13 @@ async function insertAndApplyCheckOut(
         data: { type: 'OUTSIDE_GEOFENCE_CHECKOUT', employeeId, timesheetId, payrollPeriodId, occurredAt: timeResult.effectiveAt, siteId: event.assumedSiteId!, clockEventId: event.clientEventId, status: 'OPEN', detail: exceptionDetailForGps(gpsResult, geofence) }
       });
     } else if (gpsResult.gpsVerification === 'NOT_VERIFIED') {
-      await tx.attendanceException.create({
-        data: { type: 'GPS_NOT_VERIFIED', employeeId, timesheetId, payrollPeriodId, occurredAt: timeResult.effectiveAt, siteId: event.assumedSiteId!, clockEventId: event.clientEventId, status: 'OPEN', detail: exceptionDetailForGps(gpsResult, geofence) }
-      });
+      await createGpsNotVerifiedException(
+        tx,
+        { type: 'GPS_NOT_VERIFIED', employeeId, timesheetId, payrollPeriodId, occurredAt: timeResult.effectiveAt, siteId: event.assumedSiteId!, clockEventId: event.clientEventId, detail: exceptionDetailForGps(gpsResult, geofence) },
+        gpsResult,
+        event.assumedSiteId!,
+        requestId
+      );
     }
     if (timeResult.exception === 'EXCESSIVE_CLOCK_SKEW') {
       await tx.attendanceException.create({
@@ -772,9 +853,7 @@ async function insertAndApplyCheckOut(
   if (!inserted) {
     return { inserted: false, payloadHash, hashInput };
   }
-  if (gpsResult.location) {
-    await tx.clockEventLocation.create({ data: { clockEventId: event.clientEventId, latitude: gpsResult.location.latitude, longitude: gpsResult.location.longitude } });
-  }
+  await writeEventLocation(tx, event.clientEventId, gpsResult, event.gpsApproximate);
 
   const clockShift = await tx.clockShift.create({
     data: {
@@ -814,9 +893,13 @@ async function insertAndApplyCheckOut(
     });
     exceptionType = exceptionType ?? 'OUTSIDE_GEOFENCE_CHECKOUT';
   } else if (gpsResult.gpsVerification === 'NOT_VERIFIED') {
-    await tx.attendanceException.create({
-      data: { type: 'GPS_NOT_VERIFIED', employeeId, timesheetId, payrollPeriodId, occurredAt: effectiveAt, siteId: authoritativeSiteId, clockEventId: event.clientEventId, clockShiftId: clockShift.id, status: 'OPEN', detail: exceptionDetailForGps(gpsResult, geofence) }
-    });
+    await createGpsNotVerifiedException(
+      tx,
+      { type: 'GPS_NOT_VERIFIED', employeeId, timesheetId, payrollPeriodId, occurredAt: effectiveAt, siteId: authoritativeSiteId, clockEventId: event.clientEventId, clockShiftId: clockShift.id, detail: exceptionDetailForGps(gpsResult, geofence) },
+      gpsResult,
+      authoritativeSiteId,
+      requestId
+    );
     exceptionType = exceptionType ?? 'GPS_NOT_VERIFIED';
   }
   let chronologyExceptionId: string | null = null;

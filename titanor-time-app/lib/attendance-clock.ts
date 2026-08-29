@@ -271,6 +271,75 @@ export function validateGpsPayload(rawLocation: unknown, rawReason: unknown, loc
 }
 
 // ---------------------------------------------------------------------------------------------
+// T14 (2026-08-29) — an APPROXIMATE coordinate accompanying an OFFLINE_SYNC event. The device
+// could not get a fresh fix (indoors / ship hull / offline) and instead attaches the last good
+// fix it still had, or an OS-cached position. It rides in its own `gpsApproximate` field, NEVER
+// as `gps` — so `evaluateGpsReading` still sees `location: null` and the event stays NOT_VERIFIED;
+// this point is only recorded as an approximate ClockEventLocation for the admin map. Same
+// coordinate bounds/precision as validateGpsPayload; plus one non-negative age (never both), which
+// mirrors the DB CHECK ck_clock_event_location_approx_shape.
+// ---------------------------------------------------------------------------------------------
+
+export interface ApproximateGpsReading {
+  latitude: number;
+  longitude: number;
+  accuracyMeters: number;
+  /** the fix was this many seconds OLD at capture (device last-good fix); null = OS-cached, age unknown */
+  fixAgeSeconds: number | null;
+  /** the fix locked this many seconds AFTER the event (background back-fill) */
+  capturedAfterEventSeconds: number | null;
+}
+
+function isNonNegativeIntOrNull(v: unknown): v is number | null {
+  return v === null || v === undefined || (typeof v === 'number' && Number.isInteger(v) && v >= 0);
+}
+
+/** `null`/`undefined` -> `{ ok: true, value: null }` (the ordinary "no approximate fix" case). */
+export function validateApproximateGpsPayload(raw: unknown, field: string): ValidationResult<ApproximateGpsReading | null> {
+  if (raw === null || raw === undefined) {
+    return { ok: true, value: null };
+  }
+  if (typeof raw !== 'object' || Array.isArray(raw)) {
+    return { ok: false, fieldErrors: { [field]: ['must be an object or null'] } };
+  }
+  const fieldErrors: Record<string, string[]> = {};
+  const { latitude, longitude, accuracyMeters, fixAgeSeconds, capturedAfterEventSeconds } = raw as Record<string, unknown>;
+
+  if (typeof latitude !== 'number' || !Number.isFinite(latitude) || latitude < LATITUDE_MIN || latitude > LATITUDE_MAX || !roundTripDecimal(latitude, COORD_SCALE_FACTOR)) {
+    fieldErrors[`${field}.latitude`] = [`required, ${LATITUDE_MIN}..${LATITUDE_MAX}, at most ${COORD_DECIMAL_SCALE} decimals`];
+  }
+  if (typeof longitude !== 'number' || !Number.isFinite(longitude) || longitude < LONGITUDE_MIN || longitude > LONGITUDE_MAX || !roundTripDecimal(longitude, COORD_SCALE_FACTOR)) {
+    fieldErrors[`${field}.longitude`] = [`required, ${LONGITUDE_MIN}..${LONGITUDE_MAX}, at most ${COORD_DECIMAL_SCALE} decimals`];
+  }
+  if (typeof accuracyMeters !== 'number' || !Number.isFinite(accuracyMeters) || accuracyMeters < 0 || accuracyMeters > ACCURACY_MAX || !roundTripDecimal(accuracyMeters, ACCURACY_SCALE_FACTOR)) {
+    fieldErrors[`${field}.accuracyMeters`] = [`required, 0..${ACCURACY_MAX}, at most ${ACCURACY_DECIMAL_SCALE} decimal`];
+  }
+  if (!isNonNegativeIntOrNull(fixAgeSeconds)) {
+    fieldErrors[`${field}.fixAgeSeconds`] = ['must be a non-negative integer or null'];
+  }
+  if (!isNonNegativeIntOrNull(capturedAfterEventSeconds)) {
+    fieldErrors[`${field}.capturedAfterEventSeconds`] = ['must be a non-negative integer or null'];
+  }
+  if (typeof fixAgeSeconds === 'number' && typeof capturedAfterEventSeconds === 'number') {
+    fieldErrors[field] = ['fixAgeSeconds and capturedAfterEventSeconds are mutually exclusive'];
+  }
+
+  if (Object.keys(fieldErrors).length > 0) {
+    return { ok: false, fieldErrors };
+  }
+  return {
+    ok: true,
+    value: {
+      latitude: latitude as number,
+      longitude: longitude as number,
+      accuracyMeters: accuracyMeters as number,
+      fixAgeSeconds: typeof fixAgeSeconds === 'number' ? fixAgeSeconds : null,
+      capturedAfterEventSeconds: typeof capturedAfterEventSeconds === 'number' ? capturedAfterEventSeconds : null
+    }
+  };
+}
+
+// ---------------------------------------------------------------------------------------------
 // Body validators.
 // ---------------------------------------------------------------------------------------------
 
