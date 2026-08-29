@@ -4,8 +4,10 @@
 - **Дата:** 2026-08-29. Первый проверенный backup + restore-test.
 - **Скрипты:** `ops/titanor-time/backup-titanor-time.sh`, `ops/titanor-time/restore-test-titanor-time.sh`.
 - **Юниты systemd:** `ops/titanor-time/systemd/`.
-- **Вердикт задачи:** **PASS** для локального backup/restore; **точка владельца** — подтвердить
-  квоту Contabo-бакета `250gb` до включения постоянного ежедневного таймера (см. §6).
+- **Вердикт задачи:** **PASS**. Квота Contabo подтверждена владельцем 2026-08-30 (бакет
+  `Object Storage US-central 3629`, 250 GB куплено, 3.03 MB занято, region US-central). Блокер
+  B02 закрыт. Открытый вопрос GDPR (US-регион для PII/GPS-бэкапов) — решение владельца до R14,
+  механически не блокирует (см. `RELEASE_BASELINE_2026-08-29_RU.md` §6).
 
 Правила: скрипты **не печатают** секреты, `DATABASE_URL`, токены, GPS-координаты и содержимое
 строк. Backup — только пилота (production backup — отдельный шаг R12/R14). Существующие backups
@@ -109,12 +111,10 @@ bash ops/titanor-time/restore-test-titanor-time.sh /home/deploy/backups/titanor-
 Все одноразовые контейнеры/сети/volumes удалены. Production: образ `daa2edbb`, `StartedAt`
 `2026-08-21T19:40:56Z`, `RestartCount 0` — **не изменялись**.
 
-## 6. Включение ежедневного таймера — требуется root (владелец) + подтверждение storage
+## 6. Включение ежедневного таймера — требуется root (владелец)
 
-Агент не имеет passwordless-sudo; юниты нужно установить владельцу. **До установки** подтвердить
-квоту Contabo-бакета `250gb` (см. `RELEASE_BASELINE_2026-08-29_RU.md` §6). Если квота недостаточна
-или неизвестна — таймер пока запускать только с локальным `TT_BACKUP_ROOT` (без `TT_MIRROR_ROOT`),
-локальный backup от Contabo не зависит.
+Агент не имеет passwordless-sudo; юниты устанавливает владелец. Квота Contabo подтверждена
+(250 GB / занято 3 MB), можно сразу с `TT_MIRROR_ROOT`.
 
 ```bash
 # 1. config (НЕ содержит секретов — только имена/пути)

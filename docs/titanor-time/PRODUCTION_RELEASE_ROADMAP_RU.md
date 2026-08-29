@@ -107,7 +107,7 @@ Production cutover разрешается только после R12 и отд�
 | ID | Блокер | Почему нельзя игнорировать | Закрывается |
 |---|---|---|---|
 | B01 | Нет доказанной автоматической backup-схемы на правильном storage | Нельзя безопасно заменить production-БД | R01 |
-| B02 | `/mnt/250gb` выглядит как S3/FUSE mount объёмом около 4 GB, а не подтверждённые 250 GB | Нельзя полагаться на неподтверждённое хранилище | R01 |
+| ~~B02~~ | `/mnt/250gb` — s3fs на Contabo Object Storage. **ЗАКРЫТ 2026-08-30**: панель Contabo подтвердила бакет `US-central 3629`, 250 GB куплено, 3 MB занято. Off-box backup+restore проверены. Открытый вопрос GDPR (US-регион) — решение владельца до R14, не блокер | ✅ R01 |
 | B03 | Профили/recovery не соответствуют решению «без SMTP» | Пользователь может лишиться доступа; текущий email flow не завершён | R03 |
 | B04 | Нет change-password и полноценного session management | Незавершённая безопасность учётной записи | R03 |
 | B05 | Есть 8 high dependency findings | Release содержит известные уязвимые цепочки | R04–R05 |
@@ -128,9 +128,9 @@ Production cutover разрешается только после R12 и отд�
 
 | Этап | Результат | Зависит от | Production impact | Статус |
 |---|---|---|---|---|
-| R00 | Release baseline и freeze | — | Нет | Частично подтверждён, оформить |
-| R01 | Backup/storage foundation | R00 | Нет | Следующий |
-| R02 | Надёжные test/CI gates | R00 | Нет | Не начат |
+| R00 | Release baseline и freeze | — | Нет | **DONE `96799ba`** — `RELEASE_BASELINE_2026-08-29_RU.md` |
+| R01 | Backup/storage foundation | R00 | Нет | **DONE `96799ba` — PASS** (квота Contabo 250 GB подтверждена 2026-08-30; таймер устанавливает владелец, см. `BACKUP_RESTORE_RUNBOOK_RU.md` §6) |
+| R02 | Надёжные test/CI gates | R00 | Нет | **Следующий** |
 | R03 | Profiles и recovery без SMTP | R01, R02 | Нет | Не начат |
 | R04 | Security upgrade публичного сайта | R02 | Нет | Не начат |
 | R05 | Security upgrade Titanor Time | R02 | Нет | Не начат |
