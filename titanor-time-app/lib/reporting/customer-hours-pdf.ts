@@ -70,7 +70,8 @@ export async function buildCustomerHoursPdf(report: CustomTimeReport, meta: Cust
     ly += 11;
   }
   doc.fillColor('#000000');
-  y = Math.max(y + 84, ly + 6);
+  // Logo is ~48px tall; leave room for it and for any business-id / address lines, no more.
+  y = Math.max(y + 52, ly + 6);
 
   doc.font('DejaVu-Bold').fontSize(13).text('WORKING TIME REPORT', x, y);
   y += 17;
@@ -118,14 +119,29 @@ export async function buildCustomerHoursPdf(report: CustomTimeReport, meta: Cust
     doc.font('DejaVu').fontSize(8);
     return yy + HEADER_ROW_HEIGHT;
   };
+  // `height` set to a single line forces pdfkit to clip (with ellipsis) instead of ever wrapping
+  // a too-long value into the next row.
+  const CELL_H = 11;
   const drawRow = (cells: string[], yy: number, bold = false): number => {
     doc.font(bold ? 'DejaVu-Bold' : 'DejaVu').fontSize(8);
     doc.rect(x, yy, totalWidth, ROW_HEIGHT).stroke('#cccccc');
     let cx = x;
     for (let i = 0; i < columns.length; i++) {
-      doc.text(cells[i] ?? '', cx + 3, yy + 5, { width: columns[i].width - 6, align: columns[i].align ?? 'left', lineBreak: false });
+      doc.text(cells[i] ?? '', cx + 3, yy + 5, { width: columns[i].width - 6, height: CELL_H, align: columns[i].align ?? 'left', lineBreak: false, ellipsis: true });
       cx += columns[i].width;
     }
+    return yy + ROW_HEIGHT;
+  };
+  // A subtotal / grand-total line: the label spans every column except the last, so a long site
+  // name ("Subtotal — Meyer Turku Shipyard") fits on one line instead of wrapping and overlapping
+  // the next row. The value stays right-aligned in the "Worked" column.
+  const lastColWidth = columns[columns.length - 1].width;
+  const labelWidth = totalWidth - lastColWidth;
+  const drawSummaryRow = (label: string, value: string, yy: number): number => {
+    doc.font('DejaVu-Bold').fontSize(8);
+    doc.rect(x, yy, totalWidth, ROW_HEIGHT).stroke('#cccccc');
+    doc.text(label, x + 3, yy + 5, { width: labelWidth - 6, height: CELL_H, lineBreak: false, ellipsis: true });
+    doc.text(value, x + labelWidth + 3, yy + 5, { width: lastColWidth - 6, height: CELL_H, align: 'right', lineBreak: false });
     return yy + ROW_HEIGHT;
   };
 
@@ -147,17 +163,17 @@ export async function buildCustomerHoursPdf(report: CustomTimeReport, meta: Cust
   if (report.siteSubtotals.length > 1) {
     for (const s of report.siteSubtotals) {
       ensure();
-      y = drawRow([`Subtotal — ${s.site.name}`, '', '', '', '', formatWorkedDuration(s.totals.workedMinutes, 'EN')], y, true);
+      y = drawSummaryRow(`Site total — ${s.site.name}`, formatWorkedDuration(s.totals.workedMinutes, 'EN'), y);
     }
   }
   if (report.employeeSubtotals.length > 1) {
     for (const e of report.employeeSubtotals) {
       ensure();
-      y = drawRow([`Subtotal — ${e.employee.lastName} ${e.employee.firstName}`, '', '', '', '', formatWorkedDuration(e.totals.workedMinutes, 'EN')], y, true);
+      y = drawSummaryRow(`Employee total — ${e.employee.lastName} ${e.employee.firstName}`, formatWorkedDuration(e.totals.workedMinutes, 'EN'), y);
     }
   }
   ensure();
-  drawRow(['GRAND TOTAL', '', '', '', '', formatWorkedDuration(report.grandTotal.workedMinutes, 'EN')], y, true);
+  drawSummaryRow('GRAND TOTAL', formatWorkedDuration(report.grandTotal.workedMinutes, 'EN'), y);
 
   const range = doc.bufferedPageRange();
   for (let i = range.start; i < range.start + range.count; i++) {

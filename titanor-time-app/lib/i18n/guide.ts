@@ -7,11 +7,13 @@ import type { AppLocale } from './locale';
 // those directly. Kept as a data module (not JSX) so the content itself stays easy to review/edit
 // without touching component code.
 //
-// Last brought current: 2026-08-28 (T12). Covers: grouped admin nav, the notification bell +
-// review-queue badge, the worker dossier / qualifications matrix, the unified "Awaiting approval"
-// screen with one-click approve, the three ways to change a timesheet (return / direct edit /
-// formal correction), marking sick-leave/vacation from review, the configurable GPS accuracy
-// threshold, and the mid-shift presence check in the worker app.
+// Last brought current: 2026-08-29 (T13.1–T13.11). Covers: grouped admin nav, the notification
+// bell + review-queue badge, the worker dossier, the workforce matrix (professions + qualification
+// filters + PDF/CSV export), worker professions, the unified "Awaiting approval" screen, the three
+// ways to change a timesheet, marking sick-leave/vacation from review, the configurable GPS
+// accuracy threshold, the mid-shift presence check, and the Customer working-hours report.
+// The iOS geolocation note (permission must be re-granted every launch) is in workerApp + the GPS
+// changelog entry.
 //
 // The "What's new" section (changelog) at the bottom is written for the owner, in plain language,
 // newest first, dated. When something user-visible ships, add a bullet under the right date — no
@@ -110,7 +112,7 @@ export const GUIDE_CONTENT: Record<AppLocale, GuideContent> = {
       },
       {
         title: '5б. Допуски и сертификаты (необязательно)',
-        text: 'Если для работы нужны допуски или удостоверения с ограниченным сроком (электробезопасность, работа на высоте и т. п.), заведите их на карточке работника: тип допуска, срок действия, отметка о проверке. Общая картина по всем работникам — в разделе «Работники → Допуски и сертификаты». Когда срок приближается или истёк, система заранее показывает уведомление в колокольчике в шапке.'
+        text: 'Если для работы нужны допуски или удостоверения с ограниченным сроком (электробезопасность, работа на высоте и т. п.), заведите их на карточке работника: тип допуска, срок действия, отметка о проверке. Общая картина по всем работникам — в разделе «Работники → Работники — матрица». Когда срок приближается или истёк, система заранее показывает уведомление в колокольчике в шапке.'
       },
       {
         title: '6. Назначение',
@@ -150,7 +152,7 @@ export const GUIDE_CONTENT: Record<AppLocale, GuideContent> = {
         title: 'Работники',
         items: [
           { title: 'Работники', text: 'Полный список сотрудников с их статусом трудоустройства, текущим назначением и статусом активации мобильного приложения. Отсюда же можно выдать или перевыдать код/QR-код активации, а на карточке — заполнить досье работника.' },
-          { title: 'Допуски и сертификаты', text: 'Матрица «работник × тип допуска»: по каждому работнику видно срок действия и статус (действует / истекает скоро / истёк / срок не указан), с поиском и фильтрами. Сами допуски заводятся на карточке работника; типы допусков — общий справочник компании. Приближение или истечение срока попадает в колокольчик уведомлений.' },
+          { title: 'Работники — матрица', text: 'Общая таблица по всем работникам: профессии, текущий объект, занятость (активен / неактивен), допуски и сертификаты со сроком и статусом (действует / истекает скоро / истёк / срок не указан). Фильтры по категории профессии, профессии, конкретному допуску и его статусу, объекту, подтверждению; сортировка. Всю отфильтрованную выборку можно выгрузить в PDF или CSV. Сами профессии и допуски заводятся на карточке работника. (Старый адрес «Допуски и сертификаты» ведёт сюда же.)' },
           { title: 'Назначения', text: 'Связь «работник + объект (+ рабочая зона) + шаблон графика» на период времени. У работника может быть одно основное назначение и несколько дополнительных; завершённое назначение не удаляется, а остаётся в истории.' },
           { title: 'Пользователи', text: 'Учётные записи для входа в систему помимо мобильного приложения работника — в первую очередь прорабы, а также дополнительные администраторы. Отсюда же выдаются коды активации для новых учётных записей.' }
         ]
@@ -176,6 +178,8 @@ export const GUIDE_CONTENT: Record<AppLocale, GuideContent> = {
         title: 'Отчёты',
         items: [
           { title: 'Отчёты', text: 'Суммарные отработанные часы по работнику, по расчётному периоду в целом или по конкретному объекту. Показывается только рабочее время — расчёт зарплаты система не выполняет.' },
+          { title: 'Произвольный отчёт', text: 'Отработанные часы за любой период с выбором работников и объектов, в PDF или CSV. По дням или итогами, с подытогами по работнику и объекту. Только часы, без зарплаты.' },
+          { title: 'Часы заказчику', text: 'Документ для заказчика: подтверждённые (окончательно одобренные) часы по объекту за период. Перед выгрузкой система проверяет готовность — если какой-то табель не утверждён, показывает список со ссылками и блокирует финальный PDF/CSV. PDF с логотипом Titanor и пометкой «FINAL APPROVED». Без зарплат, ставок, надбавок, TES и подписи.' },
           { title: 'Выгрузка CSV', text: 'Формирование скачиваемого CSV-файла с отработанными часами за период — для передачи во внешнюю систему расчёта зарплаты. Каждая выгрузка сохраняется как отдельная неизменяемая запись; если после выгрузки была одобрена корректировка, создаётся новый файл, а не редактируется старый.' }
         ]
       }
@@ -183,7 +187,7 @@ export const GUIDE_CONTENT: Record<AppLocale, GuideContent> = {
     workerAppTitle: 'Мобильное приложение работника (кратко)',
     workerApp: [
       'Работник получает ссылку или QR-код активации от администратора (раздел «Работники → Работники»), переходит по ней и устанавливает приложение на телефон. На iPhone — только через встроенный браузер Safari.',
-      'При первом входе приложение один раз просит разрешить геолокацию — нужно выбрать «Разрешить при использовании приложения» (не «Один раз»), тогда оно больше спрашивать не будет.',
+      'Приложение просит разрешить геолокацию. На Android достаточно выбрать «Разрешить при использовании приложения» (не «Один раз») — дальше оно не переспрашивает. На iPhone и iPad из-за ограничений Apple разрешение приходится подтверждать при каждом запуске приложения — это нормально, обойти нельзя, просто нажмите «Разрешить» и продолжайте.',
       'В приложении одна главная кнопка «Приход» / «Уход» — при нажатии проверяется геолокация и показывается её точность. Приложение продолжает работать и без интернета — данные отправятся на сервер, как только связь появится.',
       'Если смена длинная, приложение может ещё раз проверить местоположение в течение смены (когда работник его открывает) — эти точки видны администратору на карте работника. Отдельно закрывать и открывать смену для этого не нужно.',
       'Работник видит список часов по дням за текущий период и в конце периода отправляет табель на проверку. Если табель не отправлен вовремя, система может отправить его автоматически — это настраивается в разделе «Правила учёта».'
@@ -201,6 +205,15 @@ export const GUIDE_CONTENT: Record<AppLocale, GuideContent> = {
     changelogTitle: 'Что нового',
     changelogIntro: 'Коротко — что менялось в системе за последнее время. Самое свежее сверху.',
     changelog: [
+      {
+        date: '29 августа 2026',
+        items: [
+          'Профессии работника. У работника теперь можно указать одну или несколько рабочих специальностей (Сварщик, Трубопроводчик, Плотник и т.д.) — из готового каталога по двум категориям (судостроение и строительство) или своим текстом. Это отдельно от допусков и сертификатов и не даёт никакого доступа — просто специальность. Блок «Профессии» — на карточке работника, сверху. Профессии попадают в PDF-досье. Старое поле «Специальность» осталось для старых записей.',
+          'Матрица работников (бывший экран «Допуски и сертификаты», теперь «Работники — матрица»). Добавились фильтры по категории профессии, профессии и по занятости (активен / неактивен), сортировка по профессии, табельному номеру и объекту. Всю отфильтрованную выборку можно выгрузить в PDF или CSV одной кнопкой — без личного кода, адреса, телефона и фото документов.',
+          'Отчёт заказчику по часам. Новая вкладка «Часы заказчику» в разделе «Отчёты». Выбираете период, работников и объекты — система показывает готовность: если все табели окончательно одобрены, можно скачать PDF (с логотипом Titanor и пометкой «FINAL APPROVED») или CSV для заказчика. Если какой-то табель ещё не утверждён — покажет список со ссылками и заблокирует финальную выгрузку; отдельно есть «внутренний предпросмотр» на текущих данных. В отчёте только часы — без зарплат, ставок, надбавок и подписи.',
+          'Исправлен подсчёт рабочих дней в произвольном отчёте: если работник за один день был на двух объектах, в итоге по работнику это теперь один рабочий день, а не два (в итоге по объекту — по-прежнему один на каждом).'
+        ]
+      },
       {
         date: '28 августа 2026',
         items: [
@@ -222,7 +235,7 @@ export const GUIDE_CONTENT: Record<AppLocale, GuideContent> = {
       {
         date: 'Геолокация (GPS), 27–28 августа 2026',
         items: [
-          'Разрешение на геолокацию спрашивается один раз. Если работник выбрал «Разрешить при использовании приложения», приложение больше не переспрашивает и не мешает отмечаться.',
+          'Разрешение на геолокацию на Android спрашивается один раз: если работник выбрал «Разрешить при использовании приложения», приложение больше не переспрашивает. На iPhone и iPad из-за ограничений Apple разрешение приходится подтверждать при каждом запуске — обойти это нельзя, работнику нужно просто нажать «Разрешить».',
           'Точность стала выше. Приложение недолго «прогревает» геолокацию и берёт самую точную точку за последние секунды, а не первую попавшуюся. Работник видит текущую точность и может нажать «Уточнить».',
           'Видно, где был работник, даже когда GPS «не подтверждён». В проблеме учёта теперь показывается расстояние до объекта, попал ли работник в геозону, и мини-карта. Даже при плохой точности по карте понятно, был человек на месте или нет.',
           'Порог точности GPS можно настроить в «Правилах учёта» — для объектов со слабым сигналом внутри зданий его можно поднять.',
@@ -290,7 +303,7 @@ export const GUIDE_CONTENT: Record<AppLocale, GuideContent> = {
       },
       {
         title: '5b. Qualifications and certificates (optional)',
-        text: 'If the work requires permits or certificates with an expiry date (electrical safety, working at height, etc.), add them on the worker\'s card: qualification type, expiry date, a verified flag. The whole-team picture is under People → Qualifications. When an expiry date is approaching or has passed, the system shows a notification in the bell in the header ahead of time.'
+        text: 'If the work requires permits or certificates with an expiry date (electrical safety, working at height, etc.), add them on the worker\'s card: qualification type, expiry date, a verified flag. The whole-team picture is under People → Workforce matrix. When an expiry date is approaching or has passed, the system shows a notification in the bell in the header ahead of time.'
       },
       {
         title: '6. Assignment',
@@ -330,7 +343,7 @@ export const GUIDE_CONTENT: Record<AppLocale, GuideContent> = {
         title: 'People',
         items: [
           { title: 'Workers', text: 'The full employee list with employment status, current assignment, and mobile-app activation status. Activation codes/QR codes can be issued or reissued from here, and the worker\'s card is where the dossier is filled in.' },
-          { title: 'Qualifications', text: 'A "worker × qualification type" matrix: for each worker it shows the expiry date and status (valid / expiring soon / expired / expiry not set), with search and filters. The qualifications themselves are added on the worker\'s card; the list of qualification types is a company-wide catalog. An approaching or passed expiry shows up in the notification bell.' },
+          { title: 'Workforce matrix', text: 'A whole-team table: professions, current site, employment (active / inactive), and qualifications/certificates with expiry and status (valid / expiring soon / expired / expiry not set). Filter by profession category, profession, a specific qualification and its status, site, verification; sort. The whole filtered selection exports to PDF or CSV. Professions and qualifications themselves are added on the worker\'s card. (The old "Qualifications" URL leads here.)' },
           { title: 'Assignments', text: 'The link between "worker + site (+ work area) + schedule template" for a date range. A worker can have one primary assignment and several secondary ones; a finished assignment isn\'t deleted, it stays in history.' },
           { title: 'Users', text: 'System accounts for signing in besides the worker mobile app — mainly foremen, plus additional administrators. Activation codes for new accounts are also issued from here.' }
         ]
@@ -356,6 +369,8 @@ export const GUIDE_CONTENT: Record<AppLocale, GuideContent> = {
         title: 'Reports',
         items: [
           { title: 'Reports', text: 'Total worked hours by worker, by payroll period as a whole, or by a specific site. Only worked time is shown — the system doesn\'t calculate pay.' },
+          { title: 'Custom report', text: 'Worked hours for any date range, with worker and site selection, as PDF or CSV. Daily or totals, with per-worker and per-site subtotals. Hours only, no pay.' },
+          { title: 'Customer hours', text: 'A document for the customer: confirmed (final-approved) hours by site for a date range. The system checks readiness first — if a timesheet is not approved it shows a linked list and blocks the final PDF/CSV. PDF with the Titanor logo and a "FINAL APPROVED" mark. No salary, rates, premiums, TES or signature.' },
           { title: 'CSV exports', text: 'Generates a downloadable CSV file of worked hours for a period, for use in an external payroll system. Each export is saved as a separate, immutable record; if a correction is approved after an export, a new file is created rather than editing the old one.' }
         ]
       }
@@ -363,7 +378,7 @@ export const GUIDE_CONTENT: Record<AppLocale, GuideContent> = {
     workerAppTitle: 'The worker mobile app (brief overview)',
     workerApp: [
       'The worker gets an activation link or QR code from the administrator (People → Workers), opens it, and installs the app on their phone. On iPhone — through the built-in Safari browser only.',
-      'On first launch the app asks for location permission once — the worker should choose "Allow while using the app" (not "Allow once"), and it won\'t ask again.',
+      'The app asks for location permission. On Android, choosing "Allow while using the app" (not "Allow once") is enough — it won\'t ask again. On iPhone and iPad, Apple\'s restrictions mean the permission has to be granted every time the app is opened — this is normal and can\'t be avoided; the worker just taps "Allow" and continues.',
       'The app has one main Check In / Check Out button — pressing it checks location and shows its accuracy. The app keeps working without internet too; data is sent to the server as soon as a connection is available.',
       'On a long shift the app may check location again during the shift (when the worker opens it) — those points are visible to the administrator on the worker\'s map. Nothing needs to be clocked out and back in for this.',
       'The worker sees a day-by-day list of hours for the current period and submits their timesheet at the end of the period. If it isn\'t submitted in time, the system can submit it automatically — configurable under Attendance policy.'
@@ -381,6 +396,15 @@ export const GUIDE_CONTENT: Record<AppLocale, GuideContent> = {
     changelogTitle: 'What\'s new',
     changelogIntro: 'A short list of what has changed in the system recently. Newest first.',
     changelog: [
+      {
+        date: '29 August 2026',
+        items: [
+          'Worker professions. A worker can now have one or more trade specialities (Welder, Pipe fitter, Carpenter, …) — from a built-in catalog under two categories (shipbuilding and construction) or as free text. This is separate from qualifications and certificates and grants no access — it is just a speciality. The "Professions" block is at the top of the worker\'s card, and professions appear in the dossier PDF. The old "Specialty" field stays for old records.',
+          'Workforce matrix (the former "Qualifications" screen, now "Workforce matrix"). New filters by profession category, profession and by employment (active / inactive), and sorts by profession, employee number and site. The whole filtered selection can be exported to PDF or CSV in one click — with no personal ID code, address, phone or document photos.',
+          'Customer working-hours report. A new "Customer hours" tab under Reports. Pick a period, workers and sites — the system shows readiness: if every timesheet is final-approved you can download a PDF (with the Titanor logo and a "FINAL APPROVED" mark) or CSV for the customer. If a timesheet is not approved yet it shows a linked list and blocks the final export; a separate internal preview uses the current data. The report shows hours only — no salary, rates, premiums or signature.',
+          'Fixed the worked-days count in the custom report: a worker who spent one day on two sites now counts as one worked day in the per-worker total, not two (the per-site total is still one at each site).'
+        ]
+      },
       {
         date: '28 August 2026',
         items: [
@@ -402,7 +426,7 @@ export const GUIDE_CONTENT: Record<AppLocale, GuideContent> = {
       {
         date: 'Location (GPS), 27–28 August 2026',
         items: [
-          'Location permission is asked once. If the worker chose "Allow while using the app", the app no longer keeps asking and doesn\'t get in the way of checking in.',
+          'Location permission on Android is asked once: if the worker chose "Allow while using the app", the app no longer keeps asking. On iPhone and iPad, Apple\'s restrictions mean the permission must be granted on every launch — this can\'t be changed, the worker just taps "Allow".',
           'Accuracy is better. The app briefly "warms up" location and takes the most accurate point from the last few seconds rather than the first one. The worker sees the current accuracy and can tap "Refine".',
           'You can see where the worker was even when GPS is "not verified". The attendance issue now shows the distance to the site, whether the worker was inside the geofence, and a mini-map. Even with poor accuracy the map makes it clear whether the person was on-site.',
           'The GPS accuracy threshold is configurable in Attendance policy — raise it for sites with a weak signal indoors.',
