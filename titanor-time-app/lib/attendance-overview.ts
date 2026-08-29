@@ -307,8 +307,10 @@ function effectiveSiteIds(scope: OverviewScope, filters: OverviewFilters): strin
   return filters.siteId ? [filters.siteId] : null;
 }
 
-export async function buildOperationalOverview(tx: Prisma.TransactionClient, filters: OverviewFilters, scope: OverviewScope, period: OverviewPeriod | null, today: Date): Promise<OverviewResult> {
-  const asOf = new Date();
+export async function buildOperationalOverview(tx: Prisma.TransactionClient, filters: OverviewFilters, scope: OverviewScope, period: OverviewPeriod | null, today: Date, asOfOverride?: Date): Promise<OverviewResult> {
+  // `asOf` is "right now" for live open-shift minutes and the finished-today upper bound. Production
+  // always uses the wall clock; only deterministic tests pass an explicit instant.
+  const asOf = asOfOverride ?? new Date();
   const { start: todayStart, end: todayEnd } = todayRange(today);
   const siteRestriction = effectiveSiteIds(scope, filters);
   const currentPeriodIds = period?.multipleCurrentCycles

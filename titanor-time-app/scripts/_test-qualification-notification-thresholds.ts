@@ -4,6 +4,7 @@
 // blocking the next (more urgent) threshold from firing.
 import { randomUUID } from 'node:crypto';
 import { prisma } from '../lib/prisma';
+import { helsinkiCalendarDateAsUtcMidnight } from '../lib/attendance-clock';
 import { ensureQualificationNotifications, dismissAdminNotification, listActiveNotificationsForAdmin } from '../lib/qualification-notifications';
 
 let pass = 0;
@@ -17,11 +18,14 @@ function check(name: string, cond: boolean, extra?: unknown): void {
   }
 }
 
+// Anchor to the SAME calendar basis the notification code uses — Europe/Helsinki calendar day at
+// UTC midnight (lib/qualification-notifications.ts: `today = helsinkiCalendarDateAsUtcMidnight(...)`,
+// diff via diffCalendarDays). Using a plain UTC "today" here made the boundary matrix off by one
+// whenever the runner started between 21:00–24:00 UTC (Helsinki already on the next date).
 function daysFromNow(n: number): Date {
-  const now = new Date();
-  const utcMidnight = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
-  utcMidnight.setUTCDate(utcMidnight.getUTCDate() + n);
-  return utcMidnight;
+  const today = helsinkiCalendarDateAsUtcMidnight(new Date());
+  today.setUTCDate(today.getUTCDate() + n);
+  return today;
 }
 
 async function makeEmployee(suffix: string): Promise<string> {

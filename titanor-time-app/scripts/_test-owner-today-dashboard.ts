@@ -62,7 +62,9 @@ async function main() {
   check(!malformedFilter.ok && !!malformedFilter.fieldErrors.siteId, 'non-empty malformed UUID still fails validation');
 
   const today = helsinkiToday();
-  const now = new Date();
+  // Fixed "now" = 14:00 on the Helsinki calendar day, passed explicitly into buildOperationalOverview.
+  // The fixtures below are anchored to it, so the test is identical whether it runs at 02:00 or 23:00.
+  const asOf = new Date(today.getTime() + 14 * 3_600_000);
   const admin = await prisma.user.create({ data: { username: `today-admin-${randomUUID().slice(0, 8)}`, status: 'ACTIVE', locale: 'EN' } });
   const alpha = await prisma.workSite.create({ data: { name: `Alpha Yard ${randomUUID().slice(0, 4)}` } });
   const beta = await prisma.workSite.create({ data: { name: `Beta Tower ${randomUUID().slice(0, 4)}` } });
@@ -89,7 +91,7 @@ async function main() {
     data: { employeeId: finished.id, siteId: beta.id, isPrimary: true, validFrom: new Date('2020-01-01T00:00:00Z'), assignedByUserId: admin.id }
   });
 
-  const openAt = new Date(now.getTime() - 37 * 60_000);
+  const openAt = new Date(asOf.getTime() - 37 * 60_000);
   const openEvent = await clockEvent(working.id, alpha.id, 'CHECK_IN', openAt);
   await prisma.employeeOpenShift.create({
     data: { employeeId: working.id, openedByClockEventId: openEvent, siteId: alpha.id, workAreaId: northHall.id, openedAt: openAt }
@@ -107,12 +109,12 @@ async function main() {
     });
   }
   await prisma.attendanceException.create({
-    data: { type: 'GPS_NOT_VERIFIED', employeeId: finished.id, occurredAt: now, status: 'OPEN' }
+    data: { type: 'GPS_NOT_VERIFIED', employeeId: finished.id, occurredAt: asOf, status: 'OPEN' }
   });
 
   const scope = { siteIds: null, excludeEmployeeId: null, includeConflicts: true };
   const result = await prisma.$transaction(
-    (tx) => buildOperationalOverview(tx, { page: 1, pageSize: 20 }, scope, period, today),
+    (tx) => buildOperationalOverview(tx, { page: 1, pageSize: 20 }, scope, period, today, asOf),
     { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead }
   );
 
@@ -131,20 +133,20 @@ async function main() {
 
   for (const q of ['Anna Working', working.employeeNumber, alpha.name, 'North Hall', 'north hall']) {
     const searched = await prisma.$transaction(
-      (tx) => buildOperationalOverview(tx, { q, page: 1, pageSize: 20 }, scope, period, today),
+      (tx) => buildOperationalOverview(tx, { q, page: 1, pageSize: 20 }, scope, period, today, asOf),
       { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead }
     );
     check(searched.totalItems === 1 && searched.items[0]?.employee.id === working.id, `search matches ${q}`);
   }
 
   const siteFiltered = await prisma.$transaction(
-    (tx) => buildOperationalOverview(tx, { siteId: beta.id, page: 1, pageSize: 20 }, scope, period, today),
+    (tx) => buildOperationalOverview(tx, { siteId: beta.id, page: 1, pageSize: 20 }, scope, period, today, asOf),
     { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead }
   );
   check(siteFiltered.totalItems === 1 && siteFiltered.items[0]?.employee.id === finished.id, 'site filter narrows workers');
 
   const pagedSearch = await prisma.$transaction(
-    (tx) => buildOperationalOverview(tx, { q: 'Waiting', page: 1, pageSize: 1 }, scope, period, today),
+    (tx) => buildOperationalOverview(tx, { q: 'Waiting', page: 1, pageSize: 1 }, scope, period, today, asOf),
     { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead }
   );
   check(pagedSearch.totalItems === 1 && pagedSearch.items[0]?.employee.id === notStarted.id, 'search runs before pagination');
