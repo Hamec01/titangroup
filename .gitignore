@@ -17,3 +17,8 @@ pnpm-debug.log*
 
 # Database dumps (real data, never committed)
 /backups
+
+# Local runtime upload dir (lib/employee-files.ts writes here; prod uses a bind mount).
+# Never committed — contains employee photos / documents.
+/titanor-time-app/uploads/
+/uploads/
