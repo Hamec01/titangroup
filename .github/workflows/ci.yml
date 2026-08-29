@@ -1,0 +1,202 @@
+name: CI
+
+# R02 — one reproducible pipeline. Every job below must pass; `ci-summary` is the single
+# required check that aggregates them. See docs/titanor-time/R02_TEST_CI_REPORT_RU.md.
+#
+# Deliberately NOT run here (documented, not silently skipped):
+#   - the `browser` test lane (scripts/test-manifest.json) — needs a running standalone server
+#     and Chromium; runs at pilot acceptance / R12 (TZ 18.2 item 10).
+#   - the restored-pilot migration test — needs a pilot backup; runs via
+#     ops/titanor-time/restore-test-titanor-time.sh in the R14 rehearsal.
+
+on:
+  push:
+    branches: ['**']
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  NEXT_TELEMETRY_DISABLED: '1'
+  # Prisma validate/format/generate insist DATABASE_URL is defined even when only parsing.
+  DATABASE_URL: 'postgresql://u:u@localhost:5432/u'
+
+jobs:
+  # ----------------------------------------------------------------------------------------------
+  titanor-time-quality:
+    name: Titanor Time — install · typecheck · lint · build
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: titanor-time-app
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Clean install (lockfile only)
+        run: npm ci
+      - name: Lockfile is in sync
+        run: git diff --exit-code -- package-lock.json
+      - name: Prisma generate + validate
+        run: |
+          npx prisma generate --schema ../prisma/schema.prisma
+          npx prisma validate --schema ../prisma/schema.prisma
+      - name: Typecheck (app + scripts/)
+        run: npm run typecheck
+      - name: Lint
+        run: npm run lint
+      - name: Test manifest in sync
+        run: npm run test:check-manifest
+      - name: Build (standalone)
+        run: npm run build
+
+  # ----------------------------------------------------------------------------------------------
+  titanor-time-tests:
+    name: Titanor Time — unit + db + scheduler tests
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: titanor-time-app
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    env:
+      TT_TEST_DB_URL: 'postgresql://postgres:postgres@localhost:5432/postgres'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: npm ci
+      - run: npx prisma generate --schema ../prisma/schema.prisma
+      - name: Unit lane
+        run: npm run test:unit
+      - name: DB + scheduler lanes (fresh cloned database per test)
+        run: npm run test:db
+
+  # ----------------------------------------------------------------------------------------------
+  titanor-time-migrations:
+    name: Titanor Time — migrations apply cleanly from nothing
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: titanor-time-app
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: titanor_time_fresh
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    env:
+      DATABASE_URL: 'postgresql://postgres:postgres@localhost:5432/titanor_time_fresh'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: npm ci
+      - name: Fresh-DB migrate deploy
+        run: npx prisma migrate deploy --schema ../prisma/schema.prisma
+      - name: No pending / failed migrations
+        run: |
+          npx prisma migrate status --schema ../prisma/schema.prisma | tee status.txt
+          grep -q "Database schema is up to date" status.txt
+
+  # ----------------------------------------------------------------------------------------------
+  public-site-quality:
+    name: Public site — install · typecheck · build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: npm ci
+      - name: Lockfile is in sync
+        run: git diff --exit-code -- package-lock.json
+      - run: npx prisma generate --schema prisma/schema.prisma
+      - name: Typecheck
+        run: npx tsc --noEmit -p tsconfig.json
+      - name: Build (standalone)
+        run: npm run build
+
+  # ----------------------------------------------------------------------------------------------
+  security:
+    name: Security — secret scan · dependency audit · lockfiles
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Committed-secret scan (blocking)
+        run: bash ops/ci/secret-scan.sh
+      - name: Lockfiles present and tracked
+        run: |
+          git ls-files --error-unmatch package-lock.json titanor-time-app/package-lock.json
+      - name: Dependency audit — public site (report only)
+        run: npm audit --omit=dev --json > audit-public-site.json || true
+      - name: Dependency audit — Titanor Time (report only)
+        run: cd titanor-time-app && npm audit --omit=dev --json > ../audit-titanor-time.json || true
+      - name: Audit summary
+        run: |
+          node -e '
+            for (const f of ["audit-public-site.json","audit-titanor-time.json"]) {
+              try {
+                const a = JSON.parse(require("fs").readFileSync(f,"utf8"));
+                const v = a.metadata?.vulnerabilities ?? {};
+                console.log(f, JSON.stringify(v));
+              } catch { console.log(f, "(no report)"); }
+            }
+          '
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dependency-audit
+          path: |
+            audit-public-site.json
+            audit-titanor-time.json
+          if-no-files-found: warn
+
+  # ----------------------------------------------------------------------------------------------
+  ci-summary:
+    name: CI summary (required)
+    runs-on: ubuntu-latest
+    needs:
+      - titanor-time-quality
+      - titanor-time-tests
+      - titanor-time-migrations
+      - public-site-quality
+      - security
+    if: always()
+    steps:
+      - name: Fail if any job failed
+        run: |
+          results='${{ toJSON(needs) }}'
+          echo "$results"
+          echo "$results" | node -e '
+            const n = JSON.parse(require("fs").readFileSync(0,"utf8"));
+            const bad = Object.entries(n).filter(([,v]) => v.result !== "success");
+            if (bad.length) { console.error("FAILED:", bad.map(([k,v]) => `${k}=${v.result}`).join(", ")); process.exit(1); }
+            console.log("all jobs succeeded");
+          '

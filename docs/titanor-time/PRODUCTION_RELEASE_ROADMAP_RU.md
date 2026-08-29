@@ -111,7 +111,7 @@ Production cutover разрешается только после R12 и отд�
 | B03 | Профили/recovery не соответствуют решению «без SMTP» | Пользователь может лишиться доступа; текущий email flow не завершён | R03 |
 | B04 | Нет change-password и полноценного session management | Незавершённая безопасность учётной записи | R03 |
 | B05 | Есть 8 high dependency findings | Release содержит известные уязвимые цепочки | R04–R05 |
-| B06 | Нет стабильных `test`, `typecheck`, `lint` gates; часть старых тестов противоречит текущему контракту | Нельзя доказать отсутствие регрессии | R02 |
+| ~~B06~~ | Нет стабильных `test`/`typecheck`/`lint` gates; часть старых тестов противоречит контракту. **ЗАКРЫТ 2026-08-30 (R02)**: каталог из 75 тестов по lane'ам, per-test изоляция БД, 5 тестов исправлено, `typecheck`/`lint`/`test` команды, CI с required `ci-summary`. Локально: 0 type-ошибок, unit 11/11, db+scheduler 48/48, build ✓. Browser-lane (15) → R12 | ✅ R02 |
 | B07 | Production scheduler unhealthy, а readiness не проверяет схему | HTTP 200 может скрывать несовместимую БД | R06 |
 | B08 | In-memory rate limit, доверие первому `X-Forwarded-For`, слабые public admin/contact/upload controls | Обход ограничений и недостаточный security boundary | R07 |
 | B09 | Нет долговременного зашифрованного GPS-архива до удаления raw records | Возможна необратимая потеря истории координат | R08 |
@@ -130,9 +130,9 @@ Production cutover разрешается только после R12 и отд�
 |---|---|---|---|---|
 | R00 | Release baseline и freeze | — | Нет | **DONE `96799ba`** — `RELEASE_BASELINE_2026-08-29_RU.md` |
 | R01 | Backup/storage foundation | R00 | Нет | **DONE `96799ba` — PASS** (квота Contabo 250 GB подтверждена 2026-08-30; таймер устанавливает владелец, см. `BACKUP_RESTORE_RUNBOOK_RU.md` §6) |
-| R02 | Надёжные test/CI gates | R00 | Нет | **Следующий** |
-| R03 | Profiles и recovery без SMTP | R01, R02 | Нет | Не начат |
-| R04 | Security upgrade публичного сайта | R02 | Нет | Не начат |
+| R02 | Надёжные test/CI gates | R00 | Нет | **DONE `e2ad7e1`+ — PASS** (отчёт `R02_TEST_CI_REPORT_RU.md`; каталог `TEST_CATALOG_RU.md`; browser-lane → R12) |
+| R03 | Profiles и recovery без SMTP | R01, R02 | Нет | **Следующий** |
+| R04 | Security upgrade публичного сайта | R02 | Нет | Не начат (можно параллельно R03) |
 | R05 | Security upgrade Titanor Time | R02 | Нет | Не начат |
 | R06 | Scheduler/readiness/Docker/operations | R01, R02, R05 | Нет | Не начат |
 | R07 | Security hardening приложений/API | R02, R04, R05 | Нет | Не начат |

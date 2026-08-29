@@ -127,6 +127,9 @@ async function runDbLanes(lanes) {
   process.on('SIGINT', () => { cleanup(); process.exit(130); });
 
   console.log(`  target server: ${safe}   template: ${tmpl}`);
+  // Per-test DBs are dropped in each iteration's `finally`, so at any instant only this template
+  // plus one clone exist. A hard SIGKILL can still orphan up to two `tt_*` databases on the
+  // throwaway server — harmless, and the next run's names never collide (runId is time-based).
   sql(maintUrl, `CREATE DATABASE "${tmpl}"`);
   const dep = spawnSync(PRISMA_BIN, ['migrate', 'deploy', '--schema', SCHEMA], {
     cwd: APP_ROOT, env: { ...process.env, DATABASE_URL: serverNoDb(tmpl) }, encoding: 'utf8',

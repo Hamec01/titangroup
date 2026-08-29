@@ -1,31 +1,41 @@
 # Titanor Time — Implementation Status
 
-Обновлено: 2026-08-29 Europe/Helsinki (R02 — test/typecheck/CI gates, в работе)
+Обновлено: 2026-08-30 Europe/Helsinki (R02 — test/typecheck/CI gates, DONE)
 
-**`[2026-08-29]` R02 — надёжные test / typecheck / CI gates (production release roadmap, в работе).**
-Полный отчёт: `docs/titanor-time/R02_TEST_CI_REPORT_RU.md`. Каталог тестов:
-`docs/titanor-time/TEST_CATALOG_RU.md`. Production-БД/контейнеры не трогаются.
-- **Шаг 1 — typecheck-гейт зелёный.** `_test-checkin-never-blocked.ts` содержал невозможное
-  сравнение `shift.materializationState !== 'FAILED'` (в enum `ClockShiftMaterializationState`
-  только `PENDING|MATERIALIZED`) → единственная ошибка `tsc --noEmit` (`TS2367`) на всём
-  приложении. Тест теперь энролит работника в период и проверяет реальный контракт T17 —
-  смена вне геозоны **материализуется в часы** (`materializeClockShift` → `MATERIALIZED`).
-  `tsc --noEmit` = 0 ошибок; тест 13/13 на disposable PG16.
-- **Шаг 2 — role-matrix проверяет результат, а не язык.** `_test-t9-role-matrix.ts` проверял
-  наличие английской строки `Access denied` в HTML/DOM — падал при RU-локали (все новые
-  пользователи создаются с `RU`). Заменено на структурные признаки: HTTP 200 (не redirect) +
-  `<p class="login-error" role="alert">` (общий блок отказа, любой язык) + отсутствие
-  `admin-nav` в разметке; API-отказы уже проверялись по `error.code`. `tsc --noEmit` = 0;
-  browser-прогон — в R12 (lane «browser», TZ 18.2 п.10).
-- **Шаг 3 — schedule test согласован с auto-enroll первого назначения.**
-  `_test-timesheet-submission-schedules.ts` утверждал, что `createAssignment` для работника без
-  графика **не** энролит его никуда (`payrollPeriodParticipant === 0`). Действующий контракт
-  (`lib/assignments.ts`): первое в истории назначение работника без schedule-истории
-  авто-энролит его на активный company-default (Weekly), иначе работник остаётся с
-  `SiteAssignment` без единого `Timesheet`. Сценарий переписан: проверяем, что появилась
-  `EmployeeTimesheetSchedule` на company-default, ровно 2 периода в Weekly-когорте и 0 в любой
-  другой; сопряжённые счётчики overview (`totalWorkers` 4→5) и аудита
-  (`WORKER_TIMESHEET_SCHEDULE_ASSIGNED` 5→6) поправлены. Тест 24/24 на свежей PG16, `tsc` = 0.
+**`[2026-08-30]` R02 — надёжные test / typecheck / lint / CI gates (production release roadmap) — DONE.**
+Полный отчёт: `docs/titanor-time/R02_TEST_CI_REPORT_RU.md`. Каталог: `docs/titanor-time/TEST_CATALOG_RU.md`.
+Production-БД / контейнеры / scheduler / Caddy / DNS не трогались.
+- **Каталог + lane-раннер.** `titanor-time-app/scripts/test-manifest.json` — 75 `_test-*.ts` по
+  lane'ам (`unit` 11 / `db` 44 / `scheduler` 4 / `browser` 15 / `helper` 1). `scripts/run-tests.mjs`:
+  для `db`/`scheduler` создаёт БД-шаблон с миграциями с нуля и клонирует её на **каждый тест**
+  (полная изоляция); отказывается от pilot/prod-URL; browser без `TEST_BASE_URL` = SKIPPED, не FAIL.
+  Команды: `typecheck lint test test:unit test:db test:scheduler test:browser test:catalog
+  test:check-manifest`.
+- **`lint`** (`scripts/run-lint.mjs`, без новых зависимостей — Next 16 убрал `next lint`):
+  `prisma validate` + schema-format-clean + манифест-в-синхроне + smoke на секреты.
+- **5 тестов исправлено под действующий контракт / детерминизм:**
+  - `_test-checkin-never-blocked.ts` (`05cc4f5`) — невозможное `materializationState !== 'FAILED'`
+    (в enum только `PENDING|MATERIALIZED`) было единственной ошибкой `tsc` (`TS2367`); теперь
+    энрол в период + проверка реального контракта T17 (смена вне геозоны → `MATERIALIZED`).
+  - `_test-t9-role-matrix.ts` (`5171c76`) — искал англ. `Access denied`, падал при RU-локали;
+    теперь структурно: 200 + `<p class="login-error" role="alert">` + нет `admin-nav`.
+  - `_test-timesheet-submission-schedules.ts` (`5f17310`) — утверждал, что первое назначение не
+    энролит; действующий контракт (`lib/assignments.ts`) авто-энролит на company-default (Weekly).
+  - `_test-qualification-notification-thresholds.ts` (`b13d9bd`) — «дни до истечения» в UTC,
+    ломалось в 21–24 UTC; привязано к календарю Helsinki (как в коде).
+  - `_test-owner-today-dashboard.ts` (`b13d9bd`) — фикстуры «сегодня» на фикс. часах; добавлен
+    `buildOperationalOverview(…, asOf?)` (optional, default `new Date()`, 2 prod-вызова не тронуты).
+  Плюс `9648c78` — `prisma format` (только выравнивание).
+- **Реклассификация:** 3 теста c `fetch` к серверу (`_test-csv-export`, `_test-period-time-report`,
+  `_test-report-rounding-consistency`) + `_test-foreman-admin-redirect` → lane `browser`.
+- **CI:** `.github/workflows/ci.yml` — 5 job (Time quality/tests/migrations, public-site, security)
+  + `ci-summary` как единственный required-check. `ops/ci/secret-scan.sh` — grep по `git ls-files`,
+  без внешних инструментов (blocking). `npm audit` обоих — отчёт-артефакт, без auto-fix.
+- **Локальный прогон на чистом PG16:** `typecheck` 0 ошибок (была 1) · `lint` ✓ · `test:unit`
+  11/11 · `test:scheduler` 4/4 · `test:db` 48/48 · `build` (Time) ✓. `browser` (15) — на R12.
+  Публичный сайт: `typecheck`/`build` только в CI (root `node_modules` в worktree root-owned).
+- **Пропуски (с причиной, не «тихо»):** lane `browser` → R12 (ТЗ §18.2 п.10); restored-pilot
+  migration test → репетиция R14; полноценный ESLint → R07.
 
 **`[2026-08-29]` T17 — Check In больше не отклоняется из-за GPS/геозоны (по заказу владельца: приход «сбрасывался» и ошибка приходила поздно/не приходила).**
 Раньше: приход с хорошим GPS-fix, но вне геозоны (`VERIFIED_OUTSIDE`) → **REJECTED терминально**:
