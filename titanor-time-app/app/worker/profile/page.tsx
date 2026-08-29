@@ -8,6 +8,9 @@ import { COMMON_STRINGS } from '@/lib/i18n/common';
 import { WORKER_STRINGS } from '@/lib/i18n/worker';
 import { getAccountSettings } from '@/lib/account';
 import { AccountSettingsForm } from '@/components/account/AccountSettingsForm';
+import { hasPermission } from '@/lib/permissions';
+import { listEmployeeProfessions, listProfessionCatalog } from '@/lib/professions';
+import { EmployeeProfessionsEditor } from '@/components/professions/EmployeeProfessionsEditor';
 
 export const dynamic = 'force-dynamic';
 
@@ -41,9 +44,12 @@ export default async function WorkerProfilePage() {
     );
   }
 
-  const [profile, account] = await Promise.all([
+  const canManageProfessions = await hasPermission(session.user.roles, 'worker.profession.manage.own');
+  const [profile, account, professions, professionCatalog] = await Promise.all([
     getEmployeeProfileView(session.user.employeeId, false),
-    getAccountSettings(session.user.id)
+    getAccountSettings(session.user.id),
+    canManageProfessions ? listEmployeeProfessions(session.user.employeeId) : Promise.resolve([]),
+    canManageProfessions ? listProfessionCatalog() : Promise.resolve([])
   ]);
   if (!profile) {
     return (
@@ -62,6 +68,15 @@ export default async function WorkerProfilePage() {
         <h1>{t.profileTitle}</h1>
         {account ? <AccountSettingsForm initialEmail={account.email} username={account.username} roles={account.roles} /> : null}
         <WorkerProfileForm initialProfile={profile} />
+        {canManageProfessions ? (
+          <EmployeeProfessionsEditor
+            employeeId={session.user.employeeId}
+            apiBase="/api/worker/professions"
+            ownProfile
+            initialProfessions={professions}
+            catalog={professionCatalog}
+          />
+        ) : null}
       </div>
     </main>
   );

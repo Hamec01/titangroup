@@ -15,17 +15,25 @@ const CATEGORY_LABEL: Record<'SHIPBUILDING' | 'CONSTRUCTION', { en: string; ru: 
 // T13.3 — profession block on the admin worker profile page. A profession is a trade / speciality;
 // it is not a certificate and grants no access. Catalog pick or a free "Other" entry, one worker
 // many professions, no duplicates (server enforces; a duplicate shows a plain message).
+// T15.2 — the same component is reused on the worker's own /worker/profile: pass `apiBase`
+// (`/api/worker/professions`) and `ownProfile` so the wording is "your professions".
 export function EmployeeProfessionsEditor({
   employeeId,
   initialProfessions,
-  catalog
+  catalog,
+  apiBase,
+  ownProfile = false
 }: {
   employeeId: string;
   initialProfessions: EmployeeProfessionView[];
   catalog: ProfessionCatalogGroup[];
+  apiBase?: string;
+  ownProfile?: boolean;
 }) {
   const locale = useAppLocale();
   const ru = locale === 'RU';
+  const listUrl = apiBase ?? `/api/admin/workers/${employeeId}/professions`;
+  const removeUrl = (id: string) => `${listUrl}/${id}`;
 
   const [items, setItems] = useState(initialProfessions);
   const [adding, setAdding] = useState(false);
@@ -45,7 +53,7 @@ export function EmployeeProfessionsEditor({
   }
 
   async function reload() {
-    const r = await fetch(`/api/admin/workers/${employeeId}/professions`, { credentials: 'same-origin' });
+    const r = await fetch(listUrl, { credentials: 'same-origin' });
     if (r.ok) {
       const body = await r.json();
       setItems(body.items ?? []);
@@ -67,7 +75,7 @@ export function EmployeeProfessionsEditor({
     setError(null);
     try {
       const body = mode === 'CATALOG' ? { definitionId } : { customName: customName.trim(), customCategory };
-      const r = await fetch(`/api/admin/workers/${employeeId}/professions`, {
+      const r = await fetch(listUrl, {
         method: 'POST',
         credentials: 'same-origin',
         headers: { 'Content-Type': 'application/json', 'X-Requested-With': CSRF_HEADER_VALUE, 'Idempotency-Key': crypto.randomUUID() },
@@ -76,7 +84,11 @@ export function EmployeeProfessionsEditor({
       const resBody = await r.json().catch(() => null);
       if (!r.ok) {
         if (resBody?.error?.code === 'PROFESSION_ALREADY_ADDED') {
-          setError(localeText(locale, 'This worker already has that profession.', 'У работника уже есть эта профессия.'));
+          setError(
+            ownProfile
+              ? localeText(locale, 'You already have that profession.', 'У вас уже есть эта профессия.')
+              : localeText(locale, 'This worker already has that profession.', 'У работника уже есть эта профессия.')
+          );
         } else {
           setError(localeText(locale, 'Could not add the profession. Try again.', 'Не удалось добавить профессию. Попробуйте ещё раз.'));
         }
@@ -94,7 +106,7 @@ export function EmployeeProfessionsEditor({
 
   async function handleRemove(id: string) {
     setItems((prev) => prev.filter((p) => p.id !== id));
-    await fetch(`/api/admin/workers/${employeeId}/professions/${id}`, {
+    await fetch(removeUrl(id), {
       method: 'DELETE',
       credentials: 'same-origin',
       headers: { 'X-Requested-With': CSRF_HEADER_VALUE }
