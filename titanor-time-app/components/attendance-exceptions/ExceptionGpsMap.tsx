@@ -31,9 +31,16 @@ interface Props {
   point: { latitude: number; longitude: number };
   accuracyMeters: number | null;
   geofence: { latitude: number; longitude: number; radiusMeters: number } | null;
+  /** T14 — an approximate point (device last-good / cached fix, or a back-fill): drawn as a grey
+   * dashed marker with an uncertainty ring, never the red "this is where the worker was" marker. */
+  approximate?: boolean;
 }
 
-export function ExceptionGpsMap({ point, accuracyMeters, geofence }: Props) {
+// Radius of the dashed uncertainty ring drawn around an approximate point (it has no real
+// accuracy figure of its own).
+const APPROX_RING_METERS = 150;
+
+export function ExceptionGpsMap({ point, accuracyMeters, geofence, approximate = false }: Props) {
   const locale = useAppLocale();
   const container = useRef<HTMLDivElement>(null);
   const mapRef = useRef<MapLibreMap | null>(null);
@@ -59,7 +66,11 @@ export function ExceptionGpsMap({ point, accuracyMeters, geofence }: Props) {
           map.addLayer({ id: 'exc-geofence-fill', type: 'fill', source: 'exc-geofence', paint: { 'fill-color': '#18a558', 'fill-opacity': 0.15 } });
           map.addLayer({ id: 'exc-geofence-line', type: 'line', source: 'exc-geofence', paint: { 'line-color': '#18a558', 'line-width': 2 } });
         }
-        if (accuracyMeters && accuracyMeters > 0) {
+        if (approximate) {
+          map.addSource('exc-approx', { type: 'geojson', data: circleFeature(point.longitude, point.latitude, APPROX_RING_METERS) });
+          map.addLayer({ id: 'exc-approx-fill', type: 'fill', source: 'exc-approx', paint: { 'fill-color': '#8a8f98', 'fill-opacity': 0.12 } });
+          map.addLayer({ id: 'exc-approx-line', type: 'line', source: 'exc-approx', paint: { 'line-color': '#8a8f98', 'line-width': 1.5, 'line-dasharray': [2, 2] } });
+        } else if (accuracyMeters && accuracyMeters > 0) {
           map.addSource('exc-accuracy', { type: 'geojson', data: circleFeature(point.longitude, point.latitude, accuracyMeters) });
           map.addLayer({ id: 'exc-accuracy-fill', type: 'fill', source: 'exc-accuracy', paint: { 'fill-color': '#d05a47', 'fill-opacity': 0.14 } });
           map.addLayer({ id: 'exc-accuracy-line', type: 'line', source: 'exc-accuracy', paint: { 'line-color': '#d05a47', 'line-width': 1.5, 'line-dasharray': [2, 2] } });
@@ -69,7 +80,7 @@ export function ExceptionGpsMap({ point, accuracyMeters, geofence }: Props) {
         const bounds = new maplibregl.LngLatBounds();
         bounds.extend([point.longitude, point.latitude]);
         if (geofence) bounds.extend([geofence.longitude, geofence.latitude]);
-        const pad = Math.max(accuracyMeters ?? 0, geofence?.radiusMeters ?? 0);
+        const pad = Math.max(approximate ? APPROX_RING_METERS : accuracyMeters ?? 0, geofence?.radiusMeters ?? 0);
         if (pad > 0) {
           // rough degree padding so the circle isn't clipped
           const dLat = (pad / 111000) * 1.4;
@@ -79,7 +90,7 @@ export function ExceptionGpsMap({ point, accuracyMeters, geofence }: Props) {
         map.fitBounds(bounds, { padding: 48, maxZoom: 16, duration: 0 });
       });
 
-      markers.current.push(new maplibregl.Marker({ color: '#d05a47' }).setLngLat([point.longitude, point.latitude]).addTo(map));
+      markers.current.push(new maplibregl.Marker({ color: approximate ? '#8a8f98' : '#d05a47' }).setLngLat([point.longitude, point.latitude]).addTo(map));
       if (geofence) {
         markers.current.push(new maplibregl.Marker({ color: '#18a558' }).setLngLat([geofence.longitude, geofence.latitude]).addTo(map));
       }
@@ -92,7 +103,7 @@ export function ExceptionGpsMap({ point, accuracyMeters, geofence }: Props) {
       mapRef.current?.remove();
       mapRef.current = null;
     };
-  }, [point.latitude, point.longitude, accuracyMeters, geofence, locale]);
+  }, [point.latitude, point.longitude, accuracyMeters, geofence, approximate, locale]);
 
   return (
     <div

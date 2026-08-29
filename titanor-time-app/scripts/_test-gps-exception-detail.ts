@@ -107,10 +107,36 @@ async function main() {
     check('includeRawGps=true -> gpsLocation populated', !!withRaw?.gpsLocation && Math.abs(withRaw!.gpsLocation!.latitude - NEAR.lat) < 0.001, withRaw?.gpsLocation);
     check('includeRawGps=true -> siteGeofence populated', withRaw?.siteGeofence?.radiusMeters === 650, withRaw?.siteGeofence);
 
+    check('includeRawGps=true -> gpsLocation.isApproximate false for a normal fix', withRaw?.gpsLocation?.isApproximate === false, withRaw?.gpsLocation);
+
     const noRaw = await getAttendanceExceptionDetail(exc.id, null);
     check('no includeRawGps -> gpsLocation null', noRaw?.gpsLocation === null, noRaw?.gpsLocation);
     check('no includeRawGps -> siteGeofence null', noRaw?.siteGeofence === null, noRaw?.siteGeofence);
     check('detail JSON still surfaced regardless', noRaw?.detail?.pointInsideGeofence === true, noRaw?.detail);
+  }
+
+  // 8. T14 — an approximate ClockEventLocation surfaces its age on the detail DTO
+  {
+    const admin = await prisma.user.create({ data: { username: `gpsxa_${randomUUID().slice(0, 6)}`, status: 'ACTIVE', locale: 'EN', userRoles: { create: { roleId: (await prisma.role.findFirstOrThrow({ where: { name: 'ADMIN' } })).id } } } });
+    const site = await prisma.workSite.create({ data: { name: `GPSXA ${randomUUID().slice(0, 4)}` } });
+    const emp = await prisma.employee.create({ data: { employeeNumber: `GPSXA-${randomUUID().slice(0, 8)}`, firstName: 'Gps', lastName: 'Approx' } });
+    await prisma.employment.create({ data: { employeeId: emp.id, active: true, startDate: new Date('2020-01-01') } });
+    const period = await prisma.payrollPeriod.create({ data: { startDate: new Date(Date.UTC(2024, 0, 1)), endDate: new Date(Date.UTC(2024, 0, 7)), status: 'OPEN', openedByUserId: admin.id } });
+    const clockEventId = randomUUID();
+    await prisma.clockEvent.create({
+      data: {
+        id: clockEventId, groupId: randomUUID(), employeeId: emp.id, operationType: 'CHECK_IN', siteId: site.id,
+        clientCapturedAt: new Date(), capturedOffline: true, serverReceivedAt: new Date(), effectiveAt: new Date(),
+        clockSkewMs: BigInt(0), gpsAccuracyMeters: null, gpsVerification: 'NOT_VERIFIED', gpsUnavailableReason: 'TIMEOUT',
+        processingState: 'ACCEPTED', channel: 'OFFLINE_SYNC', payloadHash: 'y'.repeat(64), requestId: randomUUID()
+      }
+    });
+    await prisma.clockEventLocation.create({ data: { clockEventId, latitude: NEAR.lat, longitude: NEAR.lon, isApproximate: true, fixAgeSeconds: 480 } });
+    const exc = await prisma.attendanceException.create({
+      data: { type: 'GPS_NOT_VERIFIED', employeeId: emp.id, payrollPeriodId: period.id, occurredAt: new Date(), siteId: site.id, clockEventId, status: 'OPEN' }
+    });
+    const withRaw = await getAttendanceExceptionDetail(exc.id, null, { includeRawGps: true });
+    check('approximate ClockEventLocation -> gpsLocation.isApproximate true + fixAgeSeconds 480', withRaw?.gpsLocation?.isApproximate === true && withRaw?.gpsLocation?.fixAgeSeconds === 480 && withRaw?.gpsLocation?.capturedAfterEventSeconds === null, withRaw?.gpsLocation);
   }
 
   console.log(JSON.stringify({ pass, fail }));

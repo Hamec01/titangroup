@@ -352,8 +352,11 @@ export interface ExceptionDetail extends ExceptionListItem {
   resolvedBy: { id: string; name: string } | null;
   /** GPS-1 — raw retained Check In/Out coordinates + the site's current geofence, for the
    * "where was this" mini-map. Non-null ONLY when getAttendanceExceptionDetail was called with
-   * `includeRawGps` (the caller holds attendance.gps.read.raw). */
-  gpsLocation: { latitude: number; longitude: number } | null;
+   * `includeRawGps` (the caller holds attendance.gps.read.raw).
+   * T14 — `isApproximate` marks a point that is NOT a fix taken at the clock event: `fixAgeSeconds`
+   * = it was this old (the device's last-good fix), `capturedAfterEventSeconds` = it locked this
+   * long after the event (background back-fill). Rendered as a dashed "approximate" marker. */
+  gpsLocation: { latitude: number; longitude: number; isApproximate: boolean; fixAgeSeconds: number | null; capturedAfterEventSeconds: number | null } | null;
   siteGeofence: { latitude: number; longitude: number; radiusMeters: number } | null;
 }
 
@@ -392,7 +395,7 @@ const DETAIL_SELECT = {
       gpsAccuracyMeters: true,
       gpsUnavailableReason: true,
       // GPS-1 — raw retained coordinates; only ever surfaced when the caller holds attendance.gps.read.raw.
-      location: { select: { latitude: true, longitude: true } }
+      location: { select: { latitude: true, longitude: true, isApproximate: true, fixAgeSeconds: true, capturedAfterEventSeconds: true } }
     }
   },
   clockShiftId: true,
@@ -488,7 +491,13 @@ export async function getAttendanceExceptionDetail(
     resolvedBy: row.resolvedByUserId && row.resolvedByUser ? { id: row.resolvedByUserId, name: actorDisplayName(row.resolvedByUser) } : null,
     gpsLocation:
       options?.includeRawGps && row.clockEvent?.location
-        ? { latitude: Number(row.clockEvent.location.latitude), longitude: Number(row.clockEvent.location.longitude) }
+        ? {
+            latitude: Number(row.clockEvent.location.latitude),
+            longitude: Number(row.clockEvent.location.longitude),
+            isApproximate: row.clockEvent.location.isApproximate,
+            fixAgeSeconds: row.clockEvent.location.fixAgeSeconds,
+            capturedAfterEventSeconds: row.clockEvent.location.capturedAfterEventSeconds
+          }
         : null,
     siteGeofence:
       options?.includeRawGps && row.site?.currentGeofenceVersion

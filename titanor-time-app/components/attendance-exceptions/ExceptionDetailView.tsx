@@ -26,6 +26,23 @@ import { ExceptionGpsMap } from './ExceptionGpsMap';
 // same way regardless of whether the underlying reason is "nothing linked" or FOREMAN own↔foreign
 // redaction — this view never tries to tell those apart or guess the redacted side's data.
 
+// T14 — a one-line description of an approximate GPS point (its age / how long after the event it
+// arrived), for both the Clock-event field list and the mini-map caption.
+function approximateLocationNote(loc: NonNullable<ExceptionDetail['gpsLocation']>, ru: boolean): string {
+  const mins = (seconds: number) => Math.max(1, Math.round(seconds / 60));
+  if (loc.capturedAfterEventSeconds !== null) {
+    return ru
+      ? `Приблизительно — координаты получены примерно через ${mins(loc.capturedAfterEventSeconds)} мин после отметки`
+      : `Approximate — location fixed about ${mins(loc.capturedAfterEventSeconds)} min after the clock event`;
+  }
+  if (loc.fixAgeSeconds !== null) {
+    return ru
+      ? `Приблизительно — последняя известная координата устройства, ≈ ${mins(loc.fixAgeSeconds)} мин назад`
+      : `Approximate — the device's last known location, ≈ ${mins(loc.fixAgeSeconds)} min old`;
+  }
+  return ru ? 'Приблизительно — координата из кэша устройства, возраст неизвестен' : 'Approximate — a cached device location, age unknown';
+}
+
 interface Props {
   basePath: string;
   detail: ExceptionDetail;
@@ -132,6 +149,12 @@ export function ExceptionDetailView({ basePath, detail, timesheetHref, resolutio
                 <dd>{gpsUnavailableReasonLabel(detail.clockEvent.gpsUnavailableReason, locale)}</dd>
               </div>
             )}
+            {detail.gpsLocation?.isApproximate && (
+              <div>
+                <dt>{ru ? 'Местоположение' : 'Location'}</dt>
+                <dd>{approximateLocationNote(detail.gpsLocation, ru)}</dd>
+              </div>
+            )}
           </dl>
         </section>
       )}
@@ -163,11 +186,18 @@ export function ExceptionDetailView({ basePath, detail, timesheetHref, resolutio
             point={detail.gpsLocation}
             accuracyMeters={detail.clockEvent?.gpsAccuracyMeters ?? null}
             geofence={detail.siteGeofence}
+            approximate={detail.gpsLocation.isApproximate}
           />
           <p className="exc-muted">
-            {ru
-              ? 'Красный — GPS-точка работника и круг точности; зелёный — геозона объекта. Координаты приблизительны при плохой точности.'
-              : "Red — the worker's GPS point and its accuracy circle; green — the site geofence. Coordinates are approximate at low accuracy."}
+            {detail.gpsLocation.isApproximate
+              ? `${approximateLocationNote(detail.gpsLocation, ru)}. ${
+                  ru
+                    ? 'Серая пунктирная метка — не проверенное по геозоне местоположение; зелёный — геозона объекта.'
+                    : 'The grey dashed marker is an unverified location, not a geofence check; green — the site geofence.'
+                }`
+              : ru
+                ? 'Красный — GPS-точка работника и круг точности; зелёный — геозона объекта. Координаты приблизительны при плохой точности.'
+                : "Red — the worker's GPS point and its accuracy circle; green — the site geofence. Coordinates are approximate at low accuracy."}
           </p>
           <p>
             <Link href={`/admin/workers/${detail.employee.id}/locations`}>
