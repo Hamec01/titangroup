@@ -60,10 +60,14 @@ export interface GpsLocation {
 
 export interface GpsSnapshot {
   location: GpsLocation | null;
+  /** The reason a fresh reading could not be taken. Non-null when `location` is null, AND also
+   *  when `approximate` is true (the point is a stale/cached fallback and this says why the live
+   *  read failed). Null only for a genuine fresh fix. */
   gpsUnavailableReason: ClientGpsUnavailableReason | null;
   /** T14 — true when `location` is a stale/cached fix, not a fresh reading at the moment of the
-   *  clock event. `fixAgeSeconds` is how old it is. The server marks the recorded coordinate
-   *  approximate; the geofence check does not "verify" an approximate point. */
+   *  clock event. `fixAgeSeconds` is how old it is (null for an OS-cached fix of unknown age).
+   *  The server marks the recorded coordinate approximate; the geofence check does not "verify"
+   *  an approximate point. */
   approximate: boolean;
   fixAgeSeconds: number | null;
 }
@@ -344,18 +348,22 @@ export async function captureGpsSnapshot(opts: { maxWaitMs?: number; signal?: Ab
   const finishWithBestAvailable = async (lastError: ClientGpsUnavailableReason | null): Promise<GpsSnapshot> => {
     const buffered = bestRecentFix(maxWaitMs + 10_000);
     if (buffered) return { location: buffered, gpsUnavailableReason: null, ...FRESH };
+    // On the approximate branches `gpsUnavailableReason` records why the FRESH read failed (the
+    // point is real but stale) — the server keeps such an event NOT_VERIFIED and stores the
+    // coordinate as an approximate ClockEventLocation, using this reason for the exception detail.
+    const staleReason: ClientGpsUnavailableReason = lastError ?? 'TIMEOUT';
     if (typeof navigator !== 'undefined' && navigator.geolocation) {
       const cached = await getCurrentPositionCached(OS_CACHE_MAX_AGE_MS, 4000);
       if (cached.location) {
         // The OS reading may itself be a few minutes old; we can't tell exactly, so treat it as
         // approximate but don't claim a precise age.
-        return { location: cached.location, gpsUnavailableReason: null, approximate: true, fixAgeSeconds: null };
+        return { location: cached.location, gpsUnavailableReason: staleReason, approximate: true, fixAgeSeconds: null };
       }
       lastError = lastError ?? cached.reason;
     }
     const persisted = loadPersistedFix();
     if (persisted) {
-      return { location: persisted.location, gpsUnavailableReason: null, approximate: true, fixAgeSeconds: Math.round(persisted.ageMs / 1000) };
+      return { location: persisted.location, gpsUnavailableReason: lastError ?? 'TIMEOUT', approximate: true, fixAgeSeconds: Math.round(persisted.ageMs / 1000) };
     }
     return { location: null, gpsUnavailableReason: lastError ?? 'POSITION_UNAVAILABLE', ...FRESH };
   };

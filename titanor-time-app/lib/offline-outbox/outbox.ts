@@ -15,6 +15,7 @@ import {
   SINGLETON_KEY,
   type OutboxEventRecord,
   type OutboxGps,
+  type OutboxApproximateGps,
   type OutboxGpsUnavailableReason,
   type LocalClockStateRecord,
   type DeviceStateRecord
@@ -43,6 +44,7 @@ interface EventSpec {
   clientCapturedAt: string;
   gps: OutboxGps | null;
   gpsUnavailableReason: OutboxGpsUnavailableReason | null;
+  gpsApproximate: OutboxApproximateGps | null;
   cachedGeofenceVersionId: string | null;
 }
 
@@ -135,6 +137,8 @@ async function atomicEnqueue(specs: EventSpec[], localStateAfter: Omit<LocalCloc
       capturedOffline: true,
       gps: spec.gps,
       gpsUnavailableReason: spec.gpsUnavailableReason,
+      // T14 — provenance metadata, deliberately NOT in computePayloadHash above (see EventSpec / db.ts).
+      gpsApproximate: spec.gpsApproximate,
       cachedGeofenceVersionId: spec.cachedGeofenceVersionId,
       deviceInstallationId: deviceState.deviceInstallationId,
       payloadVersion: 1,
@@ -167,6 +171,7 @@ export interface EnqueueCheckInInput {
   clientCapturedAt: string;
   gps: OutboxGps | null;
   gpsUnavailableReason: OutboxGpsUnavailableReason | null;
+  gpsApproximate: OutboxApproximateGps | null;
   cachedGeofenceVersionId: string | null;
 }
 
@@ -184,6 +189,7 @@ export async function enqueueCheckIn(input: EnqueueCheckInInput): Promise<Outbox
         clientCapturedAt: input.clientCapturedAt,
         gps: input.gps,
         gpsUnavailableReason: input.gpsUnavailableReason,
+        gpsApproximate: input.gpsApproximate,
         cachedGeofenceVersionId: input.cachedGeofenceVersionId
       }
     ],
@@ -197,6 +203,7 @@ export interface EnqueueCheckOutInput {
   clientCapturedAt: string;
   gps: OutboxGps | null;
   gpsUnavailableReason: OutboxGpsUnavailableReason | null;
+  gpsApproximate: OutboxApproximateGps | null;
 }
 
 export async function enqueueCheckOut(input: EnqueueCheckOutInput): Promise<OutboxEventRecord> {
@@ -213,6 +220,7 @@ export async function enqueueCheckOut(input: EnqueueCheckOutInput): Promise<Outb
         clientCapturedAt: input.clientCapturedAt,
         gps: input.gps,
         gpsUnavailableReason: input.gpsUnavailableReason,
+        gpsApproximate: input.gpsApproximate,
         cachedGeofenceVersionId: null
       }
     ],
@@ -230,6 +238,7 @@ export interface EnqueueSwitchSiteInput {
   clientCapturedAt: string;
   gps: OutboxGps | null;
   gpsUnavailableReason: OutboxGpsUnavailableReason | null;
+  gpsApproximate: OutboxApproximateGps | null;
   cachedGeofenceVersionId: string | null;
 }
 
@@ -251,6 +260,7 @@ export async function enqueueSwitchSite(input: EnqueueSwitchSiteInput): Promise<
         clientCapturedAt: input.clientCapturedAt,
         gps: input.gps,
         gpsUnavailableReason: input.gpsUnavailableReason,
+        gpsApproximate: input.gpsApproximate,
         cachedGeofenceVersionId: null
       },
       {
@@ -263,6 +273,7 @@ export async function enqueueSwitchSite(input: EnqueueSwitchSiteInput): Promise<
         clientCapturedAt: input.clientCapturedAt,
         gps: input.gps,
         gpsUnavailableReason: input.gpsUnavailableReason,
+        gpsApproximate: input.gpsApproximate,
         cachedGeofenceVersionId: input.cachedGeofenceVersionId
       }
     ],

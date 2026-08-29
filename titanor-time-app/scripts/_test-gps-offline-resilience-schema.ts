@@ -85,16 +85,23 @@ async function main() {
     check('CHECK rejects both fixAgeSeconds and capturedAfterEventSeconds set', threw);
   }
 
-  // 6. CHECK rejects: isApproximate=true but no age at all
+  // 6. an approximate fix with no knowable age (OS-cached position) — allowed (migration 20260829180000)
+  {
+    const { eventId } = await makeClockEvent();
+    const loc = await prisma.clockEventLocation.create({ data: { clockEventId: eventId, latitude: 60.44, longitude: 22.21, isApproximate: true } });
+    check('approximate ClockEventLocation with no age columns is allowed', loc.isApproximate === true && loc.fixAgeSeconds === null && loc.capturedAfterEventSeconds === null, loc);
+  }
+
+  // 6b. CHECK still rejects: an age column set on a NON-approximate fix
   {
     const { eventId } = await makeClockEvent();
     let threw = false;
     try {
-      await prisma.clockEventLocation.create({ data: { clockEventId: eventId, latitude: 60.44, longitude: 22.21, isApproximate: true } });
+      await prisma.clockEventLocation.create({ data: { clockEventId: eventId, latitude: 60.44, longitude: 22.21, isApproximate: false, fixAgeSeconds: 120 } });
     } catch (e) {
       threw = isCheckViolation(e);
     }
-    check('CHECK rejects isApproximate=true with no age columns', threw);
+    check('CHECK rejects an age column on a non-approximate fix', threw);
   }
 
   // 7. CHECK rejects: negative age

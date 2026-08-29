@@ -24,6 +24,24 @@ export interface OutboxGps {
   accuracyMeters: number;
 }
 
+// T14 (2026-08-29) — an APPROXIMATE coordinate: the last good fix the device still had while it
+// could not get a fresh one (indoors / ship hull / offline), or one the background back-fill
+// attached after the event was already queued. Rides alongside `gps` (which stays null in that
+// case, with `gpsUnavailableReason` set) — the server records it as ClockEventLocation with
+// isApproximate=true and NEVER runs it through geofence verification.
+//   fixAgeSeconds            — the fix was this many seconds OLD at capture (last-good fix);
+//                              null when the source is an OS-cached position of unknown age.
+//   capturedAfterEventSeconds — the fix locked this many seconds AFTER the event (back-fill).
+// At most one of the two is ever set. Not part of the outbox payload hash (provenance metadata,
+// not the coordinate itself — a retry / a pre-send back-fill must stay hash-stable).
+export interface OutboxApproximateGps {
+  latitude: number;
+  longitude: number;
+  accuracyMeters: number;
+  fixAgeSeconds: number | null;
+  capturedAfterEventSeconds: number | null;
+}
+
 export type OutboxEventState = 'PENDING' | 'SENDING' | 'ACKED' | 'FAILED_TERMINAL';
 
 // §6 "Запись clockOutbox" — field-for-field. `deviceSequence` is a plain number (safe integer,
@@ -40,6 +58,8 @@ export interface OutboxEventRecord {
   capturedOffline: true;
   gps: OutboxGps | null;
   gpsUnavailableReason: OutboxGpsUnavailableReason | null;
+  /** T14 — optional (a row enqueued before this field existed reads as `undefined`). */
+  gpsApproximate?: OutboxApproximateGps | null;
   cachedGeofenceVersionId: string | null;
   deviceInstallationId: string;
   payloadVersion: 1;

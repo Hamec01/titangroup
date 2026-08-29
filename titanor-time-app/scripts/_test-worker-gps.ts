@@ -176,6 +176,7 @@ async function main() {
     const approx = await captureGpsSnapshot({ maxWaitMs: 300 });
     check('captureGpsSnapshot falls back to the persisted fix, approximate=true', approx.location?.latitude === 60.4438 && approx.approximate === true, approx);
     check('  fixAgeSeconds ~ 480 (8 min)', typeof approx.fixAgeSeconds === 'number' && approx.fixAgeSeconds >= 470 && approx.fixAgeSeconds <= 490, approx.fixAgeSeconds);
+    check('  approximate fallback carries the failed-fresh-read reason (TIMEOUT)', approx.gpsUnavailableReason === 'TIMEOUT', approx.gpsUnavailableReason);
 
     // persisted fix older than the 30-min TTL is ignored
     __resetGpsForTest();

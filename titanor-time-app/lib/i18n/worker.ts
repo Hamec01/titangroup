@@ -69,6 +69,11 @@ export interface WorkerStrings {
   gpsAccuracyPoor: (m: number) => string;
   gpsRefine: string;
   gpsRefining: string;
+  // T14 — "wait for GPS / clock in anyway" prompt shown when no fresh fix is on hand
+  gpsWaitTitle: string;
+  gpsWaitBody: (seconds: number) => string;
+  gpsWaitProceed: string;
+  savedApproxLocation: string;
   statusZone: string;
   statusZoneChecking: string;
   statusZoneInside: string;
@@ -340,6 +345,10 @@ export const WORKER_STRINGS: Record<AppLocale, WorkerStrings> = {
     gpsAccuracyPoor: (m: number) => `GPS accuracy ±${m} m — weak signal`,
     gpsRefine: 'Improve',
     gpsRefining: 'Improving…',
+    gpsWaitTitle: 'Finding your location',
+    gpsWaitBody: (seconds: number) => `Please wait about ${seconds} more second${seconds === 1 ? '' : 's'} — the phone hasn't got a GPS fix yet. Indoors or in a hull this can take a while.`,
+    gpsWaitProceed: 'Clock in anyway',
+    savedApproxLocation: 'Saved with an approximate location — the phone had no fresh GPS fix.',
     statusZone: 'Zone',
     statusZoneChecking: 'Checking…',
     statusZoneInside: 'In work zone',
@@ -598,6 +607,10 @@ export const WORKER_STRINGS: Record<AppLocale, WorkerStrings> = {
     gpsAccuracyPoor: (m: number) => `Точность GPS ±${m} м — слабый сигнал`,
     gpsRefine: 'Уточнить',
     gpsRefining: 'Уточняем…',
+    gpsWaitTitle: 'Определяем ваше местоположение',
+    gpsWaitBody: (seconds: number) => `Прошу подождать ещё около ${seconds} сек — телефон пока не получил координаты GPS. В помещении или внутри корпуса это может занять время.`,
+    gpsWaitProceed: 'Всё равно отметить',
+    savedApproxLocation: 'Сохранено с приблизительным местоположением — телефон не получил свежих координат GPS.',
     statusZone: 'Зона',
     statusZoneChecking: 'Проверяем…',
     statusZoneInside: 'В рабочей зоне',

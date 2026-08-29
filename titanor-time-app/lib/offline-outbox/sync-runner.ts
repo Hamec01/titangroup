@@ -56,7 +56,9 @@ function toWireEvent(record: OutboxEventRecord) {
     capturedOffline: true as const,
     cachedGeofenceVersionId: record.cachedGeofenceVersionId,
     gps: record.gps,
-    gpsUnavailableReason: record.gpsUnavailableReason
+    gpsUnavailableReason: record.gpsUnavailableReason,
+    // T14 — null for rows enqueued before this field existed; the server treats absent/null the same.
+    gpsApproximate: record.gpsApproximate ?? null
   };
 }
 

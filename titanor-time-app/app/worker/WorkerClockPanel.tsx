@@ -10,6 +10,7 @@ import {
   startGpsWatch,
   stopGpsWatch,
   currentBestFix,
+  hasFreshGoodFix,
   isGeoOnboarded,
   markGeoOnboarded,
   clearGeoOnboarded,
@@ -18,6 +19,7 @@ import {
 } from '@/lib/worker-gps';
 import { ensureDeviceBootstrapped, retryBootstrap, type BootstrapOutcome } from '@/lib/offline-outbox/device';
 import { enqueueCheckIn, enqueueCheckOut, enqueueSwitchSite, EnqueueError } from '@/lib/offline-outbox/outbox';
+import type { OutboxGps, OutboxApproximateGps, OutboxGpsUnavailableReason } from '@/lib/offline-outbox/db';
 import { runSyncOnce, tryRefreshClockState, type ClockStateWire, type SyncRunOutcome } from '@/lib/offline-outbox/sync-runner';
 import { enqueuePresenceSample, lastPresenceCaptureMs, shouldCapturePresence } from '@/lib/offline-outbox/presence';
 import { runPresenceSyncOnce } from '@/lib/offline-outbox/presence-sync';
@@ -42,6 +44,10 @@ const BOUNDED_SYNC_TIMER_MS = 25000;
 // "in zone" badge below updates without the worker having to press anything. Paused while the tab
 // is hidden (see the visibility gate on the interval below).
 const ZONE_CHECK_INTERVAL_MS = 30000;
+// T14 — when a Check In/Out/Switch is pressed and no fresh GPS fix is on hand, show a short
+// "finding your location" prompt with this countdown and a "clock in anyway" button that aborts
+// the wait and proceeds with whatever (cached / last-good / none) worker-gps can offer.
+const GPS_WAIT_SECONDS = 15;
 
 interface StatusMessage {
   kind: 'info' | 'error';
@@ -171,6 +177,9 @@ export function WorkerClockPanel({ initialClockState, assignments, workerName, t
   const [gpsPermission, setGpsPermission] = useState<GeolocationPermissionState | null>(null);
   const [bestAccuracyM, setBestAccuracyM] = useState<number | null>(null);
   const [refiningGps, setRefiningGps] = useState(false);
+  // T14 — the "finding your location" prompt: `null` when not waiting, otherwise the seconds left.
+  const [gpsWaitSecondsLeft, setGpsWaitSecondsLeft] = useState<number | null>(null);
+  const gpsWaitAbortRef = useRef<AbortController | null>(null);
   const [selectedAssignmentId, setSelectedAssignmentId] = useState<string | null>(() => {
     if (assignments.length === 0) return null;
     const primary = assignments.find((a) => a.isPrimary);
@@ -315,6 +324,9 @@ export function WorkerClockPanel({ initialClockState, assignments, workerName, t
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // T14 — abort any in-progress "finding your location" wait if the panel unmounts mid-capture.
+  useEffect(() => () => gpsWaitAbortRef.current?.abort(), []);
 
   // A clock-action capture that comes back PERMISSION_DENIED is the OS actively refusing — surface
   // the "blocked, fix it in settings" banner and forget the onboarding flag.
@@ -546,6 +558,34 @@ export function WorkerClockPanel({ initialClockState, assignments, workerName, t
 
   const deviceReady = bootstrap?.kind === 'READY';
 
+  // T14 — capture GPS for a clock action. If a fresh accurate fix is already on hand, proceed with
+  // no prompt. Otherwise show the "finding your location" countdown; `captureGpsSnapshot` waits up
+  // to GPS_WAIT_SECONDS and the worker can press "clock in anyway" (skipGpsWait) to abort early and
+  // take whatever cached / last-good point is available.
+  async function runGpsCapture(): Promise<GpsSnapshot> {
+    if (hasFreshGoodFix()) {
+      return captureGpsSnapshot({ maxWaitMs: GPS_WAIT_SECONDS * 1000 });
+    }
+    const abort = new AbortController();
+    gpsWaitAbortRef.current = abort;
+    const startedAt = Date.now();
+    setGpsWaitSecondsLeft(GPS_WAIT_SECONDS);
+    const ticker = window.setInterval(() => {
+      setGpsWaitSecondsLeft(Math.max(0, GPS_WAIT_SECONDS - Math.floor((Date.now() - startedAt) / 1000)));
+    }, 250);
+    try {
+      return await captureGpsSnapshot({ maxWaitMs: GPS_WAIT_SECONDS * 1000, signal: abort.signal });
+    } finally {
+      window.clearInterval(ticker);
+      setGpsWaitSecondsLeft(null);
+      gpsWaitAbortRef.current = null;
+    }
+  }
+
+  function skipGpsWait() {
+    gpsWaitAbortRef.current?.abort();
+  }
+
   async function handleCheckIn() {
     if (busyRef.current || !deviceReady || !selectedAssignmentId) {
       return;
@@ -559,21 +599,21 @@ export function WorkerClockPanel({ initialClockState, assignments, workerName, t
     setGpsStatus('CHECKING');
     setStatusMessage({ kind: 'info', text: t.gettingLocation });
     try {
-      const gpsSnapshot: GpsSnapshot = await captureGpsSnapshot();
+      const gpsSnapshot: GpsSnapshot = await runGpsCapture();
       setGpsStatus(resolveGpsUiState(gpsSnapshot));
       setLocating(false);
+      const gpsFields = outboxGpsFields(gpsSnapshot);
       await enqueueCheckIn({
         siteId: assignment.siteId,
         siteName: assignment.siteName,
         workAreaId: assignment.workAreaId,
         workAreaName: assignment.workAreaName,
         clientCapturedAt: new Date().toISOString(),
-        gps: gpsSnapshot.location,
-        gpsUnavailableReason: gpsSnapshot.gpsUnavailableReason,
+        ...gpsFields,
         cachedGeofenceVersionId: cachedGeofenceVersionIdFor(assignment.siteId)
       });
       await refreshOutboxSnapshot();
-      setStatusMessage({ kind: 'info', text: isOnline ? t.savedSyncing : t.savedWaitingForSync });
+      setStatusMessage({ kind: 'info', text: gpsFields.gpsApproximate ? t.savedApproxLocation : isOnline ? t.savedSyncing : t.savedWaitingForSync });
       void triggerSync();
     } catch (err) {
       handleEnqueueError(err);
@@ -592,20 +632,20 @@ export function WorkerClockPanel({ initialClockState, assignments, workerName, t
     setGpsStatus('CHECKING');
     setStatusMessage({ kind: 'info', text: t.gettingLocation });
     try {
-      const gpsSnapshot: GpsSnapshot = await captureGpsSnapshot();
+      const gpsSnapshot: GpsSnapshot = await runGpsCapture();
       setGpsStatus(resolveGpsUiState(gpsSnapshot));
       setLocating(false);
       // §5.4 — Check Out is never blocked by a missing/failed GPS reading.
+      const gpsFields = outboxGpsFields(gpsSnapshot);
       await enqueueCheckOut({
         assumedSiteId: projected.siteId,
         clientCapturedAt: new Date().toISOString(),
-        gps: gpsSnapshot.location,
-        gpsUnavailableReason: gpsSnapshot.gpsUnavailableReason
+        ...gpsFields
       });
       await refreshOutboxSnapshot();
       setSwitchPanelOpen(false);
       setSwitchTargetId(null);
-      setStatusMessage({ kind: 'info', text: isOnline ? t.savedSyncing : t.savedWaitingForSync });
+      setStatusMessage({ kind: 'info', text: gpsFields.gpsApproximate ? t.savedApproxLocation : isOnline ? t.savedSyncing : t.savedWaitingForSync });
       void triggerSync();
     } catch (err) {
       handleEnqueueError(err);
@@ -646,9 +686,10 @@ export function WorkerClockPanel({ initialClockState, assignments, workerName, t
     setGpsStatus('CHECKING');
     setStatusMessage({ kind: 'info', text: t.gettingLocation });
     try {
-      const gpsSnapshot: GpsSnapshot = await captureGpsSnapshot();
+      const gpsSnapshot: GpsSnapshot = await runGpsCapture();
       setGpsStatus(resolveGpsUiState(gpsSnapshot));
       setLocating(false);
+      const gpsFields = outboxGpsFields(gpsSnapshot);
       await enqueueSwitchSite({
         oldAssumedSiteId: projected.siteId,
         newSiteId: target.siteId,
@@ -656,14 +697,13 @@ export function WorkerClockPanel({ initialClockState, assignments, workerName, t
         newWorkAreaId: target.workAreaId,
         newWorkAreaName: target.workAreaName,
         clientCapturedAt: new Date().toISOString(),
-        gps: gpsSnapshot.location,
-        gpsUnavailableReason: gpsSnapshot.gpsUnavailableReason,
+        ...gpsFields,
         cachedGeofenceVersionId: cachedGeofenceVersionIdFor(target.siteId)
       });
       await refreshOutboxSnapshot();
       setSwitchPanelOpen(false);
       setSwitchTargetId(null);
-      setStatusMessage({ kind: 'info', text: isOnline ? t.savedSyncing : t.savedWaitingForSync });
+      setStatusMessage({ kind: 'info', text: gpsFields.gpsApproximate ? t.savedApproxLocation : isOnline ? t.savedSyncing : t.savedWaitingForSync });
       void triggerSync();
     } catch (err) {
       handleEnqueueError(err);
@@ -800,6 +840,16 @@ export function WorkerClockPanel({ initialClockState, assignments, workerName, t
         <div className="wk-return-notice" role="alert">
           <h2 className="wk-return-notice-title">{t.gpsDeniedTitle}</h2>
           <p className="wk-return-reason-text">{t.gpsDeniedBody}</p>
+        </div>
+      )}
+
+      {gpsWaitSecondsLeft !== null && (
+        <div className="wk-return-notice" role="status" aria-live="polite">
+          <h2 className="wk-return-notice-title">{t.gpsWaitTitle}</h2>
+          <p className="wk-return-reason-text">{t.gpsWaitBody(gpsWaitSecondsLeft)}</p>
+          <button type="button" className="wk-clock-secondary-button" onClick={skipGpsWait}>
+            {t.gpsWaitProceed}
+          </button>
         </div>
       )}
 
@@ -1073,6 +1123,24 @@ export function WorkerClockPanel({ initialClockState, assignments, workerName, t
 
     </div>
   );
+}
+
+// T14 — split a capture into the three outbox GPS fields. A FRESH fix rides as `gps` (the server
+// can verify it against the geofence). An APPROXIMATE fix (OS-cached / device last-good) rides as
+// `gpsApproximate` with `gps` null — the server stores it as an approximate ClockEventLocation and
+// never runs it through geofence verification. No fix at all: just the reason.
+function outboxGpsFields(snap: GpsSnapshot): { gps: OutboxGps | null; gpsUnavailableReason: OutboxGpsUnavailableReason | null; gpsApproximate: OutboxApproximateGps | null } {
+  if (snap.location && !snap.approximate) {
+    return { gps: snap.location, gpsUnavailableReason: null, gpsApproximate: null };
+  }
+  if (snap.location && snap.approximate) {
+    return {
+      gps: null,
+      gpsUnavailableReason: snap.gpsUnavailableReason ?? 'POSITION_UNAVAILABLE',
+      gpsApproximate: { latitude: snap.location.latitude, longitude: snap.location.longitude, accuracyMeters: snap.location.accuracyMeters, fixAgeSeconds: snap.fixAgeSeconds, capturedAfterEventSeconds: null }
+    };
+  }
+  return { gps: null, gpsUnavailableReason: snap.gpsUnavailableReason, gpsApproximate: null };
 }
 
 function resolveGpsUiState(snapshot: GpsSnapshot): GpsUiState {

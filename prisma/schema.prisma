@@ -1570,10 +1570,13 @@ model ClockEventLocation {
   // T14 (2026-08-29) — GPS offline resilience. A fresh fix at the moment of the clock event has
   // isApproximate=false and both age columns null (the normal case). When the device could not
   // get a fresh fix (indoors / in a ship hull / offline), the client may instead attach the last
-  // good fix it still had — isApproximate=true, fixAgeSeconds = how old that fix was. If a good
-  // fix only arrived AFTER the event was already queued (the worker walked back outside), the
+  // good fix it still had — isApproximate=true, fixAgeSeconds = how old that fix was (null when
+  // the source is an OS-cached position whose age the browser does not expose). If a good fix
+  // only arrived AFTER the event was already queued (the worker walked back outside), the
   // background back-fill attaches it with capturedAfterEventSeconds set. These points render on
   // the admin map as a dashed "approximate" marker, never as a verified location.
+  // CHECK ck_clock_event_location_approx_shape (migration 20260829180000): the two age columns
+  // are non-negative and mutually exclusive, and only an approximate fix may carry an age.
   isApproximate             Boolean  @default(false)
   fixAgeSeconds             Int?
   capturedAfterEventSeconds Int?
