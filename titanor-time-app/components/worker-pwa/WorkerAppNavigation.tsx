@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { usePathname, useRouter } from 'next/navigation';
 import { WorkerLink } from '@/components/worker-pwa/WorkerLink';
+import { WorkerNotificationBell } from '@/components/worker-pwa/WorkerNotificationBell';
 import { LanguageSwitcher } from '@/components/i18n/LanguageSwitcher';
 import { useAppLocale } from '@/components/i18n/AppLocaleProvider';
 import { COMMON_STRINGS } from '@/lib/i18n/common';
@@ -75,6 +76,7 @@ export function WorkerAppNavigation({ username }: { username: string }) {
               <span>{t.navHome}</span>
             </WorkerLink>
           ) : null}
+          <WorkerNotificationBell />
           <button
             type="button"
             className="wk-menu-button"

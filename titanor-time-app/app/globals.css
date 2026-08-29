@@ -1307,6 +1307,139 @@ button:disabled {
   background: rgba(0, 0, 0, 0.6);
 }
 
+/* T15.3 — worker notification bell, next to the ☰ menu */
+.wk-notif-wrap {
+  position: relative;
+  display: inline-flex;
+}
+
+.wk-notif-button {
+  position: relative;
+  width: 44px;
+  height: 44px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--white);
+  cursor: pointer;
+}
+
+.wk-notif-button:focus-visible {
+  outline: 2px solid var(--accent-light);
+  outline-offset: 2px;
+}
+
+.wk-notif-badge {
+  position: absolute;
+  top: -5px;
+  right: -5px;
+  min-width: 17px;
+  height: 17px;
+  padding: 0 4px;
+  border-radius: 999px;
+  font-size: 0.65rem;
+  font-weight: 700;
+  line-height: 17px;
+  text-align: center;
+  background: #fcd34d;
+  color: #1a1206;
+}
+
+.wk-notif-badge.warn {
+  background: #fb7185;
+  color: #2a0a0e;
+}
+
+.wk-notif-panel {
+  position: fixed;
+  top: 64px;
+  right: 12px;
+  width: min(360px, calc(100vw - 24px));
+  max-height: calc(100vh - 96px);
+  overflow-y: auto;
+  background: #0e1420;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 10px;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.45);
+  z-index: 70;
+}
+
+.wk-notif-panel-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 14px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.wk-notif-panel-head h2 {
+  margin: 0;
+  font-size: 0.95rem;
+}
+
+.wk-notif-panel-close {
+  border: 0;
+  background: transparent;
+  color: var(--text-soft);
+  font-size: 1.3rem;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.wk-notif-empty {
+  padding: 18px 14px;
+  color: var(--text-soft);
+  font-size: 0.85rem;
+}
+
+.wk-notif-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.wk-notif-item {
+  padding: 12px 14px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.07);
+  border-left: 3px solid #fcd34d;
+}
+
+.wk-notif-item.warn {
+  border-left-color: #fb7185;
+}
+
+.wk-notif-item-text {
+  margin: 0 0 8px;
+  font-size: 0.86rem;
+  line-height: 1.35;
+}
+
+.wk-notif-item-actions {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+}
+
+.wk-notif-item-link,
+.wk-notif-item-hide {
+  border: 0;
+  background: transparent;
+  padding: 0;
+  font-size: 0.8rem;
+  cursor: pointer;
+}
+
+.wk-notif-item-link {
+  color: var(--accent-light);
+}
+
+.wk-notif-item-hide {
+  color: var(--text-soft);
+}
+
 .wk-app-menu {
   position: fixed;
   z-index: 50;

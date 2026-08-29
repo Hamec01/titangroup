@@ -2021,3 +2021,17 @@ hex characters. It is the SHA-256 key of the normalized explicit administrator q
 provider response is never stored, only an allowlisted JSON array of display name/latitude/
 longitude. `GeocodingProviderState` is the cross-process Nominatim pacing row and adds no raw SQL
 constraint. No trigger, extension or worker GPS relation is introduced by this migration.
+
+## 16. T15.3 Worker Notification Center
+
+Migration `20260829200000_add_worker_notifications` creates `WorkerNotification` /
+`WorkerNotificationDismissal` and one hand-added partial unique index (Prisma DSL cannot express
+the `WHERE`):
+
+- `ux_worker_notification_active_period` on `WorkerNotification ("employeeId", "payrollPeriodId")`
+  `WHERE "resolvedAt" IS NULL AND "payrollPeriodId" IS NOT NULL` — at most one active
+  (unresolved) notification per (employee, period). `lib/worker-notifications.ts`'s generator
+  relies on catching the resulting `23505` (Prisma `P2002`) as the "already have one" signal on a
+  concurrent create; it is otherwise upsert-shaped ("ensure before every read", same pattern as
+  `lib/timesheet-approval-notifications.ts`). No CHECK, trigger or extension is introduced.
+  Dismissal is per `User` (`WorkerNotificationDismissal_notificationId_userId_key`).

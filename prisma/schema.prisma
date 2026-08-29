@@ -284,6 +284,60 @@ enum AdminNotificationSeverity {
   CRITICAL
 }
 
+// T15.3 (2026-08-29) — Worker Notification Center. Same shape as AdminNotification (flat enum, a
+// dismissal table normalised out so it is per-user), but for the worker's own PWA. First type:
+// the timesheet-submission deadline is coming up (or already passed). New types (schedule change,
+// hours corrected by the admin, …) can be added without redesigning.
+enum WorkerNotificationType {
+  // One active row per (employeeId, payrollPeriodId): the current OPEN period's timesheet is still
+  // a draft and its cutoff is within WORKER_DEADLINE_NOTICE_DAYS (or already passed). Resolved once
+  // the timesheet is submitted, or the period closes. `deadlineAt` carries the cutoff instant so
+  // the client renders a live "N days left" / "overdue". Dedup: partial unique index on
+  // (employeeId, payrollPeriodId) WHERE resolvedAt IS NULL (raw SQL in the migration).
+  TIMESHEET_DEADLINE_APPROACHING
+}
+
+enum WorkerNotificationSeverity {
+  INFO
+  WARNING
+}
+
+// T15.3 — one worker's notifications. `employeeId` is the subject; the paired User (the account
+// that logs into the worker app) does the dismissing, recorded in WorkerNotificationDismissal.
+model WorkerNotification {
+  id              String                       @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  type            WorkerNotificationType
+  severity        WorkerNotificationSeverity
+  employeeId      String                       @db.Uuid
+  payrollPeriodId String?                      @db.Uuid
+  timesheetId     String?                      @db.Uuid
+  deadlineAt      DateTime?                    @db.Timestamptz(6)
+  createdAt       DateTime                     @default(now()) @db.Timestamptz(6)
+  resolvedAt      DateTime?                    @db.Timestamptz(6)
+  employee        Employee                     @relation(fields: [employeeId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  payrollPeriod   PayrollPeriod?               @relation(fields: [payrollPeriodId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  timesheet       Timesheet?                   @relation(fields: [timesheetId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  dismissals      WorkerNotificationDismissal[]
+
+  @@index([employeeId, resolvedAt, createdAt(sort: Desc)])
+  @@index([payrollPeriodId])
+  @@index([timesheetId])
+}
+
+// Per-user dismissal state, normalised out so one worker's dismissal never hides a notice from a
+// different account (a shared device with two workers).
+model WorkerNotificationDismissal {
+  id             String             @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  notificationId String             @db.Uuid
+  userId         String             @db.Uuid
+  dismissedAt    DateTime           @default(now()) @db.Timestamptz(6)
+  notification   WorkerNotification @relation(fields: [notificationId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  user           User               @relation(fields: [userId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+
+  @@unique([notificationId, userId])
+  @@index([userId])
+}
+
 // T13.1 (2026-08-29) — Professions. A profession is a trade/work speciality (Welder, Pipe fitter,
 // Carpenter). It is NOT a certificate, NOT a qualification, does NOT grant a system role or any
 // permission, does NOT by itself authorise site work, and does NOT replace EmployeeQualification.
@@ -346,6 +400,7 @@ model User {
   verifiedEmployeeQualifications EmployeeQualification[]       @relation("EmployeeQualificationVerifiedBy")
   createdEmployeeProfessions     EmployeeProfession[]          @relation("EmployeeProfessionCreatedBy")
   adminNotificationDismissals    AdminNotificationDismissal[]
+  workerNotificationDismissals   WorkerNotificationDismissal[]
 }
 
 model Role {
@@ -498,6 +553,7 @@ model Employee {
   profile               EmployeeProfile?
   qualifications        EmployeeQualification[]
   adminNotifications    AdminNotification[]
+  workerNotifications   WorkerNotification[]
   shiftPresenceSamples  ShiftPresenceSample[]
   professions           EmployeeProfession[]
 }
@@ -976,6 +1032,7 @@ model PayrollPeriod {
   clockShiftFragments  ClockShiftFragment[]
   attendanceExceptions AttendanceException[]
   exportBatches        ExportBatch[]
+  workerNotifications  WorkerNotification[]
 
   @@unique([submissionScheduleId, startDate, endDate])
   @@index([status, startDate, endDate])
@@ -1023,6 +1080,7 @@ model Timesheet {
   attendanceExceptions   AttendanceException[]
   autoSubmissionAttempts AutoSubmissionAttempt[]
   adminNotifications     AdminNotification[]
+  workerNotifications    WorkerNotification[]
 
   @@unique([employeeId, periodId])
   @@unique([id, employeeId])
