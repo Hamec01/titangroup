@@ -2,6 +2,7 @@
 
 import { useEffect, useState, type FormEvent } from 'react';
 import { useRouter } from 'next/navigation';
+import Link from 'next/link';
 import {
   DEFAULT_LOGIN_LOCALE,
   LOGIN_LOCALES,
@@ -237,6 +238,9 @@ export default function LoginPage() {
         <button className="login-submit" type="submit" disabled={loading || !hydrated}>
           {loading ? t.submitting : t.submit}
         </button>
+        <Link className="login-secondary-link" href="/reset-password/request">
+          {t.forgotPassword}
+        </Link>
       </form>
     </main>
   );

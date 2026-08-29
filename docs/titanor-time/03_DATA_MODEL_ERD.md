@@ -271,7 +271,12 @@ CASCADE`) — два разных FK на `User` с разными relation-им
 через `UserActivationToken`; если уже `ACTIVE` — новый токен ему не нужен вовсе.
 `UserActivationToken` — только для **standalone** `FOREMAN` без `Employee`.
 
-**PasswordResetToken** (mutable) — аналогично `ActivationToken`, `userId FK → User`.
+**PasswordResetToken** (mutable) — одноразовая ссылка восстановления для любого human-user:
+`userId FK → User` (`ON DELETE RESTRICT`, `ON UPDATE CASCADE`), `tokenHash UNIQUE` (HMAC-SHA256
+от отдельного `PASSWORD_RESET_TOKEN_HMAC_KEY`; сырой токен в БД не хранится), `expiresAt` (1 час),
+`usedAt`, `revokedAt`, `createdAt`. Новый запрос отзывает все неиспользованные ссылки этого
+пользователя; успешная смена пароля помечает текущую ссылку использованной и отзывает все активные
+`UserSession`. Индексы: `(userId, createdAt DESC)`, `(expiresAt)`.
 
 **IdempotencyKey** (mutable, `PROCESSING`→`COMPLETED`)
 

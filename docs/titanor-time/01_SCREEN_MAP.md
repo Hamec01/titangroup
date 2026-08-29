@@ -74,23 +74,23 @@ touch target ≥ 48px), `/foreman/*` — desktop-first с поддержкой �
 - API: `POST /api/auth/set-initial-password`
 - DoD: пароль установлен, токен переходит в `USED`, повторное использование токена невозможно
 
-#### `/reset-password/request` ⚪
+#### `/reset-password/request` 🟢
 - Роли: все (неаутентифицированный)
 - Приоритет: desktop + mobile
 - Назначение: запросить восстановление доступа
-- Действия: submit `identifier` (username или email)
+- Действия: submit привязанного к учётной записи email
 - Состояния: loading; успех показывает одинаковое сообщение независимо от существования аккаунта
 - Откуда: `/login`
 - Куда: сообщение «если аккаунт существует, письмо/код отправлены»
 - API: `POST /api/auth/password-reset/request`
 - DoD: не раскрывает существование аккаунта; rate limited
 
-#### `/reset-password/[token]` ⚪
+#### `/reset-password/[token]` 🟢
 - Роли: неаутентифицированный, валидный `PasswordResetToken`
 - Приоритет: mobile-first
 - Назначение: установить новый пароль (та же форма, что `/set-password`)
 - Откуда: ссылка из `/reset-password/request`
-- Куда: `/login`
+- Куда: `/login`; все предыдущие сессии пользователя отзываются
 - API: `POST /api/auth/password-reset/confirm`
 - DoD: старый пароль перестаёт работать сразу после смены
 

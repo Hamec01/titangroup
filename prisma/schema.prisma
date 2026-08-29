@@ -330,6 +330,7 @@ model User {
   issuedSystemActivationTokens   UserActivationToken[]         @relation("UserActivationTokenCreatedBy")
   userRoles                      UserRole[]
   userSessions                   UserSession[]
+  passwordResetTokens            PasswordResetToken[]
   auditEvents                    AuditEvent[]
   idempotencyKeys                IdempotencyKey[]
   createdGeofenceVersions        WorkSiteGeofenceVersion[]     @relation("GeofenceVersionCreatedBy")
@@ -404,6 +405,23 @@ model UserSession {
   user          User      @relation(fields: [userId], references: [id], onDelete: Restrict, onUpdate: Cascade)
 
   @@index([userId])
+  @@index([expiresAt])
+}
+
+// One-time recovery credentials. The raw value is never stored: tokenHash is
+// HMAC-SHA256 with PASSWORD_RESET_TOKEN_HMAC_KEY. Tokens are retained after
+// use/revocation for a short audit trail instead of being silently deleted.
+model PasswordResetToken {
+  id          String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId      String    @db.Uuid
+  tokenHash   String    @unique @db.VarChar(64)
+  expiresAt   DateTime  @db.Timestamptz(6)
+  usedAt      DateTime? @db.Timestamptz(6)
+  revokedAt   DateTime? @db.Timestamptz(6)
+  createdAt   DateTime  @default(now()) @db.Timestamptz(6)
+  user        User      @relation(fields: [userId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+
+  @@index([userId, createdAt(sort: Desc)])
   @@index([expiresAt])
 }
 

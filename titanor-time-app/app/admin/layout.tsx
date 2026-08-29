@@ -40,6 +40,9 @@ export default async function AdminLayout({ children }: Readonly<{ children: Rea
           {session.user.username} · {session.user.roles.join(', ')}
         </span>
         <div className="admin-header-actions">
+          <Link href="/admin/profile" className="admin-guide-link">
+            {t.profileLink}
+          </Link>
           <Link href="/guide" className="admin-guide-link">
             {t.guideLink}
           </Link>

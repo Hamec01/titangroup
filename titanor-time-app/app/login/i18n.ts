@@ -24,6 +24,7 @@ export interface LoginStrings {
   errorGeneric: string;
   noRole: string;
   guideLink: string;
+  forgotPassword: string;
 }
 
 export const LOGIN_STRINGS: Record<LoginLocale, LoginStrings> = {
@@ -40,7 +41,8 @@ export const LOGIN_STRINGS: Record<LoginLocale, LoginStrings> = {
     errorRateLimited: 'Too many attempts. Try again later.',
     errorGeneric: 'Something went wrong. Please try again.',
     noRole: 'This account has no assigned role. Contact your administrator.',
-    guideLink: 'How to use this app — user guide'
+    guideLink: 'How to use this app — user guide',
+    forgotPassword: 'Forgot password?'
   },
   RU: {
     title: 'Titanor Time',
@@ -55,7 +57,8 @@ export const LOGIN_STRINGS: Record<LoginLocale, LoginStrings> = {
     errorRateLimited: 'Слишком много попыток. Попробуйте позже.',
     errorGeneric: 'Что-то пошло не так. Попробуйте ещё раз.',
     noRole: 'У учётной записи нет роли. Обратитесь к администратору.',
-    guideLink: 'Как пользоваться системой — инструкция'
+    guideLink: 'Как пользоваться системой — инструкция',
+    forgotPassword: 'Забыли пароль?'
   }
 };
 

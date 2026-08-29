@@ -4,6 +4,7 @@ export interface AdminStrings {
   accessDenied: string;
   adminNavigation: string;
   guideLink: string;
+  profileLink: string;
   signOut: string;
   signingOut: string;
   signOutError: string;
@@ -24,6 +25,7 @@ export const ADMIN_STRINGS: Record<AppLocale, AdminStrings> = {
     accessDenied: 'Access denied — this area requires the ADMIN or SUPER_ADMIN role.',
     adminNavigation: 'Admin navigation',
     guideLink: 'User guide',
+    profileLink: 'My profile',
     signOut: 'Sign out',
     signingOut: 'Signing out…',
     signOutError: 'Could not sign out. Check your connection and try again.',
@@ -42,6 +44,7 @@ export const ADMIN_STRINGS: Record<AppLocale, AdminStrings> = {
     accessDenied: 'Доступ запрещён — этот раздел доступен только администратору.',
     adminNavigation: 'Навигация администратора',
     guideLink: 'Инструкция',
+    profileLink: 'Мой профиль',
     signOut: 'Выйти',
     signingOut: 'Выполняется выход…',
     signOutError: 'Не удалось выйти. Проверьте соединение и попробуйте ещё раз.',

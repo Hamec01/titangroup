@@ -6,6 +6,8 @@ import { ConnectivityBanner } from '@/components/worker-pwa/ConnectivityBanner';
 import { resolveAppLocale } from '@/lib/i18n/server';
 import { COMMON_STRINGS } from '@/lib/i18n/common';
 import { WORKER_STRINGS } from '@/lib/i18n/worker';
+import { getAccountSettings } from '@/lib/account';
+import { AccountSettingsForm } from '@/components/account/AccountSettingsForm';
 
 export const dynamic = 'force-dynamic';
 
@@ -39,7 +41,10 @@ export default async function WorkerProfilePage() {
     );
   }
 
-  const profile = await getEmployeeProfileView(session.user.employeeId, false);
+  const [profile, account] = await Promise.all([
+    getEmployeeProfileView(session.user.employeeId, false),
+    getAccountSettings(session.user.id)
+  ]);
   if (!profile) {
     return (
       <main className="wk-page">
@@ -55,6 +60,7 @@ export default async function WorkerProfilePage() {
       <div className="wk-card">
         <ConnectivityBanner />
         <h1>{t.profileTitle}</h1>
+        {account ? <AccountSettingsForm initialEmail={account.email} username={account.username} roles={account.roles} /> : null}
         <WorkerProfileForm initialProfile={profile} />
       </div>
     </main>
