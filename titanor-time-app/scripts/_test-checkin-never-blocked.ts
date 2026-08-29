@@ -7,6 +7,8 @@ import { randomUUID } from 'node:crypto';
 import { NextRequest } from 'next/server';
 import { prisma } from '../lib/prisma';
 import { generateSessionToken, hashSessionToken, SESSION_COOKIE_NAME } from '../lib/session';
+import { ensureEmployeePeriodCore } from '../lib/periods';
+import { materializeClockShift } from '../lib/attendance-materializer';
 import { POST as syncRoute } from '../app/api/worker/attendance/sync/route';
 import { GET as contextRoute } from '../app/api/worker/attendance/context/route';
 
@@ -51,12 +53,18 @@ async function main() {
 
   const day = new Date(Date.now() - 2 * 86400_000);
   const dateOnly = new Date(Date.UTC(day.getUTCFullYear(), day.getUTCMonth(), day.getUTCDate()));
-  await prisma.payrollPeriod.create({ data: { startDate: dateOnly, endDate: dateOnly, status: 'OPEN', openedByUserId: admin.id } });
+  const period = await prisma.payrollPeriod.create({ data: { startDate: dateOnly, endDate: dateOnly, status: 'OPEN', openedByUserId: admin.id } });
 
   const employee = await prisma.employee.create({ data: { employeeNumber: `T17-${randomUUID().slice(0, 8)}`, firstName: 'Out', lastName: 'Side' } });
   await prisma.employment.create({ data: { employeeId: employee.id, active: true, startDate: new Date('2000-01-01T00:00:00Z') } });
   await prisma.siteAssignment.create({ data: { employeeId: employee.id, siteId: site.id, isPrimary: true, validFrom: new Date('2000-01-01T00:00:00Z'), validTo: null, assignedByUserId: admin.id } });
   await prisma.siteAssignment.create({ data: { employeeId: employee.id, siteId: site2.id, isPrimary: false, validFrom: new Date('2000-01-01T00:00:00Z'), validTo: null, assignedByUserId: admin.id } });
+  // Enrol the worker in the period so a closed shift can materialize into hours — the whole point of
+  // T17 is that an outside-geofence check-in still produces payable time.
+  await prisma.$transaction(async (tx) => {
+    await tx.$queryRaw`SELECT id FROM "Employee" WHERE id = ${employee.id}::uuid FOR UPDATE`;
+    await ensureEmployeePeriodCore(tx, { periodId: period.id, employeeId: employee.id, startDate: dateOnly, endDate: dateOnly });
+  });
   const { token } = await makeSession('t17-worker', ['WORKER'], employee.id);
 
   const T = (h: number) => new Date(dateOnly.getTime() + h * 3600_000).toISOString();
@@ -90,8 +98,11 @@ async function main() {
   check('2: CHECK_OUT -> 200 ACCEPTED', (await r2.json()).results?.[0]?.outcome === 'ACCEPTED');
   const shift = await prisma.clockShift.findFirstOrThrow({ where: { checkOutEventId: evOut } });
   check('2: a ClockShift was created (~8h)', Math.round((shift.recordedEndAt.getTime() - shift.recordedStartAt.getTime()) / 3600_000) === 8, shift);
-  check('2: the geofence flags do NOT block the shift (no OVERLAPPING_SHIFT, materialization not stuck on them)',
-    (await prisma.attendanceException.count({ where: { clockShiftId: shift.id, type: 'OVERLAPPING_SHIFT', status: 'OPEN' } })) === 0 && shift.materializationState !== 'FAILED', shift.materializationState);
+  const mat = await materializeClockShift(shift.id, randomUUID());
+  check('2: shift materializes into hours despite the outside-geofence flags', mat.kind === 'MATERIALIZED' || mat.kind === 'ALREADY_MATERIALIZED', mat);
+  const shiftAfter = await prisma.clockShift.findUniqueOrThrow({ where: { id: shift.id } });
+  check('2: the geofence flags do NOT block the shift (no OPEN OVERLAPPING_SHIFT, state MATERIALIZED)',
+    (await prisma.attendanceException.count({ where: { clockShiftId: shift.id, type: 'OVERLAPPING_SHIFT', status: 'OPEN' } })) === 0 && shiftAfter.materializationState === 'MATERIALIZED', shiftAfter.materializationState);
 
   // 3. Switch Site where the NEW site's check-in half is outside its geofence -> still accepted
   await prisma.employeeOpenShift.deleteMany({ where: { employeeId: employee.id } });

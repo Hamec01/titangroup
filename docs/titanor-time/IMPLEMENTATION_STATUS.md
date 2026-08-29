@@ -1,6 +1,16 @@
 # Titanor Time — Implementation Status
 
-Обновлено: 2026-08-29 Europe/Helsinki (T17 — Check In никогда не блокируется по геозоне)
+Обновлено: 2026-08-29 Europe/Helsinki (R02 — test/typecheck/CI gates, в работе)
+
+**`[2026-08-29]` R02 — надёжные test / typecheck / CI gates (production release roadmap, в работе).**
+Полный отчёт: `docs/titanor-time/R02_TEST_CI_REPORT_RU.md`. Каталог тестов:
+`docs/titanor-time/TEST_CATALOG_RU.md`. Production-БД/контейнеры не трогаются.
+- **Шаг 1 — typecheck-гейт зелёный.** `_test-checkin-never-blocked.ts` содержал невозможное
+  сравнение `shift.materializationState !== 'FAILED'` (в enum `ClockShiftMaterializationState`
+  только `PENDING|MATERIALIZED`) → единственная ошибка `tsc --noEmit` (`TS2367`) на всём
+  приложении. Тест теперь энролит работника в период и проверяет реальный контракт T17 —
+  смена вне геозоны **материализуется в часы** (`materializeClockShift` → `MATERIALIZED`).
+  `tsc --noEmit` = 0 ошибок; тест 13/13 на disposable PG16.
 
 **`[2026-08-29]` T17 — Check In больше не отклоняется из-за GPS/геозоны (по заказу владельца: приход «сбрасывался» и ошибка приходила поздно/не приходила).**
 Раньше: приход с хорошим GPS-fix, но вне геозоны (`VERIFIED_OUTSIDE`) → **REJECTED терминально**:
