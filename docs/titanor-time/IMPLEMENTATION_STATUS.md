@@ -27,6 +27,14 @@
   половины ACCEPTED). Регрессия `_test-gps-approximate-sync` 21/21, `_test-gps-exception-detail`
   23/23, `_test-exception-list-query` 12/12, `_test-bulk-ack-gps` 13/13, `_test-pilot-pair-orphan`
   (на чистой БД). `tsc` + `next build` зелёные.
+- **T16 + T17 задеплоены на пилот `t97-pilot-f486977`** (app + scheduler, 2026-08-29 ~18:40 UTC,
+  владелец выполнил `deploy-f486977.sh`). БД `t97-pilot-db` **92 → 93** (`20260829210000`,
+  idempotent-повтор чист). Бэкап `t97-pilot-20260829T175224Z-pre-f486977.dump`. `/api/ready`
+  `/api/health` `/login` = 200 (внутр. + внешний HTTPS); планировщик тикает; enum
+  `OUTSIDE_GEOFENCE_CHECKIN` в БД, фильтр по нему в exceptions route отдаёт 401 (не 400). Прод
+  (`titanor-time-app-1`, `daa2edbb`, restarts 0) и `:latest` не тронуты. Счётчики строк после
+  деплоя: AttendanceException 27 / ClockEvent 33 / Timesheet 12 — без изменений vs предыдущий
+  деплой. Rollback-контейнеры `…-pre-f486977` сохранены.
 
 **`[2026-08-29]` T16 — правки по пилоту (владелец на телефоне): убрать дубли форм и «Действие требует внимания» с главного экрана, добавить pull-to-refresh.**
 - **T16.1 (`4c1a06c`)** — на «Профиль» было два поля: старое свободное «Специальность» и новый
