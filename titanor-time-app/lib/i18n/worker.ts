@@ -87,6 +87,8 @@ export interface WorkerStrings {
   statusPendingActions: string;
   currentWorkplacePrefix: string;
   actionNeedsAttention: string;
+  dismissFailedAction: string;
+  dismissFailedActionHint: string;
   noSiteAssignedYet: string;
   primarySuffix: string;
   checkIn: string;
@@ -362,6 +364,8 @@ export const WORKER_STRINGS: Record<AppLocale, WorkerStrings> = {
     statusPendingActions: 'Pending actions',
     currentWorkplacePrefix: 'Current',
     actionNeedsAttention: 'Action needs attention',
+    dismissFailedAction: 'Dismiss',
+    dismissFailedActionHint: 'The server could not accept this check-in/out. Check in again if you still need to. You can dismiss this notice.',
     noSiteAssignedYet: 'Your manager has not assigned a site to you yet. You can use the app, but Check In will become available after a site is assigned.',
     primarySuffix: ' · Primary',
     checkIn: 'Check in',
@@ -624,6 +628,8 @@ export const WORKER_STRINGS: Record<AppLocale, WorkerStrings> = {
     statusPendingActions: 'Ожидающие действия',
     currentWorkplacePrefix: 'Текущий объект:',
     actionNeedsAttention: 'Действие требует внимания',
+    dismissFailedAction: 'Убрать',
+    dismissFailedActionHint: 'Сервер не принял эту отметку прихода/ухода. Если нужно — отметьтесь заново. Это уведомление можно убрать.',
     noSiteAssignedYet: 'Руководитель ещё не назначил вам объект. Вы можете пользоваться приложением, но отметка прихода станет доступна после назначения объекта.',
     primarySuffix: ' · Основной',
     checkIn: 'Отметить приход',

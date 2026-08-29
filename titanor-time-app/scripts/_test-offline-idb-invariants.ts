@@ -197,6 +197,15 @@ async function phaseV1Upgrade() {
   const localClockStateAfter = await db.getLocalClockState();
   check('7: local clock state preserved', localClockStateAfter?.state === 'CLOCKED_OUT' && localClockStateAfter?.updatedAt === '2026-01-01T07:00:00.000Z', localClockStateAfter);
 
+  // T15 — dismissFailedEvent removes ONLY the FAILED_TERMINAL row, never a PENDING/SENDING one.
+  const outbox = await import('../lib/offline-outbox/outbox');
+  check('T15: dismissFailedEvent refuses a PENDING row', (await outbox.dismissFailedEvent('evt-pending')) === false);
+  check('T15: dismissFailedEvent refuses a SENDING row', (await outbox.dismissFailedEvent('evt-sending')) === false);
+  check('T15: dismissFailedEvent removes the FAILED_TERMINAL row', (await outbox.dismissFailedEvent('evt-failed')) === true);
+  const afterDismiss = await db.getAllOutboxEvents();
+  check('T15: only the failed row is gone (2 rows left, both non-failed)', afterDismiss.length === 2 && !afterDismiss.some((e) => e.clientEventId === 'evt-failed'), afterDismiss.map((e) => e.clientEventId));
+  check('T15: dismissFailedEvent on an unknown id is a safe no-op false', (await outbox.dismissFailedEvent('evt-nope')) === false);
+
   console.log(JSON.stringify({ pass, fail }));
   process.exit(fail > 0 ? 1 : 0);
 }

@@ -18,7 +18,7 @@ import {
   type GeolocationPermissionState
 } from '@/lib/worker-gps';
 import { ensureDeviceBootstrapped, retryBootstrap, type BootstrapOutcome } from '@/lib/offline-outbox/device';
-import { enqueueCheckIn, enqueueCheckOut, enqueueSwitchSite, EnqueueError } from '@/lib/offline-outbox/outbox';
+import { enqueueCheckIn, enqueueCheckOut, enqueueSwitchSite, dismissFailedEvent, EnqueueError } from '@/lib/offline-outbox/outbox';
 import type { OutboxGps, OutboxApproximateGps, OutboxGpsUnavailableReason } from '@/lib/offline-outbox/db';
 import { runSyncOnce, tryRefreshClockState, type ClockStateWire, type SyncRunOutcome } from '@/lib/offline-outbox/sync-runner';
 import { enqueuePresenceSample, lastPresenceCaptureMs, shouldCapturePresence } from '@/lib/offline-outbox/presence';
@@ -713,6 +713,11 @@ export function WorkerClockPanel({ initialClockState, assignments, workerName, t
     }
   }
 
+  async function handleDismissFailed(clientEventId: string): Promise<void> {
+    await dismissFailedEvent(clientEventId);
+    await refreshOutboxSnapshot();
+  }
+
   function handleEnqueueError(err: unknown) {
     if (err instanceof EnqueueError) {
       setStatusMessage({ kind: 'error', text: err.code === 'SEQUENCE_OVERFLOW' ? err.message : t.offlineSetupNotReady, code: err.code });
@@ -987,9 +992,13 @@ export function WorkerClockPanel({ initialClockState, assignments, workerName, t
               <li key={r.clientEventId} className="wk-return-reason-item">
                 <span className="wk-return-reason-scope">{r.operationType === 'CHECK_IN' ? t.checkIn : t.checkOut}</span>
                 <span className="wk-return-reason-text">{describeErrorCode(r.lastErrorCode ?? undefined, t)}</span>
+                <button type="button" className="wk-inline-secondary" onClick={() => void handleDismissFailed(r.clientEventId)}>
+                  {t.dismissFailedAction}
+                </button>
               </li>
             ))}
           </ul>
+          <p className="wk-return-reason-text">{t.dismissFailedActionHint}</p>
         </div>
       )}
 

@@ -412,3 +412,26 @@ export async function markSending(records: OutboxEventRecord[]): Promise<void> {
   }
   await txDone(tx);
 }
+
+/**
+ * T15 — the worker dismisses a permanently-failed action from the "needs attention" banner. Only
+ * a FAILED_TERMINAL row can be removed this way: the server has already returned its final verdict
+ * (REJECTED — outside geofence, a device conflict, a validation failure), the worker cannot retry
+ * or fix it, so the row is pure leftover noise once seen. It never participates in the clock-state
+ * projection (that reads PENDING/SENDING only), so deleting it changes nothing about "where am I".
+ * A PENDING/SENDING/ACKED row is left untouched (returns false).
+ */
+export async function dismissFailedEvent(clientEventId: string): Promise<boolean> {
+  const db = await getDb();
+  const tx = db.transaction([STORE_CLOCK_OUTBOX], 'readwrite');
+  const store = tx.objectStore(STORE_CLOCK_OUTBOX);
+  const record = (await requestToPromise(store.get(clientEventId))) as OutboxEventRecord | undefined;
+  if (!record || record.state !== 'FAILED_TERMINAL') {
+    tx.abort();
+    return false;
+  }
+  store.delete(clientEventId);
+  await txDone(tx);
+  broadcastOutboxChanged();
+  return true;
+}
