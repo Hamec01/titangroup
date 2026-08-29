@@ -17,6 +17,15 @@
   `<p class="login-error" role="alert">` (общий блок отказа, любой язык) + отсутствие
   `admin-nav` в разметке; API-отказы уже проверялись по `error.code`. `tsc --noEmit` = 0;
   browser-прогон — в R12 (lane «browser», TZ 18.2 п.10).
+- **Шаг 3 — schedule test согласован с auto-enroll первого назначения.**
+  `_test-timesheet-submission-schedules.ts` утверждал, что `createAssignment` для работника без
+  графика **не** энролит его никуда (`payrollPeriodParticipant === 0`). Действующий контракт
+  (`lib/assignments.ts`): первое в истории назначение работника без schedule-истории
+  авто-энролит его на активный company-default (Weekly), иначе работник остаётся с
+  `SiteAssignment` без единого `Timesheet`. Сценарий переписан: проверяем, что появилась
+  `EmployeeTimesheetSchedule` на company-default, ровно 2 периода в Weekly-когорте и 0 в любой
+  другой; сопряжённые счётчики overview (`totalWorkers` 4→5) и аудита
+  (`WORKER_TIMESHEET_SCHEDULE_ASSIGNED` 5→6) поправлены. Тест 24/24 на свежей PG16, `tsc` = 0.
 
 **`[2026-08-29]` T17 — Check In больше не отклоняется из-за GPS/геозоны (по заказу владельца: приход «сбрасывался» и ошибка приходила поздно/не приходила).**
 Раньше: приход с хорошим GPS-fix, но вне геозоны (`VERIFIED_OUTSIDE`) → **REJECTED терминально**:

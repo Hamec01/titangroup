@@ -43,10 +43,14 @@ async function main() {
   check(firstHorizon.failed === 0 && secondHorizon.failed === 0, 'scheduler horizon has no failures');
   check((await prisma.timesheet.count({ where: { employeeId: { in: [weeklyWorker.id, biweeklyWorker.id] } } })) === 4, 'scheduler replay creates no duplicate timesheets');
 
-  const unscheduledWorker = await employee('CYCLE-UNSCHEDULED');
+  // Current contract (lib/assignments.ts): the FIRST-ever site assignment for a worker with zero
+  // schedule history auto-enrols them on the active company-default cadence (Weekly here), aligned
+  // to that cadence's own boundary — otherwise a real worker is stranded with a SiteAssignment but
+  // no Timesheet. An admin who has ever made an explicit schedule decision is never overridden.
+  const firstAssignmentWorker = await employee('CYCLE-FIRST-ASSIGNMENT');
   const assignmentSite = await prisma.workSite.create({ data: { name: `Cycle assignment ${randomUUID()}` } });
-  const unscheduledAssignment = await createAssignment({
-    employeeId: unscheduledWorker.id,
+  const firstAssignment = await createAssignment({
+    employeeId: firstAssignmentWorker.id,
     siteId: assignmentSite.id,
     workAreaId: null,
     templateId: null,
@@ -56,12 +60,26 @@ async function main() {
     assignedByUserId: actor.id,
     requestId: randomUUID()
   });
-  check('id' in unscheduledAssignment, 'assignment succeeds for a worker without a submission schedule');
+  check('id' in firstAssignment, 'first site assignment succeeds for a worker with no submission schedule');
+  const autoSchedule = await prisma.employeeTimesheetSchedule.findFirst({
+    where: { employeeId: firstAssignmentWorker.id },
+    include: { schedule: { select: { isCompanyDefault: true, cadence: true } } }
+  });
+  check(
+    autoSchedule?.schedule.isCompanyDefault === true && autoSchedule.schedule.cadence === 'WEEKLY',
+    'first assignment auto-enrols the worker on the active company-default cadence'
+  );
   check(
     (await prisma.payrollPeriodParticipant.count({
-      where: { employeeId: unscheduledWorker.id, period: { submissionScheduleId: { not: null } } }
+      where: { employeeId: firstAssignmentWorker.id, period: { submissionScheduleId: weekly.id } }
+    })) === 2,
+    'auto-enrolment generates the company-default current+next periods (never any other cohort)'
+  );
+  check(
+    (await prisma.payrollPeriodParticipant.count({
+      where: { employeeId: firstAssignmentWorker.id, period: { submissionScheduleId: { notIn: [weekly.id] } } }
     })) === 0,
-    'assignment never enrolls an unscheduled worker into another cohort'
+    'auto-enrolment never places the worker in a non-default cohort'
   );
 
   const legacyWorker = await employee('CYCLE-LEGACY');
@@ -91,11 +109,14 @@ async function main() {
   check(!backdatedSwitch.ok && backdatedSwitch.code === 'EFFECTIVE_FROM_BEFORE_CURRENT', 'a scheduled future change cannot be backdated into an existing schedule window');
 
   const overview = await getAdminOperationalOverview({ page: 1, pageSize: 100 }, boundary);
-  check(overview.code === 'OK' && overview.result.summary.totalWorkers === 4, 'unfiltered overview combines every current cadence cohort');
+  // weeklyWorker + biweeklyWorker + firstAssignmentWorker (auto-enrolled weekly) + legacyWorker +
+  // switchWorker. CYCLE-INVALID never enrols (EFFECTIVE_FROM_NOT_BOUNDARY) so it is not counted.
+  check(overview.code === 'OK' && overview.result.summary.totalWorkers === 5, 'unfiltered overview combines every current cadence cohort');
 
   const invalidBoundary = await assignWorkerSubmissionSchedule({ employeeId: await employee('CYCLE-INVALID').then((e) => e.id), scheduleId: weekly.id, effectiveFrom: new Date('2026-08-25'), actorUserId: actor.id, requestId: randomUUID() });
   check(!invalidBoundary.ok && invalidBoundary.code === 'EFFECTIVE_FROM_NOT_BOUNDARY', 'non-boundary effective date is rejected');
-  check((await prisma.auditEvent.count({ where: { eventType: 'WORKER_TIMESHEET_SCHEDULE_ASSIGNED' } })) === 5, 'successful schedule changes are audited once');
+  // weekly + biweekly + transitioned + switchInitial + switchNext + the first-assignment auto-enrol.
+  check((await prisma.auditEvent.count({ where: { eventType: 'WORKER_TIMESHEET_SCHEDULE_ASSIGNED' } })) === 6, 'successful schedule changes are audited once');
 
   console.log(`PASS: ${passed}/${passed} submission-cycle integration checks`);
 }
