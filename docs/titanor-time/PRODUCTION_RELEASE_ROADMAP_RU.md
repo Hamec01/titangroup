@@ -135,7 +135,7 @@ Production cutover разрешается только после R12 и отд�
 | R04 | Security upgrade публичного сайта | R02 | Нет | **DONE** — `105680d` audit 8→0; **R04.1 `27e65cb`** — Vercel Preview regression (`output:'standalone'`×Vercel) исправлена, Preview `success`, CI 6/6. Отчёты `R04_DEPENDENCY_SECURITY_PUBLIC_SITE_RU.md` + `R04_1_VERCEL_PREVIEW_REPORT_RU.md`. Деплой сайта — отдельно. |
 | R05 | Security upgrade Titanor Time | R02 | Нет | **DONE + DEPLOYED на пилот 2026-08-30** (`t97-pilot-1e4dc92`; audit 8→0; регрессия 62/62; отчёт `R05_DEPENDENCY_SECURITY_RU.md`) |
 | R06 | Scheduler/readiness/Docker/operations | R01, R02, R05 | Нет | **R06-A DONE + DEPLOYED** (`t97-pilot-d15586c`). **R06-B DONE + DEPLOYED на пилот 2026-08-30** (`t97-pilot-256565a`, 792 MB было 1.79 GB): `npm ci` из lockfile, Next standalone + прекомпилированные CJS-бандлы scheduler'а + минимальное `prisma` CLI-замыкание, non-root, OCI labels, реальные healthchecks. **Инцидент R06-B.1**: при swap старый `npx tsx` scheduler убит SIGKILL → orphaned `SchedulerLease` → новый scheduler завис в `OVERLAPPING`; устранено точечным DELETE доказанно мёртвого holder'а; deploy-скрипт усилен (fail-closed verify, тело `/api/ready`, реальный exit healthcheck, Docker health обоих, детект+чистка stale-lease при переходе, flock+re-run guard, авто-rollback, `--init`). **Пилот стабилен >15 мин: оба контейнера `healthy`, scheduler `HEALTHY`, lease renew'ится, все фоновые операции идут; prod не тронут.** Отчёт `R06B_DOCKER_RUNTIME_REPORT_RU.md` (§ R06-B.1). |
-| R07 | Security hardening приложений/API | R02, R04, R05 | Нет | **R07-A (Titanor Time) DONE** (`899862c`/`8f3795f`/`c413748`/`ecfb302`): (A) security headers + noindex + safe error/not-found; (B) trusted-proxy client IP `TITANOR_TRUSTED_PROXY_HOPS` + DB-backed shared rate limiter (миграция 97) — **B08**; (C) `requireUuidParam` до Prisma на 26 маршрутах — **B11**; (D) `guardApiRequest` helper + `/api/auth/{session,logout,logout-all}`. Log audit — уже соответствует. PASS-критерий выполнен (70 negative-tests). Отчёт `R07A_SECURITY_HARDENING_REPORT_RU.md`. **Остаток:** R07-A.1 (миграция ~130 маршрутов на guard, пошагово с ревью), R07-B (публичный сайт — отдельно, решение владельца). Пилот не переразвёртывался. |
+| R07 | Security hardening приложений/API | R02, R04, R05 | Нет | **R07-A DONE — кандидат `t97-pilot-8724480` + deploy-скрипт `deploy-8724480.sh` готовы, ждут владельца.** (`899862c`/`8f3795f`/`c413748`/`ecfb302`): (A) security headers + noindex + safe error/not-found; (B) trusted-proxy client IP `TITANOR_TRUSTED_PROXY_HOPS` + DB-backed shared rate limiter (миграция 97) — **B08**; (C) `requireUuidParam` до Prisma на 26 маршрутах — **B11**; (D) `guardApiRequest` helper + `/api/auth/{session,logout,logout-all}`. Log audit — уже соответствует. PASS-критерий выполнен (70 negative-tests). Отчёт `R07A_SECURITY_HARDENING_REPORT_RU.md`. **Остаток:** R07-A.1 (миграция ~130 маршрутов на guard, пошагово с ревью), R07-B (публичный сайт — отдельно). Образ `t97-pilot-8724480` + `deploy-8724480.sh` (миграция 96→97) — владельцу запустить; агент не запускает. |
 | R08 | GPS archive и безопасный retention | R01, R02, R06 | Нет | Не начат |
 | R09 | WORKER/FOREMAN/ADMIN UX | R03, R05, R07 | Нет | Не начат |
 | R10 | Release candidate и полная pilot acceptance | R03–R09 | Нет | Не начат |
@@ -376,13 +376,26 @@ R03, R04 и R05 можно разрабатывать независимо по�
 **PASS:** negative/security regression tests проходят; malformed input не вызывает 500; rate-limit нельзя обойти подменой первого forwarded IP.
 
 **Статус:**
-- **R07-A** (Titanor Time) — DONE. `899862c` security headers/noindex/error-not-found;
-  `8f3795f` trusted-proxy client IP (`TITANOR_TRUSTED_PROXY_HOPS`) + DB-backed shared rate limiter
-  (`RateLimitCounter`, миграция 97) — **B08**; `c413748` `requireUuidParam` до Prisma на 26
-  маршрутах — **B11**; `guardApiRequest` helper + `/api/auth/{session,logout,logout-all}`.
-  Log-audit — уже соответствует (3 `console.*`, ни один не из списка ТЗ). PASS-критерий выполнен
-  (70 negative-проверок: `_test-client-ip` 26, `_test-rate-limit-db` 13, `_test-malformed-uuid` 14,
-  `_test-api-guard` 17). Отчёт `R07A_SECURITY_HARDENING_REPORT_RU.md`.
+- **R07-A** (Titanor Time) — DONE, **кандидат + deploy-скрипт готовы, ждут владельца**. `899862c`
+  security headers/noindex/error-not-found; `8f3795f` trusted-proxy client IP
+  (`TITANOR_TRUSTED_PROXY_HOPS`) + DB-backed shared rate limiter (`RateLimitCounter`, миграция 97)
+  — **B08**; `c413748` `requireUuidParam` до Prisma на 26 маршрутах — **B11**; `guardApiRequest`
+  helper + `/api/auth/{session,logout,logout-all}`. Log-audit — уже соответствует. PASS-критерий
+  (код) выполнен (70 negative-проверок). CI 6/6 (`139221d`). Отчёт
+  `R07A_SECURITY_HARDENING_REPORT_RU.md`.
+  - **Образ `t97-pilot-8724480`** (`sha256:4516b393c686…`, 792 MB, из HEAD `8724480`).
+  - Disposable-env verify PASS: from-zero 97 + **restored-pilot dump 96→97** (1 миграция, 0 failed);
+    app/scheduler healthy на 97; security headers + нет `X-Powered-By` + `/robots.txt Disallow:/`;
+    login/logout/recovery smoke; **rate-limit B08 — 429 + `RateLimitCounter` строка по rightmost
+    XForwardedFor (не поддельный leftmost) + пережил `docker restart`**; malformed UUID → 404 не 500;
+    production baseline не изменён.
+  - **Deploy-скрипт `/home/deploy/app-data/t97-pilot/deploy-8724480.sh`** (канонич.
+    `ops/titanor-time/deploy-pilot-8724480.sh`): flock + re-run guard, fail-closed preflight
+    (пилот на 96), prod baseline guard, **backup + off-box mirror с re-verify (fail-closed)**,
+    `migrate deploy` 96→97 с ассертами, swap с авто-rollback, stale-lease safety net (R06-B.1),
+    fail-closed verify (тело `/api/ready` 97/97, security headers, живой rate-limit, scheduler
+    lease/heartbeat/healthcheck/Docker-health/4 операции). Rollback → `t97-pilot-256565a`
+    (миграция 97 остаётся — аддитивная). **Агент скрипт не запускает.**
 - **R07-A.1** — миграция остальных ~130 маршрутов на `guardApiRequest`. Пошагово, с ревью каждого
   (слепой codemod отклонён — риск неверного `csrf`/permission); естественно совмещается с R09.
 - **R07-B** (публичный сайт: admin login rate-limit, timing-safe пароль, CSRF logout, contact SMTP

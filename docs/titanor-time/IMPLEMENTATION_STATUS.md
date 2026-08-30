@@ -1,8 +1,22 @@
 # Titanor Time — Implementation Status
 
-**`[2026-08-30]` R07-A — Security hardening & API robustness (Titanor Time) — DONE.** Отчёт
-`R07A_SECURITY_HARDENING_REPORT_RU.md`. Одна аддитивная миграция (**97** `RateLimitCounter`).
-Пилот НЕ переразвёртывался. Публичный сайт (R07-B) — отдельный заход (решение владельца).
+**`[2026-08-30]` R07-A — Security hardening & API robustness (Titanor Time) — DONE; кандидат +
+deploy-скрипт готовы, ждут владельца.** Отчёт `R07A_SECURITY_HARDENING_REPORT_RU.md`. Одна
+аддитивная миграция (**97** `RateLimitCounter`). Публичный сайт (R07-B) — отдельный заход.
+**Образ `titanor-time-app:t97-pilot-8724480`** (`sha256:4516b393c686…`, 792 MB, HEAD `8724480`).
+Disposable-env verify PASS: from-zero 97 + **restored-pilot `pg_dump` 96→97** (1 миграция, 0 failed);
+app/scheduler healthy на 97; 7 security-заголовков + нет `X-Powered-By` + `/robots.txt Disallow:/`;
+login/logout/logout-all/recovery smoke; **rate-limit B08 — 429 + `RateLimitCounter` строка по
+rightmost X-Forwarded-For (не поддельный leftmost) + пережил `docker restart`**; malformed UUID →
+404 не 500; production baseline (`daa2edbb`) не изменён.
+**Deploy-скрипт `/home/deploy/app-data/t97-pilot/deploy-8724480.sh`** (канонич.
+`ops/titanor-time/deploy-pilot-8724480.sh`): flock + re-run guard, fail-closed preflight (пилот на
+96), prod baseline guard, **backup + off-box mirror с re-verify чек-суммы (fail-closed)**,
+`migrate deploy` 96→97 с ассертами (applied==97, failed==0, `RateLimitCounter` создана), swap с
+авто-rollback, stale-lease safety net (R06-B.1), fail-closed verify (тело `/api/ready` 97/97,
+security headers, живой rate-limit-probe, scheduler lease/heartbeat/healthcheck/Docker-health/4
+операции). Rollback → `t97-pilot-256565a` (миграция 97 остаётся — аддитивная). **Агент скрипт не
+запускает.**
 - **A (`899862c`)** — `next.config.mjs` `poweredByHeader:false` + security headers на `/:path*`
   (nosniff, X-Frame-Options DENY, Referrer-Policy, COOP same-origin, Permissions-Policy
   `geolocation=(self)` только, HSTS, X-Robots-Tag noindex). `app/robots.ts` `Disallow: /` + root
@@ -124,7 +138,7 @@ postcss 8.5.23, nanoid 3.3.18, дубль sharp@0.34.5 удалён). Slice B (`
 проверена). typecheck 0, lint ✓, build ✓, регрессия unit+db 62/62. browser smoke → R12.
 Pilot image `t97-pilot-1e4dc92` + `deploy-1e4dc92.sh` (чистый свап образа — R03 уже задеплоен, БД на 95). Ждёт запуска владельцем.
 
-Обновлено: 2026-08-30 Europe/Helsinki (R07-A DONE — trusted-proxy IP + DB rate limiter (B08), UUID-до-Prisma (B11), security headers, guardApiRequest helper; миграция 97; R07-A.1 guard-rollout + R07-B публичный сайт остаются. R06-B на пилоте `t97-pilot-256565a`)
+Обновлено: 2026-08-30 Europe/Helsinki (R07-A DONE — образ `t97-pilot-8724480` + `deploy-8724480.sh` (миграция 96→97) готовы, disposable verify PASS, ждут владельца; CI 6/6 `139221d`. R07-A.1 + R07-B остаются)
 
 **`[2026-08-30]` R03 — учётные записи, профили и recovery без SMTP (production release roadmap) — в работе.**
 ТЗ §6–§7, roadmap §R03. Production/Caddy/DNS не трогаются. Перед первым pilot deploy — `pre-deploy` backup.

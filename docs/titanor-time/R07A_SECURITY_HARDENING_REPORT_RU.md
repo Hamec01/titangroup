@@ -143,7 +143,57 @@ routes использует многострочную форму `jsonError(403
 **Полный прогон (clean env):** typecheck 0 · lint ok · unit **13** · db **57** · scheduler **5** ·
 `npm run build` ✓ · миграция 97 с нуля чисто. CI (`139221d`, run 33316873965): **6/6 job success**.
 
-## 7. Открытые пункты / для R11 и R14
+## 7. Pilot deploy — кандидат + скрипт (владельцу)
+
+- **Образ:** `titanor-time-app:t97-pilot-8724480`
+  `sha256:4516b393c686bafc8088ccc8312ed7829c1ae1603da507b8593112e9a496013b` — **792 MB**,
+  `revision=8724480`. Собран из HEAD `8724480`, `--provenance=false --sbom=false`.
+- **Скрипт:** `/home/deploy/app-data/t97-pilot/deploy-8724480.sh` (канонич. копия
+  `ops/titanor-time/deploy-pilot-8724480.sh`). Структура та же, что у усиленного
+  `deploy-pilot-256565a.sh` (R06-B.1): flock + re-run guard (никогда не удаляет rollback-контейнеры),
+  fail-closed preflight (в т.ч. **проверка, что пилот на 96 миграциях**), production baseline guard,
+  **обязательный backup + off-box mirror с re-verify чек-суммы (fail-closed)**, `migrate deploy`
+  96→97 с ассертами (applied==97, failed==0, `RateLimitCounter` создана), swap с авто-rollback,
+  stale-lease detect+targeted-delete (R06-B.1 safety net — исходящий scheduler бандловый + `--init`,
+  так что lease освобождается штатно), fail-closed verify.
+- **Verify в скрипте:** app health + `/api/ready` тело (`status=ready`, `schema=current`,
+  `applied=expected=97`); `/api/health` `/login` `/reset-password`; **7 security-заголовков +
+  отсутствие `X-Powered-By` + `/robots.txt Disallow:/`**; **живой rate-limit** (6 login-попыток
+  probe-идентификатором → 429, строка в `RateLimitCounter`, затем чистка probe-строк); malformed
+  `[id]` → не 5xx; scheduler — lease держит+renew'ит **новый** holder, heartbeat `ok`+`cf=0`,
+  **реальный** exit healthcheck, Docker health обоих, все 4 фоновые операции, нет `OVERLAPPING`;
+  повторная сверка production baseline.
+- **Откат** (в скрипте): rename `-pre-8724480` контейнеров назад к `t97-pilot-256565a`. Миграция 97
+  **остаётся** (аддитивная — `t97-pilot-256565a` терпит лишнюю таблицу, `/api/ready` → `schema:ahead`
+  → всё ещё 200). Down-миграции нет.
+
+### Disposable-env верификация (до передачи владельцу)
+
+| проверка | результат |
+|---|---|
+| from-zero migrate (новый образ) | ✅ 97 применено, 0 failed, `RateLimitCounter` корректной формы |
+| **restored-pilot** (реальный `pg_dump` пилота) 96 → 97 | ✅ ровно 1 миграция (`20260830140000_add_rate_limit_counter`), 0 failed, «up to date» |
+| app + scheduler на 97 (from-zero + restored-pilot data) | ✅ healthy, `/api/ready` `schema:current` 97/97, scheduler HEALTHY, все ticks `ok` |
+| security headers | ✅ 7/7 на `/login` и `/api/health`; **нет `X-Powered-By`**; `/robots.txt` = `Disallow: /` |
+| login | ✅ верные → 200 + `Set-Cookie: tt_session … Secure; HttpOnly; SameSite=lax`; неверные → 401; без CSRF → 403 |
+| **rate limit (B08)** | ✅ identifier-лимит на 6-й попытке → 429; строка `RateLimitCounter` = `ip:203.0.113.50` (**rightmost**, НЕ поддельный `9.9.9.9`); **пережил `docker restart` контейнера** (429 сохранился, count 7→8 в БД) |
+| forged leading X-Forwarded-For | ✅ ключ лимитера — по доверенной (правой) позиции; другой rightmost → свежий bucket |
+| malformed UUID (B11) | ✅ `not-a-uuid` / valid-but-missing / `xxxx` → **404**, ни одного 500 |
+| logout / logout-all | ✅ logout 204 + `revokedAt` set + `/api/auth/session` после → 401; logout-all 204 |
+| recovery | ✅ `/reset-password` 200; неверный код → `RECOVERY_INVALID` (не 500); без CSRF → 403 |
+| dev/test пакеты в образе | ✅ нет `typescript`/`tsx`/`playwright`/`esbuild`/`@types`/`fake-indexeddb` |
+| production baseline | ✅ `daa2edbb`, `StartedAt 2026-08-21`, restarts 0 — не изменён |
+
+**Команда владельцу:**
+
+```bash
+bash /home/deploy/app-data/t97-pilot/deploy-8724480.sh
+```
+
+Пришлите вывод — сверю PASS, обновлю статус. Агент скрипт **не запускает** (live pilot deploy +
+schema-миграция).
+
+## 8. Открытые пункты / для R11 и R14
 
 - **R07-A.1** — миграция остальных ~130 маршрутов на `guardApiRequest` (пошагово, с ревью).
 - **R07-B** — публичный сайт (отдельно, решение владельца).
