@@ -1,6 +1,6 @@
 # Titanor Time — Implementation Status
 
-Обновлено: 2026-08-30 Europe/Helsinki (R03 — профили + recovery без SMTP, в работе)
+Обновлено: 2026-08-30 Europe/Helsinki (R03 — профили + recovery без SMTP, в работе — 11/12)
 
 **`[2026-08-30]` R03 — учётные записи, профили и recovery без SMTP (production release roadmap) — в работе.**
 ТЗ §6–§7, roadmap §R03. Production/Caddy/DNS не трогаются. Перед первым pilot deploy — `pre-deploy` backup.
@@ -18,10 +18,10 @@
 - [x] **R03.6** (`946595f`) — смена пароля: `changeAccountPassword` (по текущему паролю), `POST /api/auth/change-password`, форма.
 - [x] **R03.7** (`bc24d68`) — сессии: `GET /api/me/sessions`, `DELETE /api/me/sessions/[id]`, права
   `session.read.own` + `session.revoke.own`, UI-панель.
-- [ ] **R03.8** — экран профиля ADMIN/SUPER_ADMIN: last login, язык, ссылка на инструкцию, смена пароля, сессии.
-- [ ] **R03.9** — профиль работника: тот же account-блок; необязательные поля не блокируют clock.
-- [ ] **R03.10** — админский UI: кнопка «Восстановить доступ» на карточке пользователя и работника, код показан один раз.
-- [ ] **R03.11** — тесты: переписать `_test-account-recovery.ts`, `_test-change-password.ts`, `_test-session-management.ts`, манифест.
+- [x] **R03.8** (`1af235c`) — экран профиля ADMIN/SUPER_ADMIN: last login, язык, ссылка на инструкцию, смена пароля, сессии.
+- [x] **R03.9** (`1af235c`) — профиль работника: тот же account-блок; необязательные поля не блокируют clock.
+- [x] **R03.10** (`8254186`) — админский UI: кнопка «Восстановить доступ» на карточке пользователя и работника, код показан один раз.
+- [x] **R03.11** — тесты: переписать `_test-account-recovery.ts`, `_test-change-password.ts`, `_test-session-management.ts`, манифест.
 - [ ] **R03.12** — deploy: `pre-deploy` backup + генерация `PASSWORD_RESET_TOKEN_HMAC_KEY`, pilot deploy, docs/memory.
 
 **`[2026-08-30]` R02 — надёжные test / typecheck / lint / CI gates (production release roadmap) — DONE.**
