@@ -31,6 +31,7 @@
     { "file": "_test-worker-gps.ts", "lane": "unit", "note": "captureGpsSnapshot best-fix-of-window selection; browser globals mocked." },
 
     { "file": "_test-abandoned-shift-auto-close.ts", "lane": "scheduler", "note": "runAbandonedShiftAutoCloseTick end-to-end + resolveAutoCloseEndAt." },
+    { "file": "_test-api-guard.ts", "lane": "db", "note": "R07-A lib/api-guard.guardApiRequest — CSRF / auth / single+array+any permission gates, byte-identical envelopes; plus /api/auth/{session,logout,logout-all} migrated onto it." },
     { "file": "_test-qualification-notifications.ts", "lane": "scheduler", "note": "Admin Notification Center generation service (qualification expiry)." },
     { "file": "_test-qualification-notification-thresholds.ts", "lane": "scheduler", "note": "Threshold windows feeding the qualification notification tick." },
     { "file": "_test-timesheet-submission-schedules.ts", "lane": "scheduler", "note": "assignWorkerSubmissionSchedule + ensureSubmissionScheduleHorizon; covers first-assignment auto-enrol (R02)." },

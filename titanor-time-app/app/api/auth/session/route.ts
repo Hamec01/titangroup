@@ -1,20 +1,15 @@
-import { randomUUID } from 'node:crypto';
 import { NextRequest, NextResponse } from 'next/server';
-import { jsonError, successHeaders } from '@/lib/api-error';
-import { resolveAuthenticatedSession } from '@/lib/auth';
-import { SESSION_COOKIE_NAME } from '@/lib/session';
+import { successHeaders } from '@/lib/api-error';
+import { guardApiRequest } from '@/lib/api-guard';
 
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
 
 // docs/titanor-time/04_ADMIN_FIRST_API_CONTRACTS.md §1 — exact contract for this endpoint.
 export async function GET(request: NextRequest): Promise<NextResponse> {
-  const requestId = randomUUID();
-
-  const authenticated = await resolveAuthenticatedSession(request.cookies.get(SESSION_COOKIE_NAME)?.value);
-  if (!authenticated) {
-    return jsonError(401, { code: 'NOT_AUTHENTICATED', message: 'No active session.' }, requestId);
-  }
+  const guard = await guardApiRequest(request);
+  if (!guard.ok) return guard.response;
+  const { session: authenticated, requestId } = guard;
 
   return NextResponse.json(
     {
