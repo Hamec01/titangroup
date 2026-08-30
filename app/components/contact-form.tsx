@@ -25,12 +25,14 @@ const messages = {
   en: {
     sending: 'Sending...',
     success: 'Thank you. Your project inquiry has been sent.',
-    error: 'Unable to send the message right now. Please email projects@titanorgroup.fi.'
+    error: 'Unable to send the message right now. Please email projects@titanorgroup.fi.',
+    rateLimited: 'Too many messages from this connection. Please wait a few minutes and try again.'
   },
   fi: {
     sending: 'Lähetetään...',
     success: 'Kiitos. Projektikyselysi on lähetetty.',
-    error: 'Viestin lähetys ei juuri nyt onnistunut. Lähetä sähköpostia osoitteeseen projects@titanorgroup.fi.'
+    error: 'Viestin lähetys ei juuri nyt onnistunut. Lähetä sähköpostia osoitteeseen projects@titanorgroup.fi.',
+    rateLimited: 'Liian monta viestiä tästä yhteydestä. Odota muutama minuutti ja yritä uudelleen.'
   }
 };
 
@@ -68,6 +70,11 @@ export function ContactForm({ form, locale, titleLevel }: ContactFormProps) {
       });
 
       const result = (await response.json().catch(() => null)) as { ok?: boolean } | null;
+
+      if (response.status === 429) {
+        setError(copy.rateLimited);
+        return;
+      }
 
       if (!response.ok || !result?.ok) {
         throw new Error('Contact request failed');
