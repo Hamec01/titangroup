@@ -182,8 +182,9 @@ echo
 echo "== 2/9  env file =="
 [ -r "$ENVFILE" ] || die "env file $ENVFILE not readable"
 for k in ADMIN_PASSWORD ADMIN_SESSION_SECRET SMTP_HOST SMTP_PORT SMTP_USER SMTP_PASSWORD CONTACT_TO_EMAIL; do
-  v=$(grep -E "^${k}=" "$ENVFILE" | head -1 | cut -d= -f2-)
-  [ -n "$v" ] || die "$k missing or empty in $ENVFILE"
+  # `KEY=` followed by at least one non-blank char. grep -q, no pipeline — a missing key must land
+  # on the die below, not abort the script via pipefail+set -e.
+  grep -qE "^${k}=[^[:space:]]" "$ENVFILE" || die "$k missing or empty in $ENVFILE"
 done
 echo "  ok — required admin/SMTP keys present"
 
@@ -213,6 +214,8 @@ docker image inspect "$IMAGE" --format '  id={{.Id}}  revision={{index .Config.L
 
 echo
 echo "== 5/9  pre-deploy backup (both volumes) — on-box + off-box, fail-closed =="
+grep -q ' /mnt/250gb ' /proc/mounts \
+  || die "/mnt/250gb is not mounted — the off-box mirror would be a silent local fake. ABORT."
 TS=$(date -u +%Y%m%dT%H%M%SZ)
 BK="$BACKUP_ROOT/pre-${MARK}-${TS}"
 mkdir -p "$BK"
@@ -337,12 +340,13 @@ echo "  $VERIFY removed"
 
 # ============================================================================================
 echo
-echo "== 7/9  swap $LIVE (automatic rollback on any failure from here) =="
-SWAP_STARTED=1
-OLD_ID=$(docker inspect "$LIVE" --format '{{.Id}}')
+echo "== 7/9  swap $LIVE =="
+OLD_ID=$(docker inspect "$LIVE" --format '{{.Id}}') || die "cannot inspect $LIVE"
 echo "  old container ${OLD_ID:0:12}  image $(docker inspect "$LIVE" --format '{{.Config.Image}}')"
 docker stop -t 30 "$LIVE" || true
-docker rename "$LIVE" "${LIVE}-pre-${MARK}"
+docker rename "$LIVE" "${LIVE}-pre-${MARK}" \
+  || die "rename failed — $LIVE is stopped, no rollback container yet. Restart it: docker start $LIVE"
+SWAP_STARTED=1   # ${LIVE}-pre-${MARK} now exists → automatic rollback can restore it
 docker run -d --name "$LIVE" --network "$NET" --init --restart unless-stopped \
   -p "127.0.0.1:${LIVE_PORT}:3000" \
   --env-file "$ENVFILE" \

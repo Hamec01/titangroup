@@ -55,6 +55,12 @@ admin-mutations) · `5e0d7f3` (contact) · `5a29496` (uploads) · `6ba93c4` (з�
     `git rev-parse --is-inside-work-tree` == ровно `true`; чистота через `git status --porcelain`
     (ловит и untracked — иначе `COPY . .` кладёт в образ то, чего нет в SHA). `--self-test` создаёт
     временный linked worktree и проверяет `git_worktree_ok` / `git_tree_clean` (включая untracked).
+  - **Fix 3 (превентивно, из ревью — тот же класс «тихий abort»):** проверка env-ключей
+    (`grep|head|cut` под `pipefail`+`set -e` → отсутствующий ключ ронял скрипт без `die`) → теперь
+    `grep -qE "^KEY=[^space]"`; добавлена проверка `grep ' /mnt/250gb ' /proc/mounts` до backup
+    (иначе off-box mirror — тихий локальный фейк); `SWAP_STARTED=1` перенесён ПОСЛЕ `docker rename`
+    (+`|| die` на inspect/rename) — авто-rollback армится только когда `-pre-r07b` реально
+    существует.
   - `--self-test` + `bash -n` в CI-джобе `public-site-quality`. Образ НЕ пересобирался (только скрипт).
 
 **`[2026-08-30]` R07-A — Security hardening & API robustness (Titanor Time) — DONE + РАЗВЁРНУТ на
