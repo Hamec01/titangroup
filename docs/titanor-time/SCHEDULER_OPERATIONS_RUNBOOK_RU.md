@@ -1,8 +1,12 @@
-# Titanor Time — scheduler operations runbook (R06-A)
+# Titanor Time — scheduler operations runbook (R06-A, обновлён R06-B)
 
-Долгоживущий процесс `scripts/attendance-auto-submit-scheduler.ts`. Один immutable образ, что и у
-web, но отдельная command. Никаких HTTP-портов. R06-A добавил: schema-aware `/api/ready`,
-обогащённый heartbeat + классификацию состояний, single-writer lease.
+Долгоживущий процесс. Один immutable образ, что и у web, но отдельная command. Никаких
+HTTP-портов. R06-A добавил: schema-aware `/api/ready`, обогащённый heartbeat + классификацию
+состояний, single-writer lease. **R06-B:** в runtime-образе больше нет `tsx` / dev
+`node_modules` — scheduler и его healthcheck запускаются из прекомпилированных CJS-бандлов
+(`.runtime/*.cjs`, `node`, без `npx` и без загрузки пакетов). Исходник —
+`scripts/attendance-auto-submit-scheduler.ts`; в образе он превращается в
+`.runtime/attendance-auto-submit-scheduler.cjs` (см. `R06B_DOCKER_RUNTIME_REPORT_RU.md`).
 
 ---
 
@@ -45,9 +49,12 @@ SIGTERM / SIGINT → graceful: дорабатывает текущую итер�
 
 ## 3. Healthcheck
 
-`scripts/attendance-scheduler-healthcheck.ts` — без HTTP, **без подключения к БД** (неспособность
-застрявшего цикла обновить heartbeat — это и есть сигнал). Печатает
-`scheduler-health: <STATE> (last tick Ns)`, exit 0 (healthy) / 1 (unhealthy).
+`.runtime/attendance-scheduler-healthcheck.cjs` (исходник
+`scripts/attendance-scheduler-healthcheck.ts`) — без HTTP, **без подключения к БД**
+(неспособность застрявшего цикла обновить heartbeat — это и есть сигнал). Печатает
+`scheduler-health: <STATE> (last tick Ns)`, exit 0 (healthy) / 1 (unhealthy). В
+`compose.titanor-time.yaml` и в pilot deploy — `--health-cmd 'node
+.runtime/attendance-scheduler-healthcheck.cjs'`, `start_period` 90s (= `startupGraceSeconds`).
 
 | STATE | exit | что значит | что делать |
 |---|:--:|---|---|
@@ -67,7 +74,7 @@ SIGTERM / SIGINT → graceful: дорабатывает текущую итер�
 # состояние
 docker inspect <scheduler> --format '{{json .State.Health}}'
 docker exec <scheduler> cat /tmp/attendance-scheduler-heartbeat.json
-docker exec <scheduler> sh -c 'npx tsx scripts/attendance-scheduler-healthcheck.ts; echo exit=$?'
+docker exec <scheduler> sh -c 'node .runtime/attendance-scheduler-healthcheck.cjs; echo exit=$?'
 
 # структурированные логи (уже sanitized — только event/outcome/errorCode/счётчики, без PII/SQL)
 docker logs --tail 50 <scheduler>
@@ -77,15 +84,29 @@ curl -s <app>/api/ready | jq        # 200 ready | 503 not_ready + reason
 
 # lease (на throwaway/restored копии, не на production напрямую)
 psql -c 'SELECT name, "holderId", "acquiredAt", "renewedAt" FROM "SchedulerLease"'
+
+# миграции / аварийный resolve — из запечённого минимального CLI (R06-B)
+docker run --rm --network <net> --env-file <env> -w /app --entrypoint node <image> \
+  .prisma-tools/node_modules/prisma/build/index.js migrate status --schema prisma/schema.prisma
+
+# аварийные операции (интерактивный ввод пароля — нужен настоящий TTY: docker run -it)
+docker run --rm -it --network <net> --env-file <env> --entrypoint node <image> \
+  .runtime/bootstrap-super-admin.cjs --username=<name> [--email=<email>]
+docker run --rm -it --network <net> --env-file <env> --entrypoint node <image> \
+  .runtime/reset-password.cjs --username=<name>
 ```
 
 Логи и ответы **не содержат** database URL, SQL, credentials, GPS-координаты, строки таблиц —
 только фиксированные коды и счётчики.
 
-## 5. Один immutable образ, две команды
+## 5. Один immutable образ, разные команды (R06-B)
 
-- web: `node server.js` (entrypoint образа);
-- scheduler: `sh -c 'npx tsx scripts/attendance-auto-submit-scheduler.ts'`.
+- web: `node server.js` (CMD образа);
+- scheduler: `node .runtime/attendance-auto-submit-scheduler.cjs`;
+- healthcheck scheduler: `node .runtime/attendance-scheduler-healthcheck.cjs`;
+- миграции: `node .prisma-tools/node_modules/prisma/build/index.js migrate deploy --schema prisma/schema.prisma`.
+
+Никакого `tsx` / `npx` / загрузки npm-пакетов в runtime. Один digest на web и scheduler.
 
 Ровно **один** scheduler-контейнер на окружение. Два → второй уходит в `OVERLAPPING` и ничего не
 делает (lease защищает от двойных tick'ов), но это ошибка конфигурации — убрать лишний.

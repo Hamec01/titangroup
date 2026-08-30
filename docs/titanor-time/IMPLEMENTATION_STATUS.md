@@ -1,5 +1,40 @@
 # Titanor Time — Implementation Status
 
+**`[2026-08-30]` R06-B — Docker / runtime optimization — DONE, НЕ развёрнут.** Отчёт
+`R06B_DOCKER_RUNTIME_REPORT_RU.md`. Commit `256565a`.
+- `titanor-time-app/Dockerfile` переработан: deps-стадия `npm install` → `npm ci` (lockfile
+  обязателен); runner больше **не копирует** dev `node_modules` (~884 MB).
+- Web = Next.js standalone (свой trace-`node_modules`). Scheduler + healthcheck + one-shot tick
+  + аварийные `bootstrap-super-admin` / `reset-password` = прекомпилированные CJS-бандлы
+  `.runtime/*.cjs` (`scripts/build-runtime-scripts.mjs`, esbuild; external только
+  `@prisma/client`/`argon2`/`sharp`/`node:*`) — `node`, без `tsx`/`npx`/сети.
+- `prisma migrate deploy/status/resolve` = минимальное CLI-замыкание `.prisma-tools/`
+  (`scripts/assemble-prisma-tools.mjs`, обход `dependencies` от `npm ci`, срез лишних
+  engine-бинарников); `prisma/` (схема + 96 миграций) запечена.
+- OCI labels (`revision`/`ref.name`/`created`) из build-args. `/app/uploads` создаётся и
+  `chown node:node` (устранён рассинхрон с `/app/public/uploads`).
+- `compose.titanor-time.yaml`: scheduler `command` + `healthcheck` → `node .runtime/…cjs`,
+  `start_period` 90s; app healthcheck **уже был** (T7A), не дублируется (поправка к R06A §8).
+- `scripts/run-lint.mjs` +шаг «runtime script bundles compile» (ловит browser/Next-импорт в
+  графе scheduler'а).
+- **Образ `titanor-time-app:t97-pilot-256565a`** `sha256:5db16a265ffb…` — **792 MB** (было
+  1.79 GB), unique 455 MB (было 1.45 GB).
+- Verify (одноразовый PostgreSQL + сеть, prod/pilot не тронуты): `npm ci` из lockfile; migrate
+  deploy с нуля → 96 + идемпотентный повтор + status «up to date»; web `/api/ready`
+  `schema:current` `/api/health` `/login` `/reset-password` 200; scheduler heartbeat/lease/tick
+  (все 5 задач `ok`)/healthcheck HEALTHY; graceful SIGTERM (lease released, exit 0) + restart
+  recovery; web graceful restart; uploads r/w как uid/gid 1000 через bind-mount; **PDF export
+  end-to-end** (авторизованно) — customer-hours 200 `%PDF` 91 KB со встроенным DejaVu, custom-report
+  summary/detailed + workforce-matrix 200 `%PDF`; нет `typescript`/`tsx`/`playwright`/`esbuild`/
+  `@types` в runner; нет secrets/`.env`/`.git`.
+- Regression: typecheck 0, lint ok, unit 12/12, db 54/54, scheduler 5/5, manifest OK, `npm run
+  build` в Docker ✅.
+- Deploy-скрипт `/home/deploy/app-data/t97-pilot/deploy-256565a.sh` (backup + prod baseline
+  guard + migrate no-op + swap app/scheduler + verify + rollback) — **агентом не запущен**,
+  владельцу. Старые образы / rollback-контейнеры не удалялись. Prod (`daa2edbb`,
+  `StartedAt 2026-08-21`, restarts 0) не тронут.
+- R07 — не начат.
+
 **`[2026-08-30]` R06-A — schema-aware readiness + scheduler diagnostics — DONE.** Отчёт
 `R06A_READINESS_SCHEDULER_REPORT_RU.md`, runbook `SCHEDULER_OPERATIONS_RUNBOOK_RU.md`.
 - `8414d5f` — `/api/ready` schema-aware: 200 только при совместимой схеме (строгая проверка
@@ -16,7 +51,7 @@
 - Baseline: **прод — живой B07** (образ `daa2edbb` + БД 42 миграции, tick'и падают, старый
   `/api/ready` ложно 200). R06-A чинит проверки; прод не тронут; фикс прод-БД — R14.
 - **DEPLOYED на пилот 2026-08-30** (`deploy-d15586c.sh` отработал: backup `pilot-20260830T104523Z-pre-deploy`, migrate 95→96, оба контейнера `--health-cmd` → `healthy`, `/api/ready` `schema:current`, scheduler `HEALTHY`, `SchedulerLease` 1 row, все tick-операции `ok`; prod baseline guard — `production unchanged ✓`). Rollback-контейнеры `-pre-d15586c` сохранены.
-- R06-B (Docker opt) и R07 — не начаты.
+- R06-B — DONE (см. выше), развёртывание ждёт владельца. R07 — не начат.
 
 **`[2026-08-30]` R05 — dependency security (Titanor Time) — DONE.** Отчёт `R05_DEPENDENCY_SECURITY_RU.md`.
 `npm audit --omit=dev` 8 high → **0**. Slice A (`37d5ca8`): Next 16.2.12→16.3.3 (+ транзитивно
@@ -25,7 +60,7 @@ postcss 8.5.23, nanoid 3.3.18, дубль sharp@0.34.5 удалён). Slice B (`
 проверена). typecheck 0, lint ✓, build ✓, регрессия unit+db 62/62. browser smoke → R12.
 Pilot image `t97-pilot-1e4dc92` + `deploy-1e4dc92.sh` (чистый свап образа — R03 уже задеплоен, БД на 95). Ждёт запуска владельцем.
 
-Обновлено: 2026-08-30 Europe/Helsinki (R03 задеплоен на пилот; R05 dependency security DONE, свап образа ждёт владельца)
+Обновлено: 2026-08-30 Europe/Helsinki (R06-B Docker/runtime opt DONE — образ `t97-pilot-256565a` 792 MB, deploy-скрипт ждёт владельца; R06-A на пилоте; R05 свап образа ждёт владельца)
 
 **`[2026-08-30]` R03 — учётные записи, профили и recovery без SMTP (production release roadmap) — в работе.**
 ТЗ §6–§7, roadmap §R03. Production/Caddy/DNS не трогаются. Перед первым pilot deploy — `pre-deploy` backup.

@@ -136,9 +136,12 @@ disposable PostgreSQL). `compose.titanor-time.yaml` не менялся. `:lates
 
 ## 8. Открытые пункты (в R06-B / R14)
 
-- Real Docker healthcheck для **app** в `compose.titanor-time.yaml` (сейчас только scheduler).
+- ~~Real Docker healthcheck для **app** в `compose.titanor-time.yaml` (сейчас только scheduler).~~
+  **Поправка (R06-B):** app healthcheck в `compose.titanor-time.yaml` уже присутствовал (эпоха
+  T7A) и корректен — эта строка была неточна. R06-B перевёл scheduler healthcheck/command на
+  прекомпилированный бандл, дублирования нет.
 - Один immutable image + `npm ci` lockfile-only + минимизация runtime `node_modules` + non-root —
-  **R06-B**.
+  **R06-B** (done, `256565a`, образ `t97-pilot-256565a`, 1.79 GB → 792 MB).
 - B07 (прод БД 42 миграции) закрывается заменой БД на pilot целиком — **R14**.
 - Negative `/api/ready` проверка на pilot — только на restored-копии в R12/R14 (pilot БД не мутируем).
 
