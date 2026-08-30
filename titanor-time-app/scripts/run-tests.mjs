@@ -114,7 +114,7 @@ async function runDbLanes(lanes) {
   const runId = Date.now().toString(36) + randomBytes(2).toString('hex');
   const tmpl = `tt_tmpl_${runId}`;
   const keys = {};
-  for (const k of ['IDEMPOTENCY_ENCRYPTION_KEY', 'ACTIVATION_TOKEN_HMAC_KEY', 'PERSONAL_DATA_ENCRYPTION_KEY', 'PASSWORD_RESET_TOKEN_HMAC_KEY']) {
+  for (const k of ['IDEMPOTENCY_ENCRYPTION_KEY', 'ACTIVATION_TOKEN_HMAC_KEY', 'PERSONAL_DATA_ENCRYPTION_KEY', 'PASSWORD_RESET_TOKEN_HMAC_KEY', 'GPS_ARCHIVE_ENCRYPTION_KEY']) {
     keys[k] = process.env[k] || randomBytes(32).toString('base64');
   }
   const created = [];

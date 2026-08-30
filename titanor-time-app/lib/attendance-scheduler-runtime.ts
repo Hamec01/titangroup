@@ -155,7 +155,7 @@ export interface RetentionStepResult {
 export async function maybeRunRetentionCore(
   lastSuccessAt: Date | null,
   now: Date,
-  runRetention: () => Promise<{ deletedCount: number }>,
+  runRetention: () => Promise<{ deletedCount: number; presenceDeletedCount?: number; gateSkippedReason?: string }>,
   log: (fields: Record<string, unknown>) => void,
   getNow: () => Date = () => new Date()
 ): Promise<RetentionStepResult> {
@@ -166,7 +166,15 @@ export async function maybeRunRetentionCore(
   try {
     const result = await runRetention();
     const completedAt = getNow();
-    log({ event: 'attendance_location_retention', retentionRan: true, retentionOutcome: 'ok', retentionDeleted: result.deletedCount });
+    log({
+      event: 'attendance_location_retention',
+      retentionRan: true,
+      // R08 — 'skipped_no_archive_key' when GPS_ARCHIVE_ENCRYPTION_KEY is absent/malformed: the
+      // pass still counts as "ran" for pacing, but nothing was deleted.
+      retentionOutcome: result.gateSkippedReason ?? 'ok',
+      retentionDeleted: result.deletedCount,
+      retentionPresenceDeleted: result.presenceDeletedCount ?? 0
+    });
     return { outcome: { kind: 'ran_ok', deletedCount: result.deletedCount }, lastSuccessAt: completedAt };
   } catch {
     // Never logs the raw Error/message/stack — same PII/secret-leak reasoning as runOneTickCore's

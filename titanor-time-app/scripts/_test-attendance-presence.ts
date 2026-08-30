@@ -125,18 +125,46 @@ async function main() {
     check('3-day-old capturedAt -> CLOCK_SKEW_TOO_LARGE, nothing stored', r.kind === 'CLOCK_SKEW_TOO_LARGE' && (await prisma.shiftPresenceSample.count({ where: { employeeId: f.emp.id } })) === 0, r);
   }
 
-  // ---- retention sweep ----
+  // ---- retention sweep (R08 — archive-gated) ----
   {
     const f = await makeWorkerOnShift('RET', null);
+    const oldCapturedAt = new Date(Date.now() - 100 * 86400000);
     const old = await prisma.shiftPresenceSample.create({
-      data: { clientSampleId: randomUUID(), employeeId: f.emp.id, siteId: f.site.id, capturedAt: new Date(Date.now() - 100 * 86400000), capturedOffline: false, latitude: '60.170000', longitude: '24.940000', accuracyMeters: '20.0' }
+      data: { clientSampleId: randomUUID(), employeeId: f.emp.id, siteId: f.site.id, capturedAt: oldCapturedAt, capturedOffline: false, latitude: '60.170000', longitude: '24.940000', accuracyMeters: '20.0' }
     });
     await prisma.$executeRawUnsafe(`UPDATE "ShiftPresenceSample" SET "createdAt" = now() - interval '100 days' WHERE id = '${old.id}'`);
     const fresh = await recordPresenceSample(f.emp.id, f.device.id, { clientSampleId: randomUUID(), latitude: 60.17, longitude: 24.94, accuracyMeters: 15, capturedAt: new Date(), capturedOffline: false });
     check('fresh sample recorded', fresh.kind === 'RECORDED');
+
+    // Un-archived: retention must NOT touch the old sample yet.
+    const held = await runAttendanceLocationRetention();
+    check('un-archived old sample is NOT deleted', held.presenceDeletedCount === 0 && (await prisma.shiftPresenceSample.count({ where: { employeeId: f.emp.id } })) === 2, held);
+    check('  it is counted as an un-archived old day', held.unarchivedOldDayCount >= 1, held);
+
+    // Mark that reading-day VERIFIED, then retention deletes the old sample and keeps the fresh one.
+    const day = new Date(oldCapturedAt.toISOString().slice(0, 10) + 'T00:00:00.000Z');
+    await prisma.gpsArchiveDay.create({
+      data: {
+        archiveDate: day, revision: 0, status: 'VERIFIED',
+        clockLocationCount: 0, presenceSampleCount: 1,
+        coveredThroughCreatedAt: new Date(), verifiedAt: new Date(),
+        plaintextSha256: 'a'.repeat(64), ciphertextSha256: 'b'.repeat(64), ciphertextBytes: 128,
+        relativePath: 'gps-archive/x.jsonl.gz.enc', writtenAt: new Date()
+      }
+    });
     const result = await runAttendanceLocationRetention();
-    check('retention deletes the 100-day-old presence sample', result.presenceDeletedCount >= 1, result);
+    check('after VERIFIED archive: retention deletes the 100-day-old presence sample', result.presenceDeletedCount >= 1, result);
     check('  the fresh one survives', (await prisma.shiftPresenceSample.count({ where: { employeeId: f.emp.id } })) === 1);
+  }
+
+  // ---- retention is fully held when the archive key is absent (R08 fail-closed) ----
+  {
+    const saved = process.env.GPS_ARCHIVE_ENCRYPTION_KEY;
+    delete process.env.GPS_ARCHIVE_ENCRYPTION_KEY;
+    const r = await runAttendanceLocationRetention();
+    check('no GPS_ARCHIVE_ENCRYPTION_KEY -> nothing deleted, gateSkippedReason set',
+      r.deletedCount === 0 && r.presenceDeletedCount === 0 && r.gateSkippedReason === 'skipped_no_archive_key', r);
+    if (saved) process.env.GPS_ARCHIVE_ENCRYPTION_KEY = saved;
   }
 
   console.log(JSON.stringify({ pass, fail }));
