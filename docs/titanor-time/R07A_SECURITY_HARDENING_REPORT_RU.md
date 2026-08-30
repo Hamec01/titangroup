@@ -141,7 +141,7 @@ routes использует многострочную форму `jsonError(403
   XFF is ignored» — берётся Caddy-appended rightmost)
 
 **Полный прогон (clean env):** typecheck 0 · lint ok · unit **13** · db **57** · scheduler **5** ·
-`npm run build` ✓ · миграция 97 с нуля чисто. CI (`139221d`, run 33316873965): **6/6 job success**.
+`npm run build` ✓ · миграция 97 с нуля чисто. CI: `139221d` run 33316873965 (код) + `0b9d1f2` run 33319461574 (probe fix) — оба 6/6.
 
 ## 7. Pilot deploy — кандидат + скрипт (владельцу)
 
@@ -159,7 +159,10 @@ routes использует многострочную форму `jsonError(403
 - **Verify в скрипте:** app health + `/api/ready` тело (`status=ready`, `schema=current`,
   `applied=expected=97`); `/api/health` `/login` `/reset-password`; **7 security-заголовков +
   отсутствие `X-Powered-By` + `/robots.txt Disallow:/`**; **живой rate-limit** (6 login-попыток
-  probe-идентификатором → 429, строка в `RateLimitCounter`, затем чистка probe-строк); malformed
+  probe-идентификатором с `X-Forwarded-For: 192.0.2.247` (RFC 5737, не общий `ip:unknown`) → 429;
+  fail-closed pre-check что `ip:192.0.2.247` отсутствует; ассерт **обеих** строк
+  `identifier:__deploy_rl_probe_8724480__` и `ip:192.0.2.247`; удаление **только** этих двух точных
+  ключей); malformed
   `[id]` → не 5xx; scheduler — lease держит+renew'ит **новый** holder, heartbeat `ok`+`cf=0`,
   **реальный** exit healthcheck, Docker health обоих, все 4 фоновые операции, нет `OVERLAPPING`;
   повторная сверка production baseline.
