@@ -1,10 +1,14 @@
 # Titanor Time — Implementation Status
 
-**`[2026-08-30]` R07-A — Security hardening & API robustness (Titanor Time) — DONE; кандидат +
-deploy-скрипт готовы, ждут владельца.** Отчёт `R07A_SECURITY_HARDENING_REPORT_RU.md`. Одна
-аддитивная миграция (**97** `RateLimitCounter`). Публичный сайт (R07-B) — отдельный заход.
-**Образ `titanor-time-app:t97-pilot-8724480`** (`sha256:4516b393c686…`, 792 MB, HEAD `8724480`).
-Disposable-env verify PASS: from-zero 97 + **restored-pilot `pg_dump` 96→97** (1 миграция, 0 failed);
+**`[2026-08-30]` R07-A — Security hardening & API robustness (Titanor Time) — DONE + РАЗВЁРНУТ на
+пилот, PASS.** Отчёт `R07A_SECURITY_HARDENING_REPORT_RU.md`. Одна аддитивная миграция (**97**
+`RateLimitCounter`). Публичный сайт (R07-B) — отдельный заход (можно начинать).
+**Пилот на `titanor-time-app:t97-pilot-8724480`** (`sha256:4516b393c686…`, 792 MB, HEAD `8724480`),
+**DB 97/97, app+scheduler `healthy`, scheduler ticks ok, security headers/robots/rate-limit-cleanup
+проверены, backup on-box+off-box присутствует, production (`daa2edbb`) не изменён**
+(вердикт владельца 2026-08-30). Deploy — `deploy-8724480.sh`; rollback-контейнеры `-pre-8724480`
+(на `t97-pilot-256565a`) сохранены, scheduler-pre exited 0 (штатный graceful — без stale lease).
+Disposable-env verify до деплоя PASS: from-zero 97 + **restored-pilot `pg_dump` 96→97** (1 миграция, 0 failed);
 app/scheduler healthy на 97; 7 security-заголовков + нет `X-Powered-By` + `/robots.txt Disallow:/`;
 login/logout/logout-all/recovery smoke; **rate-limit B08 — 429 + `RateLimitCounter` строка по
 rightmost X-Forwarded-For (не поддельный leftmost) + пережил `docker restart`**; malformed UUID →
@@ -138,7 +142,7 @@ postcss 8.5.23, nanoid 3.3.18, дубль sharp@0.34.5 удалён). Slice B (`
 проверена). typecheck 0, lint ✓, build ✓, регрессия unit+db 62/62. browser smoke → R12.
 Pilot image `t97-pilot-1e4dc92` + `deploy-1e4dc92.sh` (чистый свап образа — R03 уже задеплоен, БД на 95). Ждёт запуска владельцем.
 
-Обновлено: 2026-08-30 Europe/Helsinki (R07-A DONE — образ `t97-pilot-8724480` + `deploy-8724480.sh` (миграция 96→97) готовы, disposable verify PASS, ждут владельца; CI 6/6 `139221d`. R07-A.1 + R07-B остаются)
+Обновлено: 2026-08-30 Europe/Helsinki (R07-A РАЗВЁРНУТ на пилот — `t97-pilot-8724480`, DB 97/97, PASS; B08+B11 закрыты для Titanor Time. Дальше: R07-B публичный сайт (отдельно), R07-A.1 guard-rollout с R09)
 
 **`[2026-08-30]` R03 — учётные записи, профили и recovery без SMTP (production release roadmap) — в работе.**
 ТЗ §6–§7, roadmap §R03. Production/Caddy/DNS не трогаются. Перед первым pilot deploy — `pre-deploy` backup.

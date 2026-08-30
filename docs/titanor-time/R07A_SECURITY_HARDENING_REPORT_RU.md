@@ -4,12 +4,14 @@
   блокеры B08 и B11.
 - **Дата:** 2026-08-30.
 - **Не затронуто:** production, live public site, Caddy, Cloudflare DNS, схема ролей/permissions,
-  бизнес-логика, UI. Одна аддитивная миграция (**97** — `RateLimitCounter`). Пилот **не
-  переразвёртывался** этим этапом.
-- **R07-B (публичный сайт)** — вынесен в отдельный заход (решение владельца): admin login
-  rate-limit, timing-safe пароль, CSRF logout, contact SMTP timeout, uploads
+  бизнес-логика, UI. Одна аддитивная миграция (**97** — `RateLimitCounter`).
+- **Статус:** код DONE + **развёрнут на пилот 2026-08-30 (PASS)** — см. §7. Пилот на
+  `t97-pilot-8724480`, DB 97/97.
+- **R07-B (публичный сайт)** — отдельный заход (решение владельца), можно начинать после этого
+  финала: admin login rate-limit, timing-safe пароль, CSRF logout, contact SMTP timeout, uploads
   magic-byte/size/re-encode/nosniff/path-traversal.
-- **Commits:** `899862c` (A) · `8f3795f` (B) · `c413748` (C) · `ecfb302` (guard helper + auth routes).
+- **Commits:** `899862c` (A) · `8f3795f` (B, миграция 97) · `c413748` (C) · `ecfb302` (D — guard) ·
+  `27edd0b`/`0b9d1f2` (deploy-скрипт `deploy-8724480.sh`).
 
 ---
 
@@ -143,7 +145,21 @@ routes использует многострочную форму `jsonError(403
 **Полный прогон (clean env):** typecheck 0 · lint ok · unit **13** · db **57** · scheduler **5** ·
 `npm run build` ✓ · миграция 97 с нуля чисто. CI: `139221d` run 33316873965 (код) + `0b9d1f2` run 33319461574 (probe fix) — оба 6/6.
 
-## 7. Pilot deploy — кандидат + скрипт (владельцу)
+## 7. Pilot deploy — **РАЗВЁРНУТ, PASS** (2026-08-30)
+
+Владелец запустил `deploy-8724480.sh`. **Пилот на `t97-pilot-8724480`, DB 97/97, app + scheduler
+`healthy`**, вердикт владельца — **PASS**.
+
+| после деплоя | значение |
+|---|---|
+| контейнеры | `t97-pilot-app` + `t97-pilot-scheduler` на `titanor-time-app:t97-pilot-8724480`, оба `healthy` |
+| DB миграции | **97 применено, 0 failed**, newest `20260830140000_add_rate_limit_counter`; `RateLimitCounter` создана, **0 строк** (probe-строки скрипт удалил) |
+| `/api/ready` | `status:ready`, `schema:current`, `migrations 97/97` |
+| scheduler | `HEALTHY` exit 0; lease держит новый holder (`f9ed3b62c8e2:…`), renew'ится; ticks `ok` |
+| security headers | на пилотном `/login` — X-Frame-Options DENY, Permissions-Policy `geolocation=(self)`, X-Robots-Tag noindex; **нет `X-Powered-By`** |
+| backup | on-box (`/home/deploy/backups/titanor-time-pilot/pilot-*-pre-deploy`) + off-box mirror (s3fs) — присутствуют, чек-сумма re-verify пройдена |
+| rollback-контейнеры | `t97-pilot-{app,scheduler}-pre-8724480` (на `t97-pilot-256565a`) сохранены; scheduler-pre exited **0** (штатный graceful — без stale lease) |
+| production | `daa2edbb`, `StartedAt 2026-08-21`, restarts 0 — **не изменён** |
 
 - **Образ:** `titanor-time-app:t97-pilot-8724480`
   `sha256:4516b393c686bafc8088ccc8312ed7829c1ae1603da507b8593112e9a496013b` — **792 MB**,
@@ -170,7 +186,7 @@ routes использует многострочную форму `jsonError(403
   **остаётся** (аддитивная — `t97-pilot-256565a` терпит лишнюю таблицу, `/api/ready` → `schema:ahead`
   → всё ещё 200). Down-миграции нет.
 
-### Disposable-env верификация (до передачи владельцу)
+### Disposable-env верификация (до деплоя)
 
 | проверка | результат |
 |---|---|
@@ -187,14 +203,22 @@ routes использует многострочную форму `jsonError(403
 | dev/test пакеты в образе | ✅ нет `typescript`/`tsx`/`playwright`/`esbuild`/`@types`/`fake-indexeddb` |
 | production baseline | ✅ `daa2edbb`, `StartedAt 2026-08-21`, restarts 0 — не изменён |
 
-**Команда владельцу:**
+### Команда деплоя (выполнена владельцем)
 
 ```bash
 bash /home/deploy/app-data/t97-pilot/deploy-8724480.sh
 ```
 
-Пришлите вывод — сверю PASS, обновлю статус. Агент скрипт **не запускает** (live pilot deploy +
-schema-миграция).
+**Откат** (если понадобится позже; миграция 97 остаётся — аддитивная):
+
+```bash
+docker rm -f t97-pilot-app t97-pilot-scheduler
+docker rename t97-pilot-app-pre-8724480 t97-pilot-app
+docker rename t97-pilot-scheduler-pre-8724480 t97-pilot-scheduler
+docker start t97-pilot-app t97-pilot-scheduler
+```
+
+Когда откат больше не нужен: `docker rm -f t97-pilot-{app,scheduler}-pre-8724480`.
 
 ## 8. Открытые пункты / для R11 и R14
 
