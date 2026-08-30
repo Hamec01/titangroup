@@ -1,6 +1,7 @@
 # Titanor Time — модель данных
 
-Версия: **5.5.0** (2026-08-24, +§4.2a Квалификации и допуски, +§4.8a Admin Notification Center).
+Версия: **5.6.0** (2026-08-31, +§4.10 дополнения R00–R10 — новые таблицы миграций 76→98 и сквозные
+механизмы R06–R09; предыдущая 5.5.0: +§4.2a Квалификации, +§4.8a Admin Notification Center).
 Статус: **proposed architecture** (общая пометка "ничего не реализовано" в этой версии устарела —
 многое, включая обе новые секции, уже реализовано и промигрировано; см. `01_SCREEN_MAP.md`/
 `IMPLEMENTATION_STATUS.md` за фактическим статусом). Источник истины для имён сущностей, полей,
@@ -1954,6 +1955,36 @@ inline and catch-up-service materialization into payroll-period fragments/live d
 including late-sync reopen and FINAL_APPROVED correction integration. Not yet built: `/worker`
 clock UI, IndexedDB offline outbox, sync/FIFO ingestion, exception-resolution endpoints,
 auto-submit scheduler and attendance overview. See `docs/titanor-time/IMPLEMENTATION_STATUS.md`.
+
+### 4.10 Дополнения R00–R10 — **`[2026-08-31] реализовано и промигрировано`**
+
+Начиная с версии 5.5.0 (2026-08-24) в схему добавлены таблицы ниже. **Источник истины — всегда
+`prisma/schema.prisma`** (миграции 76→98); здесь — только назначение.
+
+| таблица | миграция | назначение |
+|---|---|---|
+| `ShiftPresenceSample` | T12 | оппортунистические GPS-точки «ещё на объекте» во время открытой смены; триггеры ban-UPDATE + retention-delete-guard (< 90 дн), как `ClockEventLocation` |
+| `WorkerNotification` / `WorkerNotificationDismissal` | T15 (`20260829200000`) | «колокольчик» работника: дедлайны + неустранимо-упавшие check-in; персональный dismiss |
+| `ProfessionDefinition` / `EmployeeProfession` | T13/T15/T16 | каталог профессий + профессии работника (self-service одной формой); CHECK-и в `_test-professions-schema` |
+| `TimesheetSubmissionSchedule` / `EmployeeTimesheetSchedule` | T12 | цикл отправки табеля работником (еженедельно / раз в 2 недели), авто-enrol при первом назначении |
+| `AddressGeocodeCache` / `GeocodingProviderState` | T12 | кэш геокодирования адреса объекта → авто-координаты геозоны |
+| `PasswordResetToken` (+`issuedByUserId`, `attemptCount`) | R03 (`20260830090000`) | admin-assisted одноразовый код восстановления без SMTP; право `user.recovery.generate` |
+| `SchedulerLease` | R06-A (`20260830120000`) | single-writer lock планировщика (`holderId`, `renewedAt`, TTL); startup schema-check |
+| `RateLimitCounter` | R07-A (`20260830140000`) | общий БД-бэкенд rate-limit (atomic INSERT..ON CONFLICT, multi-instance + restart-safe, fail-OPEN) |
+| `GpsArchiveDay` | R08 (`20260830160000`) | реестр зашифрованного архива GPS per reading-day: `@@id([archiveDate, revision])`, `status` WRITTEN→VERIFIED/FAILED (trigger `verified_immutable`), SHA-256 plaintext+ciphertext, seal margin 2 дня |
+
+Сквозные механизмы, добавленные R06–R09 (не новые таблицы):
+- `/api/ready` — строгая проверка **множества** миграций через `lib/generated/migration-inventory.ts`
+  (`schema: current | ahead | behind`; `ahead` → HTTP 200, rollback-толерантность); `KEY_TABLES` gate.
+- `lib/api-guard`: `requireUuidParam` (malformed `[id]` → route `<ENTITY>_NOT_FOUND` 404 до Prisma),
+  `guardApiRequest` (CSRF/auth/permission, байт-идентичные envelope) — раскатан на auth-routes + всё,
+  что трогали R07–R10; полный rollout = R07-A.1 (backlog).
+- `lib/client-ip`: XFF rightmost-minus-`TITANOR_TRUSTED_PROXY_HOPS`.
+- `lib/reporting/auto-break` (T10-D): авто-обед — день ≥ `grossThresholdMinutes` (6 ч) без своего
+  перерыва теряет `plannedUnpaidBreakMinutes` (30); `workedMinutes = grossMinutes − 30`. Затрагивает
+  все report/export пути.
+- `lib/i18n/access-denied` + `AccessDeniedNotice` (R09.2): человеческий RU/EN текст запрета,
+  permission-код только в `title`/`data-permission`.
 
 ## 5. Break-инварианты (применимо к `BreakSegment`, `TimesheetDraftBreakSegment`,
 `CorrectionDraftBreakSegment` и `proposedSegments[].breaks`)

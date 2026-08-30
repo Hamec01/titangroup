@@ -1,0 +1,332 @@
+R10 — migration from a fresh DB (candidate image titanor-time-app:t97-pilot-edd950c)
+date: 2026-08-30T22:29:28Z
+
+### run 1: migrate deploy from zero
+Prisma schema loaded from prisma/schema.prisma
+Datasource "db": PostgreSQL database "titanor_time_t97", schema "public" at "r10-db:5432"
+
+98 migrations found in prisma/migrations
+
+Applying migration `20260728012114_init_titanor_time_foundation`
+Applying migration `20260728161708_add_role_permission_user_role`
+Applying migration `20260729220524_add_user_session`
+Applying migration `20260730221710_seed_city_read_all_permission`
+Applying migration `20260730224645_seed_session_revoke_all_own_permission`
+Applying migration `20260730232202_add_audit_event`
+Applying migration `20260731210728_seed_worker_read_all_permission`
+Applying migration `20260801005057_add_idempotency_key`
+Applying migration `20260801005830_seed_site_create_permission`
+Applying migration `20260801013520_seed_template_create_permission`
+Applying migration `20260801123904_seed_worker_create_permission`
+Applying migration `20260803123201_seed_worker_update_deactivate_permissions`
+Applying migration `20260803125804_seed_site_read_all_update_permissions`
+Applying migration `20260803142013_seed_workarea_permissions`
+Applying migration `20260803152219_seed_assignment_create_permission`
+Applying migration `20260804045346_seed_assignment_read_all_permission`
+Applying migration `20260804053740_seed_assignment_update_permission`
+Applying migration `20260804054937_seed_assignment_split_permission`
+Applying migration `20260804065030_seed_assignment_end_permission`
+Applying migration `20260804073404_add_foreman_assignment`
+Applying migration `20260804085737_seed_foreman_assignment_create_permission`
+Applying migration `20260804092124_seed_foreman_assignment_read_all_permission`
+Applying migration `20260804102750_seed_foreman_assignment_end_permission`
+Applying migration `20260804110000_seed_period_create_permission`
+Applying migration `20260804110500_seed_period_read_all_permission`
+Applying migration `20260804120000_seed_worker_read_own_permission`
+Applying migration `20260804120500_seed_assignment_read_own_permission`
+Applying migration `20260804121000_seed_period_read_own_permission`
+Applying migration `20260804140000_seed_timesheet_read_own_permission`
+Applying migration `20260804150000_seed_timesheet_draft_edit_own_permission`
+Applying migration `20260804160000_add_timesheet_review_scope`
+Applying migration `20260804170000_seed_timesheet_submit_permission`
+Applying migration `20260804180000_seed_timesheet_scope_review_all_permission`
+Applying migration `20260805090000_seed_timesheet_read_all_permission`
+Applying migration `20260805090500_seed_timesheet_final_approve_permission`
+Applying migration `20260805091000_seed_timesheet_return_permission`
+Applying migration `20260805130000_seed_period_lock_permission`
+Applying migration `20260805140000_seed_foreman_review_permissions`
+Applying migration `20260805150000_add_correction_schema`
+Applying migration `20260805160000_seed_correction_permissions`
+Applying migration `20260805170000_add_activation_token`
+Applying migration `20260805171000_seed_worker_activation_permission`
+Applying migration `20260806123749_add_system_user_activation_token`
+Applying migration `20260806140000_seed_user_admin_permissions`
+Applying migration `20260806150000_seed_user_activation_generate_permission`
+Applying migration `20260807090000_seed_template_read_all_permission`
+Applying migration `20260807120000_seed_template_update_permission`
+Applying migration `20260812000000_add_attendance_clock_schema_foundation`
+Applying migration `20260813000000_seed_attendance_geofence_permissions`
+Applying migration `20260814000000_seed_attendance_clock_worker_permissions`
+Applying migration `20260815000000_seed_attendance_clock_sync_permission`
+Applying migration `20260816000000_seed_attendance_exception_read_permissions`
+Applying migration `20260817000000_seed_attendance_exception_base_resolution_permissions`
+Applying migration `20260818000000_seed_timesheet_draft_edit_exception_permission`
+Applying migration `20260818010000_seed_attendance_conflict_read_permission`
+Applying migration `20260818020000_seed_attendance_policy_permissions`
+Applying migration `20260819000000_seed_site_period_read_assigned_permissions`
+Applying migration `20260819150000_add_export_batch_schema`
+Applying migration `20260819160000_seed_export_permissions`
+Applying migration `20260819170000_fix_export_item_worked_minutes_bounds`
+Applying migration `20260819180000_add_correction_covered_by_export_batch`
+Applying migration `20260819190000_fix_correction_pending_export_excluded_participant`
+Applying migration `20260820000000_seed_city_create_permission`
+Applying migration `20260821100000_add_timesheet_submission_schedules`
+Applying migration `20260821101000_seed_timesheet_submission_schedules_and_permissions`
+Applying migration `20260821102000_add_address_geocoding_cache`
+Applying migration `20260821103000_seed_attendance_gps_raw_permission`
+Applying migration `20260823000000_seed_city_delete_permission`
+Applying migration `20260823010000_seed_user_create_admin_permission`
+Applying migration `20260824163902_add_employee_profile_and_qualifications`
+Applying migration `20260824164500_seed_worker_profile_permissions`
+Applying migration `20260824172050_replace_employee_profile_birth_year_with_date_of_birth`
+Applying migration `20260824220000_add_qualification_catalog_and_admin_notifications`
+Applying migration `20260824221000_seed_qualification_catalog_and_notification_permissions`
+Applying migration `20260826084432_add_worker_dossier_fields`
+Applying migration `20260828050000_add_company_gps_accuracy_threshold`
+Applying migration `20260828120000_add_admin_direct_edit`
+Applying migration `20260828130000_add_timesheet_approval_notifications`
+Applying migration `20260828140000_add_shift_presence_sample`
+Applying migration `20260828150000_add_planned_break_paid`
+Applying migration `20260828160000_default_cutoff_one_grace_day`
+Applying migration `20260828170000_add_auto_unpaid_break_default_minutes`
+Applying migration `20260828180000_add_shift_auto_close_enum`
+Applying migration `20260828181000_add_shift_auto_close`
+Applying migration `20260829120000_add_professions`
+Applying migration `20260829121000_seed_profession_catalog`
+Applying migration `20260829122000_seed_profession_manage_permission`
+Applying migration `20260829153000_add_password_reset_tokens`
+Applying migration `20260829170000_add_gps_offline_resilience`
+Applying migration `20260829180000_relax_approx_location_age_check`
+Applying migration `20260829190000_seed_worker_profession_manage_own`
+Applying migration `20260829200000_add_worker_notifications`
+Applying migration `20260829210000_add_outside_geofence_checkin`
+Applying migration `20260830090000_account_recovery_admin_assisted`
+Applying migration `20260830100000_seed_session_own_permissions`
+Applying migration `20260830120000_add_scheduler_lease`
+Applying migration `20260830140000_add_rate_limit_counter`
+Applying migration `20260830160000_add_gps_archive_day`
+
+The following migration(s) have been applied:
+
+migrations/
+  └─ 20260728012114_init_titanor_time_foundation/
+    └─ migration.sql
+  └─ 20260728161708_add_role_permission_user_role/
+    └─ migration.sql
+  └─ 20260729220524_add_user_session/
+    └─ migration.sql
+  └─ 20260730221710_seed_city_read_all_permission/
+    └─ migration.sql
+  └─ 20260730224645_seed_session_revoke_all_own_permission/
+    └─ migration.sql
+  └─ 20260730232202_add_audit_event/
+    └─ migration.sql
+  └─ 20260731210728_seed_worker_read_all_permission/
+    └─ migration.sql
+  └─ 20260801005057_add_idempotency_key/
+    └─ migration.sql
+  └─ 20260801005830_seed_site_create_permission/
+    └─ migration.sql
+  └─ 20260801013520_seed_template_create_permission/
+    └─ migration.sql
+  └─ 20260801123904_seed_worker_create_permission/
+    └─ migration.sql
+  └─ 20260803123201_seed_worker_update_deactivate_permissions/
+    └─ migration.sql
+  └─ 20260803125804_seed_site_read_all_update_permissions/
+    └─ migration.sql
+  └─ 20260803142013_seed_workarea_permissions/
+    └─ migration.sql
+  └─ 20260803152219_seed_assignment_create_permission/
+    └─ migration.sql
+  └─ 20260804045346_seed_assignment_read_all_permission/
+    └─ migration.sql
+  └─ 20260804053740_seed_assignment_update_permission/
+    └─ migration.sql
+  └─ 20260804054937_seed_assignment_split_permission/
+    └─ migration.sql
+  └─ 20260804065030_seed_assignment_end_permission/
+    └─ migration.sql
+  └─ 20260804073404_add_foreman_assignment/
+    └─ migration.sql
+  └─ 20260804085737_seed_foreman_assignment_create_permission/
+    └─ migration.sql
+  └─ 20260804092124_seed_foreman_assignment_read_all_permission/
+    └─ migration.sql
+  └─ 20260804102750_seed_foreman_assignment_end_permission/
+    └─ migration.sql
+  └─ 20260804110000_seed_period_create_permission/
+    └─ migration.sql
+  └─ 20260804110500_seed_period_read_all_permission/
+    └─ migration.sql
+  └─ 20260804120000_seed_worker_read_own_permission/
+    └─ migration.sql
+  └─ 20260804120500_seed_assignment_read_own_permission/
+    └─ migration.sql
+  └─ 20260804121000_seed_period_read_own_permission/
+    └─ migration.sql
+  └─ 20260804140000_seed_timesheet_read_own_permission/
+    └─ migration.sql
+  └─ 20260804150000_seed_timesheet_draft_edit_own_permission/
+    └─ migration.sql
+  └─ 20260804160000_add_timesheet_review_scope/
+    └─ migration.sql
+  └─ 20260804170000_seed_timesheet_submit_permission/
+    └─ migration.sql
+  └─ 20260804180000_seed_timesheet_scope_review_all_permission/
+    └─ migration.sql
+  └─ 20260805090000_seed_timesheet_read_all_permission/
+    └─ migration.sql
+  └─ 20260805090500_seed_timesheet_final_approve_permission/
+    └─ migration.sql
+  └─ 20260805091000_seed_timesheet_return_permission/
+    └─ migration.sql
+  └─ 20260805130000_seed_period_lock_permission/
+    └─ migration.sql
+  └─ 20260805140000_seed_foreman_review_permissions/
+    └─ migration.sql
+  └─ 20260805150000_add_correction_schema/
+    └─ migration.sql
+  └─ 20260805160000_seed_correction_permissions/
+    └─ migration.sql
+  └─ 20260805170000_add_activation_token/
+    └─ migration.sql
+  └─ 20260805171000_seed_worker_activation_permission/
+    └─ migration.sql
+  └─ 20260806123749_add_system_user_activation_token/
+    └─ migration.sql
+  └─ 20260806140000_seed_user_admin_permissions/
+    └─ migration.sql
+  └─ 20260806150000_seed_user_activation_generate_permission/
+    └─ migration.sql
+  └─ 20260807090000_seed_template_read_all_permission/
+    └─ migration.sql
+  └─ 20260807120000_seed_template_update_permission/
+    └─ migration.sql
+  └─ 20260812000000_add_attendance_clock_schema_foundation/
+    └─ migration.sql
+  └─ 20260813000000_seed_attendance_geofence_permissions/
+    └─ migration.sql
+  └─ 20260814000000_seed_attendance_clock_worker_permissions/
+    └─ migration.sql
+  └─ 20260815000000_seed_attendance_clock_sync_permission/
+    └─ migration.sql
+  └─ 20260816000000_seed_attendance_exception_read_permissions/
+    └─ migration.sql
+  └─ 20260817000000_seed_attendance_exception_base_resolution_permissions/
+    └─ migration.sql
+  └─ 20260818000000_seed_timesheet_draft_edit_exception_permission/
+    └─ migration.sql
+  └─ 20260818010000_seed_attendance_conflict_read_permission/
+    └─ migration.sql
+  └─ 20260818020000_seed_attendance_policy_permissions/
+    └─ migration.sql
+  └─ 20260819000000_seed_site_period_read_assigned_permissions/
+    └─ migration.sql
+  └─ 20260819150000_add_export_batch_schema/
+    └─ migration.sql
+  └─ 20260819160000_seed_export_permissions/
+    └─ migration.sql
+  └─ 20260819170000_fix_export_item_worked_minutes_bounds/
+    └─ migration.sql
+  └─ 20260819180000_add_correction_covered_by_export_batch/
+    └─ migration.sql
+  └─ 20260819190000_fix_correction_pending_export_excluded_participant/
+    └─ migration.sql
+  └─ 20260820000000_seed_city_create_permission/
+    └─ migration.sql
+  └─ 20260821100000_add_timesheet_submission_schedules/
+    └─ migration.sql
+  └─ 20260821101000_seed_timesheet_submission_schedules_and_permissions/
+    └─ migration.sql
+  └─ 20260821102000_add_address_geocoding_cache/
+    └─ migration.sql
+  └─ 20260821103000_seed_attendance_gps_raw_permission/
+    └─ migration.sql
+  └─ 20260823000000_seed_city_delete_permission/
+    └─ migration.sql
+  └─ 20260823010000_seed_user_create_admin_permission/
+    └─ migration.sql
+  └─ 20260824163902_add_employee_profile_and_qualifications/
+    └─ migration.sql
+  └─ 20260824164500_seed_worker_profile_permissions/
+    └─ migration.sql
+  └─ 20260824172050_replace_employee_profile_birth_year_with_date_of_birth/
+    └─ migration.sql
+  └─ 20260824220000_add_qualification_catalog_and_admin_notifications/
+    └─ migration.sql
+  └─ 20260824221000_seed_qualification_catalog_and_notification_permissions/
+    └─ migration.sql
+  └─ 20260826084432_add_worker_dossier_fields/
+    └─ migration.sql
+  └─ 20260828050000_add_company_gps_accuracy_threshold/
+    └─ migration.sql
+  └─ 20260828120000_add_admin_direct_edit/
+    └─ migration.sql
+  └─ 20260828130000_add_timesheet_approval_notifications/
+    └─ migration.sql
+  └─ 20260828140000_add_shift_presence_sample/
+    └─ migration.sql
+  └─ 20260828150000_add_planned_break_paid/
+    └─ migration.sql
+  └─ 20260828160000_default_cutoff_one_grace_day/
+    └─ migration.sql
+  └─ 20260828170000_add_auto_unpaid_break_default_minutes/
+    └─ migration.sql
+  └─ 20260828180000_add_shift_auto_close_enum/
+    └─ migration.sql
+  └─ 20260828181000_add_shift_auto_close/
+    └─ migration.sql
+  └─ 20260829120000_add_professions/
+    └─ migration.sql
+  └─ 20260829121000_seed_profession_catalog/
+    └─ migration.sql
+  └─ 20260829122000_seed_profession_manage_permission/
+    └─ migration.sql
+  └─ 20260829153000_add_password_reset_tokens/
+    └─ migration.sql
+  └─ 20260829170000_add_gps_offline_resilience/
+    └─ migration.sql
+  └─ 20260829180000_relax_approx_location_age_check/
+    └─ migration.sql
+  └─ 20260829190000_seed_worker_profession_manage_own/
+    └─ migration.sql
+  └─ 20260829200000_add_worker_notifications/
+    └─ migration.sql
+  └─ 20260829210000_add_outside_geofence_checkin/
+    └─ migration.sql
+  └─ 20260830090000_account_recovery_admin_assisted/
+    └─ migration.sql
+  └─ 20260830100000_seed_session_own_permissions/
+    └─ migration.sql
+  └─ 20260830120000_add_scheduler_lease/
+    └─ migration.sql
+  └─ 20260830140000_add_rate_limit_counter/
+    └─ migration.sql
+  └─ 20260830160000_add_gps_archive_day/
+    └─ migration.sql
+      
+All migrations have been successfully applied.
+
+### run 2: migrate deploy again (idempotent — expect 'No pending migrations')
+Prisma schema loaded from prisma/schema.prisma
+Datasource "db": PostgreSQL database "titanor_time_t97", schema "public" at "r10-db:5432"
+
+98 migrations found in prisma/migrations
+
+
+No pending migrations to apply.
+
+### migrate status
+Prisma schema loaded from prisma/schema.prisma
+Datasource "db": PostgreSQL database "titanor_time_t97", schema "public" at "r10-db:5432"
+
+98 migrations found in prisma/migrations
+
+Database schema is up to date!
+
+### applied / failed counts
+applied=98
+failed=0
+### table count
+tables=74

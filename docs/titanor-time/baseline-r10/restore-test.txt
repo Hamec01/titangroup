@@ -1,0 +1,22 @@
+R10 backup/restore rehearsal — restore-test-titanor-time.sh against the latest pre-deploy backup
+date: 2026-08-30T22:30:31Z
+
+---- backup: /home/deploy/backups/titanor-time-pilot/pilot-20260830T215914Z-pre-deploy
+PASS: gps-archive-manifest.json is valid JSON
+PASS: backup SHA256SUMS verify (staged from /home/deploy/backups/titanor-time-pilot/pilot-20260830T215914Z-pre-deploy)
+---- start disposable postgres:16 (tt-restore-test-20260830T223031Z-3557229-db)
+---- pg_restore --no-owner --no-acl into tt_restore (owner tt_restore_owner, not the source role)
+PASS: pg_restore completed with --exit-on-error
+PASS: migrations applied: 98 (== backup)
+PASS: no unfinished/rolled-back migrations in the restore
+PASS: migration-history hash matches
+PASS: public tables: 74
+PASS: public routines: 222
+PASS: triggers: 40
+PASS: foreign keys: 178
+PASS: per-table row counts identical for all 74 public tables
+PASS: all-data fingerprint matches the backup exactly
+PASS: uploads archive extracts 3 files (== manifest)
+
+RESTORE TEST: 13 passed, 0 failed
+PASS

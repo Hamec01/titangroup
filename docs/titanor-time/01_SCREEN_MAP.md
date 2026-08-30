@@ -1,7 +1,8 @@
 # Titanor Time — карта экранов
 
-Версия: **5.6.0** (2026-08-24, Qualifications Matrix + Admin Notification Center + Custom Report
-addendum). Статус: **proposed architecture**. Источник истины для route-имён
+Версия: **5.7.0** (2026-08-31, +§6 дополнения R00–R10 — экранные изменения production-release
+стадий R03/R06/R07/R09 + упрощение онбординга + T10-D/T13/T14/T15/T17; предыдущая 5.6.0:
+Qualifications Matrix + Admin Notification Center + Custom Report). Статус: **proposed architecture**. Источник истины для route-имён
 (используются в `02_ROLE_PERMISSION_MATRIX.md` и `04_ADMIN_FIRST_API_CONTRACTS.md`). Документ
 самодостаточен — каждый экран описан полностью.
 
@@ -1728,3 +1729,51 @@ flowchart TD
 должность или обязательное звено процесса. Даже если ни один FOREMAN не создан/не назначен,
 ADMIN/SUPER_ADMIN видит все scope и самостоятельно проводит возврат/подтверждение. Состояние
 `FOREMAN_APPROVED` — legacy-имя enum со смыслом «review завершён».
+
+---
+
+## 6. Дополнения R00–R10 (`[2026-08-31]`)
+
+Экранные изменения после версии 5.6.0, реализованные в production-release стадиях. Полный
+статус — `IMPLEMENTATION_STATUS.md`.
+
+### Админ
+- **`/admin`** (Today) — карточка «документы, требующие внимания» (истёкшие/скоро-истекающие
+  квалификации активных работников) → `/admin/workforce?sort=ATTENTION` / `?status=EXPIRING_SOON`
+  (R09.5). Только admin-путь `OverviewView`.
+- **`/admin/users`** — поиск (username **или** email, без регистра) + фильтры роль/статус +
+  пагинация prev/next, всё в URL (R09.1). `/admin/workers` (список работников) — пока без поиска
+  (backlog).
+- **Причины запрета доступа** на 13 admin-страницах — короткий человеческий RU/EN текст
+  («…спросите SUPER_ADMIN»); permission-код только в `title`/`data-permission` для поддержки
+  (R09.2, `AccessDeniedNotice`). FOREMAN-страницы — прежний текст (вне scope R09).
+- **`/admin/workers/[employeeId]`** + `/profile` + `/timeline` + `/locations` — **остаются
+  4 отдельными страницами**; общий заголовок `WorkerCardNav`: хлебные крошки `Работники › Имя` +
+  ряд из 4 вкладок (текущая — `aria-current="page"`) (R09.8). «Быстрые действия» на «Обзоре»
+  сокращены. Объединение в один табовый экран — backlog.
+- **Mobile/overflow** (ADMIN + WORKER): `html,body{overflow-x:hidden}`, все admin-таблицы в
+  прокручиваемой обёртке, шапка `/admin` переносится (R09.6).
+- `/admin/qualifications` → 308 redirect на `/admin/workforce` (T13); матрица принимает
+  `?status=EXPIRED|CRITICAL|EXPIRING_SOON|MISSING` + `?sort=ATTENTION`.
+- Создание работника (`/admin/workers/new`) ведёт на **карточку нового работника**
+  (`/admin/workers/<id>`), не на `/admin/setup` (упрощение онбординга, 2026-08-20).
+
+### Работник
+- `/worker` (экран учёта) — внутренне разбит на `app/worker/clock-panel/*` (R09.7, **без
+  изменения поведения**): GPS-баннеры, статус-карта, главное действие + таймер, недельная сетка,
+  4 bottom-sheet (смена объекта / переключение / статус / T17 «вне зоны»).
+- «Колокольчик» уведомлений (дедлайны + неустранимо-упавшие check-in, T15), «потянуть для
+  обновления», PWA (manifest/SW/apple-icons), человеческие GPS-сообщения + approximate fix (T14),
+  «Check In никогда не блокируется геозоной» (T17).
+- Авто-обед T10-D: в отчётах/экспортах день ≥ 6 ч без своего перерыва показывает
+  `worked = gross − 30 мин`.
+
+### Аутентификация
+- Вход → `/admin` (не `/admin/setup`). `/foreman` для ADMIN/SUPER_ADMIN → 307 на `/admin`.
+- Восстановление доступа без SMTP: админ выдаёт одноразовый код (R03); смена пароля + управление
+  сессиями в кабинете.
+- Rate-limit на `/api/auth/login` (R07-A): ~5 попыток / окно → 429.
+
+### Инфраструктура (не экраны)
+- `/api/ready` — 503 при несовпадении множества миграций / упавшей миграции / отсутствии
+  key-таблицы (R06-A). Заголовки безопасности + `noindex` на всех ответах (R07-A).

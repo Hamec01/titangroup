@@ -1,0 +1,95 @@
+R10 clean full test run — candidate app code == edd950c (pilot t97-pilot-edd950c)
+date: 2026-08-30T22:27:53Z
+node: v22.23.1
+
+
+== unit ==
+  PASS    _test-auto-unpaid-break.ts                       0.7s
+  PASS    _test-exception-list-query.ts                    0.6s
+  PASS    _test-offline-idb-invariants.ts                  1.7s
+  PASS    _test-personal-data-encryption-unavailable-response.ts 0.7s
+  PASS    _test-personal-identity-code.ts                  0.4s
+  PASS    _test-presence-pacing.ts                         0.4s
+  PASS    _test-qualification-expiry.ts                    0.5s
+  PASS    _test-retention-pacing.ts                        0.5s
+  PASS    _test-time-rounding.ts                           0.3s
+  PASS    _test-warm-cache.ts                              0.7s
+  PASS    _test-worker-gps.ts                              28.0s
+  PASS    _test-worker-clock-panel.ts                      1.4s
+  PASS    _test-worker-card-nav.ts                         0.8s
+  PASS    _test-scheduler-health.ts                        0.7s
+  PASS    _test-client-ip.ts                               0.6s
+  PASS    _test-gps-archive.ts                             0.5s
+  PASS    _test-access-denied-notice.ts                    0.5s
+
+== db + scheduler ==
+  target server: 127.0.0.1:55440/postgres   template: tt_tmpl_mtgdsblwc8a7
+  template migrated — every test below gets its own clone
+
+  PASS    _test-abandoned-shift-auto-close.ts              2.5s
+  PASS    _test-api-guard.ts                               1.1s
+  PASS    _test-qualification-notifications.ts             1.1s
+  PASS    _test-qualification-notification-thresholds.ts   1.6s
+  PASS    _test-timesheet-submission-schedules.ts          2.3s
+  PASS    _test-account-recovery.ts                        3.1s
+  PASS    _test-recovery-api.ts                            2.1s
+  PASS    _test-change-password.ts                         2.1s
+  PASS    _test-session-management.ts                      1.2s
+  PASS    _test-ready-schema.ts                            1.2s
+  PASS    _test-scheduler-lease.ts                         0.7s
+  PASS    _test-scheduler-diagnostics.ts                   0.8s
+  PASS    _test-activation.ts                              2.4s
+  PASS    _test-admin-approve-timesheet.ts                 2.9s
+  PASS    _test-admin-direct-edit.ts                       3.9s
+  PASS    _test-admin-mark-absence-day.ts                  3.4s
+  PASS    _test-admin-pre-final-correction.ts              3.8s
+  PASS    _test-attendance-presence.ts                     2.4s
+  PASS    _test-bulk-ack-gps.ts                            1.6s
+  PASS    _test-checkin-never-blocked.ts                   3.0s
+  PASS    _test-rate-limit-db.ts                           1.3s
+  PASS    _test-corrections.ts                             1.7s
+  PASS    _test-csv-export-querycount.ts                   3.0s
+  PASS    _test-custom-report-canonical.ts                 2.0s
+  PASS    _test-custom-report-pdf-csv.ts                   2.6s
+  PASS    _test-customer-hours.ts                          2.2s
+  PASS    _test-export-batch-schema.ts                     2.9s
+  PASS    _test-gps-accuracy-threshold.ts                  1.0s
+  PASS    _test-gps-approximate-sync.ts                    2.0s
+  PASS    _test-gps-exception-detail.ts                    1.0s
+  PASS    _test-gps-offline-resilience-schema.ts           1.2s
+  PASS    _test-malformed-uuid.ts                          1.1s
+  PASS    _test-gps-archive-run.ts                         1.1s
+  PASS    _test-gps-retention-gate.ts                      1.1s
+  PASS    _test-gps-archive-runner.ts                      1.0s
+  PASS    _test-gps-archive-e2e.ts                         1.0s
+  PASS    _test-admin-users-list.ts                        1.3s
+  PASS    _test-document-attention.ts                      1.1s
+  PASS    _test-map-gps.ts                                 1.3s
+  PASS    _test-overview-querycount.ts                     12.1s
+  PASS    _test-overview.ts                                1.6s
+  PASS    _test-owner-today-dashboard.ts                   1.4s
+  PASS    _test-pilot-pair-orphan.ts                       2.2s
+  PASS    _test-planned-break-paid-propagation.ts          1.9s
+  PASS    _test-professions-api.ts                         0.9s
+  PASS    _test-professions-dossier.ts                     2.3s
+  PASS    _test-professions-schema.ts                      1.0s
+  PASS    _test-pwa-offline-fixture.ts                     0.8s
+  PASS    _test-qualification-edit-verification-reset.ts   1.1s
+  PASS    _test-qualification-matrix.ts                    1.1s
+  PASS    _test-qualification-photo-hardening.ts           1.2s
+  PASS    _test-qualification-photo-lifecycle.ts           1.0s
+  PASS    _test-site-gps-flag.ts                           1.0s
+  PASS    _test-standalone-admin-activation.ts             1.3s
+  PASS    _test-time-rounding-materializer.ts              1.5s
+  PASS    _test-timesheet-approval-notifications.ts        1.6s
+  PASS    _test-worked-days.ts                             1.0s
+  PASS    _test-worker-dossier-pdf.ts                      3.3s
+  PASS    _test-worker-dossier-profile.ts                  1.9s
+  PASS    _test-worker-notifications.ts                    1.9s
+  PASS    _test-worker-professions.ts                      1.7s
+  PASS    _test-worker-reopen-edit-window.ts               2.5s
+  PASS    _test-workforce-matrix.ts                        1.7s
+
+============================================================
+  80 passed · 0 failed · 0 skipped
+  OK

@@ -1,0 +1,86 @@
+R10 browser lane — ISOLATED (fresh DB + app per test), candidate image titanor-time-app:t97-pilot-edd950c
+date: 2026-08-30T22:33:03Z
+
+  FAIL _test-csv-export.ts  17s
+      | FAIL: C25: empC1 unchanged original bucket (dateC1) still present in the replacement snapshot {"id":"8747da00-69c2-447d-86b8-f730d57c76f3","exportBatchId":"060f0323-6e94-4d31-aefb-218142bd70d0","employeeId":"6cea0c4e-48d2-4eaf-8584-ad061c272194","timesheetVersionId":"fb485a80-f802-4507-9c00-06978839a3a9","siteId":"108eb8b9-7571-4bb0-af27-2bc4ca6a2d5b","date":"2085-11-04T00:00:00.000Z","employeeNumberSnapshot":"TEST-T84B-C1-9854625b","employeeNameSnapshot":"C1 Worker","siteNameSnapshot":"T84B Site CX f8f9","grossMinutes":480,"paidBreakMinutes":0,"unpaidBreakMinutes":30,"workedMinutes":450,"segmentCount":1,"createdAt":"2026-08-30T22:33:13.800Z"}
+      | FAIL: C27: empC1 newly added bucket (dateC2) present with correct minutes {"id":"aaec2e05-8bd0-4b8e-871e-0eb680ca5251","exportBatchId":"060f0323-6e94-4d31-aefb-218142bd70d0","employeeId":"6cea0c4e-48d2-4eaf-8584-ad061c272194","timesheetVersionId":"fb485a80-f802-4507-9c00-06978839a3a9","siteId":"108eb8b9-7571-4bb0-af27-2bc4ca6a2d5b","date":"2085-11-05T00:00:00.000Z","employeeNumberSnapshot":"TEST-T84B-C1-9854625b","employeeNameSnapshot":"C1 Worker","siteNameSnapshot":"T84B Site CX f8f9","grossMinutes":480,"paidBreakMinutes":0,"unpaidBreakMinutes":30,"workedMinutes":450,"segmentCount":1,"createdAt":"2026-08-30T22:33:13.800Z"}
+      | FAIL: C26: empC3 bucket changed (8h -> 6h = 360 min) {"id":"6ea1bbb5-0e63-4e1b-93a3-0703909d806f","exportBatchId":"060f0323-6e94-4d31-aefb-218142bd70d0","employeeId":"fbc66b04-0f33-447a-90ac-5ea984e4106c","timesheetVersionId":"a51e53f8-3807-4c78-aab7-5192fd1b730a","siteId":"108eb8b9-7571-4bb0-af27-2bc4ca6a2d5b","date":"2085-11-04T00:00:00.000Z","employeeNumberSnapshot":"TEST-T84B-C3-dcfb287d","employeeNameSnapshot":"C3 Worker","siteNameSnapshot":"T84B Site CX f8f9","grossMinutes":360,"paidBreakMinutes":0,"unpaidBreakMinutes":30,"workedMinutes":330,"segmentCount":1,"createdAt":"2026-08-30T22:33:13.800Z"}
+      | FAIL: E48: malformed batchId (detail) -> 400 VALIDATION_ERROR {"error":{"code":"EXPORT_BATCH_NOT_FOUND","message":"No export batch with this id.","requestId":"d4694833-c4d1-47c3-84a9-1753f82b9263"}}
+      | 197 passed, 4 failed
+  FAIL _test-period-time-report.ts  8s
+      | FAIL: 6: malformed periodId -> 400 VALIDATION_ERROR {"status":404,"body":{"error":{"code":"PERIOD_NOT_FOUND","message":"No payroll period with this id.","requestId":"c6b9e6fd-8606-4d18-931a-59da430a0707"}}}
+      | FAIL: 16: inactive site with historical hours is not hidden {"site":{"id":"5653c266-42e3-4028-8a81-d50413424b0b","name":"T83A Site Inactive f892","active":false},"assignedWorkerCount":1,"workedWorkerCount":1,"withoutTimesheetCount":0,"workedDayCount":1,"grossMinutes":480,"paidBreakMinutes":0,"unpaidBreakMinutes":30,"workedMinutes":450,"segmentCount":1,"timesheetStatusCounts":{"DRAFT":0,"SUBMITTED":0,"RETURNED":0,"FOREMAN_APPROVED":0,"FINAL_APPROVED":1}}
+      | FAIL: 22: RETURNED reads draft (480 min), not the stale 100-min version {"grossMinutes":480,"paidBreakMinutes":0,"unpaidBreakMinutes":30,"workedMinutes":450,"segmentCount":1,"workedDayCount":1,"siteCount":1}
+      | FAIL: 24: pending correction does not change totals (still 480 min, original version) {"grossMinutes":480,"paidBreakMinutes":0,"unpaidBreakMinutes":30,"workedMinutes":450,"segmentCount":1,"workedDayCount":1,"siteCount":1}
+      | FAIL: 25: approved correction switches to version 2 totals (720 min, not 480) {"grossMinutes":720,"paidBreakMinutes":0,"unpaidBreakMinutes":30,"workedMinutes":690,"segmentCount":1,"workedDayCount":1,"siteCount":1}
+      | FAIL: 30: three 8h days = 1440 min worked {"site":{"id":"64f4aacc-3e31-461d-bbe9-df106cc959ec","name":"T83A Site Bucket30 8f0c","active":true},"assignedWorkerCount":1,"workedWorkerCount":1,"withoutTimesheetCount":0,"workedDayCount":3,"grossMinutes":1440,"paidBreakMinutes":0,"unpaidBreakMinutes":90,"workedMinutes":1350,"segmentCount":3,"timesheetStatusCounts":{"DRAFT":0,"SUBMITTED":0,"RETURNED":0,"FOREMAN_APPROVED":0,"FINAL_APPROVED":1}}
+  PASS _test-report-rounding-consistency.ts  5s  
+  PASS _test-foreman-admin-redirect.ts  7s  
+  FAIL _test-export-ui.ts  70s
+      | FAIL: 4: export.read revoked blocks the very next request "Titanor Time\nadmin-admin3-31d5fb · ADMIN\nMy profile\nUser guide\nLanguage\nRU\nEN\nSign out\nToday\nSetup\n▾\nPeople\n▾\nTime & attendance\n▾\nReview\n▾\nReports\n▾\n\nExports are for administrators who can create data"
+      | 86 passed, 1 failed (scenarios 1-46)
+  FAIL _test-offline-cold-restart.ts  23s
+      |   name: 'TimeoutError'
+  FAIL _test-offline-views.ts  267s
+      | FAIL: 14: A sees own period-detail snapshot offline (dates + site + Offline badge) "Офлайн — только просмотр\nОбновлено: 8/31/2026, 12:35:55 AM\n2200-01-01 – 2200-01-14\nВ процессе · 7 h 30 min\nВАШИ НАЗНАЧЕНИЯ\nT88 Site A 56f0 · Основной\nСмотреть часы\nОбновить при подключении\n← К учёту времени"
+      | FAIL: 14b: A sees own day-detail snapshot with the real segment site name offline "Офлайн — только просмотр\nОбновлено: 8/31/2026, 12:35:56 AM\n2200-01-02\n09:00 AM – 05:00 PM\nT88 Site A 56f0\nОбновить при подключении\n← К учёту времени"
+      | FAIL: 35: offline submit-summary view is read-only with zero Submit button {"submitBtnCount":0,"body":"Офлайн — только просмотр\nОбновлено: 8/31/2026, 12:35:57 AM\nОтправить табель\n\n2200-01-01 – 2200-01-14\n\nЗаполнено 1 из 14 дней · всего 7h 30m\n\nПодключитесь к интернету, чтобы отправить — этот снимок дос"}
+      | FAIL: 38: capturedAt ("Last updated") is shown "Офлайн — только просмотр\nОбновлено: 8/31/2026, 12:35:55 AM\n2200-01-01 – 2200-01-14\nВ процессе · 7 h 30 min\nВАШИ НАЗНАЧЕНИЯ\nT88 Site A 56f0 · Основной\nСмотреть часы\nОбновить при подключении\n← К учёту в"
+      | FAIL: 39: view is explicitly marked Offline — read-only, never presented as live/authoritative 
+      | FAIL: 44: an uncaptured/foreign period id shows the safe missing-snapshot message, never another snapshot "Эта страница ещё не сохранена для просмотра офлайн. Подключитесь к интернету и откройте её один раз.\n\n← К учёту времени"
+      | FAIL: 37: missing snapshot shows the exact safe message and a link back to /worker "Эта страница ещё не сохранена для просмотра офлайн. Подключитесь к интернету и откройте её один раз.\n\n← К учёту времени"
+      | FAIL: 36: /worker/install offline shows a data-free notice "Вы офлайн. Для проверки статуса установки в вашем браузере нужно подключение к интернету.\n\n← К учёту времени"
+      | FAIL: 30: /worker/periods offline shows the cached actionable-period list "Офлайн — только просмотр\nОбновлено: 8/31/2026, 12:35:53 AM\nВаши периоды\n2200-01-01 – 2200-01-14\nВ процессе · 7 h 30 min\n2201-01-01 – 2201-01-14\nНе начат\n2202-01-01 – 2202-01-14\nНе начат\n2206-01-01 – 2"
+      | FAIL: 31: /worker/history offline shows the cached history list "Офлайн — только просмотр\nОбновлено: 8/31/2026, 12:35:54 AM\nИстория\n2206-01-01 – 2206-01-14\nНе начат\n2202-01-01 – 2202-01-14\nНе начат\n2201-01-01 – 2201-01-14\nНе начат\n2200-01-01 – 2200-01-14\nВ процессе"
+      | FAIL: 32: /worker/periods/:id offline shows cached status/assignments/reasons "Офлайн — только просмотр\nОбновлено: 8/31/2026, 12:35:55 AM\n2200-01-01 – 2200-01-14\nВ процессе · 7 h 30 min\nВАШИ НАЗНАЧЕНИЯ\nT88 Site A 56f0 · Основной\nСмотреть часы\nОбновить при подключении\n← К учёту в"
+      | FAIL: 33: /worker/periods/:id/hours offline shows cached days/segments/totals "Офлайн — только просмотр\nОбновлено: 8/31/2026, 12:36:03 AM\nЧасы\n\nТолько просмотр — офлайн-снимок.\n\n2200-01-01—\n2200-01-027h 30m · T88 Site A 56f0\n2200-01-03—\n2200-01-04—\n2200-01-05—\n2200-01-06—\n2200-0"
+      | FAIL: 18: legacy unbound device state shows the safe not-saved message, never the real snapshot "Эта страница ещё не сохранена для просмотра офлайн. Подключитесь к интернету и откройте её один раз.\n\n← К учёту времени"
+      | FAIL: 20: a deviceInstallationId mismatch hides the snapshot "Эта страница ещё не сохранена для просмотра офлайн. Подключитесь к интернету и откройте её один раз.\n\n← К учёту времени"
+      | FAIL: 21: DEVICE_NOT_OWNED hides the snapshot "Эта страница ещё не сохранена для просмотра офлайн. Подключитесь к интернету и откройте её один раз.\n\n← К учёту времени"
+      | FAIL: 22: DEVICE_REVOKED hides the snapshot "Эта страница ещё не сохранена для просмотра офлайн. Подключитесь к интернету и откройте её один раз.\n\n← К учёту времени"
+      | FAIL: 25: after rotation, a snapshot bound to a stale device id is not shown "Эта страница ещё не сохранена для просмотра офлайн. Подключитесь к интернету и откройте её один раз.\n\n← К учёту времени"
+      | FAIL: 47: My periods link present to click while offline "link not found"
+      | FAIL: 48: a real fetch() network exception (route abort) falls back to the cached shell (real period dates from A own snapshot, not a browser error page) "Офлайн — только просмотр\nОбновлено: 8/31/2026, 12:38:05 AM\nВаши периоды\n2200-01-01 – 2200-01-14\nВ процессе · 7 h 30 min\n2201-01-01 – 2201-01-14\nНе начат\n2202-01-01 – 2202-01-14\nНе начат\n2206-01-01 – 2"
+      |   name: 'TimeoutError'
+  FAIL _test-pwa-install.ts  44s
+      | FAIL: 24: unsupported browser (no serviceWorker) shows a neutral, non-alarming message "TIME\n⌂\nHome\n☰\nInstall Titanor Time\n\nAdd Titanor Time to your home screen for one-tap access and a working clock screen even when you lose signal.\n\nOpens straight to your clock — no address bar, no browser tabs.\nCheck in and out still works after a full network drop, once set up.\nNo extra download — "
+      | 58 passed, 1 failed (scenarios 1-37)
+  FAIL _test-qualifications-browser-qa.ts  43s
+      |   name: 'TimeoutError'
+  FAIL _test-t9-full-flow.ts  34s
+      |   name: 'TimeoutError'
+  FAIL _test-t9-restart-persistence.ts  2s
+  PASS _test-t9-role-matrix.ts  14s  32 passed, 0 failed (T9 role/permission matrix)
+  FAIL _test-t9-setup-lifecycle.ts  35s
+      | FAIL: 7: after assignment — hasAssignment flips true, hasOpenPeriod still false {"hasCity":false,"hasSite":true,"hasWorkArea":true,"hasTemplate":true,"hasWorker":true,"hasAssignment":true,"hasOpenPeriod":true,"hasSubmissionScheduleConfigured":false}
+      | FAIL: 10: reload preserves 6 Done items (Site/WorkArea/Template/Worker/Assignment/Period) 5
+      | FAIL: 10b: back navigation to /admin/setup still shows correct (non-stale) 6 Done items 5
+      | FAIL: 11: checklist is a force-dynamic Server Component with zero client-side state (structural — verified by 10/10b matching DB truth after navigation) 
+      | FAIL: T9.7/G2: site/work-schedule form is embedded in the worker profile 
+      | FAIL: 3: creating a worker opens that worker profile with immediate activation and inline work setup 
+      | 60 passed, 6 failed (T9 setup lifecycle)
+  FAIL _test-t9-setup-ui.ts  50s
+      | FAIL: T9.7: Setup exposes the real City creation route 
+      |   name: 'TimeoutError'
+  FAIL _test-worker-dossier-browser-qa.ts  2s
+      | SCRIPT ERROR PrismaClientKnownRequestError: 
+      |     at ei.handleRequestError (/home/deploy/projects/titanorgroup-worktrees/titanor-time-foundation/titanor-time-app/node_modules/@prisma/client/src/runtime/RequestHandler.ts:228:13)
+      |     at ei.handleAndLogRequestError (/home/deploy/projects/titanorgroup-worktrees/titanor-time-foundation/titanor-time-app/node_modules/@prisma/client/src/runtime/RequestHandler.ts:174:12)
+
+=== summary ===
+  FAIL  _test-csv-export.ts
+  FAIL  _test-period-time-report.ts
+  PASS  _test-report-rounding-consistency.ts
+  PASS  _test-foreman-admin-redirect.ts
+  FAIL  _test-export-ui.ts
+  FAIL  _test-offline-cold-restart.ts
+  FAIL  _test-offline-views.ts
+  FAIL  _test-pwa-install.ts
+  FAIL  _test-qualifications-browser-qa.ts
+  FAIL  _test-t9-full-flow.ts
+  FAIL  _test-t9-restart-persistence.ts
+  PASS  _test-t9-role-matrix.ts
+  FAIL  _test-t9-setup-lifecycle.ts
+  FAIL  _test-t9-setup-ui.ts
+  FAIL  _test-worker-dossier-browser-qa.ts
+  3 pass / 12 fail / 0 infra

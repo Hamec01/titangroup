@@ -1,5 +1,34 @@
 # Titanor Time — Implementation Status
 
+**`[2026-08-31]` R10 — release candidate + full pilot acceptance — PASS с оговоркой.** Отчёты
+`R10_PILOT_ACCEPTANCE_REPORT_RU.md`, `R10_RELEASE_MANIFEST_RU.md`, `R10_MIGRATION_REPORT_RU.md`,
+`R10_MANUAL_ACCEPTANCE_CHECKLIST_RU.md`. Frozen candidate **`2ebe3e5`** — рантайм и все 98 миграций
+**идентичны** задеплоенному образу `t97-pilot-edd950c` (с `edd950c`: только docs + ops + 3
+`_test-*` файла). Production/DNS/Caddy/Cloudflare не тронуты.
+- **Автоматика на образе кандидата (свежая disposable PG16, per-test изоляция): unit 17 + db 58 +
+  scheduler 5 = 80/80, 0 fail.** typecheck 0, lint ok. Регрессия R03/R05/R06/R07/R08/R09 — вся
+  зелёная (см. отчёт §2). `npm audit --omit=dev` — **0** в обоих приложениях.
+- **Миграции:** fresh DB `migrate deploy` с нуля → 98/0, идемпотентно, `migrate status` up-to-date,
+  74 таблицы. Restored pilot copy (`restore-test-titanor-time.sh` против
+  `pilot-20260830T215914Z-pre-deploy`): **13/13 PASS**, all-data fingerprint точно совпадает,
+  74 tbl / 222 rout / 40 trg / 178 FK, uploads 3/3.
+- **Пилот live:** `/api/ready` `schema:current` 98/98, `/api/health` 200; scheduler heartbeat
+  `lastOutcome:ok cf:0`, lease renewed, ~1 тик/мин; 7 security-заголовков + no X-Powered-By.
+- **Browser-lane (`_test-t9-role-matrix` 32/0, `_test-foreman-admin-redirect` 10/0, 3 report-теста
+  зелёные после фикса `2ebe3e5`).** ⚠️ **Оговорка:** 9 UI-тестов browser-lane несут ожидания,
+  устаревшие с ~2026-08-20 (i18n / редизайн worker PWA / упрощение онбординга / T10-D / T13 /
+  R07-A / R09.2). **0 дефектов продукта** — каждое поведение перекрыто зелёным db/unit + ручной
+  приёмкой. Модернизацию browser-lane завершить **до R12**. Также: стоковый `run-tests.mjs browser`
+  делит один сервер/БД → добавлен `ops/titanor-time/run-browser-acceptance.sh` (изоляция на тест).
+- **Owner actions (см. `R10_PILOT_ACCEPTANCE_REPORT_RU.md` §6):** device acceptance §19.6 (реальные
+  iPhone/Android/desktop — единственное, что нельзя автоматизировать); живой role-smoke на пилоте;
+  `docker builder prune` (хост `/` 81 %, build cache 65 GB → −43 GB безопасно); подтвердить pilot
+  acceptance → разблокирует R11.
+- **Артефакты:** `docs/titanor-time/baseline-r10/` (сырые логи), обновлены `01_SCREEN_MAP` (5.7.0,
+  §6), `03_DATA_MODEL_ERD` (5.6.0, §4.10).
+- Commit `2ebe3e5` (browser test fixes) + R10 docs commit. **Pilot deploy для R10 не нужен** —
+  рантайм не менялся. **Production cutover не начинать.**
+
 **`[2026-08-30]` R09 — UX WORKER / ADMIN перед production — DEPLOYED + PASS.**
 Пилот `t97-pilot-{app,scheduler}` на `titanor-time-app:t97-pilot-edd950c`, оба `healthy`, restarts 0,
 `/api/ready` `schema:current` applied=98 (БД не менялась). Владелец запустил `deploy-edd950c.sh`:
