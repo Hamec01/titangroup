@@ -14,9 +14,9 @@
   переработка `POST /api/auth/password-reset/confirm`.
 - [x] **R03.4** (`5898a74`) — удалить SMTP-путь: `lib/password-reset-mailer.ts`, `/api/auth/password-reset/request`,
   `/reset-password/request`, `/forgot-password`, `issuePasswordReset`, «отправить ссылку» из формы.
-- [ ] **R03.5** — новая страница `/reset-password` (логин + код + новый пароль).
-- [ ] **R03.6** — смена пароля: `changeAccountPassword` (по текущему паролю), `POST /api/auth/change-password`, форма.
-- [ ] **R03.7** — сессии: `GET /api/me/sessions`, `DELETE /api/me/sessions/[id]`, права
+- [x] **R03.5** (`b7cb2e4`) — новая страница `/reset-password` (логин + код + новый пароль).
+- [x] **R03.6** (`946595f`) — смена пароля: `changeAccountPassword` (по текущему паролю), `POST /api/auth/change-password`, форма.
+- [x] **R03.7** (`bc24d68`) — сессии: `GET /api/me/sessions`, `DELETE /api/me/sessions/[id]`, права
   `session.read.own` + `session.revoke.own`, UI-панель.
 - [ ] **R03.8** — экран профиля ADMIN/SUPER_ADMIN: last login, язык, ссылка на инструкцию, смена пароля, сессии.
 - [ ] **R03.9** — профиль работника: тот же account-блок; необязательные поля не блокируют clock.
