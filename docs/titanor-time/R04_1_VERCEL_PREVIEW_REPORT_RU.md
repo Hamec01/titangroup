@@ -89,19 +89,25 @@ Vercel»). Не хак: файл не подделывается, trace не к�
 | локальная `npm run build` (Docker target) | ✅ 19/19, `.next/standalone/server.js` present, `config.output: standalone` |
 | локальный Docker-образ (`docker build -f Dockerfile .`) | ✅ собран (358 МБ), `.next/standalone` перенесён |
 | образ запускается: `server.js` есть, `/en` `/fi` `/api/health` `/robots.txt` `/sitemap.xml` `/ship-admin-portal` = **200** | ✅ |
-| Vercel Preview на fix-коммите → **READY** | _<требует токен / проверки владельцем>_ |
-| EN/FI, admin guard (401), uploads (404), robots, sitemap, health | _<по READY-деплою>_ |
+| Vercel Preview на fix-коммитах `27e65cb` / `9c7f45f` | ✅ **success** — GitHub commit status `Vercel` = `success`, «Deployment has completed» (было `failure` на `aaa66af` / `3f56773`) |
+| EN/FI, admin guard (401), uploads (404), robots, sitemap, health | ✅ на локальном Docker-образе (код идентичен; Vercel-деплой отличается только форматом build-output). Финальный прогон по `*.vercel.app` — за владельцем с токеном |
 | live-сайт `titanorgroup.fi` не изменился | ✅ контейнер `titanorgroup-web-1` не трогался |
 
 ## 7. Git
 
 - Отдельный commit: `27e65cb` — только `next.config.mjs` (+ этот отчёт).
-- CI (`.github/workflows/ci.yml` → `public-site-quality`): `npm ci` → lockfile → `tsc` → `npm run
-  build`. Локальный build с fix'ом зелёный; CI по коммиту — _<статус>_.
+- CI по `9c7f45f`: **6/6 job success**, включая `public-site-quality` и `CI summary (required)`.
 
-## 8. Открытый пункт
+## 8. Итог
 
-Финальное подтверждение — статус **READY** у Vercel Preview на fix-коммите. Нужен либо
-Vercel-токен (агенту — `npx vercel inspect --logs` / `deploy --force`), либо владелец делает
-Redeploy без кеша и присылает статус. До этого R04.1 — «fix применён и локально доказан,
-Preview-подтверждение pending».
+Причина доказана: `output: 'standalone'` × Vercel-адаптер, сломалось на Next 16.3
+(бисекция до точного коммита; чистые локальные сборки Next 16.3.3 в обоих режимах исключили
+баг Next; фикс, переключающий Vercel на нативный output → Preview `success`). Docker/self-hosted
+standalone сохранён и проверен реальной `docker build` + запуском. CI 6/6. Live-сайт не тронут.
+
+Открытый (мелкий): прогон EN/FI/admin/uploads по самому `*.vercel.app` Preview-URL — когда у
+владельца будет токен. Vercel `state: success` уже подтверждает, что build+deploy прошли.
+
+## Бэклог (записано, вне R04.1)
+- `/fi` отдаёт `<html lang="en">` (жёстко в `app/layout.tsx`; на live так же) → UX/i18n-этап.
+- contact/admin POST проверить с реальными env (`SMTP_*`, `ADMIN_*`) до live-деплоя сайта.

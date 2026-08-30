@@ -132,7 +132,7 @@ Production cutover разрешается только после R12 и отд�
 | R01 | Backup/storage foundation | R00 | Нет | **DONE `96799ba` — PASS** (квота Contabo 250 GB подтверждена 2026-08-30; таймер устанавливает владелец, см. `BACKUP_RESTORE_RUNBOOK_RU.md` §6) |
 | R02 | Надёжные test/CI gates | R00 | Нет | **DONE `e2ad7e1`+ — PASS** (отчёт `R02_TEST_CI_REPORT_RU.md`; каталог `TEST_CATALOG_RU.md`; browser-lane → R12) |
 | R03 | Profiles и recovery без SMTP | R01, R02 | Нет | **DONE + DEPLOYED на пилот 2026-08-30** (`t97-pilot-22e8b12`→`1e4dc92`; регрессия 62/62; отчёт `R03_ACCOUNT_RECOVERY_RU.md`) |
-| R04 | Security upgrade публичного сайта | R02 | Нет | **DONE `105680d` — audit 8→0; build ✓ 19/19; EN/FI/contact/admin/uploads smoke ✓** (отчёт `R04_DEPENDENCY_SECURITY_PUBLIC_SITE_RU.md`). Деплой сайта — отдельно по решению владельца. |
+| R04 | Security upgrade публичного сайта | R02 | Нет | **DONE** — `105680d` audit 8→0; **R04.1 `27e65cb`** — Vercel Preview regression (`output:'standalone'`×Vercel) исправлена, Preview `success`, CI 6/6. Отчёты `R04_DEPENDENCY_SECURITY_PUBLIC_SITE_RU.md` + `R04_1_VERCEL_PREVIEW_REPORT_RU.md`. Деплой сайта — отдельно. |
 | R05 | Security upgrade Titanor Time | R02 | Нет | **DONE + DEPLOYED на пилот 2026-08-30** (`t97-pilot-1e4dc92`; audit 8→0; регрессия 62/62; отчёт `R05_DEPENDENCY_SECURITY_RU.md`) |
 | R06 | Scheduler/readiness/Docker/operations | R01, R02, R05 | Нет | Не начат |
 | R07 | Security hardening приложений/API | R02, R04, R05 | Нет | Не начат |
