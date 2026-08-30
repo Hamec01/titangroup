@@ -24,7 +24,8 @@ const ENTRIES = {
   'attendance-scheduler-healthcheck': 'scripts/attendance-scheduler-healthcheck.ts',
   'attendance-auto-submit-tick': 'scripts/attendance-auto-submit-tick.ts',
   'bootstrap-super-admin': 'scripts/bootstrap-super-admin.ts',
-  'reset-password': 'scripts/reset-password.ts'
+  'reset-password': 'scripts/reset-password.ts',
+  'gps-archive': 'scripts/run-gps-archive.ts'
 };
 
 const EXTERNAL = ['@prisma/client', '.prisma/client', '.prisma', 'argon2', 'sharp'];
