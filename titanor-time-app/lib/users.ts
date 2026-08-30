@@ -29,11 +29,50 @@ export interface UserListItem {
   createdAt: string;
 }
 
+export const USER_LIST_ROLE_VALUES = ['FOREMAN', 'ADMIN', 'SUPER_ADMIN'] as const;
+export type UserListRole = (typeof USER_LIST_ROLE_VALUES)[number];
+export const USER_LIST_STATUS_VALUES = ['PENDING_ACTIVATION', 'ACTIVE', 'OFFBOARDING', 'DEACTIVATED'] as const;
+export type UserListStatus = (typeof USER_LIST_STATUS_VALUES)[number];
+
+export const USER_LIST_DEFAULT_PAGE_SIZE = 25;
+export const USER_LIST_MAX_PAGE_SIZE = 100;
+
 export interface UserListFilters {
   page: number;
   pageSize: number;
-  /** Only 'FOREMAN' is a meaningful value per the contract — anything else is treated as "no filter" by the route layer, not validated here. */
-  role?: string;
+  /** free text, matched case-insensitively against username OR email */
+  q?: string;
+  /** one active system role to filter by; omitted = any of FOREMAN/ADMIN/SUPER_ADMIN */
+  role?: UserListRole;
+  status?: UserListStatus;
+}
+
+export interface UserListQuery {
+  page: number;
+  pageSize: number;
+  q: string;
+  role: UserListRole | null;
+  status: UserListStatus | null;
+}
+
+/**
+ * R09.1 — lenient parser for the /admin/users filter form (a page, not an API route). An
+ * unrecognised value is dropped, never a 400: the worst a bad URL param does is show the
+ * unfiltered list. `q` is trimmed and capped; blank == absent.
+ */
+export function parseUserListQuery(raw: Record<string, string | null | undefined>): UserListQuery {
+  const str = (v: string | null | undefined): string => (typeof v === 'string' ? v : '');
+  const pageN = Number.parseInt(str(raw.page), 10);
+  const page = Number.isInteger(pageN) && pageN >= 1 ? pageN : 1;
+  const sizeN = Number.parseInt(str(raw.pageSize), 10);
+  const pageSize =
+    Number.isInteger(sizeN) && sizeN >= 1 && sizeN <= USER_LIST_MAX_PAGE_SIZE ? sizeN : USER_LIST_DEFAULT_PAGE_SIZE;
+  const q = str(raw.q).trim().slice(0, 200);
+  const roleRaw = str(raw.role).trim().toUpperCase();
+  const role = (USER_LIST_ROLE_VALUES as readonly string[]).includes(roleRaw) ? (roleRaw as UserListRole) : null;
+  const statusRaw = str(raw.status).trim().toUpperCase();
+  const status = (USER_LIST_STATUS_VALUES as readonly string[]).includes(statusRaw) ? (statusRaw as UserListStatus) : null;
+  return { page, pageSize, q, role, status };
 }
 
 export interface UserListResult {
@@ -62,15 +101,28 @@ function activeRoleWhere(now: Date, roleNames: readonly string[]): Prisma.UserRo
  */
 export async function listUsers(filters: UserListFilters): Promise<UserListResult> {
   const now = new Date();
-  const roleNamesForFilter = filters.role === 'FOREMAN' ? (['FOREMAN'] as const) : LOOKUP_ROLE_NAMES;
+  const roleNamesForFilter =
+    filters.role && (USER_LIST_ROLE_VALUES as readonly string[]).includes(filters.role)
+      ? ([filters.role] as const)
+      : LOOKUP_ROLE_NAMES;
 
+  const q = filters.q?.trim();
   const where: Prisma.UserWhereInput = {
     // T7A §13/§15 п.4 — the reserved SYSTEM actor (userKind=SYSTEM, username=system.scheduler)
     // must never appear in this admin-facing list. Explicit, not incidental: today it also has
     // no active role row so it's excluded either way, but that's not an independent guarantee —
     // this filter is the real one.
     userKind: 'HUMAN',
-    userRoles: { some: activeRoleWhere(now, roleNamesForFilter) }
+    userRoles: { some: activeRoleWhere(now, roleNamesForFilter) },
+    ...(filters.status ? { status: filters.status } : {}),
+    ...(q
+      ? {
+          OR: [
+            { username: { contains: q, mode: Prisma.QueryMode.insensitive } },
+            { email: { contains: q, mode: Prisma.QueryMode.insensitive } }
+          ]
+        }
+      : {})
   };
 
   const [totalItems, users] = await Promise.all([
