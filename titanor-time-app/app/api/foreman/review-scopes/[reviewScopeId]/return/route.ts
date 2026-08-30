@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { NextRequest, NextResponse } from 'next/server';
 import { jsonError, successHeaders, type ApiErrorBody } from '@/lib/api-error';
+import { requireUuidParam } from '@/lib/api-guard';
 import { resolveAuthenticatedSession } from '@/lib/auth';
 import { hasPermission } from '@/lib/permissions';
 import { SESSION_COOKIE_NAME } from '@/lib/session';
@@ -40,6 +41,8 @@ export async function POST(request: NextRequest, { params }: RouteParams): Promi
   }
 
   const { reviewScopeId } = await params;
+  const reviewScopeIdInvalid = requireUuidParam(reviewScopeId, { code: 'REVIEW_SCOPE_NOT_FOUND', message: 'No review scope with this id on your own sites.' }, requestId);
+  if (reviewScopeIdInvalid) return reviewScopeIdInvalid;
 
   if (!(await isForemanOwnScope(reviewScopeId, authenticated.user.id, helsinkiToday()))) {
     return jsonError(404, { code: 'REVIEW_SCOPE_NOT_FOUND', message: 'No review scope with this id on your own sites.' }, requestId);

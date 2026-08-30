@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { NextRequest, NextResponse } from 'next/server';
 import { jsonError, successHeaders, type ApiErrorBody } from '@/lib/api-error';
+import { requireUuidParam } from '@/lib/api-guard';
 import { resolveAuthenticatedSession } from '@/lib/auth';
 import { hasPermission } from '@/lib/permissions';
 import { SESSION_COOKIE_NAME } from '@/lib/session';
@@ -35,6 +36,8 @@ export async function GET(request: NextRequest, { params }: RouteParams): Promis
   }
 
   const { siteId } = await params;
+  const siteIdInvalid = requireUuidParam(siteId, { code: 'SITE_REPORT_NOT_FOUND', message: 'No site report available for this id.' }, requestId);
+  if (siteIdInvalid) return siteIdInvalid;
   const { searchParams } = new URL(request.url);
   const parsed = parseSiteReportQuery({
     siteId,

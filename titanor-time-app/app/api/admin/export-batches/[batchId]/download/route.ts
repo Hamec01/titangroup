@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { NextRequest, NextResponse } from 'next/server';
 import { jsonError } from '@/lib/api-error';
+import { requireUuidParam } from '@/lib/api-guard';
 import { resolveAuthenticatedSession } from '@/lib/auth';
 import { hasPermission } from '@/lib/permissions';
 import { SESSION_COOKIE_NAME } from '@/lib/session';
@@ -26,6 +27,8 @@ export async function GET(request: NextRequest, { params }: RouteParams): Promis
   }
 
   const { batchId } = await params;
+  const batchIdInvalid = requireUuidParam(batchId, { code: 'EXPORT_BATCH_NOT_FOUND', message: 'No export batch with this id.' }, requestId);
+  if (batchIdInvalid) return batchIdInvalid;
   if (!isValidExportBatchId(batchId)) {
     // Same uniform 404 as a genuinely missing batch — a malformed id must not be a distinguishable
     // oracle on this endpoint either (this download route is the one place raw bytes ever leave the

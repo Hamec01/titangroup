@@ -64,6 +64,7 @@
     { "file": "_test-gps-approximate-sync.ts", "lane": "db", "note": "T14 approximate-GPS offline sync + site-flag auto-resolve." },
     { "file": "_test-gps-exception-detail.ts", "lane": "db", "note": "GPS exception detail payload." },
     { "file": "_test-gps-offline-resilience-schema.ts", "lane": "db", "note": "T14 ClockEventLocation columns + WorkSite.gpsOftenUnavailable schema." },
+    { "file": "_test-malformed-uuid.ts", "lane": "db", "note": "R07-A/B11 — a garbage [id] path param yields a safe 4xx (lib/api-guard requireUuidParam), never Prisma P2023 / HTTP 500; sampled across worker/admin timesheet + report + export routes." },
     { "file": "_test-map-gps.ts", "lane": "db", "note": "Map GPS point projection." },
     { "file": "_test-overview-querycount.ts", "lane": "db", "note": "Admin overview query-count budget." },
     { "file": "_test-overview.ts", "lane": "db", "note": "getAdminOperationalOverview aggregation." },

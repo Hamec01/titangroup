@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { NextRequest, NextResponse } from 'next/server';
 import { jsonError, successHeaders, type ApiErrorBody } from '@/lib/api-error';
+import { requireUuidParam } from '@/lib/api-guard';
 import { resolveAuthenticatedSession } from '@/lib/auth';
 import { hasPermission } from '@/lib/permissions';
 import { SESSION_COOKIE_NAME } from '@/lib/session';
@@ -62,6 +63,8 @@ export async function POST(request: NextRequest, { params }: RouteParams): Promi
   }
 
   const { reviewScopeId } = await params;
+  const reviewScopeIdInvalid = requireUuidParam(reviewScopeId, { code: 'REVIEW_SCOPE_NOT_FOUND', message: 'No review scope with this id.' }, requestId);
+  if (reviewScopeIdInvalid) return reviewScopeIdInvalid;
   const result = await returnReviewScope(reviewScopeId, authenticated.user.id, authenticated.user.employeeId, (returnReason as string).trim(), normalizedProposals, requestId);
 
   if ('code' in result) {

@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { NextRequest, NextResponse } from 'next/server';
 import { jsonError, successHeaders } from '@/lib/api-error';
+import { requireUuidParam } from '@/lib/api-guard';
 import { resolveAuthenticatedSession } from '@/lib/auth';
 import { hasPermission } from '@/lib/permissions';
 import { SESSION_COOKIE_NAME } from '@/lib/session';
@@ -25,6 +26,8 @@ export async function GET(request: NextRequest, { params }: RouteParams): Promis
   }
 
   const { reviewScopeId } = await params;
+  const reviewScopeIdInvalid = requireUuidParam(reviewScopeId, { code: 'REVIEW_SCOPE_NOT_FOUND', message: 'No review scope with this id.' }, requestId);
+  if (reviewScopeIdInvalid) return reviewScopeIdInvalid;
   const detail = await getReviewScopeDetail(reviewScopeId);
   if (!detail) {
     return jsonError(404, { code: 'REVIEW_SCOPE_NOT_FOUND', message: 'No review scope with this id.' }, requestId);

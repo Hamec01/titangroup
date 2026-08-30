@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { NextRequest, NextResponse } from 'next/server';
 import { jsonError, successHeaders, type ApiErrorBody } from '@/lib/api-error';
+import { requireUuidParam } from '@/lib/api-guard';
 import { resolveAuthenticatedSession } from '@/lib/auth';
 import { hasPermission } from '@/lib/permissions';
 import { SESSION_COOKIE_NAME } from '@/lib/session';
@@ -51,6 +52,8 @@ export async function POST(request: NextRequest, { params }: RouteParams): Promi
   }
 
   const { timesheetId } = await params;
+  const timesheetIdInvalid = requireUuidParam(timesheetId, { code: 'TIMESHEET_NOT_FOUND', message: 'No timesheet with this id.' }, requestId);
+  if (timesheetIdInvalid) return timesheetIdInvalid;
   const result = await returnTimesheetOverride(timesheetId, authenticated.user.id, returnReason.trim(), requestId);
 
   if ('code' in result) {

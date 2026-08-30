@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { NextRequest, NextResponse } from 'next/server';
 import { jsonError, successHeaders, type ApiErrorBody } from '@/lib/api-error';
+import { requireUuidParam } from '@/lib/api-guard';
 import { resolveAuthenticatedSession } from '@/lib/auth';
 import { hasPermission } from '@/lib/permissions';
 import { SESSION_COOKIE_NAME } from '@/lib/session';
@@ -34,6 +35,8 @@ export async function GET(request: NextRequest, { params }: RouteParams): Promis
   }
 
   const { periodId } = await params;
+  const periodIdInvalid = requireUuidParam(periodId, { code: 'PERIOD_NOT_FOUND', message: 'No payroll period with this id.' }, requestId);
+  if (periodIdInvalid) return periodIdInvalid;
   const { searchParams } = new URL(request.url);
   const parsedQuery = parsePeriodReportQuery({ page: searchParams.get('page'), pageSize: searchParams.get('pageSize') });
 
