@@ -18,13 +18,14 @@ export function AdminLoginForm() {
       const response = await fetch('/api/admin/login', {
         method: 'POST',
         headers: {
-          'Content-Type': 'application/json'
+          'Content-Type': 'application/json',
+          'X-Requested-With': 'titanor-admin'
         },
         body: JSON.stringify({ password })
       });
 
       if (!response.ok) {
-        setError('Wrong password. Please try again.');
+        setError(response.status === 429 ? 'Too many attempts. Please wait and try again.' : 'Wrong password. Please try again.');
         setIsLoading(false);
         return;
       }

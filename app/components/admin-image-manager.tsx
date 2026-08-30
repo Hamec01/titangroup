@@ -132,7 +132,7 @@ export function AdminImageManager() {
     setIsLoggingOut(true);
 
     try {
-      await fetch('/api/admin/logout', { method: 'POST' });
+      await fetch('/api/admin/logout', { method: 'POST', headers: { 'X-Requested-With': 'titanor-admin' } });
       router.refresh();
     } finally {
       setIsLoggingOut(false);

@@ -1,18 +1,14 @@
 import { NextResponse } from 'next/server';
-import { getAdminSessionCookieName } from '../../../../lib/admin-auth';
+import { getAdminSessionCookieName, getAdminSessionClearOptions } from '../../../../lib/admin-auth';
+import { rejectIfCsrfMissing } from '../../../../lib/csrf';
 
 export const runtime = 'nodejs';
 
-export async function POST() {
+export async function POST(request: Request) {
+  const csrf = rejectIfCsrfMissing(request);
+  if (csrf) return csrf;
+
   const response = NextResponse.json({ ok: true });
-
-  response.cookies.set(getAdminSessionCookieName(), '', {
-    httpOnly: true,
-    sameSite: 'lax',
-    secure: process.env.NODE_ENV === 'production',
-    path: '/',
-    maxAge: 0
-  });
-
+  response.cookies.set(getAdminSessionCookieName(), '', getAdminSessionClearOptions());
   return response;
 }

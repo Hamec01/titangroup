@@ -75,7 +75,13 @@ export function isAdminPasswordValid(password: string): boolean {
     throw new Error('ADMIN_PASSWORD is not set');
   }
 
-  return password === expectedPassword;
+  // R07-B — constant-time. A plain `password === expectedPassword` short-circuits at the first
+  // mismatched byte, leaking the length and a matching prefix through response timing. HMAC both
+  // sides with the server secret first, then compare the two fixed-length digests in constant time.
+  const key = getSessionSecret();
+  const candidate = createHmac('sha256', key).update(password, 'utf8').digest();
+  const expected = createHmac('sha256', key).update(expectedPassword, 'utf8').digest();
+  return timingSafeEqual(candidate, expected);
 }
 
 export function getAdminSessionCookieName(): string {
@@ -85,11 +91,18 @@ export function getAdminSessionCookieName(): string {
 export function getAdminSessionCookieOptions() {
   return {
     httpOnly: true,
-    sameSite: 'lax' as const,
+    // R07-B — `strict`: the admin cookie is never needed on a cross-site navigation into the panel,
+    // and `strict` blocks it being sent on any request that did not originate on our own origin.
+    sameSite: 'strict' as const,
     secure: process.env.NODE_ENV === 'production',
     path: '/',
     maxAge: sessionTtlSeconds
   };
+}
+
+/** Cookie options for clearing the session (same attributes, maxAge 0). */
+export function getAdminSessionClearOptions() {
+  return { ...getAdminSessionCookieOptions(), maxAge: 0 };
 }
 
 export function isAdminRequestAuthenticated(request: NextRequest): boolean {
