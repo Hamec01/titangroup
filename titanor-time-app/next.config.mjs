@@ -1,7 +1,28 @@
+// R07-A — security response headers applied to every route (page, API, asset). Titanor Time is a
+// private internal application: it is never framed, never indexed, and only ever reached over
+// HTTPS through Caddy. Kept in one place instead of per-route so a new route cannot forget them.
+const SECURITY_HEADERS = [
+  { key: 'X-Content-Type-Options', value: 'nosniff' },
+  { key: 'X-Frame-Options', value: 'DENY' },
+  { key: 'Referrer-Policy', value: 'strict-origin-when-cross-origin' },
+  { key: 'Cross-Origin-Opener-Policy', value: 'same-origin' },
+  // geolocation is needed by the worker PWA (lib/worker-gps.ts); everything else is denied.
+  {
+    key: 'Permissions-Policy',
+    value:
+      'geolocation=(self), camera=(), microphone=(), payment=(), usb=(), accelerometer=(), gyroscope=(), magnetometer=(), browsing-topics=()'
+  },
+  // Honoured by browsers only on HTTPS responses; Caddy terminates TLS in front of the app.
+  { key: 'Strict-Transport-Security', value: 'max-age=63072000' },
+  { key: 'X-Robots-Tag', value: 'noindex, nofollow' }
+];
+
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   reactStrictMode: true,
   output: 'standalone',
+  // Drop the framework fingerprint (`X-Powered-By: Next.js`).
+  poweredByHeader: false,
   turbopack: {
     root: import.meta.dirname
   },
@@ -38,6 +59,11 @@ const nextConfig = {
   // explicit and testable via a real HTTP response, not just inferred from the route's source.
   async headers() {
     return [
+      {
+        // R07-A — security headers on everything.
+        source: '/:path*',
+        headers: SECURITY_HEADERS
+      },
       {
         source: '/worker-offline',
         headers: [{ key: 'Cache-Control', value: 'public, max-age=0, must-revalidate' }]
