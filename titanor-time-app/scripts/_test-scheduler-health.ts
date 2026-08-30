@@ -52,6 +52,7 @@ expect('transient tick error but now stale', { ...BASE, heartbeat: hb({ lastTick
 
 expect('overlapping: recent overlap, no ok since', { ...BASE, heartbeat: hb({ lastTickAt: ago(20), lastOutcome: 'ok', lastTickCompletedAt: ago(600), lastOverlapAt: ago(15) }), pidAlive: true }, 'OVERLAPPING', false);
 expect('overlap but a good tick happened after it', { ...BASE, heartbeat: hb({ lastTickAt: ago(10), lastOutcome: 'ok', lastTickCompletedAt: ago(10), lastOverlapAt: ago(300) }), pidAlive: true }, 'HEALTHY', true);
+expect('second scheduler in grace, only ever overlaps -> OVERLAPPING (not STARTING)', { ...BASE, heartbeat: hb({ lastOverlapAt: ago(5) }, 30), pidAlive: true }, 'OVERLAPPING', false);
 
 check('isHealthy(HEALTHY/STARTING) true, others false', isHealthy('HEALTHY') && isHealthy('STARTING') && !isHealthy('DB_UNAVAILABLE') && !isHealthy('OVERLAPPING'));
 

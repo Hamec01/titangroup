@@ -60,21 +60,23 @@ export function classifySchedulerHealth(input: SchedulerHealthInput): SchedulerH
   const lastTickAgeMs = heartbeat.lastTickAt ? nowMs - new Date(heartbeat.lastTickAt).getTime() : null;
   const lastTickAgeSeconds = lastTickAgeMs === null ? null : Math.round(lastTickAgeMs / 1000);
 
-  // Never completed a tick.
-  if (!heartbeat.lastTickAt || heartbeat.lastOutcome === null) {
-    if (processAgeMs <= graceMs) {
-      return { state: 'STARTING', healthy: true, lastTickAgeSeconds };
-    }
-    return { state: 'HEARTBEAT_STALE', healthy: false, lastTickAgeSeconds };
-  }
-
-  // A very recent overlap skip with no successful tick since — a second scheduler is running.
+  // A recent overlap skip with no successful tick since — a second scheduler is running. Checked
+  // before STARTING so a second container that only ever overlaps is not mislabelled "starting"
+  // during its grace window and "stale" forever after.
   if (heartbeat.lastOverlapAt) {
     const overlapAgeMs = nowMs - new Date(heartbeat.lastOverlapAt).getTime();
     const lastOkMs = heartbeat.lastTickCompletedAt ? nowMs - new Date(heartbeat.lastTickCompletedAt).getTime() : Number.POSITIVE_INFINITY;
     if (overlapAgeMs <= staleAfterMs && overlapAgeMs < lastOkMs) {
       return { state: 'OVERLAPPING', healthy: false, lastTickAgeSeconds };
     }
+  }
+
+  // Never completed a tick.
+  if (!heartbeat.lastTickAt || heartbeat.lastOutcome === null) {
+    if (processAgeMs <= graceMs) {
+      return { state: 'STARTING', healthy: true, lastTickAgeSeconds };
+    }
+    return { state: 'HEARTBEAT_STALE', healthy: false, lastTickAgeSeconds };
   }
 
   // Last tick outcome drives the classification.
