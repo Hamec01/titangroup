@@ -39,6 +39,7 @@
     { "file": "_test-recovery-api.ts", "lane": "db", "note": "R03 admin-assisted recovery HTTP routes: issue (worker+user), CSRF/permission/Idempotency-Key, /api/auth/password-reset/confirm login+code+password." },
     { "file": "_test-change-password.ts", "lane": "db", "note": "R03 POST /api/auth/change-password — current-password gate, keeps this session, revokes others, audit PASSWORD_CHANGED." },
     { "file": "_test-session-management.ts", "lane": "db", "note": "R03 GET /api/me/sessions + DELETE /api/me/sessions/:id — list with current flag, revoke one, revoke-own-current clears cookie, cross-user 404." },
+    { "file": "_test-ready-schema.ts", "lane": "db", "note": "R06-A schema-aware /api/ready + lib/schema-readiness — current/ahead/behind/failed-migration/missing-key-table/missing-migrations-table + response sanitization." },
     { "file": "_test-activation.ts", "lane": "db", "note": "Account activation vertical slice." },
     { "file": "_test-admin-approve-timesheet.ts", "lane": "db", "note": "finalApproveTimesheet review-scope state machine." },
     { "file": "_test-admin-direct-edit.ts", "lane": "db", "note": "requestCorrection({directEdit}) admin flow." },

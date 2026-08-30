@@ -52,6 +52,11 @@ step('test-manifest.json in sync', () => {
   if (r.status !== 0) throw new Error((r.stdout || r.stderr || '').trim());
 });
 
+step('migration-inventory.ts in sync', () => {
+  const r = spawnSync(process.execPath, [join(HERE, 'generate-migration-inventory.mjs'), '--check'], { encoding: 'utf8' });
+  if (r.status !== 0) throw new Error((r.stdout || r.stderr || '').trim());
+});
+
 step('no committed secrets under titanor-time-app/', () => {
   // Fast smoke only — CI runs an authoritative gitleaks scan over the whole repo history.
   // Patterns are deliberately conservative: real key material, not short doc placeholders.

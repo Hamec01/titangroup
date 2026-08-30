@@ -15,6 +15,7 @@
     "test:browser": "node scripts/run-tests.mjs browser",
     "test:catalog": "node scripts/run-tests.mjs --list",
     "test:check-manifest": "node scripts/run-tests.mjs --check",
+    "generate:migration-inventory": "node scripts/generate-migration-inventory.mjs",
     "bootstrap:super-admin": "tsx scripts/bootstrap-super-admin.ts",
     "reset-password": "tsx scripts/reset-password.ts",
     "attendance:auto-submit": "tsx scripts/attendance-auto-submit-tick.ts",
