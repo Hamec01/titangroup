@@ -1,0 +1,24 @@
+# Titanor Time — daily GPS encrypted archive (roadmap R08, TZ §9).
+# Templated by environment: %i is "pilot" or "prod".
+#   sudo systemctl enable --now titanor-time-gps-archive@pilot.timer
+#
+# Config for each instance lives in /etc/titanor-time/gps-archive-%i.env (mode 0600, root:root) —
+# names and paths only, NO secrets. GPS_ARCHIVE_ENCRYPTION_KEY is read by the container from the
+# app env file (TT_GPS_ENVFILE), never by this unit. See gps-archive-pilot.env.example.
+
+[Unit]
+Description=Titanor Time %i GPS encrypted archive
+Wants=docker.service
+After=docker.service network-online.target
+After=mnt-250gb.mount
+OnFailure=titanor-time-gps-archive-failed@%i.service
+
+[Service]
+Type=oneshot
+User=deploy
+Group=deploy
+EnvironmentFile=/etc/titanor-time/gps-archive-%i.env
+ExecStart=/bin/bash -lc '${TT_GPS_SCRIPT:-/home/deploy/projects/titanorgroup-worktrees/titanor-time-foundation/ops/titanor-time/gps-archive-titanor-time.sh}'
+Nice=10
+IOSchedulingClass=idle
+TimeoutStartSec=3600

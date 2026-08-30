@@ -1,0 +1,19 @@
+# Titanor Time — daily GPS archive timer (roadmap R08).
+#   sudo systemctl enable --now titanor-time-gps-archive@pilot.timer
+#
+# 05:10 UTC — after titanorgroup-backup.timer (03:30 local) and titanor-time-backup@ (04:10 UTC)
+# so the three do not contend for the s3fs upload path. The GpsArchiveDay manifest that the backup
+# bundle includes is therefore from the PREVIOUS day's archive run — acceptable (it is a pointer
+# list, not the data). Reorder to 03:5x UTC if the backup must always carry same-day manifests.
+
+[Unit]
+Description=Run the Titanor Time %i GPS encrypted archive daily
+
+[Timer]
+OnCalendar=*-*-* 05:10:00 UTC
+Persistent=true
+RandomizedDelaySec=15m
+Unit=titanor-time-gps-archive@%i.service
+
+[Install]
+WantedBy=timers.target

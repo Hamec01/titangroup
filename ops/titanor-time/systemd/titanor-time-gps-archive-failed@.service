@@ -1,0 +1,13 @@
+# Titanor Time — GPS archive failure notifier (roadmap R08).
+# Invoked by OnFailure= of titanor-time-gps-archive@%i.service. Marker file + journal line only —
+# NO email/SMTP, NO secrets, NO coordinates. A failure means one or more reading-days are not
+# VERIFIED off-box; the scheduler retention step keeps that day's raw GPS until it is.
+
+[Unit]
+Description=Titanor Time %i GPS archive FAILED notifier
+
+[Service]
+Type=oneshot
+User=deploy
+Group=deploy
+ExecStart=/bin/bash -lc 'ts=$(date -u +%%Y-%%m-%%dT%%H:%%M:%%SZ); mkdir -p /home/deploy/backups/titanor-time-%i; echo "$ts GPS archive FAILED for env=%i — see: journalctl -u titanor-time-gps-archive@%i.service -n 80" | tee -a /home/deploy/backups/titanor-time-%i/GPS_ARCHIVE_FAILED.log; logger -t titanor-time-gps-archive "GPS archive FAILED for env=%i"'
