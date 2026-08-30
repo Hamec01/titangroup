@@ -1,5 +1,12 @@
 # Titanor Time — Implementation Status
 
+**`[2026-08-30]` R05 — dependency security (Titanor Time) — DONE.** Отчёт `R05_DEPENDENCY_SECURITY_RU.md`.
+`npm audit --omit=dev` 8 high → **0**. Slice A (`37d5ca8`): Next 16.2.12→16.3.3 (+ транзитивно
+postcss 8.5.23, nanoid 3.3.18, дубль sharp@0.34.5 удалён). Slice B (`7bc6c77`): Prisma+@prisma/client
+6.19.0→6.19.3 (effect 3.21.0) + `overrides: deepmerge-ts ^8.0.2` (7→8, совместимость с Prisma
+проверена). typecheck 0, lint ✓, build ✓, регрессия unit+db 62/62. browser smoke → R12.
+Pilot image + deploy — вместе с R03.
+
 Обновлено: 2026-08-30 Europe/Helsinki (R03 — профили + recovery без SMTP, DONE; pilot deploy ждёт владельца)
 
 **`[2026-08-30]` R03 — учётные записи, профили и recovery без SMTP (production release roadmap) — в работе.**
