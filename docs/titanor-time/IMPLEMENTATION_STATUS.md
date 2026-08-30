@@ -1,5 +1,41 @@
 # Titanor Time — Implementation Status
 
+**`[2026-08-30]` R09 — UX WORKER / ADMIN перед production — код готов, CI зелёный, ждёт pilot-деплоя.**
+Отчёт `R09_UX_REPORT_RU.md`, browser-чек-лист `R09_BROWSER_ACCEPTANCE_RU.md`, план
+`R09_UX_AUDIT_AND_PLAN_RU.md`. ТЗ §13 + §15 + §19.2–19.4. **Объём сужен владельцем: FOREMAN UI
+полностью исключён** (R09.3/R09.4/любой прораб — не входят), R09.9 (split крупных модулей) — в
+backlog. **Ни одной миграции** — чисто UI/навигация/i18n + одна экстракция клиентского компонента;
+бизнес-логику не трогали. Production/Caddy/DNS/Cloudflare не тронуты.
+- **R09.1** (`d5a8d24`) — `/admin/users` поиск (username ИЛИ email, insensitive) + фильтры
+  роль/статус + пагинация, URL-persist; `parseUserListQuery` ленивый. Тест `_test-admin-users-list`
+  (db 23).
+- **R09.2** (`f0e081f`) — `AccessDeniedNotice` / `accessDeniedText(area, locale)`: 13 admin-страниц,
+  короткий RU/EN текст + «спросить SUPER_ADMIN», permission-код только в `title`/`data-permission`.
+  Тест `_test-access-denied-notice` (unit 58). FOREMAN-страницы не трогали.
+- **R09.5** (`b6f052c`) — `getDocumentAttentionSummary` + `DocumentAttentionCard` на `/admin`
+  (нужно внимание → `/admin/workforce?sort=ATTENTION`, скоро → `?status=EXPIRING_SOON`); только
+  admin-путь `OverviewView`, скрыта при 0/0. Тест `_test-document-attention` (db).
+- **R09.6** (`6099e6b`) — `html,body{overflow-x:hidden}`, 12 admin-таблиц в `.worker-table-scroll`,
+  `.admin-identity{min-width:0}`, `.admin-header-actions{flex-wrap:wrap}`. FOREMAN не трогали.
+- **R09.7** (`7184aaa`) — `WorkerClockPanel` 1160→951 строк: `app/worker/clock-panel/` — `format.ts`
+  + `GpsNotices` / `WorkerStatusCard` / `MainClockAction` / `TimeCardPreview` / `ClockOverlays`
+  (4 шита). Вся логика/эффекты/рефы на месте, шиты гейтятся по `open`/`prompt`. **Ноль изменений
+  поведения.** Реэкспорт `ClockPanelAssignment` и др. → `page.tsx` / `OfflineShellClient` не тронуты.
+  Тест `_test-worker-clock-panel` (unit 55, SSR).
+- **R09.8** (`fe33e31`) — `WorkerCardNav`: крошки `Работники › Имя` + ряд из 4 вкладок
+  (`aria-current="page"`), 4 страницы карточки остаются раздельными. Profile тянет имя. `<h1>`
+  под-страниц без `— Имя`. «Быстрые действия» почищены. Удалены `admin-daily.workers.backToday` /
+  `.locations`. Тест `_test-worker-card-nav` (unit 36).
+- **R09.10** — **no-op**: R09.1–R09.8 не изменили ни одного `app/**/route.ts` (только server
+  components / lib-хелперы / CSS / i18n / client split). `guardApiRequest` rollout не применяется
+  (правило «только трогаемые маршруты, blind codemod запрещён»). Остаётся за R07-A.1.
+- **R09.11** — отчёт + browser-чек-лист (4 viewport + клавиатура/a11y) + roadmap/status/memory.
+- **Deploy:** один pilot image-swap (без миграции, как R05) — по отдельному подтверждению владельца,
+  агент не запускает; rollback-контейнеры сохранить.
+- **Backlog (после production):** объединение карточки работника в один экран; R09.9; весь FOREMAN
+  UX; полный guard-rollout; access-denied на worker sub-страницах карточки; `/admin/workers` без
+  поиска; `/fi` → `lang="en"`.
+
 **`[2026-08-30]` R08 — GPS encrypted archive + safe retention — DEPLOYED + PASS.** Отчёт
 `R08_GPS_ARCHIVE_REPORT_RU.md`. ТЗ §9, **закрывает B09**. Миграция **98** (`GpsArchiveDay` ledger,
 аддитивная). Production не тронут.
