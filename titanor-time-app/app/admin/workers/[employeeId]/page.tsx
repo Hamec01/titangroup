@@ -4,6 +4,7 @@ import { resolveServerSession } from '@/lib/server-session';
 import { getWorkerDetail, helsinkiToday } from '@/lib/workers';
 import { NewAssignmentForm } from '@/app/admin/assignments/new/NewAssignmentForm';
 import { WorkerActions } from './WorkerActions';
+import { RecoveryCodeIssuer } from '@/components/account/RecoveryCodeIssuer';
 import { WorkerSubmissionScheduleForm } from './WorkerSubmissionScheduleForm';
 import { getWorkerSubmissionScheduleView } from '@/lib/timesheet-submission-schedules';
 import { resolveAppLocale } from '@/lib/i18n/server';
@@ -76,6 +77,12 @@ export default async function WorkerDetailPage({ params }: { params: Promise<{ e
             {worker.employment?.active ? s.workers.activeEmployment : s.workers.employmentEnded} ·{' '}
             {s.workers.activation[worker.activationStatus as keyof typeof s.workers.activation]}
           </p>
+          {worker.activationStatus === 'ALREADY_ACTIVE' ? (
+            <div style={{ marginTop: 8 }}>
+              <p className="setup-subtitle">{ru ? 'Работник забыл пароль?' : 'Worker forgot their password?'}</p>
+              <RecoveryCodeIssuer kind="worker" id={employeeId} />
+            </div>
+          ) : null}
         </section>
         <section className="worker-work-setup" aria-label={ru ? 'Допуски и сертификаты' : 'Qualifications'}>
           <h2>{ru ? 'Допуски и сертификаты' : 'Qualifications'}</h2>

@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { resolveServerSession } from '@/lib/server-session';
 import { listUsers } from '@/lib/users';
 import { ActivationCodeIssuer } from './ActivationCodeIssuer';
+import { RecoveryCodeIssuer } from '@/components/account/RecoveryCodeIssuer';
 import { resolveAppLocale } from '@/lib/i18n/server';
 import { adminDailyStrings } from '@/lib/i18n/admin-daily';
 import { localeText, type AppLocale } from '@/lib/i18n/locale';
@@ -97,8 +98,11 @@ export default async function AdminUsersPage() {
                       <span>{localeText(locale, 'Uses worker activation / existing password', 'Использует активацию работника / существующий пароль')}</span>
                     ) : user.status === 'PENDING_ACTIVATION' ? (
                       <ActivationCodeIssuer userId={user.id} />
-                    ) : user.status === 'ACTIVE' ? (
-                      <span>{localeText(locale, 'Activated', 'Активирован')}</span>
+                    ) : user.status === 'ACTIVE' || user.status === 'OFFBOARDING' ? (
+                      <>
+                        <span>{localeText(locale, 'Activated', 'Активирован')}</span>
+                        <RecoveryCodeIssuer kind="user" id={user.id} />
+                      </>
                     ) : (
                       <span>{userStatusLabel(user.status, locale)}</span>
                     )}
