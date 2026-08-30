@@ -1,6 +1,6 @@
 # Titanor Time — Implementation Status
 
-Обновлено: 2026-08-30 Europe/Helsinki (R03 — профили + recovery без SMTP, R03.1–R03.11 DONE, deploy pending)
+Обновлено: 2026-08-30 Europe/Helsinki (R03 — профили + recovery без SMTP, DONE; pilot deploy ждёт владельца)
 
 **`[2026-08-30]` R03 — учётные записи, профили и recovery без SMTP (production release roadmap) — в работе.**
 ТЗ §6–§7, roadmap §R03. Production/Caddy/DNS не трогаются. Перед первым pilot deploy — `pre-deploy` backup.
