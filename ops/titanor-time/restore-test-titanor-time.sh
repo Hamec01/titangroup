@@ -53,6 +53,12 @@ info "backup: $BACKUP_DIR"
 for f in db.dump db.toc.txt manifest.txt row-counts.txt structure.txt SHA256SUMS migration-history.sha256; do
   [ -f "$BACKUP_DIR/$f" ] || { bad "backup is missing $f"; }
 done
+# R08 — the GPS archive manifest is present on every backup taken after migration 98; when it is
+# there it must be valid JSON (its SHA is already in SHA256SUMS, verified below).
+if [ -f "$BACKUP_DIR/gps-archive-manifest.json" ]; then
+  python3 -c "import json,sys; json.load(open('$BACKUP_DIR/gps-archive-manifest.json'))" 2>/dev/null \
+    && ok "gps-archive-manifest.json is valid JSON" || bad "gps-archive-manifest.json is not valid JSON"
+fi
 # Stage to a LOCAL dir. Docker cannot bind-mount a path on a FUSE mount (the s3fs off-box copy),
 # and staging also proves an off-box copy transferred intact when the checksum re-verify below runs
 # on the local staged copy rather than the original.

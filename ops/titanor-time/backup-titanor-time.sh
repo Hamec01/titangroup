@@ -9,6 +9,9 @@
 #     uploads.tar.gz   tar of the uploads directory        (absent when uploads is empty -> uploads.empty)
 #     structure.txt    migrations / table / routine / trigger / FK counts (no row content)
 #     row-counts.txt   exact count(*) per public table     (no row content)
+#     gps-archive-manifest.json  R08 — per sealed reading-day: revision, status, counts, plaintext
+#                      + ciphertext SHA-256, off-box path (NO coordinates — those are only in the
+#                      encrypted archive on /mnt/250gb)
 #     manifest.txt     env, UTC, host, git SHA/branch, image, sizes, TOC entries, structure
 #     SHA256SUMS       sha256 of every file above
 #
@@ -140,6 +143,27 @@ if [ "${TT_DATA_HASH:-1}" = "1" ]; then
     | sha256sum | awk '{print $1}' > "$STAGE/data.sha256" || fail "all-data fingerprint"
 fi
 
+# ----------------------------------------------------------------------------- 3b. GPS archive manifest (R08, TZ §10.2)
+# A pointer list — per sealed reading-day: revision, status, record counts, plaintext + ciphertext
+# SHA-256, off-box path. NOT the coordinates (those live only in the encrypted archive on /mnt/250gb).
+# Lets a restore prove which days are safely archived and cross-check the off-box files.
+docker exec "$TT_DB_CONTAINER" psql -U "$TT_DB_USER" -d "$TT_DB_NAME" -tAc "
+  SELECT COALESCE(
+    (SELECT json_agg(row_to_json(g) ORDER BY g.archive_date, g.revision)
+       FROM (
+         SELECT to_char(\"archiveDate\",'YYYY-MM-DD') AS archive_date, \"revision\", \"status\"::text,
+                \"clockLocationCount\", \"presenceSampleCount\",
+                \"plaintextSha256\", \"ciphertextSha256\", \"ciphertextBytes\", \"relativePath\",
+                to_char(\"verifiedAt\" AT TIME ZONE 'UTC','YYYY-MM-DD\"T\"HH24:MI:SS\"Z\"') AS verified_at
+           FROM \"GpsArchiveDay\"
+       ) g),
+    '[]'::json)
+  WHERE to_regclass('public.\"GpsArchiveDay\"') IS NOT NULL
+" > "$STAGE/gps-archive-manifest.json" 2>/dev/null || echo '[]' > "$STAGE/gps-archive-manifest.json"
+[ -s "$STAGE/gps-archive-manifest.json" ] || echo '[]' > "$STAGE/gps-archive-manifest.json"
+GPS_ARCHIVE_DAYS="$(docker exec "$TT_DB_CONTAINER" psql -U "$TT_DB_USER" -d "$TT_DB_NAME" -tAc \
+  "SELECT count(*) FROM \"GpsArchiveDay\" WHERE \"status\"='VERIFIED'" 2>/dev/null || echo 0)"
+
 # ----------------------------------------------------------------------------- 4. manifest
 APP_IMAGE="$(docker inspect --format '{{.Config.Image}} ({{.Image}})' "$TT_APP_CONTAINER" 2>/dev/null || echo 'unknown')"
 GIT_SHA="$(git -C "$TT_REPO_DIR" rev-parse HEAD 2>/dev/null || echo unknown)"
@@ -163,6 +187,8 @@ GIT_DIRTY="$(git -C "$TT_REPO_DIR" status --porcelain 2>/dev/null | wc -l | tr -
   echo "uploads_bytes        = ${UPLOADS_BYTES}"
   echo "public_row_total     = ${ROWS_TOTAL}"
   echo "migration_history_sha256 = $(cat "$STAGE/migration-history.sha256")"
+  echo "gps_archive_verified_days = ${GPS_ARCHIVE_DAYS}"
+  echo "gps_archive_manifest_sha256 = $(sha256sum "$STAGE/gps-archive-manifest.json" | awk '{print $1}')"
   [ -f "$STAGE/data.sha256" ] && echo "all_data_sha256      = $(cat "$STAGE/data.sha256")"
   echo "--- structure ---"
   cat "$STAGE/structure.txt"
