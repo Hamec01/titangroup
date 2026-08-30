@@ -95,7 +95,7 @@ Vercel»). Не хак: файл не подделывается, trace не к�
 
 ## 7. Git
 
-- Отдельный commit: _<SHA>_ — только `next.config.mjs` (+ этот отчёт).
+- Отдельный commit: `27e65cb` — только `next.config.mjs` (+ этот отчёт).
 - CI (`.github/workflows/ci.yml` → `public-site-quality`): `npm ci` → lockfile → `tsc` → `npm run
   build`. Локальный build с fix'ом зелёный; CI по коммиту — _<статус>_.
 
