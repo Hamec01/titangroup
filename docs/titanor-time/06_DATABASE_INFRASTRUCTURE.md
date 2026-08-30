@@ -242,14 +242,25 @@ that boundary — the trigger only ever *permitted* it.
 
 **What runs now.** The scheduler process (§11 above — same Compose service, same image, same
 `while(!shuttingDown)` loop) runs one extra step per loop iteration, immediately after the auto-submit
-tick: `runAttendanceLocationRetention()` (`lib/attendance-location-retention.ts`) —
-`DELETE FROM "ClockEventLocation" WHERE "createdAt" < now() - interval '90 days'`, the identical
-boundary expression the guard trigger already enforces, so the job can never attempt to delete a row
-the trigger would reject. First pass runs on scheduler startup; after a successful pass, the next one
-waits at least 24h; after a failure, the very next loop iteration retries (no 24h wait). Result is
-`{ deletedCount }` only — no `clockEventId`/employee/device UUIDs, no coordinates, ever, in the
-scheduler's structured log line (`retentionRan`/`retentionOutcome`/`retentionDeleted` — safe fields
-only; a top-level failure logs a stable `errorCode`, never the raw `Error`).
+tick: `runAttendanceLocationRetention()` (`lib/attendance-location-retention.ts`). First pass runs on
+scheduler startup; after a successful pass, the next one waits at least 24h; after a failure, the very
+next loop iteration retries (no 24h wait). Result carries `deletedCount` / `presenceDeletedCount` only
+— no `clockEventId`/employee/device UUIDs, no coordinates, ever, in the scheduler's structured log
+line (`retentionRan`/`retentionOutcome`/`retentionDeleted` — safe fields only; a top-level failure
+logs a stable `errorCode`, never the raw `Error`).
+
+**R08 (2026-08-30) — the delete is now archive-gated.** `runAttendanceLocationRetention` no longer
+issues a blanket `DELETE … WHERE createdAt < now() - interval '90 days'`. It deletes a
+`ClockEventLocation` / `ShiftPresenceSample` row only when BOTH the 90-day boundary has passed AND
+that row's UTC reading-day (`ClockEvent.effectiveAt` / `ShiftPresenceSample.capturedAt`) is fully
+covered by a `VERIFIED` `GpsArchiveDay` — every revision for the day VERIFIED and no raw row for the
+day inserted past the latest archive watermark. A day whose archive is only `WRITTEN`, `FAILED`,
+missing, or has a pending amendment keeps its raw GPS. If `GPS_ARCHIVE_ENCRYPTION_KEY` is absent or
+malformed the pass deletes **nothing** and returns `gateSkippedReason: 'skipped_no_archive_key'`
+(archiving is impossible, so no coordinate may be discarded). The daily archive itself is written
+off-box by `ops/titanor-time/gps-archive-titanor-time.sh` (systemd `titanor-time-gps-archive@`), not
+by the scheduler. See `docs/titanor-time/R08_GPS_ARCHIVE_REPORT_RU.md`. The `ShiftPresenceSample`
+delete still applies the same 90-day floor even though only `ClockEventLocation` has the DB trigger.
 
 **No new public API, no manual-run endpoint, no admin button** — by design (this is a maintenance
 job, not a user-facing feature; see design doc addendum §B).
@@ -266,9 +277,11 @@ scheduler container's existing heartbeat/health semantics from §11 unchanged.
 
 **Legal/privacy note.** Whether 90 days is the *correct* retention window for raw GPS coordinates
 under applicable privacy law is an external owner/legal decision, not something this slice determines
-or changes — this slice only makes the already-agreed 90-day boundary (encoded in the trigger since
-T7A.1) actually take effect operationally. That approval remains an open external gate, tracked
-outside this document.
+or changes. R08 adds the long-term encrypted archive: the operational DB holds precise coordinates
+for 90 days, but the AES-256-GCM archive on the off-box store is kept **indefinitely** by owner
+decision, so the effective retention of precise coordinates is indefinite and must be stated in the
+worker notice and the personal-data-processing policy (TZ §9.5 — an open owner/legal action, tracked
+in `R08_GPS_ARCHIVE_REPORT_RU.md` §6).
 
 **Full pilot E2E, including this section's own backup/restore procedure (§6-7), is now done** — see
 T7A.10C.2 below; production `titanor-time-app-1`/`titanor-time-db-1` still has no `scheduler`

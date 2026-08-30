@@ -1,5 +1,41 @@
 # Titanor Time — Implementation Status
 
+**`[2026-08-30]` R08 — GPS encrypted archive + safe retention — КОД DONE, PASS-критерий выполнен;
+на пилот НЕ развёрнут.** Отчёт `R08_GPS_ARCHIVE_REPORT_RU.md`. ТЗ §9, **закрывает B09**. Миграция
+**98** (`GpsArchiveDay` ledger, аддитивная). Production не тронут.
+Commits `9bcf16f` (миграция 98) · `19544cc` (`lib/gps-archive`) · `f071482` (`lib/gps-archive-run`)
+· `5feba91` (retention gate) · `07cb4ed` (runner `.runtime/gps-archive.cjs`) · `7253bf9`
+(host-скрипт + systemd) · `64070fc` (backup bundle) · `506321e` (e2e).
+- **Модель:** `GpsArchiveDay(archiveDate, revision)` — один ряд на sealed UTC reading-день (bucket
+  по `ClockEvent.effectiveAt` / `ShiftPresenceSample.capturedAt`), seal margin 2 дня, поздний
+  offline-sync → amendment revision 1+. `status` WRITTEN→VERIFIED (не регрессирует, trigger) / FAILED.
+- **Архив:** `lib/gps-archive` — gzip(9)+AES-256-GCM, blob `TGPSA|ver|iv|ct|tag`, путь
+  `gps-archive/YYYY/MM/YYYY-MM-DD[.rNN].jsonl.gz.enc` + `.manifest.json` (counts+оба SHA-256, без
+  координат). Отдельный `GPS_ARCHIVE_ENCRYPTION_KEY` (не `PERSONAL_DATA_ENCRYPTION_KEY`),
+  `isGpsArchiveKeyConfigured()` fail-closed.
+- **Поток (host, как R01 backup — Docker не bind-mount'ит FUSE):** `gps-archive-titanor-time.sh` →
+  throwaway container `node .runtime/gps-archive.cjs write` (staging bind-mount, self-verify,
+  ledger WRITTEN) → host cp staging→`/mnt/250gb` + SHA-256 verify → `... promote` (re-check off-box
+  sha + staging sha + decrypt + plaintext sha + counts → VERIFIED). systemd
+  `titanor-time-gps-archive@` 05:10 UTC + `-failed@` маркер (без SMTP), pilot/prod-параметризовано.
+- **Retention gated:** `runAttendanceLocationRetention` удаляет `ClockEventLocation` /
+  `ShiftPresenceSample` только за полностью-VERIFIED+covered reading-день; WRITTEN/FAILED/amendment/
+  нет архива держит день; **нет/битый `GPS_ARCHIVE_ENCRYPTION_KEY` → 0 удалений**
+  (`gateSkippedReason: 'skipped_no_archive_key'`). 90-дневный пол + DB-trigger не изменены.
+  `unarchivedOldDayCount` — диагностика.
+- **Backup:** `backup-titanor-time.sh` → `gps-archive-manifest.json` (все дни, `to_regclass`-guard),
+  в `SHA256SUMS`; `restore-test` проверяет валидный JSON.
+- **Проверки:** `_test-gps-archive` (unit 32) · `_test-gps-archive-run` (db 20) ·
+  `_test-gps-retention-gate` (db 17) · `_test-gps-archive-runner` (db 19) · `_test-gps-archive-e2e`
+  (db 13 — полный цикл, достаёт координаты удалённых строк из off-box `.enc`, failure-симуляция
+  сохраняет raw). `_test-attendance-presence` (23) переработан под gate. `run-tests.mjs` инжектит
+  `GPS_ARCHIVE_ENCRYPTION_KEY`.
+- **Осознанно не сделано:** **R08.1** — читаемый TXT/CSV экспорт из архива по запросу (ТЗ §9.4).
+  Worker-notice + политика перс. данных (бессрочный архив точных координат) — задача владельца/юриста.
+- **Owner action items перед деплоем** — `R08_GPS_ARCHIVE_REPORT_RU.md` §6: генерация ключа
+  (`openssl rand -base64 32`), деплой образа с миграцией 98, systemd install (root), disposable-verify
+  на pilot dump (агент), текст уведомления работникам.
+
 **`[2026-08-30]` R07-B — Public site security hardening (`titanorgroup.fi`) — DEPLOYED + PASS.**
 Отчёт `R07B_PUBLIC_SITE_HARDENING_REPORT_RU.md`. ТЗ §16.2–16.4, **закрывает public-часть B08**.
 БД у сайта нет — миграций нет. **`titanorgroup-web-1` на `titanorgroup-web:site-3321c09`**
