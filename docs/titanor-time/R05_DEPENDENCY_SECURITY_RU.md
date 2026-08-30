@@ -81,8 +81,17 @@ Next/runtime (A), отдельно Prisma (B) — «не смешивать в �
 
 ## 7. Pilot image + deploy
 
-Собирается вместе с R03 (см. `R03_ACCOUNT_RECOVERY_RU.md` §7) — один образ на R05-SHA, один
-скрипт `deploy-<sha>.sh` (pre-deploy backup → генерация `PASSWORD_RESET_TOKEN_HMAC_KEY` →
-миграции 93→95 → пересоздание app+scheduler → verify web/scheduler). Он **заменяет**
-`deploy-22e8b12.sh`: если R03 уже задеплоен — шаг миграций идемпотентен, выполняется только
-свап образа.
+R03 задеплоен владельцем 2026-08-30 (`deploy-22e8b12.sh`) — пилот на `t97-pilot-22e8b12`,
+БД 95 миграций, `PASSWORD_RESET_TOKEN_HMAC_KEY` в `app.env`.
+
+R05 — **чистый свап образа**, без миграций:
+- образ `titanor-time-app:t97-pilot-1e4dc92` (id `c6313e04`, 1.79 GB — меньше R03's 1.89 GB
+  за счёт лёгкого дерева Next 16.3.3 + удалённого nodemailer);
+- скрипт `/home/deploy/app-data/t97-pilot/deploy-1e4dc92.sh`: pre-deploy backup → `migrate deploy`
+  (идемпотентный no-op) + `migrate status` = «up to date» → пересоздание app+scheduler на новом
+  образе → verify (`/api/ready` `/reset-password` `/worker` = 200, scheduler tick, prod baseline).
+
+**Проверено до деплоя:** восстановление pre-deploy-бэкапа → `migrate deploy` образом R05 доводит
+93→95 чисто; `migrate status` против клона на 95 = «up to date»; boot образа R05 против клона —
+`/api/ready` `/login` `/reset-password` `/worker` = 200, `/api/auth/change-password` = 401
+без сессии, логи чистые. prod (`daa2edbb`, restarts 0) не тронут.

@@ -5,9 +5,9 @@
 postcss 8.5.23, nanoid 3.3.18, дубль sharp@0.34.5 удалён). Slice B (`7bc6c77`): Prisma+@prisma/client
 6.19.0→6.19.3 (effect 3.21.0) + `overrides: deepmerge-ts ^8.0.2` (7→8, совместимость с Prisma
 проверена). typecheck 0, lint ✓, build ✓, регрессия unit+db 62/62. browser smoke → R12.
-Pilot image + deploy — вместе с R03.
+Pilot image `t97-pilot-1e4dc92` + `deploy-1e4dc92.sh` (чистый свап образа — R03 уже задеплоен, БД на 95). Ждёт запуска владельцем.
 
-Обновлено: 2026-08-30 Europe/Helsinki (R03 — профили + recovery без SMTP, DONE; pilot deploy ждёт владельца)
+Обновлено: 2026-08-30 Europe/Helsinki (R03 задеплоен на пилот; R05 dependency security DONE, свап образа ждёт владельца)
 
 **`[2026-08-30]` R03 — учётные записи, профили и recovery без SMTP (production release roadmap) — в работе.**
 ТЗ §6–§7, roadmap §R03. Production/Caddy/DNS не трогаются. Перед первым pilot deploy — `pre-deploy` backup.
