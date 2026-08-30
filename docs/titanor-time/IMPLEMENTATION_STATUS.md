@@ -1,16 +1,20 @@
 # Titanor Time — Implementation Status
 
-**`[2026-08-30]` R08 — GPS encrypted archive + safe retention — КОД DONE + disposable-verify PASS
-(17/0); deploy-скрипт готов; на пилот НЕ развёрнут (владелец запускает).** Отчёт
+**`[2026-08-30]` R08 — GPS encrypted archive + safe retention — DEPLOYED + PASS.** Отчёт
 `R08_GPS_ARCHIVE_REPORT_RU.md`. ТЗ §9, **закрывает B09**. Миграция **98** (`GpsArchiveDay` ledger,
-аддитивная). Production не тронут. Образ `titanor-time-app:t97-pilot-6a47ed3` +
-`ops/titanor-time/deploy-pilot-6a47ed3.sh` (`1f2b198`, байт-копия
-`/home/deploy/app-data/t97-pilot/deploy-6a47ed3.sh`). Владелец добавил `GPS_ARCHIVE_ENCRYPTION_KEY`
-в pilot app.env. Disposable-verify на restored pilot dump (§5a отчёта): migrate 98, `/api/ready`
-current, write→off-box-sync→promote (6 VERIFIED), `.enc` расшифровывается в seeded-строки с точными
-координатами, retention удаляет ровно 3 архивированных >90д строки (31 недавняя не тронута),
-keyless→`skipped_no_archive_key`, `t97-pilot-8724480` толерантен к схеме 98. **Осталось владельцу:**
-запуск deploy-скрипта + systemd `titanor-time-gps-archive@pilot.timer` (root) + worker-notice.
+аддитивная). Production не тронут.
+**Пилот на `titanor-time-app:t97-pilot-6a47ed3`, DB 98/98, app+scheduler `healthy` restarts 0,
+`/api/ready` schema=current.** `deploy-6a47ed3.sh` (владелец): backup on+off-box (с
+`gps-archive-manifest.json`), migrate 97→98 (0 failed, `GpsArchiveDay`+trigger+пусто), swap,
+verify (`.runtime/gps-archive.cjs` bogus→2 + empty-key→3, retention `retentionOutcome:ok`, R07-A
+регрессия, prod baseline). Rollback-контейнеры `-pre-6a47ed3` (на `t97-pilot-8724480`) —
+**сохранены по указанию владельца**. Disposable-verify до деплоя: PASS 17/0 (§5a отчёта).
+**Первый ручной прогон архива + systemd (владелец):** 5 sealable дней (2026-08-24…28) → written →
+off-box sync 5/5 (SHA-256) → promote → **5 VERIFIED, 0 FAILED**; файлы в
+`/mnt/250gb/titanor-time-foundation/gps-archive-store/gps-archive/2026/08/`. Scheduler retention:
+`retentionOutcome:ok retentionDeleted:0` (raw GPS >90 дн на пилоте нет). `titanor-time-gps-archive@pilot.timer`
+`enabled` (следующий ~05:10 UTC). **Открыто (вне R08):** worker-notice + политика перс. данных
+(владелец/юрист); R08.1 (читаемый TXT/CSV экспорт из архива по запросу, ТЗ §9.4).
 Commits `9bcf16f` (миграция 98) · `19544cc` (`lib/gps-archive`) · `f071482` (`lib/gps-archive-run`)
 · `5feba91` (retention gate) · `07cb4ed` (runner `.runtime/gps-archive.cjs`) · `7253bf9`
 (host-скрипт + systemd) · `64070fc` (backup bundle) · `506321e` (e2e).

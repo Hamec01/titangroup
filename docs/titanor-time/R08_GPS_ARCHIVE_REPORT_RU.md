@@ -5,10 +5,16 @@
 - **Дата:** 2026-08-30.
 - **Не затронуто:** production Titanor Time, публичный сайт, Caddy, DNS, Cloudflare. Одна аддитивная
   миграция (**98** — `GpsArchiveDay`). Бизнес-логику клок-ина/табелей не трогали.
-- **Статус:** **код DONE, все проверки зелёные** (5 новых test-файлов, ~100 assert; existing
-  `_test-attendance-presence` + `_test-retention-pacing` обновлены). На пилот **не развёрнут** —
-  деплой отдельным шагом (владелец), нужен `GPS_ARCHIVE_ENCRYPTION_KEY` в `app.env` + установка
-  systemd-таймера.
+- **Статус:** **DEPLOYED + PASS 2026-08-30.** Пилот `t97-pilot-app` + `t97-pilot-scheduler` на
+  `titanor-time-app:t97-pilot-6a47ed3`, DB **98/98**, оба `healthy`, restarts 0, `/api/ready`
+  `schema:current`. Первый ручной прогон архива (владелец): **5 sealable дней (2026-08-24…28)
+  written → 5/5 off-box → 5 VERIFIED, 0 FAILED**; файлы в
+  `/mnt/250gb/titanor-time-foundation/gps-archive-store/gps-archive/2026/08/`. Scheduler retention:
+  `retentionOutcome:ok retentionDeleted:0` (raw GPS >90 дн на пилоте нет). systemd
+  `titanor-time-gps-archive@pilot.timer` — `enabled`. Rollback-контейнеры `-pre-6a47ed3` сохранены
+  (по указанию владельца). Production не тронут. См. §5b.
+- **Проверки кода:** 5 новых test-файлов (~100 assert) + переработаны `_test-attendance-presence` /
+  `_test-retention-pacing`; CI зелёный.
 - **Решения владельца (fork):** host-скрипт + staging (как R01 backup); отдельный
   `GPS_ARCHIVE_ENCRYPTION_KEY` (не `PERSONAL_DATA_ENCRYPTION_KEY`); seal margin 2 дня; поздний
   offline-sync за sealed-день → amendment-файл, не переписываем основной.
@@ -139,7 +145,23 @@ deploy-6a47ed3.sh`). Проверка на `pg_dump` пилота, восста�
 8. keyless прогон → `retentionOutcome:skipped_no_archive_key retentionDeleted:0`, ничего не удалено.
 9. rollback-образ `t97-pilot-8724480` против схемы 98 → `/api/ready` 200 `schema:ahead` (толерантен).
 
-## 6. Owner action items (перед деплоем на пилот)
+## 5b. Пилот-деплой — 2026-08-30, PASS
+
+`bash /home/deploy/app-data/t97-pilot/deploy-6a47ed3.sh` (владелец):
+- backup on-box + off-box (с `gps-archive-manifest.json`), `migrate deploy` 97→98 (0 failed,
+  `GpsArchiveDay` + trigger + пусто);
+- swap app+scheduler на `t97-pilot-6a47ed3`; scheduler-pre exited 0 (graceful — без stale lease);
+- verify: `/api/ready` 98/98 `schema:current`; `.runtime/gps-archive.cjs` в образе, `bogus`→exit 2,
+  empty-key `write`→exit 3; retention-шаг `retentionOutcome:ok`; R07-A регрессия (заголовки,
+  DB-rate-limit, malformed-UUID) — ок; production baseline не изменён.
+- rollback-контейнеры `t97-pilot-{app,scheduler}-pre-6a47ed3` (на `t97-pilot-8724480`) — **сохранены**.
+
+Первый ручной прогон архива + `systemctl enable --now titanor-time-gps-archive@pilot.timer`
+(владелец): 5 sealable дней → written → off-box sync 5/5 (SHA-256) → promote → **5 VERIFIED,
+0 FAILED**. `GpsArchiveDay`: 2026-08-24(2/0) · 08-25(2/0) · 08-26(6/0) · 08-27(8/0) · 08-28(6/2)
+[clock/presence]. Таймер `enabled`, следующий запуск ~05:10 UTC.
+
+## 6. Owner action items — статус
 
 1. **Ключ:** ✅ `GPS_ARCHIVE_ENCRYPTION_KEY` добавлен в `/home/deploy/app-data/t97-pilot/app.env`
    владельцем 2026-08-30 (43-символьный base64 → 32 байта; проверено). Не коммитить, не класть в
@@ -149,15 +171,11 @@ deploy-6a47ed3.sh`). Проверка на `pg_dump` пилота, восста�
    (fail-closed, авто-rollback, prod baseline guard; агент не запускает). Скрипт проверяет наличие
    ключа, миграцию 98, `GpsArchiveDay` + trigger, `.runtime/gps-archive.cjs` в образе + fail-closed,
    retention-шаг `retentionOutcome:ok`, регрессию R07-A.
-3. **Установить systemd** (root): `gps-archive-pilot.env.example` → `/etc/titanor-time/gps-archive-pilot.env`
-   (0600); `cp ops/titanor-time/systemd/titanor-time-gps-archive*@*.{service,timer}` →
-   `/etc/systemd/system/`; `systemctl daemon-reload`; `systemctl enable --now titanor-time-gps-archive@pilot.timer`.
-   Первый прогон вручную: `sudo systemctl start titanor-time-gps-archive@pilot.service` +
-   `journalctl -u titanor-time-gps-archive@pilot -n 100`.
-4. **Disposable-verify на pilot dump** (агент подготовит, как в R07-A): restore pilot `pg_dump` →
-   disposable → прогнать `write`/host-sync/`promote`/retention → расшифровать off-box файл → counts.
+3. **Установить systemd** (root): ✅ выполнено владельцем 2026-08-30 —
+   `titanor-time-gps-archive@pilot.timer` `enabled`, первый ручной прогон PASS (5/5 VERIFIED).
+4. **Disposable-verify на pilot dump** (агент): ✅ PASS 17/0 — §5a.
 5. **Написать и показать работникам** текст об удержании координат (90 дней БД + бессрочный
-   зашифрованный архив) — уведомление + политика перс. данных.
+   зашифрованный архив) — уведомление + политика перс. данных. 🟡 **открыто (владелец/юрист).**
 
 ## 7. Осознанно не сделано / follow-up
 
@@ -170,5 +188,10 @@ deploy-6a47ed3.sh`). Проверка на `pg_dump` пилота, восста�
 
 ## 8. Дальше
 
-- Владелец выполняет §6, затем агент — disposable-verify на pilot dump и деплой.
-- После PASS → **R09 (UX WORKER/FOREMAN/ADMIN)** + свёртка R07-A.1 (guard rollout).
+- **R08 закрыт (DEPLOYED + PASS).** B09 закрыт. Rollback-контейнеры `-pre-6a47ed3` сохранены до
+  разрешения владельца на удаление.
+- Открыто (вне R08): текст уведомления работников + политика перс. данных (владелец/юрист); R08.1
+  (читаемый TXT/CSV экспорт из архива по запросу, ТЗ §9.4); `unarchivedOldDayCount` в scheduler
+  health — при R09.
+- Следующий этап — по указанию владельца: **R09 (UX WORKER/FOREMAN/ADMIN)** + свёртка R07-A.1
+  (guard rollout ~130 маршрутов), либо R10 по roadmap.
