@@ -22,3 +22,7 @@ pnpm-debug.log*
 # Never committed — contains employee photos / documents.
 /titanor-time-app/uploads/
 /uploads/
+
+# Next.js auto-generates this on every build / version bump (see its own header).
+/titanor-time-app/next-env.d.ts
+/next-env.d.ts
