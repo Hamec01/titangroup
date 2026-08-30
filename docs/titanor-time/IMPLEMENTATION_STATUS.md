@@ -10,7 +10,7 @@
 - [x] **R03.2** (`08fb99a`) — backend: `lib/account-recovery.ts` — короткий код группами `XXXX-XXXX-XXXX`
   (Crockford base32, 45 мин, HMAC, лимит попыток на код), отзыв прежних, audit
   `ACCOUNT_RECOVERY_ISSUED`. Переработка `redeemPasswordReset` → `(login, code, password)`.
-- [ ] **R03.3** — API: `POST /api/admin/users/[userId]/recovery` + `.../workers/[employeeId]/recovery`;
+- [x] **R03.3** (`38c12d9`) — API: `POST /api/admin/users/[userId]/recovery` + `.../workers/[employeeId]/recovery`;
   переработка `POST /api/auth/password-reset/confirm`.
 - [ ] **R03.4** — удалить SMTP-путь: `lib/password-reset-mailer.ts`, `/api/auth/password-reset/request`,
   `/reset-password/request`, `/forgot-password`, `issuePasswordReset`, «отправить ссылку» из формы.
