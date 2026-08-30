@@ -119,13 +119,36 @@ raw только за полностью-VERIFIED дни.
   защищённого архива, с ограниченным сроком жизни и записью в audit — **отдельная задача (R08.1 /
   admin-инструмент), в этот заход не входит.**
 
+## 5a. Disposable-verify на restored pilot dump — PASS 17/0 (2026-08-30)
+
+Образ `titanor-time-app:t97-pilot-6a47ed3` (792 MB, revision `6a47ed3`). Скрипт
+`ops/titanor-time/deploy-pilot-6a47ed3.sh` (+ байт-копия `/home/deploy/app-data/t97-pilot/
+deploy-6a47ed3.sh`). Проверка на `pg_dump` пилота, восстановленном в disposable PG16 (пилот
+только читался):
+
+1. restored DB на 97 миграций → `migrate deploy` 97→98, 0 failed; `GpsArchiveDay` + trigger.
+2. `/api/ready` = 200 `schema:current` applied=98.
+3. seeded 3 старых (>90 дн) `ClockEventLocation` на reading-день −100 дн, известные координаты.
+4. `.runtime/gps-archive.cjs write` → 6 sealable дней (5 реальных пилотных + seeded), все WRITTEN,
+   self-verify прошёл.
+5. host-sim off-box sync (6/6 по SHA-256) → `promote` → 6 VERIFIED.
+6. расшифровка off-box `.enc` за seeded-день → ровно 3 записи, координаты
+   `61.490001/61.490002/61.490003` совпадают.
+7. scheduler retention (ключ есть) → `retentionOutcome:ok retentionDeleted:3` — удалены ровно 3
+   seeded (архивированных, >90 дн) строки, 31 недавняя пилотная строка не тронута.
+8. keyless прогон → `retentionOutcome:skipped_no_archive_key retentionDeleted:0`, ничего не удалено.
+9. rollback-образ `t97-pilot-8724480` против схемы 98 → `/api/ready` 200 `schema:ahead` (толерантен).
+
 ## 6. Owner action items (перед деплоем на пилот)
 
-1. **Сгенерировать ключ:** `openssl rand -base64 32` → добавить строкой `GPS_ARCHIVE_ENCRYPTION_KEY=…`
-   в `/home/deploy/app-data/t97-pilot/app.env`. Без него: GPS archive job не запускается И
-   retention НЕ удаляет raw GPS (fail-closed). Не коммитить, не класть в backup/отчёт.
-2. **Развернуть образ с миграцией 98** (следующий pilot deploy — тот же runbook, что R07-A;
-   `.runtime/gps-archive.cjs` уже в образе).
+1. **Ключ:** ✅ `GPS_ARCHIVE_ENCRYPTION_KEY` добавлен в `/home/deploy/app-data/t97-pilot/app.env`
+   владельцем 2026-08-30 (43-символьный base64 → 32 байта; проверено). Не коммитить, не класть в
+   backup/отчёт.
+2. **Развернуть образ с миграцией 98:** ✅ образ `titanor-time-app:t97-pilot-6a47ed3` собран,
+   disposable-verify PASS (§5a). Запустить: `bash /home/deploy/app-data/t97-pilot/deploy-6a47ed3.sh`
+   (fail-closed, авто-rollback, prod baseline guard; агент не запускает). Скрипт проверяет наличие
+   ключа, миграцию 98, `GpsArchiveDay` + trigger, `.runtime/gps-archive.cjs` в образе + fail-closed,
+   retention-шаг `retentionOutcome:ok`, регрессию R07-A.
 3. **Установить systemd** (root): `gps-archive-pilot.env.example` → `/etc/titanor-time/gps-archive-pilot.env`
    (0600); `cp ops/titanor-time/systemd/titanor-time-gps-archive*@*.{service,timer}` →
    `/etc/systemd/system/`; `systemctl daemon-reload`; `systemctl enable --now titanor-time-gps-archive@pilot.timer`.
