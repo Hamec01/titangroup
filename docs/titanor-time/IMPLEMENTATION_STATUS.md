@@ -15,8 +15,7 @@
   typecheck 0, lint ok, миграция 96 чисто с нуля.
 - Baseline: **прод — живой B07** (образ `daa2edbb` + БД 42 миграции, tick'и падают, старый
   `/api/ready` ложно 200). R06-A чинит проверки; прод не тронут; фикс прод-БД — R14.
-- Кандидат образа + `deploy-<sha>.sh` (pre-deploy backup + prod baseline guard + migrate +
-  app/scheduler swap с `--health-cmd` + verify + rollback) — готовы, **deploy за владельцем**.
+- **DEPLOYED на пилот 2026-08-30** (`deploy-d15586c.sh` отработал: backup `pilot-20260830T104523Z-pre-deploy`, migrate 95→96, оба контейнера `--health-cmd` → `healthy`, `/api/ready` `schema:current`, scheduler `HEALTHY`, `SchedulerLease` 1 row, все tick-операции `ok`; prod baseline guard — `production unchanged ✓`). Rollback-контейнеры `-pre-d15586c` сохранены.
 - R06-B (Docker opt) и R07 — не начаты.
 
 **`[2026-08-30]` R05 — dependency security (Titanor Time) — DONE.** Отчёт `R05_DEPENDENCY_SECURITY_RU.md`.
