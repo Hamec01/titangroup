@@ -7,7 +7,7 @@
 Подзадачи (каждая — отдельный commit):
 - [x] **R03.1** (`240761e`) — схема: `PasswordResetToken.issuedByUserId` + `attemptCount`; право
   `user.recovery.generate` (ADMIN, SUPER_ADMIN). Миграция `20260830090000`, применяется с нуля чисто.
-- [ ] **R03.2** — backend: `lib/account-recovery.ts` — короткий код группами `XXXX-XXXX-XXXX`
+- [x] **R03.2** (`08fb99a`) — backend: `lib/account-recovery.ts` — короткий код группами `XXXX-XXXX-XXXX`
   (Crockford base32, 45 мин, HMAC, лимит попыток на код), отзыв прежних, audit
   `ACCOUNT_RECOVERY_ISSUED`. Переработка `redeemPasswordReset` → `(login, code, password)`.
 - [ ] **R03.3** — API: `POST /api/admin/users/[userId]/recovery` + `.../workers/[employeeId]/recovery`;
