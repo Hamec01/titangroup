@@ -68,7 +68,7 @@ export default async function WorkerProfilePage() {
       <div className="wk-card">
         <ConnectivityBanner />
         <h1>{t.profileTitle}</h1>
-        {account ? <AccountSettingsForm initialEmail={account.email} username={account.username} roles={account.roles} /> : null}
+        {account ? <AccountSettingsForm initialEmail={account.email} username={account.username} roles={account.roles} lastLoginAt={account.lastLoginAt} /> : null}
         {account ? <ChangePasswordForm /> : null}
         {account ? <SessionsPanel /> : null}
         {canManageProfessions ? (

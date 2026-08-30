@@ -5,7 +5,17 @@ import { useAppLocale } from '@/components/i18n/AppLocaleProvider';
 
 const CSRF_HEADER_VALUE = 'titanor-time';
 
-export function AccountSettingsForm({ initialEmail, username, roles }: { initialEmail: string | null; username: string; roles: string[] }) {
+export function AccountSettingsForm({
+  initialEmail,
+  username,
+  roles,
+  lastLoginAt
+}: {
+  initialEmail: string | null;
+  username: string;
+  roles: string[];
+  lastLoginAt?: string | null;
+}) {
   const locale = useAppLocale();
   const ru = locale === 'RU';
   const [email, setEmail] = useState(initialEmail ?? '');
@@ -52,6 +62,10 @@ export function AccountSettingsForm({ initialEmail, username, roles }: { initial
       <dl className="account-settings-summary">
         <div><dt>{ru ? 'Логин' : 'Username'}</dt><dd>{username}</dd></div>
         <div><dt>{ru ? 'Роль' : 'Role'}</dt><dd>{roles.join(', ') || '—'}</dd></div>
+        <div>
+          <dt>{ru ? 'Последний вход' : 'Last sign-in'}</dt>
+          <dd>{lastLoginAt ? new Date(lastLoginAt).toLocaleString(ru ? 'ru-RU' : 'en-GB') : (ru ? '—' : '—')}</dd>
+        </div>
       </dl>
       <form onSubmit={saveEmail} aria-busy={saving}>
         <div className="login-field">

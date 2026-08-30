@@ -10,6 +10,7 @@ export interface AccountSettings {
   username: string;
   email: string | null;
   roles: string[];
+  lastLoginAt: string | null;
 }
 
 export function normalizeAccountEmail(value: string): string | null {
@@ -24,13 +25,21 @@ export async function getAccountSettings(userId: string): Promise<AccountSetting
     select: {
       username: true,
       email: true,
+      lastLoginAt: true,
       userRoles: {
         where: { validFrom: { lte: now }, OR: [{ validTo: null }, { validTo: { gt: now } }] },
         select: { role: { select: { name: true } } }
       }
     }
   });
-  return user ? { username: user.username, email: user.email, roles: user.userRoles.map((item) => item.role.name) } : null;
+  return user
+    ? {
+        username: user.username,
+        email: user.email,
+        roles: user.userRoles.map((item) => item.role.name),
+        lastLoginAt: user.lastLoginAt ? user.lastLoginAt.toISOString() : null
+      }
+    : null;
 }
 
 export type UpdateAccountEmailResult =

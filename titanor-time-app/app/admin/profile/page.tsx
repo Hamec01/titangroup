@@ -1,9 +1,11 @@
+import Link from 'next/link';
 import { redirect } from 'next/navigation';
 import { resolveServerSession } from '@/lib/server-session';
 import { getAccountSettings } from '@/lib/account';
 import { AccountSettingsForm } from '@/components/account/AccountSettingsForm';
 import { ChangePasswordForm } from '@/components/account/ChangePasswordForm';
 import { SessionsPanel } from '@/components/account/SessionsPanel';
+import { LanguageSwitcher } from '@/components/i18n/LanguageSwitcher';
 
 export const dynamic = 'force-dynamic';
 
@@ -15,11 +17,25 @@ export default async function AdminProfilePage() {
   const account = await getAccountSettings(session.user.id);
   if (!account) redirect('/login');
 
+  const ru = session.user.locale === 'RU';
+
   return (
     <main className="setup-page">
       <div className="setup-card">
-        <h1>{session.user.locale === 'RU' ? 'Профиль администратора' : 'Administrator profile'}</h1>
-        <AccountSettingsForm initialEmail={account.email} username={account.username} roles={account.roles} />
+        <h1>{ru ? 'Профиль администратора' : 'Administrator profile'}</h1>
+        <AccountSettingsForm
+          initialEmail={account.email}
+          username={account.username}
+          roles={account.roles}
+          lastLoginAt={account.lastLoginAt}
+        />
+        <section className="account-settings" aria-labelledby="admin-profile-lang-title">
+          <h2 id="admin-profile-lang-title">{ru ? 'Язык интерфейса' : 'Interface language'}</h2>
+          <LanguageSwitcher />
+          <p className="setup-subtitle" style={{ marginTop: 12 }}>
+            <Link href="/guide">{ru ? 'Открыть инструкцию' : 'Open the user guide'}</Link>
+          </p>
+        </section>
         <ChangePasswordForm />
         <SessionsPanel />
       </div>
