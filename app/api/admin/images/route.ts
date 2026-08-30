@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { isAdminRequestAuthenticated } from '../../../../lib/admin-auth';
+import { rejectIfCsrfMissing } from '../../../../lib/csrf';
 import { deleteLocalServiceImage, saveLocalServiceImage } from '../../../../lib/local-image-storage';
 import {
   addServiceImage,
@@ -29,8 +30,17 @@ export async function POST(request: NextRequest) {
     return unauthorizedResponse();
   }
 
+  const csrf = rejectIfCsrfMissing(request);
+  if (csrf) return csrf;
+
+  let formData: FormData;
   try {
-    const formData = await request.formData();
+    formData = await request.formData();
+  } catch {
+    return NextResponse.json({ error: 'Invalid form data' }, { status: 400 });
+  }
+
+  try {
     const sectionRaw = formData.get('section');
     const fileRaw = formData.get('file');
 
@@ -66,13 +76,17 @@ export async function DELETE(request: NextRequest) {
     return unauthorizedResponse();
   }
 
-  try {
-    const body = (await request.json()) as {
-      section?: string;
-      publicId?: string;
-      url?: string;
-    };
+  const csrf = rejectIfCsrfMissing(request);
+  if (csrf) return csrf;
 
+  let body: { section?: string; publicId?: string; url?: string };
+  try {
+    body = (await request.json()) as { section?: string; publicId?: string; url?: string };
+  } catch {
+    return NextResponse.json({ error: 'Invalid request body' }, { status: 400 });
+  }
+
+  try {
     if (typeof body.section !== 'string' || !isServiceSection(body.section)) {
       return NextResponse.json({ error: 'Invalid section' }, { status: 400 });
     }

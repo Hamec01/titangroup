@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { isAdminRequestAuthenticated } from '../../../../lib/admin-auth';
+import { rejectIfCsrfMissing } from '../../../../lib/csrf';
 import { getServiceContent, saveServiceContent, type ServiceContentByLocale } from '../../../../lib/service-content-store';
 import { serviceSections, type ServiceSection } from '../../../../lib/service-sections';
 
@@ -24,8 +25,17 @@ export async function PUT(request: NextRequest) {
     return unauthorizedResponse();
   }
 
+  const csrf = rejectIfCsrfMissing(request);
+  if (csrf) return csrf;
+
+  let payload: Partial<ServiceContentByLocale>;
   try {
-    const payload = (await request.json()) as Partial<ServiceContentByLocale>;
+    payload = (await request.json()) as Partial<ServiceContentByLocale>;
+  } catch {
+    return NextResponse.json({ error: 'Invalid request body' }, { status: 400 });
+  }
+
+  try {
     const current = await getServiceContent();
 
     for (const locale of ['en', 'fi'] as const) {

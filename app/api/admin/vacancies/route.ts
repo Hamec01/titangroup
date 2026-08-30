@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { isAdminRequestAuthenticated } from '../../../../lib/admin-auth';
+import { rejectIfCsrfMissing } from '../../../../lib/csrf';
 import { addVacancy, getVacancies, removeVacancy } from '../../../../lib/vacancies-store';
 
 export const dynamic = 'force-dynamic';
@@ -23,15 +24,23 @@ export async function POST(request: NextRequest) {
     return unauthorizedResponse();
   }
 
-  try {
-    const body = (await request.json()) as {
-      role?: string;
-      location?: string;
-      duration?: string;
-      description?: string;
-      postedAt?: string;
-    };
+  const csrf = rejectIfCsrfMissing(request);
+  if (csrf) return csrf;
 
+  let body: {
+    role?: string;
+    location?: string;
+    duration?: string;
+    description?: string;
+    postedAt?: string;
+  };
+  try {
+    body = (await request.json()) as typeof body;
+  } catch {
+    return NextResponse.json({ error: 'Invalid request body' }, { status: 400 });
+  }
+
+  try {
     if (
       typeof body.role !== 'string' ||
       typeof body.location !== 'string' ||
@@ -67,9 +76,17 @@ export async function DELETE(request: NextRequest) {
     return unauthorizedResponse();
   }
 
-  try {
-    const body = (await request.json()) as { id?: string };
+  const csrf = rejectIfCsrfMissing(request);
+  if (csrf) return csrf;
 
+  let body: { id?: string };
+  try {
+    body = (await request.json()) as { id?: string };
+  } catch {
+    return NextResponse.json({ error: 'Invalid request body' }, { status: 400 });
+  }
+
+  try {
     if (typeof body.id !== 'string' || !body.id.trim()) {
       return NextResponse.json({ error: 'Vacancy id is required' }, { status: 400 });
     }

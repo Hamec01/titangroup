@@ -159,6 +159,9 @@ export function AdminImageManager() {
 
       const response = await fetch('/api/admin/images', {
         method: 'POST',
+        headers: {
+          'X-Requested-With': 'titanor-admin'
+        },
         body: formData
       });
 
@@ -184,7 +187,8 @@ export function AdminImageManager() {
       const response = await fetch('/api/admin/images', {
         method: 'DELETE',
         headers: {
-          'Content-Type': 'application/json'
+          'Content-Type': 'application/json',
+          'X-Requested-With': 'titanor-admin'
         },
         body: JSON.stringify({
           section: item.section,
@@ -237,7 +241,8 @@ export function AdminImageManager() {
       const response = await fetch('/api/admin/service-content', {
         method: 'PUT',
         headers: {
-          'Content-Type': 'application/json'
+          'Content-Type': 'application/json',
+          'X-Requested-With': 'titanor-admin'
         },
         body: JSON.stringify(content)
       });
@@ -287,7 +292,8 @@ export function AdminImageManager() {
       const response = await fetch('/api/admin/vacancies', {
         method: 'POST',
         headers: {
-          'Content-Type': 'application/json'
+          'Content-Type': 'application/json',
+          'X-Requested-With': 'titanor-admin'
         },
         body: JSON.stringify(vacancyForm)
       });
@@ -326,7 +332,8 @@ export function AdminImageManager() {
       const response = await fetch('/api/admin/vacancies', {
         method: 'DELETE',
         headers: {
-          'Content-Type': 'application/json'
+          'Content-Type': 'application/json',
+          'X-Requested-With': 'titanor-admin'
         },
         body: JSON.stringify({ id })
       });
