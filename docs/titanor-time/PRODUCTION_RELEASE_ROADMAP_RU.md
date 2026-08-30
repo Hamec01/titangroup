@@ -413,10 +413,12 @@ R03, R04 и R05 можно разрабатывать независимо по�
     `public/{robots.txt,sitemap.xml}` (перекрывали динамические маршруты).
   - `sharp` → прямая зависимость (`0.35.4`). Проверки: 7 файлов `_test-*.ts` / 133 assert,
     CI-джоба `public-site-quality` → «Security regression tests (R07-B)». PASS-критерий R07 выполнен.
-  - **Slice 7 (deploy live-сайта) — не начат**, ждёт решений владельца: механизм (immutable-swap
-    как пилот vs `docker compose`), проверка contact с реальным SMTP, нужен ли временный
-    дым-тест-контейнер. Публичный деплой отложен с R04 — образ принесёт R04 (deps) + R07-B.
-    Живой `titanorgroup-web-1` не тронут.
+  - **Slice 7 — deploy-скрипт написан** (`ops/site/deploy-site-r07b.sh`), запускает владелец:
+    immutable-swap `titanorgroup-web:site-<sha>` (как пилот); smoke-тест на черновом контейнере
+    `:3199` ПЕРЕД подменой live; backup обоих томов on-box+off-box; авто-rollback; baseline
+    Titanor Time (prod+pilot) перепроверяется; contact — только проверка env (письмо владелец шлёт
+    вручную). Dockerfile: OCI labels + `GIT_SHA`. Compose-детач задокументирован. Публичный деплой
+    отложен с R04 — образ принесёт R04 (deps) + R07-B. Живой `titanorgroup-web-1` не тронут.
 - **R11**: Caddy для `app.titanorgroup.fi` — `trusted_proxies_strict` + Cloudflare CIDR + очистка
   поддельных forwarded; затем `TITANOR_TRUSTED_PROXY_HOPS=2`.
 

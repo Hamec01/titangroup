@@ -35,9 +35,17 @@ admin-mutations) · `5e0d7f3` (contact) · `5a29496` (uploads) · `6ba93c4` (з�
   → 404.
 - **Осознанно не сделано:** CSP (нужен аудит inline — отдельно); HSTS `includeSubDomains`;
   общий rate-limit (сайт одно-инстансный).
-- **Slice 7 (деплой live-сайта):** ждёт ответов владельца — механизм (immutable-swap vs compose),
-  проверка contact с реальным SMTP, нужен ли временный дым-тест-контейнер. Публичный деплой сайта
-  отложен с R04 — образ принесёт R04 (deps) + R07-B.
+- **Slice 7 — deploy-скрипт написан:** `ops/site/deploy-site-r07b.sh` (решения владельца:
+  immutable-swap как пилот; smoke-тест на черновом контейнере `titanorgroup-web-verify:3199` ПЕРЕД
+  подменой live; contact — только проверка env, письмо владелец шлёт вручную). flock + state-guard
+  (не удаляет `titanorgroup-web-1-pre-r07b`), repo-sanity, baseline Titanor Time (prod+pilot,
+  `exit 2` при изменении), immutable build `titanorgroup-web:site-<sha>` + ассерт OCI-revision,
+  backup обоих томов on-box+off-box с re-verify чек-сумм, smoke → swap с авто-rollback → live
+  verify (заголовки, robots, admin-login 403/401/429, contact 4xx, traversal без 5xx, существующий
+  upload отдаётся, audit-log непустой). Dockerfile получил OCI labels + `GIT_SHA` build-arg
+  (проверено: образ собирается из alpine, `sharp` musl re-encode работает в рантайме). Compose-
+  детач задокументирован. **Агент скрипт не запускает.** Публичный деплой отложен с R04 — образ
+  принесёт R04 (deps) + R07-B.
 
 **`[2026-08-30]` R07-A — Security hardening & API robustness (Titanor Time) — DONE + РАЗВЁРНУТ на
 пилот, PASS.** Отчёт `R07A_SECURITY_HARDENING_REPORT_RU.md`. Одна аддитивная миграция (**97**

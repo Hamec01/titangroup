@@ -5,14 +5,17 @@
 - **Дата:** 2026-08-30.
 - **Не затронуто:** Titanor Time, его БД и scheduler; production Titanor Time; Caddy; Cloudflare
   DNS. Публичный сайт БД не имеет — миграций нет. Бизнес-логика и вёрстка страниц не менялись.
-- **Статус:** **код DONE, все проверки зелёные (7 файлов, 133 assert), CI-джоба добавлена.**
-  На live-сайт **не развёрнут** — деплой отдельным шагом (решение владельца, скрипт — Slice 7,
-  запускает владелец). Живой контейнер `titanorgroup-web-1` не тронут.
+- **Статус:** **код DONE, все проверки зелёные (7 файлов, 133 assert), CI зелёный.**
+  Deploy-скрипт `ops/site/deploy-site-r07b.sh` написан (Slice 7). На live-сайт **не развёрнут** —
+  запускает владелец. Живой контейнер `titanorgroup-web-1` не тронут.
 - **Решения владельца (fork):** rate-limit — in-memory fixed-window; login-audit — персистентный
   append-only файл; фото — `sharp` strip metadata + нормализация, формат сохраняем (GIF → отказ);
-  деплой — код + fail-closed скрипт для live-сайта, запускает владелец.
+  деплой — код + fail-closed скрипт для live-сайта, immutable-swap (как пилот), smoke-тест на
+  временном контейнере ПЕРЕД подменой live, contact — только проверка env (письмо владелец шлёт
+  вручную).
 - **Commits:** `f8dd3f5` (примитивы + харнесс) · `02a9c9b` (admin auth) · `6644254` (CSRF на
-  admin-mutations) · `5e0d7f3` (contact) · `5a29496` (uploads) · `6ba93c4` (заголовки + robots).
+  admin-mutations) · `5e0d7f3` (contact) · `5a29496` (uploads) · `6ba93c4` (заголовки + robots) ·
+  Slice 7 (Dockerfile OCI labels + `ops/site/deploy-site-r07b.sh`).
 
 ---
 
@@ -119,27 +122,54 @@
   — вынести `lib/rate-limit.ts` на общее хранилище (как сделано в Titanor Time R07-A).
 - Раздача `/uploads/**` намеренно остаётся публичной и `inline` (картинки сайта), не `attachment`.
 
-## 5. Деплой (Slice 7 — отдельно, запускает владелец)
+## 5. Deploy-скрипт (Slice 7) — `ops/site/deploy-site-r07b.sh`, запускает владелец
 
-Живой сайт: контейнер `titanorgroup-web-1`, образ `titanorgroup-web` (собран из `compose.yaml`),
-порт `127.0.0.1:3100->3000`, тома `titanorgroup_data` (+ журнал входов) и `titanorgroup_uploads`.
-Публичный деплой сайта отложен с R04 — этот образ принесёт на сайт и R04 (обновление зависимостей),
-и R07-B.
+Живой сайт: контейнер `titanorgroup-web-1` (сейчас docker-compose service, проект
+`/home/deploy/projects/titanorgroup/compose.yaml`), порт `127.0.0.1:3100->3000`, тома
+`titanorgroup_titanorgroup_data` (`/app/data` — сюда пишется журнал входов) и
+`…_uploads` (`/app/public/uploads`), сеть `titanorgroup_default`, env
+`/home/deploy/projects/titanorgroup/.env.production`. Публичный деплой отложен с R04 — образ
+принесёт R04 (обновление зависимостей) + R07-B.
 
-**Открытые вопросы к владельцу перед написанием deploy-скрипта:**
-1. Механизм: неизменяемый тег + ручная подмена контейнера (как пилот Titanor Time) **или**
-   через `docker compose` (риск общего ретега `titanorgroup-web:latest`, см. memo Docker
-   shared-tag).
-2. Проверка contact-формы: скрипт проверит наличие `SMTP_*` в env; фактическая отправка тестового
-   письма — либо флагом с реальными prod-creds (уйдёт реальное письмо), либо вручную владельцем
-   после деплоя.
-3. Промежуточный staging для публичного сайта отсутствует — деплатим сразу на live или сначала
-   поднять временный контейнер на другом порту для дым-теста.
+Скрипт (та же fail-closed / auto-rollback структура, что у пилота Titanor Time):
+
+1. **Guard:** `flock`; отказ, если существует `titanorgroup-web-1-pre-r07b` (скрипт никогда не
+   удаляет rollback-контейнер) или занят verify-порт.
+2. **Repo sanity:** worktree чистый, на `feature/titanor-time-foundation`, HEAD запушен.
+3. **Baseline Titanor Time:** снимок `titanor-time-app-1` + `t97-pilot-app` + `t97-pilot-scheduler`
+   (image/started/restarts), перепроверяется в конце — при любом изменении `exit 2`.
+4. **Immutable build:** `titanorgroup-web:site-<shortsha>` из `Dockerfile` с
+   `--build-arg GIT_SHA/GIT_REF/BUILD_TIME`; ассерт `org.opencontainers.image.revision == <sha>`.
+5. **Backup обоих томов** (`tar` через helper-контейнер) → `/home/deploy/backups/titanorgroup/
+   pre-r07b-<ts>/` + off-box `/mnt/250gb/titanorgroup/backups/…` с `manifest.txt` + `SHA256SUMS`;
+   fail-closed re-verify чек-сумм on-box и off-box.
+6. **Smoke-тест на ЧЕРНОВОМ контейнере** `titanorgroup-web-verify` на `127.0.0.1:3199` (без томов,
+   без restart-policy): health, `/en` `/fi` 200, 6 security-заголовков, нет `X-Powered-By`/
+   `X-Robots-Tag`, `robots` c `Disallow: /ship-admin-portal`, `sitemap.xml`, admin-login 403 без
+   заголовка + 401 на неверный пароль + **429 на 12-ю попытку** (`X-Forwarded-For: 192.0.2.247`),
+   contact на битом теле → 4xx (не 5xx), traversal-пробы → нет 5xx, `SMTP_*` присутствуют в env.
+   **Провал здесь → live не тронут, откатывать нечего.**
+7. **Swap live** (авто-rollback с этого момента): `stop -t 30` → `rename … -pre-r07b` →
+   `docker run` новый с теми же портом/томами/env/healthcheck/`--restart unless-stopped`.
+8. **Verify live** (fail-closed → rollback): весь набор из п.6 + существующий upload всё ещё
+   отдаётся (проверка монтирования тома) + `/app/data/admin-login-audit.log` непустой после проб.
+9. **Titanor Time baseline** — идентичен.
+
+**Contact:** скрипт проверяет только наличие `SMTP_HOST/USER/PASSWORD` + `CONTACT_TO_EMAIL` в env
+и что `/api/contact` на битом теле отдаёт 400. **Фактическую доставку письма владелец проверяет
+вручную** через форму после деплоя (реальные SMTP-creds, реальное письмо).
+
+**Compose-детач:** после swap контейнер — hand-run. `docker compose up -d`/`down` в
+`/home/deploy/projects/titanorgroup` после этого **запускать нельзя** (пересоздаст из старого
+compose-билда). Ре-синк compose позже: тот checkout на feature-ветку, тот же `docker build`,
+`image:` в compose на новый тег. Задокументировано в шапке скрипта.
+
+**Rollback:** `docker rm -f titanorgroup-web-1 && docker rename titanorgroup-web-1-pre-r07b
+titanorgroup-web-1 && docker start titanorgroup-web-1`. `-pre-r07b` удаляется только вручную.
 
 ## 6. Дальше
 
-- Slice 7: fail-closed deploy-скрипт для live-сайта (после ответов из §5) — backup обоих томов +
-  off-box mirror, неизменяемый образ из HEAD, подмена с health-gate и авто-rollback, verify
-  (заголовки, robots, admin-login rate-limit, contact env, upload re-encode, EN/FI страницы,
-  health), production Titanor Time не тронут.
-- После PASS деплоя публичного сайта → **R08 (GPS archive)** — по решению владельца.
+- Владелец запускает `ops/site/deploy-site-r07b.sh`. После PASS — обновить статус/roadmap и
+  проверить форму вручную.
+- Затем → **R08 (GPS archive)** — по решению владельца.
+- Позже (i18n-этап): `/fi` отдаёт `<html lang="en">` — вне R07-B.
