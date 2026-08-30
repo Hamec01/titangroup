@@ -2,7 +2,7 @@
 
 - **Основание:** production release roadmap R04, ТЗ §12.1. Закрывает блокер B05 (для публичного сайта).
 - **Дата:** 2026-08-30.
-- **Git SHA:** _<заполняется при коммите>_ на ветке `feature/titanor-time-foundation`.
+- **Git SHA:** `105680d` на ветке `feature/titanor-time-foundation`.
 - **Live-сайт `titanorgroup.fi` (контейнер `titanorgroup-web-1`), Titanor Time production, Caddy и
   DNS НЕ менялись.** Проверка выполнена в отдельном preview-процессе (`node .next/standalone/server.js`,
   порт 3902), контейнер не пересоздавался.
