@@ -194,9 +194,10 @@ compose — `path.join(process.cwd(), 'uploads', 'employees')` в `lib/employee-
 | `npm run test:check-manifest` | OK — 82 записи |
 | `npm run build` (в Docker builder) | ✅ Next 16.3.3, 19/19 страниц |
 
-CI (`.github/workflows/ci.yml`) на коммите `256565a`: **_будет заполнено после push_** —
-джобы `titanor-time-quality` (npm ci + lockfile + typecheck + lint + build) и
-`titanor-time-tests` / `titanor-time-migrations` покрывают всё вышеперечисленное.
+CI (`.github/workflows/ci.yml`, run `33311501796` на `d810a9d`): **6/6 job success** —
+`security` · `public-site-quality` · `titanor-time-quality` (npm ci + lockfile + typecheck +
+lint + build) · `titanor-time-tests` (unit + db + scheduler) · `titanor-time-migrations`
+(migrate deploy с нуля) · `ci-summary` (required).
 
 ## 6. Кандидат + deploy script (ТЗ §17, пункт 16)
 
