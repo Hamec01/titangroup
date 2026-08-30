@@ -120,5 +120,6 @@ Cloudflare не трогать.
 | R09.10 | — | ✅ no-op — R09.1–R09.8 не тронули ни одного `app/**/route.ts`; rollout не применяется (правило «только трогаемые маршруты») |
 | R09.11 | этот коммит | ✅ отчёт + чек-лист + roadmap/status/memory |
 
-**Deploy:** один pilot image-swap (БД не меняется, миграций нет) — по отдельному подтверждению
-владельца; агент не запускает.
+**Deploy:** **DEPLOYED + PASS 2026-08-30** — пилот на `titanor-time-app:t97-pilot-edd950c`
+(`deploy-pilot-edd950c.sh`, read-only `migrate status`, БД на 98). Владелец запустил — DEPLOY OK,
+production unchanged, rollback-контейнеры `-pre-edd950c` сохранены.

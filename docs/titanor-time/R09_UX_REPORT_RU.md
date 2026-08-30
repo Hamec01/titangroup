@@ -10,10 +10,17 @@
 - **Не затронуто:** production Titanor Time, публичный сайт, Caddy, DNS, Cloudflare. **Ни одной
   миграции** — R09 чисто UI/навигация/i18n + одна экстракция клиентского компонента; бизнес-логику
   клок-ина, табелей, прав не меняли.
-- **Статус:** код готов, CI зелёный. **Один pilot-деплой** (image swap, БД не меняется) — по
-  отдельному подтверждению владельца; агент не запускает.
+- **Статус:** **DEPLOYED + PASS 2026-08-30.** Пилот `t97-pilot-app` + `t97-pilot-scheduler` на
+  `titanor-time-app:t97-pilot-edd950c`, оба `healthy`, restarts 0, `/api/ready` `schema:current`
+  applied=98 (БД не менялась). Владелец запустил `deploy-edd950c.sh` — все 7 шагов + verify
+  прошли (backup on+off-box `pilot-20260830T215914Z-pre-deploy`; `migrate status` up-to-date;
+  R09-страницы 307; R07-A headers/rate-limit(429)/malformed-UUID(401); R08 gps-archive bogus→2 /
+  empty-key→3; scheduler lease у нового holder `7725b957fc51`, heartbeat ok, 4 тика, retention
+  `retentionOutcome:ok retentionDeleted:0`; **production unchanged** — `titanor-time-app-1` на
+  `:latest`=`daa2edbb`, restarts 0). Rollback-контейнеры `t97-pilot-{app,scheduler}-pre-edd950c`
+  (scheduler Exited 0 — lease освобождён чисто) сохранены.
 - **Commits:** `d5a8d24` (R09.1) · `f0e081f` (R09.2) · `b6f052c` (R09.5) · `6099e6b` (R09.6) ·
-  `7184aaa` (R09.7) · `fe33e31` (R09.8) · этот коммит (R09.11).
+  `7184aaa` (R09.7) · `fe33e31` (R09.8) · `edd950c` (R09.11) · `a07e477` (deploy script + disposable-verify).
 
 ---
 
@@ -143,7 +150,7 @@ guard-rollout остаётся за R07-A.1 (позже, отдельно).
 
 ---
 
-## 4. Deploy (готово, ожидает владельца)
+## 4. Deploy — DEPLOYED + PASS 2026-08-30
 
 R09 не меняет БД → **чистый swap образа** на пилоте (как R05), без миграции. Обычный pre-deploy
 backup всё равно делается.
@@ -168,5 +175,7 @@ PG16 (98 миграций) → образ `edd950c`: `migrate status` = «up to 
 `?status=EXPIRING_SOON`, `/admin/workers`, `/worker` → 307 (redirect на /login, 0×5xx); rollback-образ
 `6a47ed3` тоже boot 200 против той же БД; пилот-БД и контейнеры не тронуты; полный teardown.
 
-**Агент не запускает деплой** — владелец, после отдельного подтверждения. Rollback-контейнеры
-`t97-pilot-{app,scheduler}-pre-edd950c` сохранить (как для R07-A/R08).
+**Выполнено владельцем 2026-08-30** (`bash /home/deploy/app-data/t97-pilot/deploy-edd950c.sh`):
+DEPLOY OK, все verify-проверки прошли, production unchanged. Rollback-контейнеры
+`t97-pilot-{app,scheduler}-pre-edd950c` сохранены (удалить вручную, когда владелец убедится).
+Рекомендованный post-deploy ручной UI-прогон — по `R09_BROWSER_ACCEPTANCE_RU.md`.
