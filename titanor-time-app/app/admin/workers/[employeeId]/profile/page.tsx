@@ -1,11 +1,12 @@
-import Link from 'next/link';
 import { redirect } from 'next/navigation';
+import { prisma } from '@/lib/prisma';
 import { resolveServerSession } from '@/lib/server-session';
 import { hasPermission } from '@/lib/permissions';
 import { getEmployeeProfileView } from '@/lib/employee-profile';
 import { listEmployeeProfessions, listProfessionCatalog } from '@/lib/professions';
 import { AdminWorkerProfileForm } from './AdminWorkerProfileForm';
 import { EmployeeProfessionsEditor } from '@/components/professions/EmployeeProfessionsEditor';
+import { WorkerCardNav } from '@/components/admin/WorkerCardNav';
 import { resolveAppLocale } from '@/lib/i18n/server';
 import { localeText } from '@/lib/i18n/locale';
 
@@ -31,10 +32,11 @@ export default async function AdminWorkerProfilePage({ params }: { params: Promi
 
   const { employeeId } = await params;
   const canManageProfessions = await hasPermission(session.user.roles, 'worker.profession.manage');
-  const [profile, professions, professionCatalog] = await Promise.all([
+  const [profile, professions, professionCatalog, employee] = await Promise.all([
     getEmployeeProfileView(employeeId, true),
     listEmployeeProfessions(employeeId),
-    listProfessionCatalog()
+    listProfessionCatalog(),
+    prisma.employee.findUnique({ where: { id: employeeId }, select: { firstName: true, lastName: true } })
   ]);
   if (!profile) {
     return (
@@ -48,12 +50,12 @@ export default async function AdminWorkerProfilePage({ params }: { params: Promi
     );
   }
 
+  const employeeName = employee ? `${employee.firstName} ${employee.lastName}` : null;
+
   return (
     <main className="setup-page">
       <div className="setup-card worker-card">
-        <p>
-          <Link href={`/admin/workers/${employeeId}`}>← {localeText(locale, 'Back to worker', 'Назад к работнику')}</Link>
-        </p>
+        <WorkerCardNav employeeId={employeeId} employeeName={employeeName} current="profile" locale={locale} />
         <h1>{localeText(locale, 'Worker profile & documents', 'Профиль и документы работника')}</h1>
         {canManageProfessions ? (
           <EmployeeProfessionsEditor employeeId={employeeId} initialProfessions={professions} catalog={professionCatalog} />

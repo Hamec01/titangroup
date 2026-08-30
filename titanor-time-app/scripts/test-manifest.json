@@ -31,6 +31,7 @@
     { "file": "_test-warm-cache.ts", "lane": "unit", "note": "warmOfflineShellCache retry/concurrency via mocked fetch/caches globals." },
     { "file": "_test-worker-gps.ts", "lane": "unit", "note": "captureGpsSnapshot best-fix-of-window selection; browser globals mocked." },
     { "file": "_test-worker-clock-panel.ts", "lane": "unit", "note": "R09.7 WorkerClockPanel split — app/worker/clock-panel/format.ts helpers keep exact output; each extracted presentational piece (GpsNotices / WorkerStatusCard / MainClockAction / TimeCardPreview / the 4 overlays) still renders its key affordances via renderToStaticMarkup, overlays render nothing while closed." },
+    { "file": "_test-worker-card-nav.ts", "lane": "unit", "note": "R09.8 WorkerCardNav — shared header for the 4 separate worker-card pages: breadcrumb links to /admin/workers, one plain <Link> per sibling page, current page rendered as text with aria-current=page (never a link); null name drops the separator; RU labels swap." },
 
     { "file": "_test-abandoned-shift-auto-close.ts", "lane": "scheduler", "note": "runAbandonedShiftAutoCloseTick end-to-end + resolveAutoCloseEndAt." },
     { "file": "_test-api-guard.ts", "lane": "db", "note": "R07-A lib/api-guard.guardApiRequest — CSRF / auth / single+array+any permission gates, byte-identical envelopes; plus /api/auth/{session,logout,logout-all} migrated onto it." },

@@ -11,6 +11,7 @@ import { resolveAppLocale } from '@/lib/i18n/server';
 import { adminDailyStrings } from '@/lib/i18n/admin-daily';
 import { getEmployeeProfileView } from '@/lib/employee-profile';
 import { QualificationBadge } from '@/components/qualifications/QualificationBadge';
+import { WorkerCardNav } from '@/components/admin/WorkerCardNav';
 
 export const dynamic = 'force-dynamic';
 
@@ -66,7 +67,7 @@ export default async function WorkerDetailPage({ params }: { params: Promise<{ e
   return (
     <main className="setup-page">
       <div className="setup-card worker-card">
-        <p className="setup-subtitle"><Link href="/admin">← {s.workers.backToday}</Link></p>
+        <WorkerCardNav employeeId={employeeId} employeeName={`${worker.firstName} ${worker.lastName}`} current="overview" locale={locale} />
         <h1>
           {worker.firstName} {worker.lastName}
         </h1>
@@ -113,20 +114,13 @@ export default async function WorkerDetailPage({ params }: { params: Promise<{ e
         <section className="worker-work-setup" aria-label={ru ? 'Быстрые действия' : 'Quick actions'}>
           <h2>{ru ? 'Быстрые действия' : 'Quick actions'}</h2>
           <ul className="setup-list">
-            <li className="setup-item"><Link href={`/admin?employeeId=${employeeId}`}>{ru ? 'Статус работника' : 'Worker status'}</Link></li>
+            <li className="setup-item"><Link href={`/admin?employeeId=${employeeId}`}>{ru ? 'Статус работника на «Сегодня»' : 'Worker status on Today'}</Link></li>
             <li className="setup-item"><Link href={`#worker-assignments`}>{ru ? 'Объект и назначения' : 'Site and assignments'}</Link></li>
-            <li className="setup-item"><Link href={`/admin/workers/${employeeId}/timeline`}>{ru ? 'Приход/Уход/Сегодня (история по дням)' : 'Check in/out/today (day history)'}</Link></li>
+            <li className="setup-item"><Link href={`#worker-profile`}>{ru ? 'Редактирование имени и статуса' : 'Edit name and status'}</Link></li>
             <li className="setup-item"><Link href={`/admin/attendance/exceptions?employeeId=${employeeId}`}>{ru ? 'Проблемы работника' : 'Worker issues'}</Link></li>
-            <li className="setup-item"><Link href={`#worker-profile`}>{ru ? 'Открыть редактирование профиля' : 'Open profile edit section'}</Link></li>
-            <li className="setup-item"><Link href={`/admin/workers/${employeeId}/profile`}>{ru ? 'Профиль и документы работника' : 'Worker profile & documents'}</Link></li>
+            <li className="setup-item"><Link href={`/admin/reports?employeeId=${employeeId}`}>{s.workers.report}</Link></li>
           </ul>
         </section>
-        <p>
-          <Link href={`/admin/reports?employeeId=${employeeId}`}>{s.workers.report}</Link>
-        </p>
-        <p>
-          <Link href={`/admin/workers/${employeeId}/locations`}>{s.workers.locations}</Link>
-        </p>
 
         <h2 id="worker-assignments">{s.workers.currentAssignments}</h2>
         {worker.currentAssignments.length === 0 ? (

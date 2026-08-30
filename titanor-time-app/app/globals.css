@@ -1131,6 +1131,50 @@ button:disabled {
   max-width: 960px;
 }
 
+/* R09.8 — shared header for the four separate worker-card pages (components/admin/WorkerCardNav.tsx). */
+.worker-card-nav {
+  margin-bottom: 18px;
+}
+
+.worker-card-breadcrumb {
+  margin: 0 0 10px;
+}
+
+.worker-card-breadcrumb a {
+  color: var(--accent-light);
+}
+
+.worker-card-tabs {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.worker-card-tab {
+  display: inline-block;
+  padding: 7px 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  font-size: 0.88rem;
+  color: var(--accent-light);
+  text-decoration: none;
+}
+
+.worker-card-tab:focus-visible {
+  outline: 2px solid var(--accent-light);
+  outline-offset: 2px;
+}
+
+.worker-card-tab.is-current {
+  color: var(--text);
+  background: var(--card);
+  border-color: var(--accent-light);
+  font-weight: 600;
+}
+
 .worker-table-scroll {
   overflow-x: auto;
 }

@@ -7,6 +7,7 @@ import { helsinkiToday } from '@/lib/workers';
 import { helsinkiDateAndTimeToUtcIso } from '@/lib/helsinki-datetime';
 import { resolveAppLocale } from '@/lib/i18n/server';
 import { localeText } from '@/lib/i18n/locale';
+import { WorkerCardNav } from '@/components/admin/WorkerCardNav';
 
 export const dynamic = 'force-dynamic';
 
@@ -238,12 +239,10 @@ export default async function WorkerTimelinePage({ params, searchParams }: Route
   return (
     <main className="setup-page">
       <div className="setup-card worker-card">
-        <p>
-          <Link href={`/admin/workers/${employeeId}`}>← {localeText(locale, 'Back to worker', 'Назад к работнику')}</Link>
-        </p>
+        <WorkerCardNav employeeId={employeeId} employeeName={`${worker.firstName} ${worker.lastName}`} current="timeline" locale={locale} />
         <h1>{localeText(locale, 'Check In/Out day history', 'История приходов и уходов по дням')}</h1>
         <p className="setup-subtitle">
-          {worker.firstName} {worker.lastName} · #{worker.employeeNumber}
+          #{worker.employeeNumber}
         </p>
         <p className="setup-subtitle">
           {localeText(locale, 'Window', 'Период')}: {rangeLabel} · {localeText(locale, 'page', 'страница')} {page}

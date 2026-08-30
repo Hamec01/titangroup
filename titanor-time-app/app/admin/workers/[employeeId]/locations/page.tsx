@@ -1,10 +1,10 @@
 import { randomUUID } from 'node:crypto';
-import Link from 'next/link';
 import { redirect } from 'next/navigation';
 import { resolveServerSession } from '@/lib/server-session';
 import { hasPermission } from '@/lib/permissions';
 import { getAdminWorkerGpsView } from '@/lib/attendance-gps-admin';
 import { WorkerLocationMap } from './WorkerLocationMap';
+import { WorkerCardNav } from '@/components/admin/WorkerCardNav';
 import { resolveAppLocale } from '@/lib/i18n/server';
 import { localeText } from '@/lib/i18n/locale';
 
@@ -23,8 +23,8 @@ export default async function WorkerLocationsPage({ params }: { params: Promise<
   if (!view) return <main className="setup-page"><div className="setup-card"><p>{localeText(locale, 'Worker not found.', 'Работник не найден.')}</p></div></main>;
   return (
     <main className="setup-page"><div className="setup-card worker-card">
-      <p><Link href={`/admin/workers/${employeeId}`}>← {localeText(locale, 'Back to worker', 'Назад к работнику')}</Link></p>
-      <h1>{localeText(locale, 'Check In/Out locations', 'Места Check In/Out')} — {view.employee.name}</h1>
+      <WorkerCardNav employeeId={employeeId} employeeName={view.employee.name} current="locations" locale={locale} />
+      <h1>{localeText(locale, 'Check In/Out locations', 'Места Check In/Out')}</h1>
       <p className="setup-subtitle">{localeText(locale, `Last 7 days · raw coordinates retained for ${view.retentionDays} days · every view is audited.`, `Последние 7 дней · точные координаты хранятся ${view.retentionDays} дней · каждый просмотр записывается в аудит.`)}</p>
       {view.items.length || view.presenceSamples.length ? <WorkerLocationMap items={view.items} presenceSamples={view.presenceSamples} /> : <p>{localeText(locale, 'No retained GPS coordinates. Events marked “GPS not verified” may not contain a point to show.', 'Сохранённых GPS-координат нет. События с отметкой «GPS не подтверждён» могут не содержать точки для показа.')}</p>}
       <ul className="setup-list">
