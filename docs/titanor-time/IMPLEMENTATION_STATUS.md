@@ -46,11 +46,16 @@ admin-mutations) · `5e0d7f3` (contact) · `5a29496` (uploads) · `6ba93c4` (з�
   (проверено: образ собирается из alpine, `sharp` musl re-encode работает в рантайме). Compose-
   детач задокументирован. **Агент скрипт не запускает.** Публичный деплой отложен с R04 — образ
   принесёт R04 (deps) + R07-B.
-  - **Fix (owner прогон 1 остановился на state-guard):** `http_code()` при отказе соединения давал
-    `000000` (`curl -w` печатает `000`, затем `|| echo 000` ещё раз) → ложный abort «порт 3199
-    занят» на фактически свободном порту. Теперь fail-closed: вывод `curl` берётся только при
-    успехе команды, иначе ровно `000`. `--self-test` (свободный порт → ровно `000`) + `bash -n`
-    добавлены в CI-джобу `public-site-quality`. Образ НЕ пересобирался.
+  - **Fix 1 (owner прогон 1 → state-guard):** `http_code()` при отказе соединения давал `000000`
+    (`curl -w` печатает `000`, затем `|| echo 000` ещё раз) → ложный abort «порт 3199 занят» на
+    фактически свободном порту. Теперь fail-closed: вывод `curl` берётся только при успехе команды,
+    иначе ровно `000`.
+  - **Fix 2 (owner прогон 2 → repo sanity):** скрипт использовал `[ -d "$REPO/.git" ]`, но в linked
+    worktree `.git` — файл (`gitdir:` указатель) → ложный abort «не git-checkout». Теперь
+    `git rev-parse --is-inside-work-tree` == ровно `true`; чистота через `git status --porcelain`
+    (ловит и untracked — иначе `COPY . .` кладёт в образ то, чего нет в SHA). `--self-test` создаёт
+    временный linked worktree и проверяет `git_worktree_ok` / `git_tree_clean` (включая untracked).
+  - `--self-test` + `bash -n` в CI-джобе `public-site-quality`. Образ НЕ пересобирался (только скрипт).
 
 **`[2026-08-30]` R07-A — Security hardening & API robustness (Titanor Time) — DONE + РАЗВЁРНУТ на
 пилот, PASS.** Отчёт `R07A_SECURITY_HARDENING_REPORT_RU.md`. Одна аддитивная миграция (**97**

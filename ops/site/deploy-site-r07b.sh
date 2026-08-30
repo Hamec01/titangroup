@@ -56,6 +56,14 @@ SHA=""
 
 die()  { echo "DEPLOY ABORTED: $*" >&2; exit 1; }
 
+# --- git helpers ---
+# This script builds from a *linked worktree*, where "$REPO/.git" is a FILE (a gitdir: pointer),
+# not a directory — so `[ -d "$REPO/.git" ]` is the wrong test. Ask git instead.
+git_worktree_ok() { [ "$(git -C "${1:-.}" rev-parse --is-inside-work-tree 2>/dev/null)" = "true" ]; }
+# Clean == no staged, unstaged, OR untracked (non-ignored) changes. Untracked source files would
+# land in the image via `COPY . .`, so the built SHA would not describe what shipped.
+git_tree_clean()  { [ -z "$(git -C "${1:-.}" status --porcelain 2>/dev/null)" ]; }
+
 # Print the HTTP status code for a request, or exactly "000" on any curl failure
 # (connection refused, DNS, timeout). Fail-closed: on failure curl itself prints "000" to stdout
 # AND exits non-zero, so a `curl ... || echo 000` form yields "000000" — which broke the
@@ -72,17 +80,36 @@ http_code() {
 
 if [ "${1:-}" = "--self-test" ]; then
   rc=0
-  # A free port (nothing listening) must yield exactly "000" — this is the free-VERIFY_PORT guard.
+  ok()   { echo "  ok: $*"; }
+  bad()  { echo "  FAIL: $*"; rc=1; }
+
+  echo "-- http_code: a free port (nothing listening) must yield exactly \"000\" --"
   for p in 1 2 3; do
     c=$(http_code "http://127.0.0.1:${p}/")
-    if [ "$c" = "000" ]; then
-      echo "  ok: free port 127.0.0.1:${p} -> '${c}'"
-    else
-      echo "  FAIL: http_code for free port 127.0.0.1:${p} returned '${c}' (len ${#c}), expected exactly '000'"
-      rc=1
-    fi
+    [ "$c" = "000" ] && ok "free port 127.0.0.1:${p} -> '${c}'" \
+      || bad "http_code for free port 127.0.0.1:${p} returned '${c}' (len ${#c}), expected exactly '000'"
   done
-  [ "$rc" = 0 ] && echo "self-test PASS: http_code returns exactly 000 for a free port"
+
+  echo "-- repo sanity: works for a linked worktree where .git is a FILE --"
+  td=$(mktemp -d)
+  git init -q "$td/main"
+  git -C "$td/main" -c user.email=ci@example.invalid -c user.name=ci commit -q --allow-empty -m init
+  git -C "$td/main" worktree add -q -b wt-selftest "$td/linked"
+  [ -f "$td/linked/.git" ] && [ ! -d "$td/linked/.git" ] \
+    && ok "linked worktree .git is a file (not a dir)" \
+    || bad "expected $td/linked/.git to be a plain file"
+  git_worktree_ok "$td/linked"     && ok "git_worktree_ok=true in the linked worktree" \
+                                   || bad "git_worktree_ok said the linked worktree is not a work tree"
+  git_worktree_ok "$td"            && bad "git_worktree_ok=true outside any repo" \
+                                   || ok "git_worktree_ok=false outside a repo"
+  git_tree_clean "$td/linked"      && ok "git_tree_clean=true for a clean linked worktree" \
+                                   || bad "git_tree_clean=false for a clean linked worktree"
+  : > "$td/linked/stray.txt"
+  git_tree_clean "$td/linked"      && bad "git_tree_clean ignored an untracked file" \
+                                   || ok "git_tree_clean=false with an untracked file present"
+  rm -rf "$td"
+
+  [ "$rc" = 0 ] && echo "self-test PASS" || echo "self-test FAIL"
   exit "$rc"
 fi
 
@@ -139,8 +166,9 @@ docker inspect "$LIVE" >/dev/null 2>&1 || die "$LIVE is not running — nothing 
 
 echo
 echo "== 1/9  repo sanity =="
-[ -d "$REPO/.git" ] || die "$REPO is not a git checkout"
-git -C "$REPO" diff --quiet && git -C "$REPO" diff --cached --quiet || die "worktree $REPO has uncommitted changes"
+git_worktree_ok "$REPO" || die "$REPO is not inside a git work tree (rev-parse --is-inside-work-tree != true)"
+git_tree_clean "$REPO"  || die "$REPO is not clean — commit or remove these before deploying:
+$(git -C "$REPO" status --porcelain | sed 's/^/    /')"
 CUR_BRANCH=$(git -C "$REPO" rev-parse --abbrev-ref HEAD)
 [ "$CUR_BRANCH" = "$BRANCH" ] || die "worktree is on '$CUR_BRANCH', expected '$BRANCH'"
 git -C "$REPO" fetch -q origin "$BRANCH" || die "git fetch failed"

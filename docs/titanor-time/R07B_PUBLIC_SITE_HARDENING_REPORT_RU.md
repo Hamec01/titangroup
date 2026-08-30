@@ -138,7 +138,10 @@
    **ровно `000`** при отказе соединения (баг `curl … || echo 000` → `000000` → ложный abort на
    свободном порту — исправлено); `bash ops/site/deploy-site-r07b.sh --self-test` + `bash -n` в
    CI-джобе `public-site-quality`.
-2. **Repo sanity:** worktree чистый, на `feature/titanor-time-foundation`, HEAD запушен.
+2. **Repo sanity:** `git rev-parse --is-inside-work-tree` ровно `true` (в linked worktree `.git` —
+   файл, `[ -d .git ]` не годится); `git status --porcelain` пусто (учитывает и untracked — иначе
+   `COPY . .` положит в образ то, чего нет в SHA); на `feature/titanor-time-foundation`, HEAD
+   запушен. `--self-test` создаёт временный linked worktree и проверяет обе функции.
 3. **Baseline Titanor Time:** снимок `titanor-time-app-1` + `t97-pilot-app` + `t97-pilot-scheduler`
    (image/started/restarts), перепроверяется в конце — при любом изменении `exit 2`.
 4. **Immutable build:** `titanorgroup-web:site-<shortsha>` из `Dockerfile` с
