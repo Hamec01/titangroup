@@ -31,7 +31,7 @@
   event/outcome/errorCode/счётчики.
 - Тесты: `_test-client-ip` (unit, 26), `_test-rate-limit-db` (db, 13), `_test-malformed-uuid`
   (db, 14), `_test-api-guard` (db, 17). typecheck 0, lint ok, unit 13 / db 57 / scheduler 5,
-  build ✓, миграция 97 с нуля чисто. CI: _после push_.
+  build ✓, миграция 97 с нуля чисто. CI 6/6 (run 33316873965).
 - PASS-критерий R07 выполнен: negative-tests проходят; malformed input → 404 не 500; rate-limit
   не обходится подменой первого forwarded IP.
 - R11: Caddy для `app.titanorgroup.fi` — `trusted_proxies_strict` + Cloudflare CIDR + очистка

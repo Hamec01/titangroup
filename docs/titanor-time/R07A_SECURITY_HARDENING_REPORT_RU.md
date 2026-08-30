@@ -141,7 +141,7 @@ routes использует многострочную форму `jsonError(403
   XFF is ignored» — берётся Caddy-appended rightmost)
 
 **Полный прогон (clean env):** typecheck 0 · lint ok · unit **13** · db **57** · scheduler **5** ·
-`npm run build` ✓ · миграция 97 с нуля чисто. CI: _после push_.
+`npm run build` ✓ · миграция 97 с нуля чисто. CI (`139221d`, run 33316873965): **6/6 job success**.
 
 ## 7. Открытые пункты / для R11 и R14
 
