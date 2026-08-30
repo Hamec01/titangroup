@@ -1,6 +1,28 @@
 # Titanor Time — Implementation Status
 
-Обновлено: 2026-08-30 Europe/Helsinki (R02 — test/typecheck/CI gates, DONE)
+Обновлено: 2026-08-30 Europe/Helsinki (R03 — профили + recovery без SMTP, в работе)
+
+**`[2026-08-30]` R03 — учётные записи, профили и recovery без SMTP (production release roadmap) — в работе.**
+ТЗ §6–§7, roadmap §R03. Production/Caddy/DNS не трогаются. Перед первым pilot deploy — `pre-deploy` backup.
+Подзадачи (каждая — отдельный commit):
+- [x] **R03.1** (`240761e`) — схема: `PasswordResetToken.issuedByUserId` + `attemptCount`; право
+  `user.recovery.generate` (ADMIN, SUPER_ADMIN). Миграция `20260830090000`, применяется с нуля чисто.
+- [ ] **R03.2** — backend: `lib/account-recovery.ts` — короткий код группами `XXXX-XXXX-XXXX`
+  (Crockford base32, 45 мин, HMAC, лимит попыток на код), отзыв прежних, audit
+  `ACCOUNT_RECOVERY_ISSUED`. Переработка `redeemPasswordReset` → `(login, code, password)`.
+- [ ] **R03.3** — API: `POST /api/admin/users/[userId]/recovery` + `.../workers/[employeeId]/recovery`;
+  переработка `POST /api/auth/password-reset/confirm`.
+- [ ] **R03.4** — удалить SMTP-путь: `lib/password-reset-mailer.ts`, `/api/auth/password-reset/request`,
+  `/reset-password/request`, `/forgot-password`, `issuePasswordReset`, «отправить ссылку» из формы.
+- [ ] **R03.5** — новая страница `/reset-password` (логин + код + новый пароль).
+- [ ] **R03.6** — смена пароля: `changeAccountPassword` (по текущему паролю), `POST /api/auth/change-password`, форма.
+- [ ] **R03.7** — сессии: `GET /api/me/sessions`, `DELETE /api/me/sessions/[id]`, права
+  `session.read.own` + `session.revoke.own`, UI-панель.
+- [ ] **R03.8** — экран профиля ADMIN/SUPER_ADMIN: last login, язык, ссылка на инструкцию, смена пароля, сессии.
+- [ ] **R03.9** — профиль работника: тот же account-блок; необязательные поля не блокируют clock.
+- [ ] **R03.10** — админский UI: кнопка «Восстановить доступ» на карточке пользователя и работника, код показан один раз.
+- [ ] **R03.11** — тесты: переписать `_test-account-recovery.ts`, `_test-change-password.ts`, `_test-session-management.ts`, манифест.
+- [ ] **R03.12** — deploy: `pre-deploy` backup + генерация `PASSWORD_RESET_TOKEN_HMAC_KEY`, pilot deploy, docs/memory.
 
 **`[2026-08-30]` R02 — надёжные test / typecheck / lint / CI gates (production release roadmap) — DONE.**
 Полный отчёт: `docs/titanor-time/R02_TEST_CI_REPORT_RU.md`. Каталог: `docs/titanor-time/TEST_CATALOG_RU.md`.
