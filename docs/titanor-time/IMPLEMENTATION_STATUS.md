@@ -12,7 +12,7 @@
   `ACCOUNT_RECOVERY_ISSUED`. Переработка `redeemPasswordReset` → `(login, code, password)`.
 - [x] **R03.3** (`38c12d9`) — API: `POST /api/admin/users/[userId]/recovery` + `.../workers/[employeeId]/recovery`;
   переработка `POST /api/auth/password-reset/confirm`.
-- [ ] **R03.4** — удалить SMTP-путь: `lib/password-reset-mailer.ts`, `/api/auth/password-reset/request`,
+- [x] **R03.4** (`5898a74`) — удалить SMTP-путь: `lib/password-reset-mailer.ts`, `/api/auth/password-reset/request`,
   `/reset-password/request`, `/forgot-password`, `issuePasswordReset`, «отправить ссылку» из формы.
 - [ ] **R03.5** — новая страница `/reset-password` (логин + код + новый пароль).
 - [ ] **R03.6** — смена пароля: `changeAccountPassword` (по текущему паролю), `POST /api/auth/change-password`, форма.
