@@ -108,8 +108,8 @@ Production cutover разрешается только после R12 и отд�
 |---|---|---|---|
 | B01 | Нет доказанной автоматической backup-схемы на правильном storage | Нельзя безопасно заменить production-БД | R01 |
 | ~~B02~~ | `/mnt/250gb` — s3fs на Contabo Object Storage. **ЗАКРЫТ 2026-08-30**: панель Contabo подтвердила бакет `US-central 3629`, 250 GB куплено, 3 MB занято. Off-box backup+restore проверены. Открытый вопрос GDPR (US-регион) — решение владельца до R14, не блокер | ✅ R01 |
-| B03 | Профили/recovery не соответствуют решению «без SMTP» | Пользователь может лишиться доступа; текущий email flow не завершён | R03 |
-| B04 | Нет change-password и полноценного session management | Незавершённая безопасность учётной записи | R03 |
+| ~~B03~~ | Профили/recovery без SMTP. **ЗАКРЫТ 2026-08-30 (R03)**: admin-assisted одноразовый код `XXXX-XXXX-XXXX`, `/reset-password` (логин+код+пароль), SMTP-путь удалён целиком. | ✅ R03 |
+| ~~B04~~ | change-password + session management. **ЗАКРЫТ 2026-08-30 (R03)**: `POST /api/auth/change-password`, `GET/DELETE /api/me/sessions`, панель сессий на профилях. | ✅ R03 |
 | B05 | Есть 8 high dependency findings | Release содержит известные уязвимые цепочки | R04–R05 |
 | ~~B06~~ | Нет стабильных `test`/`typecheck`/`lint` gates; часть старых тестов противоречит контракту. **ЗАКРЫТ 2026-08-30 (R02)**: каталог из 75 тестов по lane'ам, per-test изоляция БД, 5 тестов исправлено, `typecheck`/`lint`/`test` команды, CI с required `ci-summary`. Локально: 0 type-ошибок, unit 11/11, db+scheduler 48/48, build ✓. Browser-lane (15) → R12 | ✅ R02 |
 | B07 | Production scheduler unhealthy, а readiness не проверяет схему | HTTP 200 может скрывать несовместимую БД | R06 |
@@ -131,7 +131,7 @@ Production cutover разрешается только после R12 и отд�
 | R00 | Release baseline и freeze | — | Нет | **DONE `96799ba`** — `RELEASE_BASELINE_2026-08-29_RU.md` |
 | R01 | Backup/storage foundation | R00 | Нет | **DONE `96799ba` — PASS** (квота Contabo 250 GB подтверждена 2026-08-30; таймер устанавливает владелец, см. `BACKUP_RESTORE_RUNBOOK_RU.md` §6) |
 | R02 | Надёжные test/CI gates | R00 | Нет | **DONE `e2ad7e1`+ — PASS** (отчёт `R02_TEST_CI_REPORT_RU.md`; каталог `TEST_CATALOG_RU.md`; browser-lane → R12) |
-| R03 | Profiles и recovery без SMTP | R01, R02 | Нет | **Следующий** |
+| R03 | Profiles и recovery без SMTP | R01, R02 | Нет | **DONE `22e8b12` — регрессия 62/62; pilot deploy pending (`deploy-22e8b12.sh`)** (отчёт `R03_ACCOUNT_RECOVERY_RU.md`) |
 | R04 | Security upgrade публичного сайта | R02 | Нет | Не начат (можно параллельно R03) |
 | R05 | Security upgrade Titanor Time | R02 | Нет | Не начат |
 | R06 | Scheduler/readiness/Docker/operations | R01, R02, R05 | Нет | Не начат |

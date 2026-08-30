@@ -1,6 +1,6 @@
 # Titanor Time — Implementation Status
 
-Обновлено: 2026-08-30 Europe/Helsinki (R03 — профили + recovery без SMTP, в работе — 11/12)
+Обновлено: 2026-08-30 Europe/Helsinki (R03 — профили + recovery без SMTP, R03.1–R03.11 DONE, deploy pending)
 
 **`[2026-08-30]` R03 — учётные записи, профили и recovery без SMTP (production release roadmap) — в работе.**
 ТЗ §6–§7, roadmap §R03. Production/Caddy/DNS не трогаются. Перед первым pilot deploy — `pre-deploy` backup.
@@ -22,7 +22,7 @@
 - [x] **R03.9** (`1af235c`) — профиль работника: тот же account-блок; необязательные поля не блокируют clock.
 - [x] **R03.10** (`8254186`) — админский UI: кнопка «Восстановить доступ» на карточке пользователя и работника, код показан один раз.
 - [x] **R03.11** — тесты: переписать `_test-account-recovery.ts`, `_test-change-password.ts`, `_test-session-management.ts`, манифест.
-- [ ] **R03.12** — deploy: `pre-deploy` backup + генерация `PASSWORD_RESET_TOKEN_HMAC_KEY`, pilot deploy, docs/memory.
+- [~] **R03.12** — deploy: образ `t97-pilot-22e8b12` собран, скрипт `deploy-22e8b12.sh` написан (pre-deploy backup + генерация `PASSWORD_RESET_TOKEN_HMAC_KEY` + 2 миграции 93→95). Ждёт запуска владельцем. Прежнее: `pre-deploy` backup + генерация `PASSWORD_RESET_TOKEN_HMAC_KEY`, pilot deploy, docs/memory.
 
 **`[2026-08-30]` R02 — надёжные test / typecheck / lint / CI gates (production release roadmap) — DONE.**
 Полный отчёт: `docs/titanor-time/R02_TEST_CI_REPORT_RU.md`. Каталог: `docs/titanor-time/TEST_CATALOG_RU.md`.
