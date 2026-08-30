@@ -1,11 +1,22 @@
 # Titanor Time — Implementation Status
 
-**`[2026-08-30]` R07-B — Public site security hardening (`titanorgroup.fi`) — КОД DONE, все проверки
-зелёные; на live-сайт НЕ развёрнут (Slice 7 отдельно, запускает владелец).** Отчёт
-`R07B_PUBLIC_SITE_HARDENING_REPORT_RU.md`. ТЗ §16.2–16.4, закрывает public-часть **B08**. БД у сайта
-нет — миграций нет. Живой контейнер `titanorgroup-web-1` не тронут.
+**`[2026-08-30]` R07-B — Public site security hardening (`titanorgroup.fi`) — DEPLOYED + PASS.**
+Отчёт `R07B_PUBLIC_SITE_HARDENING_REPORT_RU.md`. ТЗ §16.2–16.4, **закрывает public-часть B08**.
+БД у сайта нет — миграций нет. **`titanorgroup-web-1` на `titanorgroup-web:site-3321c09`**
+(revision label `3321c09`, 359 MB), `healthy`, restarts 0, порт `127.0.0.1:3100`. Владелец
+подтвердил доставку contact-письма вручную (пришло на `projects@titanorgroup.fi`). Независимая
+read-only проверка агентом на `:3100`: 6 security-заголовков, нет `X-Powered-By`/`X-Robots-Tag`,
+`robots Disallow`, `/fi` `/en/contact` `/api/health` = 200, admin-login без CSRF → 403, contact
+битое тело → 400, audit-log непустой. **Rollback-контейнер `titanorgroup-web-1-pre-r07b`
+(Exited 143, graceful, на `titanorgroup-web:latest`) сохранён по указанию владельца.** Образ
+принёс R04 (public-site deps 8→0 high) + R07-B. Titanor Time prod+pilot не тронут.
 Commits `f8dd3f5` (примитивы + харнесс) · `02a9c9b` (admin auth) · `6644254` (CSRF на
-admin-mutations) · `5e0d7f3` (contact) · `5a29496` (uploads) · `6ba93c4` (заголовки + robots).
+admin-mutations) · `5e0d7f3` (contact) · `5a29496` (uploads) · `6ba93c4` (заголовки + robots) ·
+`a896019` (Slice 7 скрипт) · `d60a125`/`2999397`/`3321c09` (3 фикса pre-swap gates — все один
+класс «gate падает молча вместо `die`»; см. отчёт §7).
+**UX backlog (НЕ чинить сейчас):** `mailto:` на контактных карточках корректны, но у владельца в
+Chrome/Windows нет внешнего mailto-handler → окно письма не открывается (проблема клиента). Позже:
+кнопка «скопировать email» и/или переход к встроенной форме. Плюс `/fi` `<html lang="en">` (i18n).
 - **§16.2 admin:** login rate-limit 10/15мин на доверенный client-IP (in-memory fixed-window,
   `lib/rate-limit.ts`); пароль — HMAC-SHA256 + `timingSafeEqual` (не `===`); CSRF (`X-Requested-With:
   titanor-admin`) на `login`/`logout`/`images`/`vacancies`/`service-content`; cookie

@@ -5,9 +5,11 @@
 - **Дата:** 2026-08-30.
 - **Не затронуто:** Titanor Time, его БД и scheduler; production Titanor Time; Caddy; Cloudflare
   DNS. Публичный сайт БД не имеет — миграций нет. Бизнес-логика и вёрстка страниц не менялись.
-- **Статус:** **код DONE, все проверки зелёные (7 файлов, 133 assert), CI зелёный.**
-  Deploy-скрипт `ops/site/deploy-site-r07b.sh` написан (Slice 7). На live-сайт **не развёрнут** —
-  запускает владелец. Живой контейнер `titanorgroup-web-1` не тронут.
+- **Статус:** **DEPLOYED + PASS 2026-08-30.** `titanorgroup-web-1` на
+  `titanorgroup-web:site-3321c09` (revision label `3321c09`), `healthy`, restarts 0, порт
+  `127.0.0.1:3100`. Rollback-контейнер `titanorgroup-web-1-pre-r07b` (Exited 143 — graceful)
+  **сохранён по указанию владельца**. Владелец подтвердил доставку contact-письма вручную —
+  пришло на `projects@titanorgroup.fi`. Код: 7 test-файлов / 133 assert, CI зелёный. См. §7.
 - **Решения владельца (fork):** rate-limit — in-memory fixed-window; login-audit — персистентный
   append-only файл; фото — `sharp` strip metadata + нормализация, формат сохраняем (GIF → отказ);
   деплой — код + fail-closed скрипт для live-сайта, immutable-swap (как пилот), smoke-тест на
@@ -173,9 +175,53 @@ compose-билда). Ре-синк compose позже: тот checkout на feat
 **Rollback:** `docker rm -f titanorgroup-web-1 && docker rename titanorgroup-web-1-pre-r07b
 titanorgroup-web-1 && docker start titanorgroup-web-1`. `-pre-r07b` удаляется только вручную.
 
-## 6. Дальше
+## 7. Деплой на live — 2026-08-30, PASS
 
-- Владелец запускает `ops/site/deploy-site-r07b.sh`. После PASS — обновить статус/roadmap и
-  проверить форму вручную.
-- Затем → **R08 (GPS archive)** — по решению владельца.
-- Позже (i18n-этап): `/fi` отдаёт `<html lang="en">` — вне R07-B.
+Три прогона владельца — первые два безопасно abort'нулись на pre-swap gates (live не тронут),
+третий прошёл. Все три бага — один класс («gate падает молча вместо `die`»):
+
+| прогон | gate | баг | фикс |
+|---|---|---|---|
+| 1 | state-guard (свободный порт) | `http_code()` → `000000` при отказе соединения (`curl` печатает `000` + `\|\| echo 000`) → порт 3199 «занят» | `d60a125` — fail-closed: вывод `curl` только при успехе, иначе ровно `000` |
+| 2 | repo sanity | `[ -d "$REPO/.git" ]`, но в linked worktree `.git` — файл | `2999397` — `git rev-parse --is-inside-work-tree` == `true`; чистота через `git status --porcelain` (ловит untracked) |
+| 3 | env-file check | `grep\|head\|cut` под `pipefail`+`set -e` → отсутствующий ключ ронял скрипт до `die` | `3321c09` — `grep -qE "^KEY=[^space]"` + проверка mount `/mnt/250gb` + `SWAP_STARTED=1` после `rename` |
+
+`--self-test` (в CI-джобе `public-site-quality`) покрывает `http_code` (свободный порт → ровно
+`000`) и repo sanity (создаёт временный linked worktree, проверяет `.git`-файл, `git_worktree_ok`,
+`git_tree_clean` включая untracked).
+
+**Итог прогона 3:**
+- образ `titanorgroup-web:site-3321c09` (`e620dc4a0a34`, 359 MB, revision label `3321c09`);
+- backup обоих томов on-box (`/home/deploy/backups/titanorgroup/pre-r07b-*`) + off-box
+  (`/mnt/250gb/titanorgroup/backups/pre-r07b-*`), чек-суммы re-verified;
+- smoke-тест на `titanorgroup-web-verify:3199` — PASS, затем удалён;
+- swap: `titanorgroup-web-1` → `-pre-r07b` (Exited 143, graceful), новый `titanorgroup-web-1` на
+  `site-3321c09`, `healthy`, restarts 0;
+- live verify PASS; Titanor Time prod+pilot baseline не изменён.
+
+**Независимая проверка агентом (read-only, `:3100`):** 6 security-заголовков, нет `X-Powered-By`,
+нет `X-Robots-Tag`; `/robots.txt` c `Disallow: /ship-admin-portal /api/ /uploads/`; `/fi`
+`/en/contact` `/api/health` = 200; admin-login без CSRF-заголовка → 403; contact битое тело → 400;
+`/app/data/admin-login-audit.log` — 13 строк.
+
+**Contact доставка:** владелец подтвердил вручную — письмо пришло на `projects@titanorgroup.fi`. ✅
+
+**Rollback-контейнер `titanorgroup-web-1-pre-r07b` (на `titanorgroup-web:latest`) сохранён** по
+указанию владельца. Удалять только вручную:
+`docker rm -f titanorgroup-web-1 && docker rename titanorgroup-web-1-pre-r07b titanorgroup-web-1 && docker start titanorgroup-web-1`
+для отката; `docker rm titanorgroup-web-1-pre-r07b` когда откат больше не нужен.
+
+## 8. UX backlog (неблокирующий — НЕ чинить сейчас)
+
+- **`mailto:` на контактных карточках.** Ссылки корректны, но у владельца в Chrome/Windows не
+  настроен внешний `mailto`-handler → окно письма не открывается (проблема клиента, не сайта).
+  Позже: добавить кнопку «скопировать email» и/или переход к встроенной contact-форме с
+  подставленным адресом. Часть общего i18n/UX-этапа публичного сайта.
+- **`/fi` отдаёт `<html lang="en">`** (было и на старом сайте) — i18n-этап, вне R07-B.
+
+## 9. Дальше
+
+- **R07-B закрыт (DEPLOYED + PASS).** B08 (public admin/contact/upload controls) закрыт.
+- Следующий: **R08 — GPS encrypted archive + safe retention** (production/DNS/Caddy/Cloudflare
+  не трогать).
+- R07-A.1 (guard rollout ~130 маршрутов Titanor Time) — совмещается с R09.
