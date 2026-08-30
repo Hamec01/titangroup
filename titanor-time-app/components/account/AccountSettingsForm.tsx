@@ -9,10 +9,8 @@ export function AccountSettingsForm({ initialEmail, username, roles }: { initial
   const locale = useAppLocale();
   const ru = locale === 'RU';
   const [email, setEmail] = useState(initialEmail ?? '');
-  const [savedEmail, setSavedEmail] = useState(initialEmail);
   const [currentPassword, setCurrentPassword] = useState('');
   const [saving, setSaving] = useState(false);
-  const [sending, setSending] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -37,10 +35,9 @@ export function AccountSettingsForm({ initialEmail, username, roles }: { initial
         else setError(ru ? 'Не удалось сохранить email. Повторите попытку.' : 'Could not save the email. Please try again.');
         return;
       }
-      setSavedEmail(body.email);
       setEmail(body.email);
       setCurrentPassword('');
-      setMessage(ru ? 'Email для входа и восстановления пароля сохранён.' : 'Your sign-in and recovery email has been saved.');
+      setMessage(ru ? 'Email для входа и связи сохранён.' : 'Your sign-in and contact email has been saved.');
     } catch {
       setError(ru ? 'Ошибка сети. Повторите попытку.' : 'Network error. Please try again.');
     } finally {
@@ -48,44 +45,17 @@ export function AccountSettingsForm({ initialEmail, username, roles }: { initial
     }
   }
 
-  async function sendResetLink(): Promise<void> {
-    if (!savedEmail || sending) return;
-    setSending(true);
-    setMessage(null);
-    setError(null);
-    try {
-      const response = await fetch('/api/auth/password-reset/request', {
-        method: 'POST',
-        credentials: 'same-origin',
-        headers: { 'Content-Type': 'application/json', 'X-Requested-With': CSRF_HEADER_VALUE },
-        body: JSON.stringify({ email: savedEmail })
-      });
-      const body = await response.json().catch(() => null);
-      if (!response.ok) {
-        setError(body?.error?.code === 'DELIVERY_UNAVAILABLE'
-          ? (ru ? 'Отправка писем пока не настроена. Обратитесь к администратору.' : 'Email delivery is not configured yet. Contact an administrator.')
-          : (ru ? 'Не удалось отправить письмо. Повторите попытку позже.' : 'Could not send the email. Try again later.'));
-        return;
-      }
-      setMessage(ru ? 'Если адрес привязан к учётной записи, ссылка для нового пароля уже отправлена.' : 'If this address is linked to an account, a password reset link is on its way.');
-    } catch {
-      setError(ru ? 'Ошибка сети. Повторите попытку.' : 'Network error. Please try again.');
-    } finally {
-      setSending(false);
-    }
-  }
-
   return (
     <section className="account-settings" aria-labelledby="account-settings-title">
       <h2 id="account-settings-title">{ru ? 'Моя учётная запись' : 'My account'}</h2>
-      <p className="setup-subtitle">{ru ? 'Привяжите личный email: по нему можно входить и восстанавливать пароль.' : 'Link a personal email to sign in and recover your password.'}</p>
+      <p className="setup-subtitle">{ru ? 'Личный email можно использовать вместо логина при входе. Он не используется для восстановления пароля.' : 'Your personal email can be used instead of your username to sign in. It is not used for password recovery.'}</p>
       <dl className="account-settings-summary">
         <div><dt>{ru ? 'Логин' : 'Username'}</dt><dd>{username}</dd></div>
         <div><dt>{ru ? 'Роль' : 'Role'}</dt><dd>{roles.join(', ') || '—'}</dd></div>
       </dl>
       <form onSubmit={saveEmail} aria-busy={saving}>
         <div className="login-field">
-          <label htmlFor="account-recovery-email">{ru ? 'Email для входа и восстановления' : 'Sign-in and recovery email'}</label>
+          <label htmlFor="account-recovery-email">{ru ? 'Email для входа и связи' : 'Sign-in and contact email'}</label>
           <input id="account-recovery-email" type="email" autoComplete="email" maxLength={255} required value={email} onChange={(event) => setEmail(event.target.value)} disabled={saving} />
         </div>
         <div className="login-field">
@@ -94,15 +64,11 @@ export function AccountSettingsForm({ initialEmail, username, roles }: { initial
         </div>
         <button className="login-submit" type="submit" disabled={saving}>{saving ? (ru ? 'Сохранение…' : 'Saving…') : (ru ? 'Сохранить email' : 'Save email')}</button>
       </form>
-      <div className="account-reset-row">
-        <div>
-          <h3>{ru ? 'Забыли пароль?' : 'Forgot your password?'}</h3>
-          <p>{ru ? 'Мы отправим одноразовую ссылку. После смены пароля все остальные сеансы завершатся.' : 'We will send a one-time link. Changing the password signs out all other sessions.'}</p>
-        </div>
-        <button type="button" className="wk-inline-secondary" onClick={sendResetLink} disabled={!savedEmail || sending}>
-          {sending ? (ru ? 'Отправка…' : 'Sending…') : (ru ? 'Отправить ссылку' : 'Send reset link')}
-        </button>
-      </div>
+      <p className="setup-subtitle">
+        {ru
+          ? 'Забыли пароль — обратитесь к администратору. Он выдаст одноразовый код для страницы «Сброс пароля».'
+          : 'Forgot your password — ask an administrator. They will issue a one-time code for the “Reset password” page.'}
+      </p>
       {error ? <p className="login-error" role="alert">{error}</p> : null}
       {message ? <p className="form-status" role="status">{message}</p> : null}
     </section>

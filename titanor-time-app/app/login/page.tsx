@@ -238,7 +238,7 @@ export default function LoginPage() {
         <button className="login-submit" type="submit" disabled={loading || !hydrated}>
           {loading ? t.submitting : t.submit}
         </button>
-        <Link className="login-secondary-link" href="/reset-password/request">
+        <Link className="login-secondary-link" href="/reset-password">
           {t.forgotPassword}
         </Link>
       </form>
