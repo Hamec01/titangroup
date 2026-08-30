@@ -110,7 +110,7 @@ Scheduler на старте зовёт `checkSchemaReadiness()`; несовме�
 restored pilot copy. Production не трогается (пункт 7).
 
 **Полный прогон (clean env):** unit **12/12** · db **54/54** · scheduler **5/5** · `typecheck` 0 ·
-`lint` ok · миграция 96 применяется с нуля чисто · CI — _<статус по коммиту>_.
+`lint` ok · миграция 96 с нуля чисто · restored-pilot тест (95→96) PASS · CI `b50808e` 6/6 job success.
 
 ## 6. Кандидат образа + deploy script (пункты 9–11)
 
@@ -141,3 +141,15 @@ disposable PostgreSQL). `compose.titanor-time.yaml` не менялся. `:lates
   **R06-B**.
 - B07 (прод БД 42 миграции) закрывается заменой БД на pilot целиком — **R14**.
 - Negative `/api/ready` проверка на pilot — только на restored-копии в R12/R14 (pilot БД не мутируем).
+
+## 9. Точная команда владельцу
+
+```bash
+bash /home/deploy/app-data/t97-pilot/deploy-d15586c.sh
+```
+
+Скрипт сам: снимает `pre-deploy` backup → фиксирует и в конце сверяет production baseline
+(`titanor-time-app-1` + `:latest`) → мигрирует pilot 95→96 → пересоздаёт `t97-pilot-app` и
+`t97-pilot-scheduler` на `t97-pilot-d15586c` с реальным `--health-cmd` → verify (`/api/ready`
+200 `schema:current`, scheduler `HEALTHY`, один `ok` tick) → печатает rollback-инструкцию.
+Пришлите вывод — сверю. **Агент скрипт не запускает.**
