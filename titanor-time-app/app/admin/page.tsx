@@ -3,6 +3,7 @@ import { redirect } from 'next/navigation';
 import { resolveServerSession } from '@/lib/server-session';
 import { hasPermission } from '@/lib/permissions';
 import { helsinkiToday } from '@/lib/workers';
+import { getDocumentAttentionSummary } from '@/lib/document-attention';
 import { getAdminOperationalOverview, parseOverviewQuery } from '@/lib/attendance-overview';
 import { listPeriodOptions, listSiteOptionsForAdmin } from '@/lib/attendance-overview-lookups';
 import { OverviewView, type OverviewOutcome } from '@/components/overview/OverviewView';
@@ -65,11 +66,23 @@ export default async function AdminOverviewPage({ searchParams }: RouteParams) {
     outcome = result.code === 'PERIOD_NOT_FOUND' ? { kind: 'period-not-found' } : { kind: 'ok', result: result.result };
   }
 
-  const [periodOptions, siteOptions] = await Promise.all([listPeriodOptions(), listSiteOptionsForAdmin()]);
+  const [periodOptions, siteOptions, documentAttention] = await Promise.all([
+    listPeriodOptions(),
+    listSiteOptionsForAdmin(),
+    getDocumentAttentionSummary(helsinkiToday())
+  ]);
 
   return (
     <main className="setup-page">
-      <OverviewView role="admin" basePath={BASE_PATH} rawQuery={rawQuery} outcome={outcome} periodOptions={periodOptions} siteOptions={siteOptions} />
+      <OverviewView
+        role="admin"
+        basePath={BASE_PATH}
+        rawQuery={rawQuery}
+        outcome={outcome}
+        periodOptions={periodOptions}
+        siteOptions={siteOptions}
+        documentAttention={documentAttention}
+      />
     </main>
   );
 }

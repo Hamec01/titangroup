@@ -4,6 +4,7 @@ import Link from 'next/link';
 import type { OverviewResult, OverviewSummary, OverviewWorkerItem, OverviewConflicts, OperationalState } from '@/lib/attendance-overview';
 import { OPERATIONAL_STATE_VALUES } from '@/lib/attendance-overview';
 import type { PeriodOption, SiteOption } from '@/lib/attendance-overview-lookups';
+import type { DocumentAttentionSummary } from '@/lib/document-attention';
 import {
   operationalStateLabel,
   operationalStateBadgeClass,
@@ -51,9 +52,12 @@ interface Props {
   /** Foreman-only legacy fields (task §11 — pre-existing pendingCount/exceptionCount + review-queue
    * links, unchanged in meaning, kept alongside the new scoped summary/items/filters). */
   legacy?: { pendingCount: number; exceptionCount: number };
+  /** R09.5 — admin-only "documents needing attention" figure for the task-center. Foreman does not
+   * pass it, so no card renders there. */
+  documentAttention?: DocumentAttentionSummary;
 }
 
-export function OverviewView({ role, basePath, rawQuery, outcome, periodOptions, siteOptions, legacy }: Props) {
+export function OverviewView({ role, basePath, rawQuery, outcome, periodOptions, siteOptions, legacy, documentAttention }: Props) {
   const isAdmin = role === 'admin';
   const ru = useAppLocale() === 'RU';
 
@@ -76,7 +80,7 @@ export function OverviewView({ role, basePath, rawQuery, outcome, periodOptions,
       )}
 
       {outcome.kind === 'ok' && (
-        <OverviewBody role={role} basePath={basePath} rawQuery={rawQuery} result={outcome.result} periodOptions={periodOptions} siteOptions={siteOptions} />
+        <OverviewBody role={role} basePath={basePath} rawQuery={rawQuery} result={outcome.result} periodOptions={periodOptions} siteOptions={siteOptions} documentAttention={documentAttention} />
       )}
     </div>
   );
@@ -121,7 +125,8 @@ function OverviewBody({
   rawQuery,
   result,
   periodOptions,
-  siteOptions
+  siteOptions,
+  documentAttention
 }: {
   role: 'admin' | 'foreman';
   basePath: string;
@@ -129,11 +134,12 @@ function OverviewBody({
   result: OverviewResult;
   periodOptions: PeriodOption[];
   siteOptions: SiteOption[];
+  documentAttention?: DocumentAttentionSummary;
 }) {
   const isAdmin = role === 'admin';
 
   if (isAdmin) {
-    return <AdminTodayBody basePath={basePath} rawQuery={rawQuery} result={result} periodOptions={periodOptions} siteOptions={siteOptions} />;
+    return <AdminTodayBody basePath={basePath} rawQuery={rawQuery} result={result} periodOptions={periodOptions} siteOptions={siteOptions} documentAttention={documentAttention} />;
   }
 
   return (
@@ -159,13 +165,15 @@ function AdminTodayBody({
   rawQuery,
   result,
   periodOptions,
-  siteOptions
+  siteOptions,
+  documentAttention
 }: {
   basePath: string;
   rawQuery: OverviewRawQuery;
   result: OverviewResult;
   periodOptions: PeriodOption[];
   siteOptions: SiteOption[];
+  documentAttention?: DocumentAttentionSummary;
 }) {
   const ru = useAppLocale() === 'RU';
   const todayLabel = new Intl.DateTimeFormat(ru ? 'ru-RU' : 'en-GB', { timeZone: 'Europe/Helsinki', weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' }).format(new Date(result.asOf));
@@ -182,6 +190,7 @@ function AdminTodayBody({
 
       <OwnerSearchForm basePath={basePath} rawQuery={rawQuery} periodOptions={periodOptions} siteOptions={siteOptions} />
       <OwnerQuickSummary summary={result.summary} />
+      {documentAttention ? <DocumentAttentionCard summary={documentAttention} /> : null}
       <OwnerWorkerList items={result.items} totalItems={result.totalItems} asOf={result.asOf} />
       <Pagination basePath={basePath} rawQuery={rawQuery} page={result.page} totalPages={result.totalPages} totalItems={result.totalItems} />
 
@@ -244,6 +253,35 @@ function OwnerSearchForm({ basePath, rawQuery, periodOptions, siteOptions }: { b
         </div>
       </details>
     </form>
+  );
+}
+
+// R09.5 — task-center: worker documents that need action. Links into the workforce matrix
+// (/admin/workforce) sorted/filtered so the flagged workers are what the admin lands on.
+function DocumentAttentionCard({ summary }: { summary: DocumentAttentionSummary }) {
+  const ru = useAppLocale() === 'RU';
+  if (summary.workersNeedingAttention === 0 && summary.workersExpiringSoon === 0) {
+    return null;
+  }
+  return (
+    <ul className="owner-quick-stats ov-doc-attention" aria-label={ru ? 'Документы работников' : 'Worker documents'}>
+      {summary.workersNeedingAttention > 0 ? (
+        <li className="owner-stat-attention">
+          <Link href="/admin/workforce?sort=ATTENTION">
+            <strong>{summary.workersNeedingAttention}</strong>
+            <span>{ru ? 'Документы истекли или требуют действий' : 'Documents expired or need action'}</span>
+          </Link>
+        </li>
+      ) : null}
+      {summary.workersExpiringSoon > 0 ? (
+        <li className="owner-stat-neutral">
+          <Link href="/admin/workforce?status=EXPIRING_SOON">
+            <strong>{summary.workersExpiringSoon}</strong>
+            <span>{ru ? 'Документы скоро истекают' : 'Documents expiring soon'}</span>
+          </Link>
+        </li>
+      ) : null}
+    </ul>
   );
 }
 
