@@ -5,11 +5,13 @@
 //   1. prisma validate            — the shared schema is well-formed
 //   2. schema formatting is clean  — `prisma format` would make no change
 //   3. test-manifest.json is in sync with scripts/_test-*.ts
-//   4. no obvious secret literal has been committed under titanor-time-app/
+//   4. lib/generated/migration-inventory.ts is in sync with prisma/migrations
+//   5. the R06-B runtime script bundles still compile with no stray external deps
+//   6. no obvious secret literal has been committed under titanor-time-app/
 // Type checking is a separate gate (`npm run typecheck`).
 
 import { spawnSync } from 'node:child_process';
-import { readFileSync, readdirSync, statSync } from 'node:fs';
+import { readFileSync, readdirSync, statSync, existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join, relative } from 'node:path';
 
@@ -54,6 +56,16 @@ step('test-manifest.json in sync', () => {
 
 step('migration-inventory.ts in sync', () => {
   const r = spawnSync(process.execPath, [join(HERE, 'generate-migration-inventory.mjs'), '--check'], { encoding: 'utf8' });
+  if (r.status !== 0) throw new Error((r.stdout || r.stderr || '').trim());
+});
+
+step('runtime script bundles compile (R06-B)', () => {
+  // Fast (~100 ms). The Dockerfile runs this too, but gating it here catches the likely
+  // regression early: a `../lib` import into the scheduler/CLI graph that drags in a
+  // browser/Next-only module — build-runtime-scripts.mjs exits non-zero if anything outside
+  // its allow-list (@prisma/client, argon2, sharp, node:*) ends up external.
+  if (!existsSync(join(APP_ROOT, 'node_modules', 'esbuild'))) return 'skipped (no esbuild)';
+  const r = spawnSync(process.execPath, [join(HERE, 'build-runtime-scripts.mjs')], { encoding: 'utf8' });
   if (r.status !== 0) throw new Error((r.stdout || r.stderr || '').trim());
 });
 

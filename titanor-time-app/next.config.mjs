@@ -18,6 +18,16 @@ const nextConfig = {
   // Next.js's standalone output-file tracing does not always follow Prisma's
   // dynamically-loaded native query engine binary. Force it in explicitly so
   // .next/standalone actually contains it at runtime.
+  //
+  // pdfkit + fontkit are deliberately NOT in serverExternalPackages: the Turbopack
+  // build inlines them into the server chunks together with a virtual FS for
+  // pdfkit's *.afm metric files and fontkit's trie tables, so the bundle is
+  // self-contained. Marking them external instead makes node-file-trace follow
+  // their require graph and it drops CJS-only conditional deps (@noble/hashes CJS
+  // entry, restructure, unicode-properties, brotli) — a partial, broken tree. The
+  // reporting code (lib/reporting/*-pdf.ts) always registers the embedded DejaVu
+  // TTFs from assets/ before drawing, so no dependency on a physical node_modules
+  // font layout at runtime. R06-B verifies real PDF output from the slim image.
   outputFileTracingIncludes: {
     '/api/ready': ['./node_modules/.prisma/client/**/*']
   },

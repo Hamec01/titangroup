@@ -74,16 +74,19 @@ services:
 
   # T7A.10B — permanent attendance auto-submit scheduler. Deliberately has NO `build:` of its own —
   # `image: titanor-time-app:latest` reuses the exact image `app` builds (same code, same generated
-  # Prisma Client, same node_modules), just run with a different command. `docker compose build app`
-  # (or `up --build app`) is what actually produces this image; `scheduler` only ever consumes it.
-  # Runs `attendance:auto-submit:scheduler` (docs/titanor-time/T7A_1_ATTENDANCE_CLOCK_DESIGN.md
-  # Addendum "T7A.10B") instead of the default `node server.js`/Next.js server — this service never
-  # listens on any port and is not reachable from `lan` or the host; it only needs to reach `db`.
-  # A second replica of this service is safe (§3/§4 of the addendum) — the existing T7A.10A
-  # DB-level locking/idempotency is the source of truth, not anything scheduler-side.
+  # Prisma Client), just run with a different command. `docker compose build app` (or `up --build
+  # app`) is what actually produces this image; `scheduler` only ever consumes it.
+  # Runs the precompiled scheduler bundle (R06-B: .runtime/attendance-auto-submit-scheduler.cjs —
+  # `node`, no tsx/npx/network; see docs/titanor-time/T7A_1_ATTENDANCE_CLOCK_DESIGN.md Addendum
+  # "T7A.10B" + docs/titanor-time/R06B_DOCKER_RUNTIME_REPORT_RU.md) instead of the default
+  # `node server.js`/Next.js server — this service never listens on any port and is not reachable
+  # from `lan` or the host; it only needs to reach `db`.
+  # A second replica of this service is safe — the R06-A SchedulerLease single-writer lock makes the
+  # extra process skip its work (OVERLAPPING) instead of double-running ticks; the T7A.10A DB-level
+  # locking/idempotency remains the source of truth.
   scheduler:
     image: titanor-time-app:latest
-    command: ["npx", "tsx", "scripts/attendance-auto-submit-scheduler.ts"]
+    command: ["node", ".runtime/attendance-auto-submit-scheduler.cjs"]
     restart: unless-stopped
     init: true
 
@@ -102,12 +105,15 @@ services:
     networks:
       - internal
 
+    # R06-A state machine (HEALTHY / STARTING / HEARTBEAT_MISSING / HEARTBEAT_STALE /
+    # PROCESS_STOPPED / DB_UNAVAILABLE / SCHEMA_INCOMPATIBLE / TICK_FAILING / OVERLAPPING),
+    # read from the heartbeat file only — no DB connection. R06-B: precompiled bundle, plain `node`.
     healthcheck:
-      test: ["CMD", "npx", "tsx", "scripts/attendance-scheduler-healthcheck.ts"]
+      test: ["CMD", "node", ".runtime/attendance-scheduler-healthcheck.cjs"]
       interval: 30s
       timeout: 5s
       retries: 3
-      start_period: 30s
+      start_period: 90s
 
   db:
     image: postgres:16

@@ -23,6 +23,11 @@ pnpm-debug.log*
 /titanor-time-app/uploads/
 /uploads/
 
+# R06-B Docker build outputs — regenerated in the builder stage on every image build
+# (scripts/build-runtime-scripts.mjs, scripts/assemble-prisma-tools.mjs).
+/titanor-time-app/.runtime/
+/titanor-time-app/.prisma-tools/
+
 # Next.js auto-generates this on every build / version bump (see its own header).
 /titanor-time-app/next-env.d.ts
 /next-env.d.ts

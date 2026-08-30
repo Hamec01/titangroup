@@ -41,6 +41,9 @@
 titanor-time-app/node_modules
 titanor-time-app/.next
 titanor-time-app/*.tsbuildinfo
+# R06-B build outputs — regenerated inside the builder stage, never sent from the host.
+titanor-time-app/.runtime
+titanor-time-app/.prisma-tools
 
 # Docs, backups, uploads, review artifacts — not needed inside any image.
 /docs
