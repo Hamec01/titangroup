@@ -13,8 +13,9 @@ verify (`.runtime/gps-archive.cjs` bogus→2 + empty-key→3, retention `retenti
 off-box sync 5/5 (SHA-256) → promote → **5 VERIFIED, 0 FAILED**; файлы в
 `/mnt/250gb/titanor-time-foundation/gps-archive-store/gps-archive/2026/08/`. Scheduler retention:
 `retentionOutcome:ok retentionDeleted:0` (raw GPS >90 дн на пилоте нет). `titanor-time-gps-archive@pilot.timer`
-`enabled` (следующий ~05:10 UTC). **Открыто (вне R08):** worker-notice + политика перс. данных
-(владелец/юрист); R08.1 (читаемый TXT/CSV экспорт из архива по запросу, ТЗ §9.4).
+`enabled` (следующий ~05:10 UTC). **Открыто (вне R08, не блокер):** worker-notice + политика перс.
+данных — внутреннее приложение фирмы, текст утверждает владелец бизнеса / ответственное лицо
+Titanor; R08.1 (читаемый TXT/CSV экспорт из архива по запросу, ТЗ §9.4).
 Commits `9bcf16f` (миграция 98) · `19544cc` (`lib/gps-archive`) · `f071482` (`lib/gps-archive-run`)
 · `5feba91` (retention gate) · `07cb4ed` (runner `.runtime/gps-archive.cjs`) · `7253bf9`
 (host-скрипт + systemd) · `64070fc` (backup bundle) · `506321e` (e2e).
@@ -43,7 +44,8 @@ Commits `9bcf16f` (миграция 98) · `19544cc` (`lib/gps-archive`) · `f07
   сохраняет raw). `_test-attendance-presence` (23) переработан под gate. `run-tests.mjs` инжектит
   `GPS_ARCHIVE_ENCRYPTION_KEY`.
 - **Осознанно не сделано:** **R08.1** — читаемый TXT/CSV экспорт из архива по запросу (ТЗ §9.4).
-  Worker-notice + политика перс. данных (бессрочный архив точных координат) — задача владельца/юриста.
+  Worker-notice + политика перс. данных (бессрочный архив точных координат) — внутреннее приложение
+  фирмы, текст утверждает владелец бизнеса / ответственное лицо Titanor (не блокер).
 - **Owner action items перед деплоем** — `R08_GPS_ARCHIVE_REPORT_RU.md` §6: генерация ключа
   (`openssl rand -base64 32`), деплой образа с миграцией 98, systemd install (root), disposable-verify
   на pilot dump (агент), текст уведомления работникам.

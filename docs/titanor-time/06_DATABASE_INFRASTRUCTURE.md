@@ -275,13 +275,14 @@ database (zero errors, summed deleted counts equal the eligible set).
 for `"event":"attendance_location_retention"` lines. No separate health signal — retention shares the
 scheduler container's existing heartbeat/health semantics from §11 unchanged.
 
-**Legal/privacy note.** Whether 90 days is the *correct* retention window for raw GPS coordinates
-under applicable privacy law is an external owner/legal decision, not something this slice determines
-or changes. R08 adds the long-term encrypted archive: the operational DB holds precise coordinates
-for 90 days, but the AES-256-GCM archive on the off-box store is kept **indefinitely** by owner
+**Privacy note.** This is an internal company application. Whether 90 days is the *correct*
+retention window for raw GPS coordinates is a decision for the Titanor business owner / responsible
+person, not something this slice determines or changes — there is no external "legal sign-off"
+blocker. R08 adds the long-term encrypted archive: the operational DB holds precise coordinates for
+90 days, but the AES-256-GCM archive on the off-box store is kept **indefinitely** by owner
 decision, so the effective retention of precise coordinates is indefinite and must be stated in the
-worker notice and the personal-data-processing policy (TZ §9.5 — an open owner/legal action, tracked
-in `R08_GPS_ARCHIVE_REPORT_RU.md` §6).
+worker notice and the personal-data-processing policy, **which the responsible Titanor person must
+approve** (TZ §9.5 — an open action, tracked in `R08_GPS_ARCHIVE_REPORT_RU.md` §6).
 
 **Full pilot E2E, including this section's own backup/restore procedure (§6-7), is now done** — see
 T7A.10C.2 below; production `titanor-time-app-1`/`titanor-time-db-1` still has no `scheduler`

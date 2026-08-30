@@ -37,7 +37,7 @@
 | удалять raw >90 дней только после archive PASS + verify | ✅ `runAttendanceLocationRetention` удаляет строку, только если её UTC reading-день полностью VERIFIED и нет строки за день позже watermark. Плюс DB-trigger `trg_clock_event_location_retention_delete_guard` (90-дневный пол) не изменён |
 | при ошибке архива retention останавливается, данные остаются | ✅ WRITTEN/FAILED/нет архива/pending amendment → день держится. Нет/битый `GPS_ARCHIVE_ENCRYPTION_KEY` → retention не удаляет НИЧЕГО (`gateSkippedReason: 'skipped_no_archive_key'`) |
 | GPS archive manifest в общий backup bundle | ✅ `backup-titanor-time.sh` → `gps-archive-manifest.json` (guarded `to_regclass`), в `SHA256SUMS`; `restore-test` проверяет валидный JSON |
-| обновить privacy/retention documentation + owner-facing policy | 🟡 §«Политика хранения» ниже + `06_DATABASE_INFRASTRUCTURE.md` §12 обновлены. **Текст уведомления работников + политика обработки перс. данных — задача владельца/юриста** (см. Owner action items) |
+| обновить privacy/retention documentation + owner-facing policy | 🟡 §«Политика хранения» ниже + `06_DATABASE_INFRASTRUCTURE.md` §12 обновлены. **Текст уведомления работников + политика обработки перс. данных утверждает ответственное лицо Titanor** (внутреннее приложение фирмы, не блокер; см. Owner action items) |
 
 **PASS-критерий R08** (архив расшифровывается в disposable проверке, counts совпадают, failure
 simulation сохраняет исходные DB records) — **выполнен**: `_test-gps-archive-e2e.ts` делает полный
@@ -175,7 +175,8 @@ deploy-6a47ed3.sh`). Проверка на `pg_dump` пилота, восста�
    `titanor-time-gps-archive@pilot.timer` `enabled`, первый ручной прогон PASS (5/5 VERIFIED).
 4. **Disposable-verify на pilot dump** (агент): ✅ PASS 17/0 — §5a.
 5. **Написать и показать работникам** текст об удержании координат (90 дней БД + бессрочный
-   зашифрованный архив) — уведомление + политика перс. данных. 🟡 **открыто (владелец/юрист).**
+   зашифрованный архив) — уведомление + политика перс. данных. 🟡 **открыто (не блокер): внутреннее
+   приложение фирмы, текст утверждает владелец бизнеса / ответственное лицо Titanor.**
 
 ## 7. Осознанно не сделано / follow-up
 
@@ -190,7 +191,8 @@ deploy-6a47ed3.sh`). Проверка на `pg_dump` пилота, восста�
 
 - **R08 закрыт (DEPLOYED + PASS).** B09 закрыт. Rollback-контейнеры `-pre-6a47ed3` сохранены до
   разрешения владельца на удаление.
-- Открыто (вне R08): текст уведомления работников + политика перс. данных (владелец/юрист); R08.1
+- Открыто (вне R08, не блокер): текст уведомления работников + политика перс. данных — внутреннее
+  приложение фирмы, утверждает владелец бизнеса / ответственное лицо Titanor; R08.1
   (читаемый TXT/CSV экспорт из архива по запросу, ТЗ §9.4); `unarchivedOldDayCount` в scheduler
   health — при R09.
 - Следующий этап — по указанию владельца: **R09 (UX WORKER/FOREMAN/ADMIN)** + свёртка R07-A.1
