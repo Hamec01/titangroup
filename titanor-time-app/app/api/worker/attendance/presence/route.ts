@@ -41,7 +41,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   if (!authenticated.user.employeeId) {
     return jsonError(403, { code: 'NO_EMPLOYEE_PROFILE', message: 'This user has no linked employee profile.' }, requestId);
   }
-  if (!checkRateLimit(`actor:${authenticated.user.id}:${ROUTE_TEMPLATE}`, RATE_LIMIT.limit, RATE_LIMIT.windowMs)) {
+  if (!(await checkRateLimit(`actor:${authenticated.user.id}:${ROUTE_TEMPLATE}`, RATE_LIMIT.limit, RATE_LIMIT.windowMs))) {
     return jsonError(429, { code: 'RATE_LIMITED', message: 'Too many presence samples. Try again later.' }, requestId);
   }
 

@@ -5,6 +5,7 @@ import { resolveAuthenticatedSession } from '@/lib/auth';
 import { SESSION_COOKIE_NAME } from '@/lib/session';
 import { changeAccountPassword, MAX_PASSWORD_LENGTH } from '@/lib/account';
 import { checkRateLimit } from '@/lib/rate-limit';
+import { clientRateLimitKey } from '@/lib/client-ip';
 
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
@@ -13,10 +14,6 @@ export const revalidate = 0;
 // (TZ §6.1). Keeps this session; every other session is revoked.
 const REQUIRED_CSRF_HEADER_VALUE = 'titanor-time';
 const IP_RATE_LIMIT = { limit: 10, windowMs: 15 * 60 * 1000 };
-
-function clientIp(request: NextRequest): string | null {
-  return request.headers.get('x-forwarded-for')?.split(',')[0]?.trim() || null;
-}
 
 export async function POST(request: NextRequest): Promise<NextResponse> {
   const requestId = randomUUID();
@@ -27,7 +24,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   const session = await resolveAuthenticatedSession(request.cookies.get(SESSION_COOKIE_NAME)?.value);
   if (!session) return jsonError(401, { code: 'NOT_AUTHENTICATED', message: 'No active session.' }, requestId);
 
-  if (!checkRateLimit(`change-password-ip:${clientIp(request) ?? 'unknown'}`, IP_RATE_LIMIT.limit, IP_RATE_LIMIT.windowMs)) {
+  if (!(await checkRateLimit(`change-password-ip:${clientRateLimitKey(request)}`, IP_RATE_LIMIT.limit, IP_RATE_LIMIT.windowMs))) {
     return jsonError(429, { code: 'RATE_LIMITED', message: 'Too many attempts. Try again later.' }, requestId);
   }
 

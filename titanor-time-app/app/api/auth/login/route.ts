@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { jsonError, successHeaders } from '@/lib/api-error';
 import { checkRateLimit } from '@/lib/rate-limit';
+import { clientIp } from '@/lib/client-ip';
 import { createAuditEvent } from '@/lib/audit';
 import {
   SESSION_COOKIE_NAME,
@@ -28,12 +29,6 @@ const IP_RATE_LIMIT = { limit: 50, windowMs: 15 * 60 * 1000 };
 // enumerate valid usernames/emails by response timing.
 const DUMMY_PASSWORD_HASH =
   '$argon2id$v=19$m=65536,p=4,t=3$hoBnOzNYf8zPdloDwuu8aw$M+azLBT3hoCxLpSpugR5fKKGiB1zfP1xvxuEgSfB8nA';
-
-function clientIp(request: NextRequest): string | null {
-  const forwardedFor = request.headers.get('x-forwarded-for');
-  const first = forwardedFor?.split(',')[0]?.trim();
-  return first && first.length > 0 ? first : null;
-}
 
 // Shared by both INVALID_CREDENTIALS paths below (unknown identifier, wrong
 // password) — deliberately identical in both cases: no identifier, email,
@@ -108,12 +103,10 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   const normalizedIdentifier = (identifier as string).trim().toLowerCase();
   const ip = clientIp(request);
 
-  const identifierAllowed = checkRateLimit(
-    `identifier:${normalizedIdentifier}`,
-    IDENTIFIER_RATE_LIMIT.limit,
-    IDENTIFIER_RATE_LIMIT.windowMs
-  );
-  const ipAllowed = checkRateLimit(`ip:${ip ?? 'unknown'}`, IP_RATE_LIMIT.limit, IP_RATE_LIMIT.windowMs);
+  const [identifierAllowed, ipAllowed] = await Promise.all([
+    checkRateLimit(`identifier:${normalizedIdentifier}`, IDENTIFIER_RATE_LIMIT.limit, IDENTIFIER_RATE_LIMIT.windowMs),
+    checkRateLimit(`ip:${ip ?? 'unknown'}`, IP_RATE_LIMIT.limit, IP_RATE_LIMIT.windowMs)
+  ]);
   if (!identifierAllowed || !ipAllowed) {
     return jsonError(
       429,

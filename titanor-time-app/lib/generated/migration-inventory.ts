@@ -100,13 +100,14 @@ export const MIGRATION_INVENTORY = [
   '20260829210000_add_outside_geofence_checkin',
   '20260830090000_account_recovery_admin_assisted',
   '20260830100000_seed_session_own_permissions',
-  '20260830120000_add_scheduler_lease'
+  '20260830120000_add_scheduler_lease',
+  '20260830140000_add_rate_limit_counter'
 ] as const;
 
-export const MIGRATION_INVENTORY_COUNT = 96;
+export const MIGRATION_INVENTORY_COUNT = 97;
 
 /** sha256 of the newline-joined sorted names — a cheap single-value schema-version fingerprint. */
-export const MIGRATION_INVENTORY_CHECKSUM = 'ad71b7723f142f9af391c046b1d97f9cb03e1b4e5dd86c9e569aad984a391f6c';
+export const MIGRATION_INVENTORY_CHECKSUM = '3d85653f76f2ff035f6f4decf1dedb5b30cb4a9b7e827156e1148fcfbe76adc5';
 
 /** The newest migration this build knows about (informational only — comparisons use the full set). */
-export const LATEST_KNOWN_MIGRATION = '20260830120000_add_scheduler_lease';
+export const LATEST_KNOWN_MIGRATION = '20260830140000_add_rate_limit_counter';

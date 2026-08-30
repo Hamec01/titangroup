@@ -51,6 +51,8 @@
     { "file": "_test-attendance-presence.ts", "lane": "db", "note": "recordPresenceSample geofence/dedup/skew outcomes." },
     { "file": "_test-bulk-ack-gps.ts", "lane": "db", "note": "bulkAcknowledgeGpsNotVerified scoped bulk resolve (T14)." },
     { "file": "_test-checkin-never-blocked.ts", "lane": "db", "note": "T17 — outside-geofence check-in still opens a shift and materializes hours." },
+    { "file": "_test-client-ip.ts", "lane": "unit", "note": "R07-A trusted-proxy client IP (lib/client-ip) — rightmost-minus-hops XFF parsing, forged-XFF rejection, direct-hit + CF+Caddy chains, TITANOR_TRUSTED_PROXY_HOPS env. Pure." },
+    { "file": "_test-rate-limit-db.ts", "lane": "db", "note": "R07-A shared DB-backed rate limiter (lib/rate-limit + RateLimitCounter) — window limit/reset, key isolation, atomic concurrent increments, opportunistic GC." },
     { "file": "_test-corrections.ts", "lane": "db", "note": "Correction request lifecycle." },
     { "file": "_test-csv-export-querycount.ts", "lane": "db", "note": "CSV export query-count budget." },
     { "file": "_test-csv-export.ts", "lane": "browser", "note": "HTTP against a running server (fetch to TEST_BASE_URL), no Chromium. CSV export end-to-end — batches, idempotency, corrections, races." },

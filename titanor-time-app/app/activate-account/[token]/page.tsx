@@ -2,6 +2,7 @@ import Link from 'next/link';
 import { headers } from 'next/headers';
 import { verifySystemActivationToken } from '@/lib/system-activation';
 import { checkRateLimit } from '@/lib/rate-limit';
+import { clientRateLimitKey } from '@/lib/client-ip';
 
 export const dynamic = 'force-dynamic';
 
@@ -26,9 +27,11 @@ type RouteParams = { params: Promise<{ token: string }> };
 export default async function ActivateAccountTokenPage({ params }: RouteParams) {
   const { token } = await params;
   const requestHeaders = await headers();
-  const forwardedFor = requestHeaders.get('x-forwarded-for');
-  const ip = forwardedFor?.split(',')[0]?.trim() || 'unknown';
-  const result = checkRateLimit(`activate-account-ip:${ip}`, IP_RATE_LIMIT.limit, IP_RATE_LIMIT.windowMs)
+  const result = (await checkRateLimit(
+    `activate-account-ip:${clientRateLimitKey(requestHeaders)}`,
+    IP_RATE_LIMIT.limit,
+    IP_RATE_LIMIT.windowMs
+  ))
     ? await verifySystemActivationToken(token)
     : { code: 'RATE_LIMITED' as const };
 

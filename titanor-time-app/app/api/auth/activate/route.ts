@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { NextRequest, NextResponse } from 'next/server';
 import { jsonError, successHeaders } from '@/lib/api-error';
 import { checkRateLimit } from '@/lib/rate-limit';
+import { clientRateLimitKey } from '@/lib/client-ip';
 import { verifyActivationToken } from '@/lib/activation';
 
 export const dynamic = 'force-dynamic';
@@ -14,17 +15,10 @@ export const revalidate = 0;
 // the same 72h token lifetime as the code itself is, not tied to any per-token counter.
 const IP_RATE_LIMIT = { limit: 30, windowMs: 15 * 60 * 1000 };
 
-function clientIp(request: NextRequest): string | null {
-  const forwardedFor = request.headers.get('x-forwarded-for');
-  const first = forwardedFor?.split(',')[0]?.trim();
-  return first && first.length > 0 ? first : null;
-}
-
 export async function GET(request: NextRequest): Promise<NextResponse> {
   const requestId = randomUUID();
 
-  const ip = clientIp(request);
-  if (!checkRateLimit(`activate-ip:${ip ?? 'unknown'}`, IP_RATE_LIMIT.limit, IP_RATE_LIMIT.windowMs)) {
+  if (!(await checkRateLimit(`activate-ip:${clientRateLimitKey(request)}`, IP_RATE_LIMIT.limit, IP_RATE_LIMIT.windowMs))) {
     return jsonError(429, { code: 'RATE_LIMITED', message: 'Too many attempts. Try again later.' }, requestId);
   }
 

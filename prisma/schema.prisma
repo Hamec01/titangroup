@@ -1894,6 +1894,18 @@ model SchedulerLease {
   renewedAt  DateTime @db.Timestamptz(6)
 }
 
+// R07-A — shared, restart-safe fixed-window rate limiting (lib/rate-limit.ts). One row per
+// limiter key (e.g. `ip:<addr>`, `identifier:<login>`, `actor:<userId>:<route>`); the whole
+// increment is one atomic INSERT … ON CONFLICT DO UPDATE so it is correct across app instances.
+// Rows are disposable — expired ones are ignored by the check and GC'd opportunistically.
+model RateLimitCounter {
+  key             String   @id @db.VarChar(200)
+  count           Int
+  windowExpiresAt DateTime @db.Timestamptz(6)
+
+  @@index([windowExpiresAt])
+}
+
 // §2.1 п.12 — append-only. Identity is (timesheetId, systemReopenGeneration), not cutoffAt.
 model AutoSubmissionAttempt {
   id                     String               @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid

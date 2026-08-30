@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { jsonError, successHeaders } from '@/lib/api-error';
 import { redeemAccountRecovery } from '@/lib/account-recovery';
 import { checkRateLimit } from '@/lib/rate-limit';
+import { clientIp } from '@/lib/client-ip';
 
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
@@ -14,10 +15,6 @@ export const revalidate = 0;
 const REQUIRED_CSRF_HEADER_VALUE = 'titanor-time';
 const IP_RATE_LIMIT = { limit: 10, windowMs: 15 * 60 * 1000 };
 const LOGIN_RATE_LIMIT = { limit: 5, windowMs: 15 * 60 * 1000 };
-
-function clientIp(request: NextRequest): string | null {
-  return request.headers.get('x-forwarded-for')?.split(',')[0]?.trim() || null;
-}
 
 export async function POST(request: NextRequest): Promise<NextResponse> {
   const requestId = randomUUID();
@@ -42,10 +39,11 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
 
   const ip = clientIp(request);
   const loginKey = body.login.trim().toLowerCase();
-  if (
-    !checkRateLimit(`recovery-confirm-ip:${ip ?? 'unknown'}`, IP_RATE_LIMIT.limit, IP_RATE_LIMIT.windowMs) ||
-    !checkRateLimit(`recovery-confirm-login:${loginKey}`, LOGIN_RATE_LIMIT.limit, LOGIN_RATE_LIMIT.windowMs)
-  ) {
+  const [ipAllowed, loginAllowed] = await Promise.all([
+    checkRateLimit(`recovery-confirm-ip:${ip ?? 'unknown'}`, IP_RATE_LIMIT.limit, IP_RATE_LIMIT.windowMs),
+    checkRateLimit(`recovery-confirm-login:${loginKey}`, LOGIN_RATE_LIMIT.limit, LOGIN_RATE_LIMIT.windowMs)
+  ]);
+  if (!ipAllowed || !loginAllowed) {
     return jsonError(429, { code: 'RATE_LIMITED', message: 'Too many attempts. Try again later.' }, requestId);
   }
 

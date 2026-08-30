@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { NextRequest, NextResponse } from 'next/server';
 import { jsonError, successHeaders, type ApiErrorBody } from '@/lib/api-error';
 import { checkRateLimit } from '@/lib/rate-limit';
+import { clientIp } from '@/lib/client-ip';
 import { setAccountPassword } from '@/lib/system-activation';
 import { SESSION_COOKIE_NAME, SESSION_DURATION_MS } from '@/lib/session';
 
@@ -20,12 +21,6 @@ function errorBody(body: ApiErrorBody, requestId: string): { error: ApiErrorBody
   return { error: { ...body, requestId } };
 }
 
-function clientIp(request: NextRequest): string | null {
-  const forwardedFor = request.headers.get('x-forwarded-for');
-  const first = forwardedFor?.split(',')[0]?.trim();
-  return first && first.length > 0 ? first : null;
-}
-
 export async function POST(request: NextRequest): Promise<NextResponse> {
   const requestId = randomUUID();
 
@@ -34,7 +29,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   }
 
   const ip = clientIp(request);
-  if (!checkRateLimit(`set-account-password-ip:${ip ?? 'unknown'}`, IP_RATE_LIMIT.limit, IP_RATE_LIMIT.windowMs)) {
+  if (!(await checkRateLimit(`set-account-password-ip:${ip ?? 'unknown'}`, IP_RATE_LIMIT.limit, IP_RATE_LIMIT.windowMs))) {
     return jsonError(429, { code: 'RATE_LIMITED', message: 'Too many attempts. Try again later.' }, requestId);
   }
 
