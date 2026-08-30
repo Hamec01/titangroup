@@ -142,6 +142,10 @@ jobs:
         run: npx tsc --noEmit -p tsconfig.json
       - name: Security regression tests (R07-B)
         run: npm test
+      - name: Deploy script — syntax + self-test
+        run: |
+          bash -n ops/site/deploy-site-r07b.sh
+          bash ops/site/deploy-site-r07b.sh --self-test
       - name: Build (standalone)
         run: npm run build
 

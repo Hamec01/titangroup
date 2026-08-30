@@ -55,7 +55,36 @@ SWAP_STARTED=0
 SHA=""
 
 die()  { echo "DEPLOY ABORTED: $*" >&2; exit 1; }
-http_code() { curl -s -o /dev/null -w '%{http_code}' --max-time 10 "$@" 2>/dev/null || echo 000; }
+
+# Print the HTTP status code for a request, or exactly "000" on any curl failure
+# (connection refused, DNS, timeout). Fail-closed: on failure curl itself prints "000" to stdout
+# AND exits non-zero, so a `curl ... || echo 000` form yields "000000" — which broke the
+# free-VERIFY_PORT guard below (it compares against "000"). Take curl's output only when curl
+# succeeded; otherwise emit a single "000".
+http_code() {
+  local out
+  if out=$(curl -s -o /dev/null -w '%{http_code}' --max-time 10 "$@" 2>/dev/null); then
+    printf '%s' "$out"
+  else
+    printf '000'
+  fi
+}
+
+if [ "${1:-}" = "--self-test" ]; then
+  rc=0
+  # A free port (nothing listening) must yield exactly "000" — this is the free-VERIFY_PORT guard.
+  for p in 1 2 3; do
+    c=$(http_code "http://127.0.0.1:${p}/")
+    if [ "$c" = "000" ]; then
+      echo "  ok: free port 127.0.0.1:${p} -> '${c}'"
+    else
+      echo "  FAIL: http_code for free port 127.0.0.1:${p} returned '${c}' (len ${#c}), expected exactly '000'"
+      rc=1
+    fi
+  done
+  [ "$rc" = 0 ] && echo "self-test PASS: http_code returns exactly 000 for a free port"
+  exit "$rc"
+fi
 
 wait_health() {  # $1 container  $2 timeout_s
   local c=$1 t=$2 d=0 h
@@ -104,7 +133,8 @@ if docker inspect "${LIVE}-pre-${MARK}" >/dev/null 2>&1; then
   die "${LIVE}-pre-${MARK} exists — this deploy was already attempted. Resolve first (roll back, or once satisfied remove that container BY HAND). This script never deletes rollback containers."
 fi
 docker inspect "$VERIFY" >/dev/null 2>&1 && die "$VERIFY container already exists — remove it by hand first"
-[ "$(http_code "http://127.0.0.1:${VERIFY_PORT}/")" = 000 ] || die "port ${VERIFY_PORT} is already serving something — pick another VERIFY_PORT"
+VP=$(http_code "http://127.0.0.1:${VERIFY_PORT}/")   # exactly "000" when nothing is listening
+[ "$VP" = "000" ] || die "port ${VERIFY_PORT} already answers HTTP ${VP} — free it or change VERIFY_PORT"
 docker inspect "$LIVE" >/dev/null 2>&1 || die "$LIVE is not running — nothing to swap"
 
 echo

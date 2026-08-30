@@ -134,7 +134,10 @@
 Скрипт (та же fail-closed / auto-rollback структура, что у пилота Titanor Time):
 
 1. **Guard:** `flock`; отказ, если существует `titanorgroup-web-1-pre-r07b` (скрипт никогда не
-   удаляет rollback-контейнер) или занят verify-порт.
+   удаляет rollback-контейнер) или занят verify-порт. Хелпер `http_code()` fail-closed возвращает
+   **ровно `000`** при отказе соединения (баг `curl … || echo 000` → `000000` → ложный abort на
+   свободном порту — исправлено); `bash ops/site/deploy-site-r07b.sh --self-test` + `bash -n` в
+   CI-джобе `public-site-quality`.
 2. **Repo sanity:** worktree чистый, на `feature/titanor-time-foundation`, HEAD запушен.
 3. **Baseline Titanor Time:** снимок `titanor-time-app-1` + `t97-pilot-app` + `t97-pilot-scheduler`
    (image/started/restarts), перепроверяется в конце — при любом изменении `exit 2`.
