@@ -136,7 +136,7 @@ Production cutover разрешается только после R12 и отд�
 | R05 | Security upgrade Titanor Time | R02 | Нет | **DONE + DEPLOYED на пилот 2026-08-30** (`t97-pilot-1e4dc92`; audit 8→0; регрессия 62/62; отчёт `R05_DEPENDENCY_SECURITY_RU.md`) |
 | R06 | Scheduler/readiness/Docker/operations | R01, R02, R05 | Нет | **R06-A DONE + DEPLOYED** (`t97-pilot-d15586c`). **R06-B DONE + DEPLOYED на пилот 2026-08-30** (`t97-pilot-256565a`, 792 MB было 1.79 GB): `npm ci` из lockfile, Next standalone + прекомпилированные CJS-бандлы scheduler'а + минимальное `prisma` CLI-замыкание, non-root, OCI labels, реальные healthchecks. **Инцидент R06-B.1**: при swap старый `npx tsx` scheduler убит SIGKILL → orphaned `SchedulerLease` → новый scheduler завис в `OVERLAPPING`; устранено точечным DELETE доказанно мёртвого holder'а; deploy-скрипт усилен (fail-closed verify, тело `/api/ready`, реальный exit healthcheck, Docker health обоих, детект+чистка stale-lease при переходе, flock+re-run guard, авто-rollback, `--init`). **Пилот стабилен >15 мин: оба контейнера `healthy`, scheduler `HEALTHY`, lease renew'ится, все фоновые операции идут; prod не тронут.** Отчёт `R06B_DOCKER_RUNTIME_REPORT_RU.md` (§ R06-B.1). |
 | R07 | Security hardening приложений/API | R02, R04, R05 | Нет | **R07-A DONE + РАЗВЁРНУТ на пилот 2026-08-30 (PASS)** — `t97-pilot-8724480`, DB 97/97, app+scheduler `healthy`. (`899862c`/`8f3795f`/`c413748`/`ecfb302`): (A) security headers + noindex + safe error/not-found; (B) trusted-proxy client IP `TITANOR_TRUSTED_PROXY_HOPS` + DB-backed shared rate limiter (`RateLimitCounter`, миграция 97) — **B08**; (C) `requireUuidParam` до Prisma на 26 маршрутах — **B11**; (D) `guardApiRequest` helper + `/api/auth/{session,logout,logout-all}`. Log audit — уже соответствует. PASS-критерий (70 negative-tests) + deploy-verify (security headers, rate-limit-probe cleanup, scheduler, backup on+off-box, prod unchanged). Отчёт `R07A_SECURITY_HARDENING_REPORT_RU.md`. **R07-B (публичный сайт) — DEPLOYED + PASS 2026-08-30** (`titanorgroup-web:site-3321c09`, `healthy`): admin login rate-limit + timing-safe пароль + CSRF + журнал входов; contact rate-limit + SMTP timeouts + очищенный лог; uploads magic-bytes + GIF-отказ + sharp re-encode + path-traversal; security-заголовки + `poweredByHeader:false` + `robots Disallow`. Владелец подтвердил доставку contact-письма. Rollback-контейнер `titanorgroup-web-1-pre-r07b` сохранён. Образ принёс R04 (public-site deps) + R07-B. 3 фикса pre-swap gates (`d60a125`/`2999397`/`3321c09`). Отчёт `R07B_PUBLIC_SITE_HARDENING_REPORT_RU.md`. **Остаток:** R07-A.1 (миграция ~130 маршрутов на guard, пошагово с ревью, с R09). |
-| R08 | GPS archive и безопасный retention | R01, R02, R06 | Нет | **КОД DONE 2026-08-30 (`9bcf16f`…`506321e`)** — миграция 98 `GpsArchiveDay`; `lib/gps-archive*` (AES-256-GCM+gzip, sorted-key JSONL, day manifest без координат); `.runtime/gps-archive.cjs` write/promote; `ops/titanor-time/gps-archive-titanor-time.sh` + systemd `titanor-time-gps-archive@` (05:10 UTC, staging→off-box `/mnt/250gb` c SHA-256 verify, как R01); archive-gated retention (delete только за VERIFIED+covered дни; нет ключа → 0); backup bundle `gps-archive-manifest.json`. Отдельный `GPS_ARCHIVE_ENCRYPTION_KEY` (fork). PASS-критерий выполнен (e2e). **На пилот НЕ развёрнут** — Owner action items в `R08_GPS_ARCHIVE_REPORT_RU.md` §6 (генерация ключа, миграция 98, systemd, disposable-verify, worker-notice). **Остаток:** R08.1 (читаемый TXT/CSV экспорт из архива по запросу, ТЗ §9.4). |
+| R08 | GPS archive и безопасный retention | R01, R02, R06 | Нет | **КОД DONE + disposable-verify PASS 2026-08-30, deploy-скрипт готов, на пилот НЕ развёрнут** (`9bcf16f`…`1f2b198`) — миграция 98 `GpsArchiveDay`; `lib/gps-archive*` (AES-256-GCM+gzip, sorted-key JSONL, manifest без координат); `.runtime/gps-archive.cjs` write/promote; `gps-archive-titanor-time.sh` + systemd `titanor-time-gps-archive@` (05:10 UTC, staging→off-box `/mnt/250gb` c SHA-256, как R01); archive-gated retention (delete только за VERIFIED+covered дни; нет ключа → 0); backup bundle `gps-archive-manifest.json`. Отдельный `GPS_ARCHIVE_ENCRYPTION_KEY` (добавлен владельцем). Образ `titanor-time-app:t97-pilot-6a47ed3` + `deploy-pilot-6a47ed3.sh`; disposable-verify 17/0. **Осталось владельцу:** запустить deploy-скрипт + установить systemd-таймер + worker-notice. **Остаток:** R08.1 (читаемый TXT/CSV экспорт из архива по запросу, ТЗ §9.4). |
 | R09 | WORKER/FOREMAN/ADMIN UX | R03, R05, R07 | Нет | Не начат |
 | R10 | Release candidate и полная pilot acceptance | R03–R09 | Нет | Не начат |
 | R11 | Domain/Caddy/public login preparation | R04, R10 | Caddy staging; DNS только по команде | Не начат |
@@ -450,8 +450,14 @@ R03, R04 и R05 можно разрабатывать независимо по�
 
 **PASS:** архив расшифровывается в disposable проверке, counts совпадают, failure simulation сохраняет исходные DB records.
 
-**Статус: КОД DONE 2026-08-30, PASS-критерий выполнен, на пилот НЕ развёрнут.** Отчёт
-`R08_GPS_ARCHIVE_REPORT_RU.md`. Commits `9bcf16f` (миграция 98 `GpsArchiveDay`) · `19544cc`
+**Статус: КОД DONE + disposable-verify PASS 2026-08-30, deploy-скрипт готов, на пилот НЕ развёрнут
+(владелец запускает).** Отчёт `R08_GPS_ARCHIVE_REPORT_RU.md`. Образ
+`titanor-time-app:t97-pilot-6a47ed3` + `ops/titanor-time/deploy-pilot-6a47ed3.sh` (`1f2b198`,
+байт-копия `/home/deploy/app-data/t97-pilot/deploy-6a47ed3.sh`). Владелец добавил
+`GPS_ARCHIVE_ENCRYPTION_KEY` в pilot app.env. Disposable-verify на restored pilot dump: **17/0**
+(migrate 98, `/api/ready` current, write→off-box→promote 6 VERIFIED, `.enc` расшифровывается в
+seeded-строки с точными координатами, retention удаляет ровно 3 архивированных >90д строки,
+keyless→`skipped_no_archive_key` ничего не удаляет, `t97-pilot-8724480` толерантен к схеме 98). Commits `9bcf16f` (миграция 98 `GpsArchiveDay`) · `19544cc`
 (`lib/gps-archive` — AES-256-GCM+gzip, sorted-key JSONL, day manifest без координат) · `f071482`
 (`lib/gps-archive-run` — sealable-day selection bucket по reading-дню, seal margin 2, amendment для
 поздних offline) · `5feba91` (archive-gated retention + fail-closed на отсутствие ключа) · `07cb4ed`
@@ -460,10 +466,10 @@ R03, R04 и R05 можно разрабатывать независимо по�
 (`gps-archive-manifest.json` в backup bundle) · `506321e` (e2e).
 - **Fork-решения:** host-скрипт + staging (как R01); отдельный `GPS_ARCHIVE_ENCRYPTION_KEY`; seal
   margin 2 дня; amendment-файл для поздних offline-sync.
-- **Owner action items (перед деплоем)** — `R08_GPS_ARCHIVE_REPORT_RU.md` §6: `openssl rand -base64
-  32` → `GPS_ARCHIVE_ENCRYPTION_KEY` в `app.env`; деплой образа с миграцией 98; установить systemd
-  (root); disposable-verify на pilot dump (агент); написать/показать уведомление работникам + политику
-  перс. данных (владелец/юрист).
+- **Owner action items** — `R08_GPS_ARCHIVE_REPORT_RU.md` §6: ✅ ключ добавлен; ✅ образ +
+  disposable-verify. **Осталось:** запустить `bash /home/deploy/app-data/t97-pilot/deploy-6a47ed3.sh`;
+  установить systemd `titanor-time-gps-archive@pilot.timer` (root); написать/показать уведомление
+  работникам + политику перс. данных (владелец/юрист).
 - **Остаток:** R08.1 — читаемый TXT/CSV экспорт из архива по запросу (ТЗ §9.4), отдельная задача.
 
 ---
