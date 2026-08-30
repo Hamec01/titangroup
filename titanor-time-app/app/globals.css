@@ -25,6 +25,13 @@ body {
   min-height: 100%;
 }
 
+/* R09.6 — the page body never scrolls sideways. Wide content (tables, code) scrolls inside its
+   own .worker-table-scroll / overflow-x container instead. */
+html,
+body {
+  overflow-x: hidden;
+}
+
 body {
   background:
     radial-gradient(circle at top, rgba(82, 130, 168, 0.14), transparent 30%),
@@ -167,11 +174,15 @@ button:disabled {
   color: var(--text-soft);
   font-size: 0.82rem;
   text-align: right;
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 
+/* R09.6 — the header action row wraps instead of pushing the page wide on a narrow screen. */
 .admin-header-actions {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 16px;
 }
 

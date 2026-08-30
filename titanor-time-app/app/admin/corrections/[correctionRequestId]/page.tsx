@@ -107,6 +107,7 @@ export default async function AdminCorrectionDetailPage({ params }: RouteParams)
         {correction.days.length === 0 ? (
           <p>{correction.status === 'PENDING' ? localeText(locale, 'Open the draft to start editing.', 'Откройте черновик, чтобы начать редактирование.') : localeText(locale, 'No days to show.', 'Нет дней для отображения.')}</p>
         ) : (
+          <div className="worker-table-scroll">
           <table className="worker-table">
             <thead>
               <tr>
@@ -137,6 +138,7 @@ export default async function AdminCorrectionDetailPage({ params }: RouteParams)
               ))}
             </tbody>
           </table>
+          </div>
         )}
 
         <CorrectionActions

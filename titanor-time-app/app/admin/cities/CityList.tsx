@@ -56,6 +56,7 @@ export function CityList({ cities, canDelete }: { cities: CityItem[]; canDelete:
   return (
     <>
       {errorMessage ? <p className="login-error" role="alert">{errorMessage}</p> : null}
+      <div className="worker-table-scroll">
       <table className="worker-table">
         <thead>
           <tr>
@@ -80,6 +81,7 @@ export function CityList({ cities, canDelete }: { cities: CityItem[]; canDelete:
           ))}
         </tbody>
       </table>
+      </div>
     </>
   );
 }

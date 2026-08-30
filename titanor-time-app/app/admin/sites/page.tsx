@@ -43,6 +43,7 @@ export default async function AdminSitesPage() {
         {items.length === 0 ? (
           <p>{s.sites.empty}</p>
         ) : (
+          <div className="worker-table-scroll">
           <table className="worker-table">
             <thead>
               <tr>
@@ -63,6 +64,7 @@ export default async function AdminSitesPage() {
               ))}
             </tbody>
           </table>
+          </div>
         )}
       </div>
     </main>

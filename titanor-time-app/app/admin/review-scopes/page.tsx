@@ -43,6 +43,7 @@ export default async function AdminReviewScopesPage() {
         {items.length === 0 ? (
           <p>{localeText(locale, 'Nothing pending review.', 'Нет табелей, ожидающих проверки.')}</p>
         ) : (
+          <div className="worker-table-scroll">
           <table className="worker-table">
             <thead>
               <tr>
@@ -69,6 +70,7 @@ export default async function AdminReviewScopesPage() {
               ))}
             </tbody>
           </table>
+          </div>
         )}
       </div>
     </main>

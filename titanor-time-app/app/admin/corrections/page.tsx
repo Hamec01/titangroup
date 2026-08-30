@@ -40,6 +40,7 @@ export default async function AdminCorrectionsPage() {
         {items.length === 0 ? (
           <p>{localeText(locale, "No correction requests yet. Start one from a FINAL_APPROVED timesheet's card.", 'Запросов на корректировку пока нет. Начните с карточки окончательно одобренного табеля.')}</p>
         ) : (
+          <div className="worker-table-scroll">
           <table className="worker-table">
             <thead>
               <tr>
@@ -60,6 +61,7 @@ export default async function AdminCorrectionsPage() {
               ))}
             </tbody>
           </table>
+          </div>
         )}
       </div>
     </main>

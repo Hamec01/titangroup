@@ -84,6 +84,7 @@ export default async function AdminReviewPage({ searchParams }: RouteParams) {
         {queue.rows.length === 0 ? (
           <p>{ru ? 'Нет табелей на утверждении.' : 'Nothing awaiting approval.'}</p>
         ) : (
+          <div className="worker-table-scroll">
           <table className="worker-table">
             <thead>
               <tr>
@@ -129,6 +130,7 @@ export default async function AdminReviewPage({ searchParams }: RouteParams) {
               })}
             </tbody>
           </table>
+          </div>
         )}
       </div>
 
@@ -136,6 +138,7 @@ export default async function AdminReviewPage({ searchParams }: RouteParams) {
         <div className="setup-card worker-card">
           <details>
             <summary>{ru ? `Ещё не сдали: ${queue.notSubmitted.length}` : `Not submitted yet: ${queue.notSubmitted.length}`}</summary>
+            <div className="worker-table-scroll">
             <table className="worker-table" style={{ marginTop: 8 }}>
               <thead>
                 <tr>
@@ -158,6 +161,7 @@ export default async function AdminReviewPage({ searchParams }: RouteParams) {
                 ))}
               </tbody>
             </table>
+            </div>
           </details>
         </div>
       ) : null}

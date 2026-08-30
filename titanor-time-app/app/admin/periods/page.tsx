@@ -45,6 +45,7 @@ export default async function AdminPeriodsPage() {
         {periods.length === 0 ? (
           <p>{s.periods.empty}</p>
         ) : (
+          <div className="worker-table-scroll">
           <table className="worker-table">
             <thead>
               <tr>
@@ -69,6 +70,7 @@ export default async function AdminPeriodsPage() {
               ))}
             </tbody>
           </table>
+          </div>
         )}
       </div>
     </main>

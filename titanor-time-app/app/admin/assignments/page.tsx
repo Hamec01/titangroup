@@ -47,6 +47,7 @@ export default async function AdminAssignmentsPage() {
         {items.length === 0 ? (
           <p>{s.assignments.empty}</p>
         ) : (
+          <div className="worker-table-scroll">
           <table className="worker-table">
             <thead>
               <tr>
@@ -81,6 +82,7 @@ export default async function AdminAssignmentsPage() {
               ))}
             </tbody>
           </table>
+          </div>
         )}
       </div>
     </main>

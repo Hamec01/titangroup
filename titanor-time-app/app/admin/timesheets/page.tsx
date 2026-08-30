@@ -65,6 +65,7 @@ export default async function AdminTimesheetsPage({ searchParams }: RouteParams)
         {items.length === 0 ? (
           <p>{ru ? 'Пусто.' : 'Nothing here.'}</p>
         ) : (
+          <div className="worker-table-scroll">
           <table className="worker-table">
             <thead>
               <tr>
@@ -85,6 +86,7 @@ export default async function AdminTimesheetsPage({ searchParams }: RouteParams)
               ))}
             </tbody>
           </table>
+          </div>
         )}
       </div>
     </main>

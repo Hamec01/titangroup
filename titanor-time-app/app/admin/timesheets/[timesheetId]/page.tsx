@@ -73,6 +73,7 @@ export default async function AdminTimesheetCardPage({ params }: RouteParams) {
         {card.days.length === 0 ? (
           <p>{localeText(locale, 'No submitted version yet.', 'Отправленной версии пока нет.')}</p>
         ) : (
+          <div className="worker-table-scroll">
           <table className="worker-table">
             <thead>
               <tr>
@@ -99,6 +100,7 @@ export default async function AdminTimesheetCardPage({ params }: RouteParams) {
               ))}
             </tbody>
           </table>
+          </div>
         )}
 
         {card.status === 'SUBMITTED' || card.status === 'FOREMAN_APPROVED' ? (
