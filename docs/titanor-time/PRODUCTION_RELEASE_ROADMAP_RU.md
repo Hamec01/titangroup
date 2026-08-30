@@ -134,7 +134,7 @@ Production cutover разрешается только после R12 и отд�
 | R03 | Profiles и recovery без SMTP | R01, R02 | Нет | **DONE + DEPLOYED на пилот 2026-08-30** (`t97-pilot-22e8b12`→`1e4dc92`; регрессия 62/62; отчёт `R03_ACCOUNT_RECOVERY_RU.md`) |
 | R04 | Security upgrade публичного сайта | R02 | Нет | **DONE** — `105680d` audit 8→0; **R04.1 `27e65cb`** — Vercel Preview regression (`output:'standalone'`×Vercel) исправлена, Preview `success`, CI 6/6. Отчёты `R04_DEPENDENCY_SECURITY_PUBLIC_SITE_RU.md` + `R04_1_VERCEL_PREVIEW_REPORT_RU.md`. Деплой сайта — отдельно. |
 | R05 | Security upgrade Titanor Time | R02 | Нет | **DONE + DEPLOYED на пилот 2026-08-30** (`t97-pilot-1e4dc92`; audit 8→0; регрессия 62/62; отчёт `R05_DEPENDENCY_SECURITY_RU.md`) |
-| R06 | Scheduler/readiness/Docker/operations | R01, R02, R05 | Нет | **R06-A DONE + DEPLOYED на пилот 2026-08-30** (`t97-pilot-d15586c`, DB 96). **R06-B DONE, НЕ развёрнут** (`256565a`): один образ `t97-pilot-256565a` (792 MB, было 1.79 GB), `npm ci` из lockfile, Next standalone + прекомпилированные CJS-бандлы scheduler'а + минимальное `prisma` CLI-замыкание, non-root, OCI labels, реальные healthchecks; verify на одноразовом стеке (migrate/web/scheduler/graceful/uploads/PDF) + typecheck/lint/unit 12/db 54/scheduler 5 зелёные; prod не тронут. Отчёты `R06A_…` / `R06B_DOCKER_RUNTIME_REPORT_RU.md`. Deploy-скрипт `/home/deploy/app-data/t97-pilot/deploy-256565a.sh` — **владельцу запустить**. |
+| R06 | Scheduler/readiness/Docker/operations | R01, R02, R05 | Нет | **R06-A DONE + DEPLOYED** (`t97-pilot-d15586c`). **R06-B DONE + DEPLOYED на пилот 2026-08-30** (`t97-pilot-256565a`, 792 MB было 1.79 GB): `npm ci` из lockfile, Next standalone + прекомпилированные CJS-бандлы scheduler'а + минимальное `prisma` CLI-замыкание, non-root, OCI labels, реальные healthchecks. **Инцидент R06-B.1**: при swap старый `npx tsx` scheduler убит SIGKILL → orphaned `SchedulerLease` → новый scheduler завис в `OVERLAPPING`; устранено точечным DELETE доказанно мёртвого holder'а; deploy-скрипт усилен (fail-closed verify, тело `/api/ready`, реальный exit healthcheck, Docker health обоих, детект+чистка stale-lease при переходе, flock+re-run guard, авто-rollback, `--init`). **Пилот стабилен >15 мин: оба контейнера `healthy`, scheduler `HEALTHY`, lease renew'ится, все фоновые операции идут; prod не тронут.** Отчёт `R06B_DOCKER_RUNTIME_REPORT_RU.md` (§ R06-B.1). |
 | R07 | Security hardening приложений/API | R02, R04, R05 | Нет | Не начат |
 | R08 | GPS archive и безопасный retention | R01, R02, R06 | Нет | Не начат |
 | R09 | WORKER/FOREMAN/ADMIN UX | R03, R05, R07 | Нет | Не начат |
@@ -334,13 +334,19 @@ R03, R04 и R05 можно разрабатывать независимо по�
 **Статус:**
 - **R06-A** (`8414d5f`, `b9ce061`) — done + развёрнут на пилот (`t97-pilot-d15586c`).
   Отчёт `R06A_READINESS_SCHEDULER_REPORT_RU.md`.
-- **R06-B** (`256565a`) — done, **не развёрнут**. `npm ci` из lockfile; runner = Next standalone
-  + прекомпилированные CJS-бандлы (`scripts/build-runtime-scripts.mjs`) + минимальное `prisma`
-  CLI-замыкание (`scripts/assemble-prisma-tools.mjs`); нет `tsx`/dev `node_modules`; non-root;
-  OCI labels; `compose` scheduler healthcheck/command на бандл; lint-gate на компиляцию бандлов.
-  Образ `t97-pilot-256565a` (792 MB / 1.79 GB). Verify на одноразовом стеке + regression suite
-  зелёные. Отчёт `R06B_DOCKER_RUNTIME_REPORT_RU.md`, deploy-скрипт
-  `/home/deploy/app-data/t97-pilot/deploy-256565a.sh` (владельцу).
+- **R06-B** (`256565a`) — done + **развёрнут на пилот 2026-08-30**. `npm ci` из lockfile; runner =
+  Next standalone + прекомпилированные CJS-бандлы (`scripts/build-runtime-scripts.mjs`) +
+  минимальное `prisma` CLI-замыкание (`scripts/assemble-prisma-tools.mjs`); нет `tsx`/dev
+  `node_modules`; non-root; OCI labels; `compose` scheduler healthcheck/command на бандл;
+  lint-gate на компиляцию бандлов. Образ `t97-pilot-256565a` (792 MB / 1.79 GB).
+- **R06-B.1** (`ops/titanor-time/deploy-pilot-256565a.sh`) — при первом деплое новый scheduler
+  завис в `OVERLAPPING`: старый `sh -c 'npx tsx …'` scheduler убит SIGKILL (npx не пробросил
+  SIGTERM) → `releaseLease` не отработал → orphaned `SchedulerLease` до 90-мин TTL. Устранено
+  точечным `DELETE` доказанно мёртвого holder'а (read-only проверка: контейнер exited/pid 0, нет
+  соединений). Deploy-скрипт усилен: fail-closed verify (тело `/api/ready`, реальный exit
+  healthcheck, Docker health обоих контейнеров, свежесть heartbeat/lease), детект+точечная
+  чистка stale-lease при переходе, flock + re-run guard (не удаляет rollback-контейнеры),
+  авто-rollback после неудачного swap, `--init`. Пилот стабилен. Отчёт § R06-B.1.
 
 ---
 

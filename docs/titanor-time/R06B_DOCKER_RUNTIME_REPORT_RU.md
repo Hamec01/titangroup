@@ -4,12 +4,15 @@
 - **Дата:** 2026-08-30.
 - **Не затронуто:** production (`titanor-time-app-1` / `titanor-time-scheduler-1` / `titanor-time-db-1`,
   image `daa2edbb`, `StartedAt 2026-08-21T19:40:56Z`, `RestartCount 0` — до и после идентично),
-  live public site, Caddy, Cloudflare DNS. Pilot deploy **не выполнялся** — образ и скрипт
-  подготовлены, остановка перед R07. Бизнес-логика, схема БД, permissions, UI не менялись.
+  live public site, Caddy, Cloudflare DNS. Бизнес-логика, схема БД, permissions, UI не менялись.
 - **Commit:** `256565a` (Dockerfile + бандлы + compose + lint gate). Git SHA кандидата: `256565a`.
 - **Кандидат образа:** `titanor-time-app:t97-pilot-256565a`
   `sha256:5db16a265ffb1c8cd002450897c9cf36f56441f01f6b5ba2d9ebe55db57333ff` — **792 MB**
   (было 1.79 GB), unique layers **455 MB** (было 1.45 GB).
+- **Статус деплоя:** владелец запустил `deploy-256565a.sh` 2026-08-30 ~12:52. Swap прошёл, но
+  scheduler завис в `OVERLAPPING` (см. **§R06-B.1** ниже — orphaned `SchedulerLease` от старого
+  `npx tsx` scheduler'а, убитого SIGKILL). Исправлено точечно + deploy-скрипт усилен. **Пилот
+  сейчас на `t97-pilot-256565a`, оба контейнера `healthy`, scheduler `HEALTHY`.**
 
 ---
 
@@ -155,8 +158,8 @@ compose — `path.join(process.cwd(), 'uploads', 'employees')` в `lib/employee-
 
 ## 4. Verification — одноразовый стек (ТЗ §17, пункт 13)
 
-Всё на выброшенном PostgreSQL 16 + выброшенной сети. Production и pilot контейнеры/БД не
-трогались.
+Всё на выброшенном PostgreSQL 16 + выброшенной сети (до деплоя). Production и pilot контейнеры/БД
+на этом этапе не трогались. Реальный pilot-деплой + его исправление — § R06-B.1.
 
 | проверка | результат |
 |---|---|
@@ -202,41 +205,96 @@ lint + build) · `titanor-time-tests` (unit + db + scheduler) · `titanor-time-m
 ## 6. Кандидат + deploy script (ТЗ §17, пункт 16)
 
 - Образ: `titanor-time-app:t97-pilot-256565a` (digest в шапке).
-- Скрипт: **`/home/deploy/app-data/t97-pilot/deploy-256565a.sh`**
-  1. проверка наличия + labels кандидата;
-  2. **production baseline guard** — фиксирует и в конце сверяет `titanor-time-app-1`
-     image / StartedAt / RestartCount + `:latest` id; любое расхождение → `exit 2`;
-  3. **обязательный pre-deploy backup** (`ops/titanor-time/backup-titanor-time.sh pre-deploy`);
-  4. `migrate deploy` через запечённый `.prisma-tools` (ожидается no-op) + `migrate status` = 96 / up to date;
-  5. пересоздание `t97-pilot-app` (тот же `node server.js`, `-p 127.0.0.1:3297:3000`,
-     `-v …/uploads:/app/uploads`, `--health-cmd`) — rollback-контейнер `t97-pilot-app-pre-256565a`;
-  6. пересоздание `t97-pilot-scheduler` с **graceful stop** и новой командой
-     `node .runtime/attendance-auto-submit-scheduler.cjs` + `--health-cmd
-     'node .runtime/attendance-scheduler-healthcheck.cjs'` — rollback-контейнер
-     `t97-pilot-scheduler-pre-256565a`;
-  7. verify: HTTP (`/api/ready` 200 `schema:current`, `/api/health` `/login` `/reset-password`,
-     внешний `/login`), PDF-ассеты, scheduler heartbeat + healthcheck exit 0 + `ok` tick,
-     SchedulerLease (один holder), container health, DB counters;
-  8. повторная проверка production baseline;
-  9. печать rollback-инструкции (назад к `t97-pilot-d15586c`; `-pre-256565a` контейнеры
-     сохраняют старый образ и старые команды).
-- **Скрипт агентом не запускается.** Старые образы и rollback-контейнеры не удаляются.
+- Скрипт: **`/home/deploy/app-data/t97-pilot/deploy-256565a.sh`** (канонический источник в репо —
+  `ops/titanor-time/deploy-pilot-256565a.sh`, копии байт-в-байт). Усилен после инцидента R06-B.1
+  (§ ниже). Кратко:
+  0. **flock + state guard** — второй запуск = no-op (если оба контейнера уже на образе) или
+     жёсткий отказ (если остались `-pre-256565a` rollback-контейнеры от прошлой попытки; их
+     скрипт **никогда не удаляет**) или отказ при half-swapped состоянии;
+  1. кандидат присутствует и `revision`-label == `256565a`;
+  2. preflight (env, `DATABASE_URL`, R03-secret, сеть, БД healthy, app отвечает на `:3297`);
+  3. **production baseline guard** — фиксирует и в конце сверяет `titanor-time-app-1`
+     image/StartedAt/RestartCount + `titanor-time-scheduler-1` StartedAt + `:latest` id;
+     расхождение → `exit 2`;
+  4. **обязательный pre-deploy backup** (fail-closed: проверяется наличие `SHA256SUMS`);
+  5. `migrate deploy` через запечённый `.prisma-tools` + `migrate status` **assert** «up to date»
+     + `psql` **assert** applied == 96, failed == 0;
+  6. **swap с автоматическим rollback** при любой ошибке: пересоздание `t97-pilot-app`
+     (`--init`, `node server.js`) и `t97-pilot-scheduler` (`--init`,
+     `node .runtime/attendance-auto-submit-scheduler.cjs`); **обработка stale-lease** — если после
+     graceful-stop старого scheduler'а `SchedulerLease` держит именно его hostname, а контейнер
+     доказанно мёртв (`Running=false`, `Pid=0`, ни один живой контейнер не носит этот hostname) →
+     точечный `DELETE ... WHERE name='attendance-scheduler' AND holderId='<точное значение>'`;
+  7. **fail-closed verify** (любой сбой → rollback → `exit 1`): app Docker health `healthy`;
+     `/api/ready` == 200 **и тело** `status=ready` + `schema=current` + `applied=expected=96`;
+     `/api/health` == 200; `/login` `/reset-password` не 5xx; PDF-ассеты в образе; scheduler —
+     lease захвачен **и активно renew'ится новым** holder'ом, heartbeat `lastOutcome=ok` +
+     `consecutiveFailures=0`, healthcheck **реальный exit 0** (без `; echo`), Docker health
+     `healthy`, все 4 фоновые операции в логах с момента старта, нет `SCHEDULER_LEASE_HELD_BY_ANOTHER`;
+  8. повторная проверка production baseline.
+- **Скрипт агентом повторно не запускается.** Старые образы и rollback-контейнеры не удаляются.
 
 ## 7. Точная команда владельцу
 
+Пилот уже на `t97-pilot-256565a` (владелец запустил скрипт, инцидент R06-B.1 устранён вручную).
+Повторно запускать `deploy-256565a.sh` **не нужно** — усиленный скрипт при повторе откажет
+(остались `-pre-256565a` rollback-контейнеры). Когда решите, что откат больше не нужен:
+
 ```bash
-bash /home/deploy/app-data/t97-pilot/deploy-256565a.sh
+docker rm -f t97-pilot-app-pre-256565a t97-pilot-scheduler-pre-256565a
 ```
 
-Схема БД не меняется (96 → 96). Скрипт: guard + backup → `migrate deploy` (no-op) → swap
-`t97-pilot-app` и `t97-pilot-scheduler` на `t97-pilot-256565a` → verify → сверка prod baseline
-→ rollback-инструкция. Рекомендованная ручная проверка после деплоя: скачать один
-Customer-hours / Custom-report PDF из пилота и открыть. Пришлите вывод — сверю.
+(до тех пор они — точка отката на `t97-pilot-d15586c`). Рекомендованная проверка: скачать один
+Customer-hours / Custom-report PDF из пилота и открыть.
+
+## R06-B.1 — инцидент при первом деплое и его устранение
+
+**Что произошло.** Владелец запустил `deploy-256565a.sh` (первая версия). Swap `t97-pilot-app`
+прошёл штатно (`healthy`, `/api/ready` 200 `schema:current` 96/96). Новый scheduler-контейнер
+`dc350bb4522a` поднялся, но каждый tick писал `SCHEDULER_LEASE_HELD_BY_ANOTHER` → состояние
+`OVERLAPPING`, healthcheck exit 1, `unhealthy`, фоновые операции не выполнялись.
+
+**Корневая причина.** Старый scheduler (`t97-pilot-d15586c`) запускался как
+`sh -c 'npx tsx scripts/attendance-auto-submit-scheduler.ts'` **без `--init`**. При `docker stop`
+SIGTERM уходит в PID 1 = `npx`, который **не пробрасывает сигнал** дочернему `node` → через 30 с
+SIGKILL (`exit 137`) → обработчик `SIGTERM` в коде scheduler'а (доработать итерацию →
+`releaseLease` → `$disconnect` → exit 0) **не сработал** → строка `SchedulerLease`
+(`holderId=a445c42af404:31:d57e3c03`, `renewedAt=12:51:56`) осталась «живой». Новый scheduler
+видит `renewedAt` моложе TTL (90 мин) → корректно уступает (`held_by_another`) и ушёл бы в
+`OVERLAPPING` **на весь час** до истечения TTL. Это ровно тот класс хрупкости, который R06-B
+устраняет для будущих деплоев (новый scheduler = `node` как PID 1 + `--init`, SIGTERM
+обрабатывается — проверено: `docker stop -t 30` → exit 0, lease released), но **переход** со
+старого `npx tsx`-scheduler'а этим не защищён.
+
+**Устранение (точечное, read-only проверка → один targeted DELETE).**
+1. Доказано read-only: `holderId` начинается с `a445c42af404` = hostname контейнера
+   `t97-pilot-scheduler-pre-256565a` (`Id a445c42af4049aa9…`), который `exited`, `ExitCode 137`,
+   `Running=false`, `Pid=0`; ни один другой контейнер не носит этот hostname; в
+   `pg_stat_activity` нет соединений от старого scheduler'а (только app-pool `172.22.0.3` и
+   новый scheduler `172.22.0.4`).
+2. `DELETE FROM "SchedulerLease" WHERE "name"='attendance-scheduler' AND "holderId"='a445c42af404:31:d57e3c03' RETURNING …` → `DELETE 1` (та же targeted-форма, что и `releaseLease` в `lib/scheduler-lease.ts:55`).
+3. Следующий tick нового scheduler'а (`INSERT … ON CONFLICT`) — строки нет → `acquired`.
+
+**Итог (подтверждено, стабильно > 15 мин).** Lease держит и **renew'ит каждые 60 с**
+`dc350bb4522a:1:e4dae363` (новый scheduler); `heartbeat.lastOutcome=ok`,
+`consecutiveFailures=0`; healthcheck `HEALTHY` exit 0; контейнер `healthy`; 4+ подряд `ok`
+tick'а; все фоновые операции (`attendance_auto_submit_tick`, `abandoned_shift_auto_close`,
+`attendance_location_retention`, `timesheet_period_generation`) выполнились;
+`t97-pilot-app` `healthy`, `/api/ready` 200 ready 96/96; production baseline не изменён
+(`daa2edbb`, `StartedAt 2026-08-21`, restarts 0). Rollback-контейнеры `-pre-256565a` сохранены.
+
+**Усиление deploy-скрипта** — см. § 6 (пункты 0, 5, 6, 7). Ключевое: детект+точечная чистка
+stale-lease при переходе, fail-closed проверки, проверка тела `/api/ready`, реальный exit
+healthcheck, Docker health обоих контейнеров, свежесть heartbeat/lease, flock + re-run guard,
+автоматический rollback после неудачного swap, `--init` для обоих контейнеров.
 
 ## 8. Открытые пункты
 
 - Полный smoke защищённого Vercel Preview публичного сайта — R10/R12 (не блокирует).
-- Прод-БД 42 миграции (B07) — замена на pilot целиком в R14.
+- Прод-БД 42 миграции (B07) — замена на pilot целиком в R14. При R14-cutover прод-scheduler'а
+  (`sh -c npx tsx`, старый образ) действует та же stale-lease логика — R14-runbook должен её
+  учесть (либо остановить старый scheduler заранее и дождаться `releaseLease`, либо targeted
+  DELETE по доказанно мёртвому holder'у).
 - `.next/standalone` `sharp`/`@img` 45 MB — сокращаемо только отключением оптимизации
   `next/image` (изменение поведения UI) → вне R06-B.
 - Дальнейшее ужатие `.prisma-tools` (`effect` 34 MB) — только через отдельный migrator-образ;

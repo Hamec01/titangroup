@@ -1,7 +1,36 @@
 # Titanor Time — Implementation Status
 
-**`[2026-08-30]` R06-B — Docker / runtime optimization — DONE, НЕ развёрнут.** Отчёт
-`R06B_DOCKER_RUNTIME_REPORT_RU.md`. Commit `256565a`.
+**`[2026-08-30]` R06-B.1 — pilot deploy инцидент + усиление deploy-скрипта — DONE.**
+`R06B_DOCKER_RUNTIME_REPORT_RU.md` § R06-B.1. Скрипт `ops/titanor-time/deploy-pilot-256565a.sh`
+(копия в `/home/deploy/app-data/t97-pilot/deploy-256565a.sh`).
+- Владелец запустил `deploy-256565a.sh` (v1). Swap app — штатно. Новый scheduler завис в
+  `OVERLAPPING`: старый scheduler (`t97-pilot-d15586c`, `sh -c 'npx tsx …'`, без `--init`) при
+  `docker stop` получил SIGKILL (`exit 137`) — `npx` не пробросил SIGTERM в `node` → обработчик
+  `releaseLease` не отработал → строка `SchedulerLease` (`holderId=a445c42af404:31:d57e3c03`)
+  осталась «живой», новый scheduler корректно уступал до 90-мин TTL.
+- Устранение: read-only доказательство (holder-hostname = контейнер `t97-pilot-scheduler-pre-256565a`,
+  `exited`/`Running=false`/`Pid=0`; ни один живой контейнер не носит этот hostname; в
+  `pg_stat_activity` нет его соединений) → **один** targeted
+  `DELETE FROM "SchedulerLease" WHERE "name"='attendance-scheduler' AND "holderId"='a445c42af404:31:d57e3c03'`
+  (`DELETE 1`) → следующий tick нового scheduler'а `INSERT … ON CONFLICT` → `acquired`.
+- Итог (стабильно >15 мин): lease держит + renew'ит каждые 60 с `dc350bb4522a:1:e4dae363`;
+  `heartbeat.lastOutcome=ok`, `consecutiveFailures=0`; healthcheck `HEALTHY` exit 0; контейнер
+  `healthy`; 4+ `ok` tick'а; все 4 фоновые операции выполнились; `t97-pilot-app` `healthy`,
+  `/api/ready` 200 ready 96/96; production baseline не изменён; rollback-контейнеры `-pre-256565a`
+  сохранены.
+- Deploy-скрипт усилен: flock + re-run guard (не трогает rollback-контейнеры); fail-closed
+  preflight/migrate assertions; swap с авто-rollback; **детект + точечная чистка stale-lease при
+  переходе** (только для доказанно мёртвого holder'а); fail-closed verify — тело `/api/ready`
+  (`status=ready` + `schema=current` + `applied=expected=96`), HTTP 5xx/000 = провал, реальный
+  exit scheduler healthcheck (без `; echo`), Docker health обоих контейнеров, свежесть
+  heartbeat/`lastOutcome`/lease-renew, все фоновые операции с момента старта, отсутствие
+  `SCHEDULER_LEASE_HELD_BY_ANOTHER`; `--init` на обоих контейнерах. R14-runbook должен учесть ту
+  же логику для прод-scheduler'а при cutover.
+- **Пилот на `t97-pilot-256565a`. Скрипт повторно НЕ запускать** (усиленная версия при повторе
+  откажет — остались `-pre-256565a`). R07 не начат.
+
+**`[2026-08-30]` R06-B — Docker / runtime optimization — DONE + DEPLOYED (pilot).** Отчёт
+`R06B_DOCKER_RUNTIME_REPORT_RU.md`. Commit `256565a`. Развёрнут 2026-08-30 (см. R06-B.1 выше).
 - `titanor-time-app/Dockerfile` переработан: deps-стадия `npm install` → `npm ci` (lockfile
   обязателен); runner больше **не копирует** dev `node_modules` (~884 MB).
 - Web = Next.js standalone (свой trace-`node_modules`). Scheduler + healthcheck + one-shot tick
@@ -29,10 +58,8 @@
   `@types` в runner; нет secrets/`.env`/`.git`.
 - Regression: typecheck 0, lint ok, unit 12/12, db 54/54, scheduler 5/5, manifest OK, `npm run
   build` в Docker ✅.
-- Deploy-скрипт `/home/deploy/app-data/t97-pilot/deploy-256565a.sh` (backup + prod baseline
-  guard + migrate no-op + swap app/scheduler + verify + rollback) — **агентом не запущен**,
-  владельцу. Старые образы / rollback-контейнеры не удалялись. Prod (`daa2edbb`,
-  `StartedAt 2026-08-21`, restarts 0) не тронут.
+- Deploy-скрипт запущен владельцем 2026-08-30 → инцидент R06-B.1 (см. запись выше), устранён,
+  скрипт усилен. Prod (`daa2edbb`, `StartedAt 2026-08-21`, restarts 0) не тронут.
 - R07 — не начат.
 
 **`[2026-08-30]` R06-A — schema-aware readiness + scheduler diagnostics — DONE.** Отчёт
@@ -51,7 +78,7 @@
 - Baseline: **прод — живой B07** (образ `daa2edbb` + БД 42 миграции, tick'и падают, старый
   `/api/ready` ложно 200). R06-A чинит проверки; прод не тронут; фикс прод-БД — R14.
 - **DEPLOYED на пилот 2026-08-30** (`deploy-d15586c.sh` отработал: backup `pilot-20260830T104523Z-pre-deploy`, migrate 95→96, оба контейнера `--health-cmd` → `healthy`, `/api/ready` `schema:current`, scheduler `HEALTHY`, `SchedulerLease` 1 row, все tick-операции `ok`; prod baseline guard — `production unchanged ✓`). Rollback-контейнеры `-pre-d15586c` сохранены.
-- R06-B — DONE (см. выше), развёртывание ждёт владельца. R07 — не начат.
+- R06-B — DONE + DEPLOYED (см. R06-B / R06-B.1 выше). R07 — не начат.
 
 **`[2026-08-30]` R05 — dependency security (Titanor Time) — DONE.** Отчёт `R05_DEPENDENCY_SECURITY_RU.md`.
 `npm audit --omit=dev` 8 high → **0**. Slice A (`37d5ca8`): Next 16.2.12→16.3.3 (+ транзитивно
@@ -60,7 +87,7 @@ postcss 8.5.23, nanoid 3.3.18, дубль sharp@0.34.5 удалён). Slice B (`
 проверена). typecheck 0, lint ✓, build ✓, регрессия unit+db 62/62. browser smoke → R12.
 Pilot image `t97-pilot-1e4dc92` + `deploy-1e4dc92.sh` (чистый свап образа — R03 уже задеплоен, БД на 95). Ждёт запуска владельцем.
 
-Обновлено: 2026-08-30 Europe/Helsinki (R06-B Docker/runtime opt DONE — образ `t97-pilot-256565a` 792 MB, deploy-скрипт ждёт владельца; R06-A на пилоте; R05 свап образа ждёт владельца)
+Обновлено: 2026-08-30 Europe/Helsinki (R06-B DEPLOYED на пилот — `t97-pilot-256565a` 792 MB; инцидент R06-B.1 со stale SchedulerLease устранён, deploy-скрипт усилен; R05 свап образа прод ждёт владельца)
 
 **`[2026-08-30]` R03 — учётные записи, профили и recovery без SMTP (production release roadmap) — в работе.**
 ТЗ §6–§7, roadmap §R03. Production/Caddy/DNS не трогаются. Перед первым pilot deploy — `pre-deploy` backup.
