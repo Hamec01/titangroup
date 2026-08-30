@@ -275,8 +275,11 @@ async function main() {
   // ===============================================================================================
   {
     const period = await makePeriod(new Date('2050-03-01'), new Date('2050-03-14'));
+    // R07-A (lib/api-guard.requireUuidParam): a malformed [periodId] PATH param is rejected with the
+    // route's own PERIOD_NOT_FOUND 404 before Prisma ever sees it — never a P2023/500, and (since
+    // R07-A) no longer a 400 VALIDATION_ERROR. Query params (page/pageSize) keep their 400.
     const rBadPeriodId = await getPeriodReport('not-a-uuid', admin.token);
-    check('6: malformed periodId -> 400 VALIDATION_ERROR', rBadPeriodId.status === 400 && rBadPeriodId.body?.error?.code === 'VALIDATION_ERROR', rBadPeriodId);
+    check('6: malformed periodId -> 404 PERIOD_NOT_FOUND', rBadPeriodId.status === 404 && rBadPeriodId.body?.error?.code === 'PERIOD_NOT_FOUND', rBadPeriodId);
     const rBadPage = await getPeriodReport(period.id, admin.token, 'page=0');
     check('6: malformed page -> 400 VALIDATION_ERROR', rBadPage.status === 400 && rBadPage.body?.error?.code === 'VALIDATION_ERROR', rBadPage);
     const rBadPageSize = await getPeriodReport(period.id, admin.token, 'pageSize=101');
@@ -400,7 +403,8 @@ async function main() {
     const activeZeroRow = r.body?.sites?.find((s: PeriodReportSite) => s.site.id === activeZeroSite.id);
     check('15: active site with zero hours appears with workedMinutes = 0', activeZeroRow && activeZeroRow.workedMinutes === 0 && activeZeroRow.assignedWorkerCount === 1, activeZeroRow);
     const inactiveRow = r.body?.sites?.find((s: PeriodReportSite) => s.site.id === inactiveSite.id);
-    check('16: inactive site with historical hours is not hidden', inactiveRow && inactiveRow.workedMinutes === 480 && inactiveRow.site.active === false, inactiveRow);
+    // 480 gross − 30 min T10-D automatic unpaid lunch (day ≥ 6h, no logged break) = 450 worked.
+    check('16: inactive site with historical hours is not hidden', inactiveRow && inactiveRow.workedMinutes === 450 && inactiveRow.grossMinutes === 480 && inactiveRow.site.active === false, inactiveRow);
     check('17: multiple sites all present', r.body?.sites?.length >= 3, r.body?.sites?.length);
   }
 
@@ -489,17 +493,20 @@ async function main() {
     check('21: DRAFT source reflected in T8.1 (dataSource=DRAFT)', wDraft.body?.timesheet?.dataSource === 'DRAFT', wDraft.body?.timesheet);
 
     const wReturned = await getWorkerReport(empReturned.id, period.id, admin.token);
-    check('22: RETURNED reads draft (480 min), not the stale 100-min version', wReturned.body?.total?.workedMinutes === 480, wReturned.body?.total);
+    // draft's 8h day (480 gross) − 30 min T10-D auto unpaid lunch = 450; the stale 100-min version must not be read.
+    check('22: RETURNED reads draft (450 min worked / 480 gross), not the stale 100-min version', wReturned.body?.total?.workedMinutes === 450 && wReturned.body?.total?.grossMinutes === 480, wReturned.body?.total);
 
     const wSubmitted = await getWorkerReport(empSubmitted.id, period.id, admin.token);
     check('23: SUBMITTED reads CURRENT_VERSION', wSubmitted.body?.timesheet?.dataSource === 'CURRENT_VERSION', wSubmitted.body?.timesheet);
 
     const wPending = await getWorkerReport(empPending.id, period.id, admin.token);
-    check('24: pending correction does not change totals (still 480 min, original version)', wPending.body?.total?.workedMinutes === 480, wPending.body?.total);
+    // original 8h version: 480 gross − 30 min T10-D auto lunch = 450 worked; a PENDING correction changes nothing.
+    check('24: pending correction does not change totals (still 450 min worked / 480 gross, original version)', wPending.body?.total?.workedMinutes === 450 && wPending.body?.total?.grossMinutes === 480, wPending.body?.total);
     check('24: pending correction does not change versionNumber', wPending.body?.timesheet?.versionNumber === 1, wPending.body?.timesheet);
 
     const wApproved = await getWorkerReport(empApproved.id, period.id, admin.token);
-    check('25: approved correction switches to version 2 totals (720 min, not 480)', wApproved.body?.total?.workedMinutes === 720, wApproved.body?.total);
+    // approved v2 is a 12h day: 720 gross − 30 min T10-D auto lunch = 690 worked (not v1's 450).
+    check('25: approved correction switches to version 2 totals (690 min worked / 720 gross, not v1)', wApproved.body?.total?.workedMinutes === 690 && wApproved.body?.total?.grossMinutes === 720, wApproved.body?.total);
     check('25: approved correction versionNumber = 2', wApproved.body?.timesheet?.versionNumber === 2, wApproved.body?.timesheet);
   }
 
@@ -582,7 +589,8 @@ async function main() {
     const r30 = await getPeriodReport(period30.id, admin.token);
     const siteRow30 = r30.body?.sites?.find((s: PeriodReportSite) => s.site.id === site30.id);
     check('30: three days workedDayCount = 3', siteRow30?.workedDayCount === 3, siteRow30);
-    check('30: three 8h days = 1440 min worked', siteRow30?.workedMinutes === 1440, siteRow30);
+    // 3 × 480 gross = 1440; each day ≥ 6h with no logged break loses 30 min to the T10-D auto lunch → 3 × 450 = 1350 worked.
+    check('30: three 8h days = 1350 min worked / 1440 gross', siteRow30?.workedMinutes === 1350 && siteRow30?.grossMinutes === 1440, siteRow30);
 
     // 31: cross-midnight/period-boundary fragments without double count
     const period31 = await makePeriod(new Date('2050-12-01'), new Date('2050-12-14'));

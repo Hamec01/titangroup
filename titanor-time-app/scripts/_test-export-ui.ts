@@ -331,7 +331,11 @@ async function main() {
       const page = await newPageAs(ctx, admin3.token);
       await gotoFresh(page, `${BASE}/admin/export`);
       const body = await bodyText(page);
-      check('4: export.read revoked blocks the very next request', body.includes('Access denied') || body.includes('permission'), body.slice(0, 200));
+      // R09.2 (components/admin/AccessDeniedNotice + lib/i18n/access-denied): the export page's own
+      // permission gate now renders a short human message ending with "Ask a SUPER_ADMIN …" — no
+      // longer the literal "Access denied" / "permission" strings. The permission code lives only in
+      // the alert's title / data-permission for support.
+      check('4: export.read revoked blocks the very next request', /SUPER_ADMIN/i.test(body) && /export/i.test(body), body.slice(0, 200));
       await ctx.close();
     });
     // Confirm the restore actually took effect (same user, same role, fresh request).

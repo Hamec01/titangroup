@@ -728,9 +728,11 @@ async function main() {
     const c3Dc1 = batch2Items.find((i) => i.employeeId === empC3.employee.id && i.date.getTime() === dateC1.getTime());
     const c2AnyItem = batch2Items.find((i) => i.employeeId === empC2.employee.id);
 
-    check('C25: empC1 unchanged original bucket (dateC1) still present in the replacement snapshot', !!c1Dc1 && c1Dc1.workedMinutes === 480, c1Dc1);
-    check('C27: empC1 newly added bucket (dateC2) present with correct minutes', !!c1Dc2 && c1Dc2.workedMinutes === 480, c1Dc2);
-    check('C26: empC3 bucket changed (8h -> 6h = 360 min)', !!c3Dc1 && c3Dc1.workedMinutes === 360, c3Dc1);
+    // T10-D automatic unpaid lunch: a day ≥ 6h with no logged break loses 30 min → workedMinutes =
+    // grossMinutes − 30. 8h day: 480 gross / 450 worked. 6h day: 360 gross / 330 worked.
+    check('C25: empC1 unchanged original bucket (dateC1) still present in the replacement snapshot', !!c1Dc1 && c1Dc1.workedMinutes === 450 && c1Dc1.grossMinutes === 480, c1Dc1);
+    check('C27: empC1 newly added bucket (dateC2) present with correct minutes', !!c1Dc2 && c1Dc2.workedMinutes === 450 && c1Dc2.grossMinutes === 480, c1Dc2);
+    check('C26: empC3 bucket changed (8h -> 6h = 360 gross / 330 worked)', !!c3Dc1 && c3Dc1.workedMinutes === 330 && c3Dc1.grossMinutes === 360, c3Dc1);
     check('C28: deletion of last bucket is represented by its absence, not a zero row', c2AnyItem === undefined, c2AnyItem);
 
     // C30/C31: coveredByExportBatchId set correctly; pendingExport cleared ONLY for the covered rows.
@@ -996,8 +998,10 @@ async function main() {
 
   // --- E48: uniform 404 for malformed/missing batchId ---
   {
+    // R07-A (lib/api-guard.requireUuidParam): a malformed [batchId] PATH param gets the route's own
+    // EXPORT_BATCH_NOT_FOUND 404 before Prisma — same envelope as a nonexistent id (uniform 404).
     const rMalformedDetail = await getExportDetail('not-a-uuid', admin.token);
-    check('E48: malformed batchId (detail) -> 400 VALIDATION_ERROR', rMalformedDetail.status === 400, rMalformedDetail.body);
+    check('E48: malformed batchId (detail) -> 404 EXPORT_BATCH_NOT_FOUND', rMalformedDetail.status === 404 && rMalformedDetail.body?.error?.code === 'EXPORT_BATCH_NOT_FOUND', rMalformedDetail.body);
     const rMissingDetail = await getExportDetail(randomUUID(), admin.token);
     check('E48: nonexistent batchId (detail) -> 404 EXPORT_BATCH_NOT_FOUND', rMissingDetail.status === 404 && rMissingDetail.body?.error?.code === 'EXPORT_BATCH_NOT_FOUND', rMissingDetail.body);
 
