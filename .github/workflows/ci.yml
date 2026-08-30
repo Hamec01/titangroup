@@ -32,10 +32,11 @@ jobs:
       run:
         working-directory: titanor-time-app
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
         with:
           node-version: '22'
+          package-manager-cache: false
       - name: Clean install (lockfile only)
         run: npm ci
       - name: Lockfile is in sync
@@ -75,10 +76,11 @@ jobs:
     env:
       TT_TEST_DB_URL: 'postgresql://postgres:postgres@localhost:5432/postgres'
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
         with:
           node-version: '22'
+          package-manager-cache: false
       - run: npm ci
       - run: npx prisma generate --schema ../prisma/schema.prisma
       - name: Unit lane
@@ -109,10 +111,11 @@ jobs:
     env:
       DATABASE_URL: 'postgresql://postgres:postgres@localhost:5432/titanor_time_fresh'
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
         with:
           node-version: '22'
+          package-manager-cache: false
       - run: npm ci
       - name: Fresh-DB migrate deploy
         run: npx prisma migrate deploy --schema ../prisma/schema.prisma
@@ -126,10 +129,11 @@ jobs:
     name: Public site — install · typecheck · build
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
         with:
           node-version: '22'
+          package-manager-cache: false
       - run: npm ci
       - name: Lockfile is in sync
         run: git diff --exit-code -- package-lock.json
@@ -144,12 +148,13 @@ jobs:
     name: Security — secret scan · dependency audit · lockfiles
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: '22'
+          package-manager-cache: false
       - name: Committed-secret scan (blocking)
         run: bash ops/ci/secret-scan.sh
       - name: Lockfiles present and tracked
@@ -170,7 +175,7 @@ jobs:
               } catch { console.log(f, "(no report)"); }
             }
           '
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: dependency-audit
           path: |
