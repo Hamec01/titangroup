@@ -35,7 +35,8 @@
     { "file": "_test-qualification-notification-thresholds.ts", "lane": "scheduler", "note": "Threshold windows feeding the qualification notification tick." },
     { "file": "_test-timesheet-submission-schedules.ts", "lane": "scheduler", "note": "assignWorkerSubmissionSchedule + ensureSubmissionScheduleHorizon; covers first-assignment auto-enrol (R02)." },
 
-    { "file": "_test-account-recovery.ts", "lane": "db", "note": "issuePasswordReset / redeemPasswordReset — needs PASSWORD_RESET_TOKEN_HMAC_KEY (injected)." },
+    { "file": "_test-account-recovery.ts", "lane": "db", "note": "R03 lib/account-recovery.ts — issue + redeem one-time code, attempt lock, expiry, updateAccountEmail. Needs PASSWORD_RESET_TOKEN_HMAC_KEY (injected)." },
+    { "file": "_test-recovery-api.ts", "lane": "db", "note": "R03 admin-assisted recovery HTTP routes: issue (worker+user), CSRF/permission/Idempotency-Key, /api/auth/password-reset/confirm login+code+password." },
     { "file": "_test-activation.ts", "lane": "db", "note": "Account activation vertical slice." },
     { "file": "_test-admin-approve-timesheet.ts", "lane": "db", "note": "finalApproveTimesheet review-scope state machine." },
     { "file": "_test-admin-direct-edit.ts", "lane": "db", "note": "requestCorrection({directEdit}) admin flow." },
