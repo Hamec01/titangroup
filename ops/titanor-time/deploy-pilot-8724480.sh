@@ -268,20 +268,38 @@ ROBOTS=$(curl -s --max-time 10 "$BASE/robots.txt" || true)
 printf '%s' "$ROBOTS" | grep -qi 'Disallow: /' && echo "     /robots.txt disallows all" || note_fail "/robots.txt not Disallow: /"
 
 echo "  -- R07-A: DB-backed rate limit is live (identifier limit = 5) --"
+# Dedicated probe identity: a private probe identifier + a fixed RFC 5737 TEST-NET-1 documentation
+# address as the client IP. This never touches the shared `ip:unknown` bucket, so real traffic that
+# could not be attributed to an IP is unaffected. The X-Forwarded-For is a single entry, so with the
+# default TITANOR_TRUSTED_PROXY_HOPS=1 the limiter keys on exactly ip:192.0.2.247.
 PROBE="__deploy_rl_probe_${MARK}__"
+PROBE_IP="192.0.2.247"
+PROBE_ID_KEY="identifier:$PROBE"
+PROBE_IP_KEY="ip:$PROBE_IP"
+
+# fail-closed pre-check: the probe IP key must not already exist, or the test result is meaningless.
+[ -z "$(psqlq "SELECT 1 FROM \"RateLimitCounter\" WHERE key='$PROBE_IP_KEY'" || echo x)" ] \
+  || note_fail "$PROBE_IP_KEY already exists in RateLimitCounter — cannot run a clean rate-limit probe"
+
 LAST=""
 for i in 1 2 3 4 5 6; do
   LAST=$(curl -s -o /dev/null -w '%{http_code}' --max-time 10 -X POST "$BASE/api/auth/login" \
-    -H 'content-type: application/json' -H 'x-requested-with: titanor-time' \
+    -H 'content-type: application/json' -H 'x-requested-with: titanor-time' -H "x-forwarded-for: $PROBE_IP" \
     --data "{\"identifier\":\"$PROBE\",\"password\":\"wrong-on-purpose\"}")
 done
 echo "     6th probe login -> $LAST (expect 429)"
 [ "$LAST" = 429 ] || note_fail "rate limit did not trigger (6th attempt was $LAST, not 429)"
-RLROW=$(psqlq "SELECT count FROM \"RateLimitCounter\" WHERE key='identifier:$PROBE'" || echo "")
-[ -n "$RLROW" ] || note_fail "no RateLimitCounter row for the probe — limiter is not DB-backed"
-echo "     RateLimitCounter[identifier:$PROBE].count = ${RLROW:-<none>}"
-psqlq "DELETE FROM \"RateLimitCounter\" WHERE key IN ('identifier:$PROBE','ip:unknown')" >/dev/null || true
-echo "     probe rows cleaned"
+
+ID_COUNT=$(psqlq "SELECT count FROM \"RateLimitCounter\" WHERE key='$PROBE_ID_KEY'" || echo "")
+IP_COUNT=$(psqlq "SELECT count FROM \"RateLimitCounter\" WHERE key='$PROBE_IP_KEY'" || echo "")
+[ -n "$ID_COUNT" ] || note_fail "no RateLimitCounter row for $PROBE_ID_KEY — limiter is not DB-backed"
+[ -n "$IP_COUNT" ] || note_fail "no RateLimitCounter row for $PROBE_IP_KEY — client IP not resolved to the trusted position"
+echo "     RateLimitCounter[$PROBE_ID_KEY].count = ${ID_COUNT:-<none>} , [$PROBE_IP_KEY].count = ${IP_COUNT:-<none>}"
+
+# clean up ONLY the two exact probe rows.
+psqlq "DELETE FROM \"RateLimitCounter\" WHERE key = '$PROBE_ID_KEY'" >/dev/null || true
+psqlq "DELETE FROM \"RateLimitCounter\" WHERE key = '$PROBE_IP_KEY'" >/dev/null || true
+echo "     probe rows removed ($PROBE_ID_KEY , $PROBE_IP_KEY)"
 
 echo "  -- R07-A: malformed [id] -> 4xx not 500 (unauthenticated probe) --"
 # GET admin route with a garbage id and no cookie: the point is it must NEVER be 500.
