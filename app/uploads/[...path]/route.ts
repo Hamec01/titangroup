@@ -28,7 +28,10 @@ export async function GET(_request: Request, { params }: UploadRouteContext) {
       'Content-Type': image.contentType,
       'Cache-Control': 'public, max-age=31536000, immutable',
       ETag: image.etag,
-      'X-Content-Type-Options': 'nosniff'
+      // R07-B — never let a stored upload be interpreted as anything but the declared image type,
+      // and render it in place rather than as a top-level document.
+      'X-Content-Type-Options': 'nosniff',
+      'Content-Disposition': `inline; filename="${image.filename.replace(/[^\w.-]/g, '_')}"`
     }
   });
 }

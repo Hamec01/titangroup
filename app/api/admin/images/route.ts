@@ -40,34 +40,36 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: 'Invalid form data' }, { status: 400 });
   }
 
+  const sectionRaw = formData.get('section');
+  const fileRaw = formData.get('file');
+
+  if (typeof sectionRaw !== 'string' || !isServiceSection(sectionRaw)) {
+    return NextResponse.json({ error: 'Invalid section' }, { status: 400 });
+  }
+
+  if (!(fileRaw instanceof File)) {
+    return NextResponse.json({ error: 'File is required' }, { status: 400 });
+  }
+
+  let uploaded: Awaited<ReturnType<typeof saveLocalServiceImage>>;
   try {
-    const sectionRaw = formData.get('section');
-    const fileRaw = formData.get('file');
+    // R07-B — saveLocalServiceImage rejects bad input with a curated, safe message (wrong format,
+    // GIF, too large, corrupt, write failure). Treat every rejection as a 400 client error.
+    uploaded = await saveLocalServiceImage(sectionRaw, fileRaw);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'The image could not be uploaded.';
+    return NextResponse.json({ error: message }, { status: 400 });
+  }
 
-    if (typeof sectionRaw !== 'string' || !isServiceSection(sectionRaw)) {
-      return NextResponse.json({ error: 'Invalid section' }, { status: 400 });
-    }
-
-    if (!(fileRaw instanceof File)) {
-      return NextResponse.json({ error: 'File is required' }, { status: 400 });
-    }
-
-    const uploaded = await saveLocalServiceImage(sectionRaw, fileRaw);
+  try {
     const images = await addServiceImage(sectionRaw, {
       url: uploaded.url,
       publicId: uploaded.publicId
     });
-
     return NextResponse.json(images);
   } catch (error) {
-    const message = error instanceof Error ? error.message : 'Upload failed';
-
-    return NextResponse.json(
-      {
-        error: `Upload failed: ${message}`
-      },
-      { status: 500 }
-    );
+    console.error(`admin/images: index update failed [${(error as { code?: string })?.code ?? 'UNKNOWN'}]`);
+    return NextResponse.json({ error: 'The image was uploaded but the catalogue could not be updated.' }, { status: 500 });
   }
 }
 
