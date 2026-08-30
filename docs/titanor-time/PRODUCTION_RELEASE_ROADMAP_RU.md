@@ -112,7 +112,7 @@ Production cutover разрешается только после R12 и отд�
 | ~~B04~~ | change-password + session management. **ЗАКРЫТ 2026-08-30 (R03)**: `POST /api/auth/change-password`, `GET/DELETE /api/me/sessions`, панель сессий на профилях. | ✅ R03 |
 | B05 | 8 high dependency findings. **Titanor Time ЗАКРЫТ 2026-08-30 (R05)** — `npm audit --omit=dev` = 0 (Next 16.3.3, Prisma 6.19.3, effect 3.21, deepmerge-ts 8 override). Публичный сайт (R04) — отдельно. | 🟡 R05 done / R04 pending |
 | ~~B06~~ | Нет стабильных gates. **ЗАКРЫТ 2026-08-30 (R02)**: каталог 78 тестов по lane'ам, per-test изоляция БД, `typecheck`/`lint`/`test` команды, CI (6 job) + **branch protection на `main`: required `CI summary (required)`, strict, без force-push/deletion**. Browser-lane → R12 | ✅ R02 |
-| B07 | Production scheduler unhealthy, а readiness не проверяет схему | HTTP 200 может скрывать несовместимую БД | R06 |
+| B07 | Production scheduler unhealthy, readiness не проверяет схему. **R06-A (`b9ce061`)**: `/api/ready` теперь 503 при `SCHEMA_BEHIND`/failed/missing-table (ложный 200 невозможен); scheduler health различает 9 состояний. Прод-БД (42 миграции) чинится в R14 (замена на pilot). | 🟡 R06-A done / R14 |
 | B08 | In-memory rate limit, доверие первому `X-Forwarded-For`, слабые public admin/contact/upload controls | Обход ограничений и недостаточный security boundary | R07 |
 | B09 | Нет долговременного зашифрованного GPS-архива до удаления raw records | Возможна необратимая потеря истории координат | R08 |
 | B10 | Mobile overflow в ADMIN и части WORKER-экранов; неполные UX-потоки | Рабочие сценарии на телефоне неудобны или частично недоступны | R09 |
@@ -134,7 +134,7 @@ Production cutover разрешается только после R12 и отд�
 | R03 | Profiles и recovery без SMTP | R01, R02 | Нет | **DONE + DEPLOYED на пилот 2026-08-30** (`t97-pilot-22e8b12`→`1e4dc92`; регрессия 62/62; отчёт `R03_ACCOUNT_RECOVERY_RU.md`) |
 | R04 | Security upgrade публичного сайта | R02 | Нет | **DONE** — `105680d` audit 8→0; **R04.1 `27e65cb`** — Vercel Preview regression (`output:'standalone'`×Vercel) исправлена, Preview `success`, CI 6/6. Отчёты `R04_DEPENDENCY_SECURITY_PUBLIC_SITE_RU.md` + `R04_1_VERCEL_PREVIEW_REPORT_RU.md`. Деплой сайта — отдельно. |
 | R05 | Security upgrade Titanor Time | R02 | Нет | **DONE + DEPLOYED на пилот 2026-08-30** (`t97-pilot-1e4dc92`; audit 8→0; регрессия 62/62; отчёт `R05_DEPENDENCY_SECURITY_RU.md`) |
-| R06 | Scheduler/readiness/Docker/operations | R01, R02, R05 | Нет | Не начат |
+| R06 | Scheduler/readiness/Docker/operations | R01, R02, R05 | Нет | **R06-A DONE `b9ce061`** — schema-aware `/api/ready` + scheduler diagnostics (9 health states, lease, error classification), runbook. Кандидат образа + deploy script готовы, deploy за владельцем. R06-B (Docker opt) — отдельно. Отчёт `R06A_READINESS_SCHEDULER_REPORT_RU.md` |
 | R07 | Security hardening приложений/API | R02, R04, R05 | Нет | Не начат |
 | R08 | GPS archive и безопасный retention | R01, R02, R06 | Нет | Не начат |
 | R09 | WORKER/FOREMAN/ADMIN UX | R03, R05, R07 | Нет | Не начат |

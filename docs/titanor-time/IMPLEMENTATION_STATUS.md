@@ -1,5 +1,24 @@
 # Titanor Time — Implementation Status
 
+**`[2026-08-30]` R06-A — schema-aware readiness + scheduler diagnostics — DONE.** Отчёт
+`R06A_READINESS_SCHEDULER_REPORT_RU.md`, runbook `SCHEDULER_OPERATIONS_RUNBOOK_RU.md`.
+- `8414d5f` — `/api/ready` schema-aware: 200 только при совместимой схеме (строгая проверка
+  множества миграций `lib/generated/migration-inventory.ts`, не count); 503 +
+  `DB_UNAVAILABLE|MIGRATIONS_TABLE_MISSING|MIGRATIONS_FAILED|SCHEMA_BEHIND|KEY_TABLE_MISSING`;
+  тело sanitized (только enum + публичные имена + счётчики).
+- `b9ce061` — scheduler: обогащённый heartbeat (format 2) + healthcheck различает 9 состояний
+  (HEALTHY/STARTING/HEARTBEAT_MISSING/HEARTBEAT_STALE/PROCESS_STOPPED/DB_UNAVAILABLE/
+  SCHEMA_INCOMPATIBLE/TICK_FAILING/OVERLAPPING); `classifyDbError`; `SchedulerLease` (миграция
+  `20260830120000`) — single-writer lock против двойных tick'ов; startup schema check.
+- Тесты: `_test-ready-schema` (db, 24), `_test-scheduler-health` (unit, 24), `_test-scheduler-lease`
+  (db, 13), `_test-scheduler-diagnostics` (scheduler, 9). unit 12/12, db 54/54, scheduler 5/5,
+  typecheck 0, lint ok, миграция 96 чисто с нуля.
+- Baseline: **прод — живой B07** (образ `daa2edbb` + БД 42 миграции, tick'и падают, старый
+  `/api/ready` ложно 200). R06-A чинит проверки; прод не тронут; фикс прод-БД — R14.
+- Кандидат образа + `deploy-<sha>.sh` (pre-deploy backup + prod baseline guard + migrate +
+  app/scheduler swap с `--health-cmd` + verify + rollback) — готовы, **deploy за владельцем**.
+- R06-B (Docker opt) и R07 — не начаты.
+
 **`[2026-08-30]` R05 — dependency security (Titanor Time) — DONE.** Отчёт `R05_DEPENDENCY_SECURITY_RU.md`.
 `npm audit --omit=dev` 8 high → **0**. Slice A (`37d5ca8`): Next 16.2.12→16.3.3 (+ транзитивно
 postcss 8.5.23, nanoid 3.3.18, дубль sharp@0.34.5 удалён). Slice B (`7bc6c77`): Prisma+@prisma/client
