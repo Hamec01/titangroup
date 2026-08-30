@@ -1,5 +1,44 @@
 # Titanor Time — Implementation Status
 
+**`[2026-08-30]` R07-B — Public site security hardening (`titanorgroup.fi`) — КОД DONE, все проверки
+зелёные; на live-сайт НЕ развёрнут (Slice 7 отдельно, запускает владелец).** Отчёт
+`R07B_PUBLIC_SITE_HARDENING_REPORT_RU.md`. ТЗ §16.2–16.4, закрывает public-часть **B08**. БД у сайта
+нет — миграций нет. Живой контейнер `titanorgroup-web-1` не тронут.
+Commits `f8dd3f5` (примитивы + харнесс) · `02a9c9b` (admin auth) · `6644254` (CSRF на
+admin-mutations) · `5e0d7f3` (contact) · `5a29496` (uploads) · `6ba93c4` (заголовки + robots).
+- **§16.2 admin:** login rate-limit 10/15мин на доверенный client-IP (in-memory fixed-window,
+  `lib/rate-limit.ts`); пароль — HMAC-SHA256 + `timingSafeEqual` (не `===`); CSRF (`X-Requested-With:
+  titanor-admin`) на `login`/`logout`/`images`/`vacancies`/`service-content`; cookie
+  `HttpOnly`+`SameSite=Strict`+`Secure`(prod); журнал входов `lib/admin-audit.ts` → append-only
+  файл `ADMIN_AUDIT_LOG` (default `/app/data/admin-login-audit.log`, 0600), события
+  success/failure/rate_limited, без пароля/токена.
+- **§16.3 contact:** rate-limit 5/15мин на доверенный client-IP до парсинга тела; SMTP
+  `connection/greeting/socket` timeouts 10/10/20s; лог сбоя — только `[code] message(≤200)`, без
+  тела формы и сырого объекта; honeypot + `escapeHtml` сохранены; битое тело → 400.
+- **§16.4 uploads:** формат по magic-bytes (`sniffImageFormat`, не Content-Type); только
+  JPEG/PNG/WebP, **GIF — явный отказ**; `file.size` до чтения буфера + повторно по факту; **sharp
+  re-encode** (`failOn:'error'`, `.rotate()`, downscale > 4096) — выход без EXIF/GPS/ICC/XMP;
+  `Content-Disposition: inline` + nosniff; path-traversal — посегментный allowlist + resolve-
+  containment; `POST/DELETE /api/admin/images` — auth + CSRF.
+- **Заголовки:** `next.config.mjs` `poweredByHeader:false` + `headers()` на `/:path*` (nosniff,
+  X-Frame-Options `SAMEORIGIN`, Referrer-Policy, COOP same-origin, Permissions-Policy lockdown,
+  HSTS 2y). **Нет** `X-Robots-Tag` — сайт индексируется. `app/robots.ts` `Disallow`
+  `/ship-admin-portal` `/api/` `/uploads/`. Удалены статические `public/{robots.txt,sitemap.xml}`
+  (перекрывали динамические маршруты → правило `Disallow` было бы no-op).
+- **`sharp` → прямая зависимость** (`0.35.4` pinned); standalone-сборка несёт glibc+musl нативные
+  бинарники.
+- **Проверки:** `scripts/run-tests.mjs` (`npm test`) — 7 файлов `_test-*.ts`, 133 assert, без БД
+  и браузера; CI-джоба `public-site-quality` → шаг «Security regression tests (R07-B)». PASS-
+  критерий R07 выполнен (malformed → 4xx не 500; rate-limit не обойти поддельным левым XFF —
+  отдельный assert в `_test-contact.ts`). Живая проверка на standalone-сервере: 6 заголовков есть,
+  `X-Powered-By` нет, `/robots.txt` c `Disallow:`, `/sitemap.xml` ок, `/uploads/../../etc/passwd`
+  → 404.
+- **Осознанно не сделано:** CSP (нужен аудит inline — отдельно); HSTS `includeSubDomains`;
+  общий rate-limit (сайт одно-инстансный).
+- **Slice 7 (деплой live-сайта):** ждёт ответов владельца — механизм (immutable-swap vs compose),
+  проверка contact с реальным SMTP, нужен ли временный дым-тест-контейнер. Публичный деплой сайта
+  отложен с R04 — образ принесёт R04 (deps) + R07-B.
+
 **`[2026-08-30]` R07-A — Security hardening & API robustness (Titanor Time) — DONE + РАЗВЁРНУТ на
 пилот, PASS.** Отчёт `R07A_SECURITY_HARDENING_REPORT_RU.md`. Одна аддитивная миграция (**97**
 `RateLimitCounter`). Публичный сайт (R07-B) — отдельный заход (можно начинать).
