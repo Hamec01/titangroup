@@ -133,7 +133,7 @@ jobs:
       - run: npm ci
       - name: Lockfile is in sync
         run: git diff --exit-code -- package-lock.json
-      - run: npx prisma generate --schema prisma/schema.prisma
+      # The public site has no database — it does not depend on Prisma (R04).
       - name: Typecheck
         run: npx tsc --noEmit -p tsconfig.json
       - name: Build (standalone)
