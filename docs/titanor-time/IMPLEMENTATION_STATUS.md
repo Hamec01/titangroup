@@ -30,8 +30,14 @@ backlog. **Ни одной миграции** — чисто UI/навигаци
   components / lib-хелперы / CSS / i18n / client split). `guardApiRequest` rollout не применяется
   (правило «только трогаемые маршруты, blind codemod запрещён»). Остаётся за R07-A.1.
 - **R09.11** — отчёт + browser-чек-лист (4 viewport + клавиатура/a11y) + roadmap/status/memory.
-- **Deploy:** один pilot image-swap (без миграции, как R05) — по отдельному подтверждению владельца,
-  агент не запускает; rollback-контейнеры сохранить.
+- **Deploy — ГОТОВ, ждёт владельца.** Образ `titanor-time-app:t97-pilot-edd950c` (revision `edd950c`,
+  HEAD; `:latest`=`daa2edbb` production не тронут). Скрипт `ops/titanor-time/deploy-pilot-edd950c.sh`
+  (+ байт-копия `/home/deploy/app-data/t97-pilot/deploy-edd950c.sh`, sha256 `6457582e…`) — как
+  `deploy-6a47ed3.sh`, но шаг 5 = **read-only `migrate status`** (миграций нет). **Disposable-verify
+  PASS 2026-08-30** (restored pilot dump 98 → образ: `migrate status` up-to-date, `/api/ready` 200
+  `schema:current` applied=98, R09-страницы 307 без 5xx, rollback-образ `6a47ed3` тоже 200; пилот не
+  тронут). **Агент не запускает** — владелец, `bash /home/deploy/app-data/t97-pilot/deploy-edd950c.sh`;
+  rollback-контейнеры `-pre-edd950c` сохранить.
 - **Backlog (после production):** объединение карточки работника в один экран; R09.9; весь FOREMAN
   UX; полный guard-rollout; access-denied на worker sub-страницах карточки; `/admin/workers` без
   поиска; `/fi` → `lang="en"`.

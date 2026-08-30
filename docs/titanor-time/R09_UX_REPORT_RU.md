@@ -143,15 +143,30 @@ guard-rollout остаётся за R07-A.1 (позже, отдельно).
 
 ---
 
-## 4. Deploy (ожидает владельца)
+## 4. Deploy (готово, ожидает владельца)
 
-R09 не меняет БД → **чистый swap образа** на пилоте (как R05), без миграции, без backup-gate по
-схеме (обычный pre-deploy backup всё равно делается).
-1. `docker build` → `titanor-time-app:t97-pilot-<sha>` (изолированный тег, см.
-   `titanor_time_docker_shared_tag_risk`).
-2. `deploy-pilot-<sha>.sh` (по образцу `deploy-6a47ed3.sh`, но без `migrate deploy` шага): backup →
-   swap `t97-pilot-app` + `t97-pilot-scheduler` на новый образ → recreate `--env-file` → verify
-   (`/api/ready` `schema:current`, R07-A регрессия headers, prod baseline `unchanged`).
-3. Disposable-verify на свежем pilot-дампе до деплоя.
-4. **Агент не запускает** — владелец, после отдельного подтверждения. Rollback-контейнеры
-   сохранить.
+R09 не меняет БД → **чистый swap образа** на пилоте (как R05), без миграции. Обычный pre-deploy
+backup всё равно делается.
+
+**Образ собран:** `titanor-time-app:t97-pilot-edd950c` (revision label `edd950c`, HEAD ветки;
+изолированный тег — `titanor-time-app:latest` = `daa2edbb` production не тронут, см.
+`titanor_time_docker_shared_tag_risk`).
+
+**Скрипт:** `ops/titanor-time/deploy-pilot-edd950c.sh` (байт-копия
+`/home/deploy/app-data/t97-pilot/deploy-edd950c.sh`, sha256 `6457582e…`). По образцу
+`deploy-6a47ed3.sh`, но **шаг 5 — read-only `migrate status`** (проверяет «up to date»,
+`migrate deploy` не запускается — миграций нет). 7 шагов: state-guard → образ+label →
+preflight (DB на 98, `GPS_ARCHIVE_ENCRYPTION_KEY` есть) → prod baseline → pre-deploy backup
+on+off-box → schema check → swap с авто-rollback → verify (app health, `/api/ready`
+`schema:current` applied=98, R09-страницы не 5xx, R07-A headers/rate-limit/malformed-UUID
+регрессия, R08 gps-archive bundle + fail-closed, scheduler lease/heartbeat/ticks, retention
+`retentionOutcome:ok`) → prod baseline `unchanged`.
+
+**Disposable-verify — PASS (2026-08-30):** свежий `pg_dump` пилота (только чтение) → disposable
+PG16 (98 миграций) → образ `edd950c`: `migrate status` = «up to date»; boot → `/api/ready` 200
+`schema:current` applied=98; `/login` 200; `/admin`, `/admin/users`, `/admin/workforce?sort=ATTENTION`,
+`?status=EXPIRING_SOON`, `/admin/workers`, `/worker` → 307 (redirect на /login, 0×5xx); rollback-образ
+`6a47ed3` тоже boot 200 против той же БД; пилот-БД и контейнеры не тронуты; полный teardown.
+
+**Агент не запускает деплой** — владелец, после отдельного подтверждения. Rollback-контейнеры
+`t97-pilot-{app,scheduler}-pre-edd950c` сохранить (как для R07-A/R08).
