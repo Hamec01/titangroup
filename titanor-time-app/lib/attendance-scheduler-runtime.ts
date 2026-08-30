@@ -1,4 +1,5 @@
 import type { AttendanceAutoSubmitTickResult } from '@/lib/attendance-auto-submit';
+import { classifyDbError, type DbErrorClass } from '@/lib/db-error-classification';
 
 // docs/titanor-time/T7A_1_ATTENDANCE_CLOCK_DESIGN.md Addendum "T7A.10B" §1-§6, follow-up (2026-08-18)
 // — the scheduler's lifecycle primitives (interval parsing, abort-aware sleep, one-tick execution)
@@ -60,7 +61,9 @@ export function sleep(ms: number, signal: AbortSignal): Promise<void> {
   });
 }
 
-export type TickOutcome = { kind: 'ok'; durationMs: number; result: AttendanceAutoSubmitTickResult } | { kind: 'top_level_error'; durationMs: number };
+export type TickOutcome =
+  | { kind: 'ok'; durationMs: number; result: AttendanceAutoSubmitTickResult }
+  | { kind: 'top_level_error'; durationMs: number; errorClass: DbErrorClass };
 
 /**
  * One tick cycle, dependency-injected so it is testable without a real database or a real 30s+
@@ -79,16 +82,13 @@ export type TickOutcome = { kind: 'ok'; durationMs: number; result: AttendanceAu
  */
 export async function runOneTickCore(
   tick: (now: Date) => Promise<AttendanceAutoSubmitTickResult>,
-  writeHeartbeat: (completedAt: Date) => Promise<void>,
   log: (fields: Record<string, unknown>) => void
 ): Promise<TickOutcome> {
   const startedAt = new Date();
   const startTime = performance.now();
   try {
     const result = await tick(new Date());
-    const completedAt = new Date();
     const durationMs = Math.round(performance.now() - startTime);
-    await writeHeartbeat(completedAt);
     log({
       event: 'attendance_auto_submit_tick',
       startedAt: startedAt.toISOString(),
@@ -104,20 +104,22 @@ export async function runOneTickCore(
       failed: result.failed
     });
     return { kind: 'ok', durationMs, result };
-  } catch {
+  } catch (error) {
     // Never logs the raw Error/message/stack — it may contain DB connection details or SQL
-    // fragments. A single stable code is enough for operators to know a tick failed at the top
-    // level; real diagnosis happens by inspecting the database/infra directly, not by leaking
-    // arbitrary error content into logs.
+    // fragments. Classify it into a safe category so the heartbeat/healthcheck can tell
+    // "DB down" from "schema mismatch" from a generic tick error, then only a stable code
+    // is emitted.
     const durationMs = Math.round(performance.now() - startTime);
+    const errorClass = classifyDbError(error);
     log({
       event: 'attendance_auto_submit_tick',
       startedAt: startedAt.toISOString(),
       durationMs,
       runnerOutcome: 'top_level_error',
+      errorClass,
       errorCode: 'SCHEDULER_TICK_TOP_LEVEL_ERROR'
     });
-    return { kind: 'top_level_error', durationMs };
+    return { kind: 'top_level_error', durationMs, errorClass };
   }
 }
 

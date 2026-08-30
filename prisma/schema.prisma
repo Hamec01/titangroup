@@ -1886,6 +1886,14 @@ model CompanyAttendancePolicy {
   updatedByUser                   User?    @relation("CompanyAttendancePolicyUpdatedBy", fields: [updatedByUserId], references: [id], onDelete: Restrict, onUpdate: Cascade)
 }
 
+// R06-A — single-writer lease for the attendance scheduler process (see the migration comment).
+model SchedulerLease {
+  name       String   @id @db.VarChar(64)
+  holderId   String   @db.VarChar(64)
+  acquiredAt DateTime @db.Timestamptz(6)
+  renewedAt  DateTime @db.Timestamptz(6)
+}
+
 // §2.1 п.12 — append-only. Identity is (timesheetId, systemReopenGeneration), not cutoffAt.
 model AutoSubmissionAttempt {
   id                     String               @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
