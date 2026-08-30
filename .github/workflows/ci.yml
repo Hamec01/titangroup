@@ -140,6 +140,8 @@ jobs:
       # The public site has no database — it does not depend on Prisma (R04).
       - name: Typecheck
         run: npx tsc --noEmit -p tsconfig.json
+      - name: Security regression tests (R07-B)
+        run: npm test
       - name: Build (standalone)
         run: npm run build
 
