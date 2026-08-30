@@ -95,5 +95,5 @@ JSON: `docs/titanor-time/baseline-2026-08-29/audit-public-site-before-R04.json` 
 ## 7. CI
 
 Изменение попадает под существующий job `public-site-quality` в `.github/workflows/ci.yml`
-(`npm ci` → lockfile-in-sync → `tsc --noEmit` → `npm run build`). CI result по коммиту R04 —
-_<ссылка/статус при пуше>_.
+(`npm ci` → lockfile-in-sync → `tsc --noEmit` → `npm run build`; шаг `prisma generate` убран).
+CI по коммиту R04 `925923f` — **success**, все 6 job зелёные, включая `CI summary (required)`.

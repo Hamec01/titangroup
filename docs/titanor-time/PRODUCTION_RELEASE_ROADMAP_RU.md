@@ -111,7 +111,7 @@ Production cutover разрешается только после R12 и отд�
 | ~~B03~~ | Профили/recovery без SMTP. **ЗАКРЫТ 2026-08-30 (R03)**: admin-assisted одноразовый код `XXXX-XXXX-XXXX`, `/reset-password` (логин+код+пароль), SMTP-путь удалён целиком. | ✅ R03 |
 | ~~B04~~ | change-password + session management. **ЗАКРЫТ 2026-08-30 (R03)**: `POST /api/auth/change-password`, `GET/DELETE /api/me/sessions`, панель сессий на профилях. | ✅ R03 |
 | B05 | 8 high dependency findings. **Titanor Time ЗАКРЫТ 2026-08-30 (R05)** — `npm audit --omit=dev` = 0 (Next 16.3.3, Prisma 6.19.3, effect 3.21, deepmerge-ts 8 override). Публичный сайт (R04) — отдельно. | 🟡 R05 done / R04 pending |
-| ~~B06~~ | Нет стабильных `test`/`typecheck`/`lint` gates; часть старых тестов противоречит контракту. **ЗАКРЫТ 2026-08-30 (R02)**: каталог из 75 тестов по lane'ам, per-test изоляция БД, 5 тестов исправлено, `typecheck`/`lint`/`test` команды, CI с required `ci-summary`. Локально: 0 type-ошибок, unit 11/11, db+scheduler 48/48, build ✓. Browser-lane (15) → R12 | ✅ R02 |
+| ~~B06~~ | Нет стабильных gates. **ЗАКРЫТ 2026-08-30 (R02)**: каталог 78 тестов по lane'ам, per-test изоляция БД, `typecheck`/`lint`/`test` команды, CI (6 job) + **branch protection на `main`: required `CI summary (required)`, strict, без force-push/deletion**. Browser-lane → R12 | ✅ R02 |
 | B07 | Production scheduler unhealthy, а readiness не проверяет схему | HTTP 200 может скрывать несовместимую БД | R06 |
 | B08 | In-memory rate limit, доверие первому `X-Forwarded-For`, слабые public admin/contact/upload controls | Обход ограничений и недостаточный security boundary | R07 |
 | B09 | Нет долговременного зашифрованного GPS-архива до удаления raw records | Возможна необратимая потеря истории координат | R08 |
