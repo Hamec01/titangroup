@@ -136,6 +136,16 @@ enum GpsUnavailableReason {
   LOW_ACCURACY
 }
 
+// R08 — lifecycle of one GpsArchiveDay revision. WRITTEN: .enc + manifest are in the local staging
+// dir and self-verified there. VERIFIED: also copied off-box (/mnt/250gb), checksum re-verified and
+// decrypt+count re-checked — the only status that lets retention delete that day's raw GPS.
+// FAILED: a step failed (errorCode set); the day's raw GPS stays in the DB.
+enum GpsArchiveStatus {
+  WRITTEN
+  VERIFIED
+  FAILED
+}
+
 enum ClockEventProcessingState {
   ACCEPTED
   NEEDS_REVIEW
@@ -1904,6 +1914,36 @@ model RateLimitCounter {
   windowExpiresAt DateTime @db.Timestamptz(6)
 
   @@index([windowExpiresAt])
+}
+
+// R08 — GPS encrypted archive + safe retention (docs/titanor-time/R08_GPS_ARCHIVE_REPORT_RU.md).
+// One row per sealed UTC reading-day of raw GPS. A day is bucketed by the reading's own time
+// (ClockEvent.effectiveAt / ShiftPresenceSample.capturedAt) and sealed once it is <= today_utc - 2.
+// `revision` 0 is the main archive file; a raw row that syncs in AFTER its day was sealed (rare —
+// only a >2-day-offline device) is written to revision 1,2,… as an amendment, never rewriting the
+// main file. `coveredThroughCreatedAt` = the max server-insert time this revision included, so the
+// next run can tell what is still un-archived for that day. lib/attendance-location-retention.ts
+// deletes a raw ClockEventLocation / ShiftPresenceSample row only when its day is fully VERIFIED
+// here and no un-archived row for the day remains. Never holds coordinates or the encryption key.
+model GpsArchiveDay {
+  archiveDate             DateTime         @db.Date
+  revision                Int              @default(0)
+  status                  GpsArchiveStatus
+  clockLocationCount      Int
+  presenceSampleCount     Int
+  coveredThroughCreatedAt DateTime         @db.Timestamptz(6)
+  plaintextSha256         String?          @db.VarChar(64)
+  ciphertextSha256        String?          @db.VarChar(64)
+  ciphertextBytes         Int?
+  relativePath            String?          @db.VarChar(160)
+  errorCode               String?          @db.VarChar(64)
+  startedAt               DateTime         @default(now()) @db.Timestamptz(6)
+  writtenAt               DateTime?        @db.Timestamptz(6)
+  verifiedAt              DateTime?        @db.Timestamptz(6)
+  updatedAt               DateTime         @updatedAt @db.Timestamptz(6)
+
+  @@id([archiveDate, revision])
+  @@index([status])
 }
 
 // §2.1 п.12 — append-only. Identity is (timesheetId, systemReopenGeneration), not cutoffAt.
