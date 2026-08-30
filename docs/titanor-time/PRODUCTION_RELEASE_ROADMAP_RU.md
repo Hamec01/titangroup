@@ -113,10 +113,10 @@ Production cutover разрешается только после R12 и отд�
 | B05 | 8 high dependency findings. **Titanor Time ЗАКРЫТ 2026-08-30 (R05)** — `npm audit --omit=dev` = 0 (Next 16.3.3, Prisma 6.19.3, effect 3.21, deepmerge-ts 8 override). Публичный сайт (R04) — отдельно. | 🟡 R05 done / R04 pending |
 | ~~B06~~ | Нет стабильных gates. **ЗАКРЫТ 2026-08-30 (R02)**: каталог 78 тестов по lane'ам, per-test изоляция БД, `typecheck`/`lint`/`test` команды, CI (6 job) + **branch protection на `main`: required `CI summary (required)`, strict, без force-push/deletion**. Browser-lane → R12 | ✅ R02 |
 | B07 | Production scheduler unhealthy, readiness не проверяет схему. **R06-A (`b9ce061`)**: `/api/ready` теперь 503 при `SCHEMA_BEHIND`/failed/missing-table (ложный 200 невозможен); scheduler health различает 9 состояний. Прод-БД (42 миграции) чинится в R14 (замена на pilot). | 🟡 R06-A done / R14 |
-| B08 | In-memory rate limit, доверие первому `X-Forwarded-For`, слабые public admin/contact/upload controls | Обход ограничений и недостаточный security boundary | R07 |
+| B08 | In-memory rate limit, доверие первому `X-Forwarded-For`, слабые public admin/contact/upload controls | Обход ограничений и недостаточный security boundary | 🟡 **R07-A (`8f3795f`)**: rate-limit теперь DB-backed shared (`RateLimitCounter`, миграция 97), client IP — trusted-proxy-aware (`lib/client-ip.ts`, rightmost-minus-hops, `TITANOR_TRUSTED_PROXY_HOPS`). Public admin/contact/upload controls — R07-B (публичный сайт, отдельно). |
 | B09 | Нет долговременного зашифрованного GPS-архива до удаления raw records | Возможна необратимая потеря истории координат | R08 |
 | B10 | Mobile overflow в ADMIN и части WORKER-экранов; неполные UX-потоки | Рабочие сценарии на телефоне неудобны или частично недоступны | R09 |
-| B11 | Некоторые API возвращают 500 на malformed UUID | Ошибка клиента превращается в server error | R07/R09 |
+| B11 | Некоторые API возвращают 500 на malformed UUID | Ошибка клиента превращается в server error | ✅ **R07-A (`c413748`)**: `lib/api-guard.requireUuidParam` до Prisma на 26 динамических маршрутах — garbage `[id]` → безопасный 404, не P2023/500. `_test-malformed-uuid` (14). |
 | B12 | Docker image слишком велик, использует `npm install` и полный runtime `node_modules` | Невоспроизводимость и лишняя attack surface | ✅ **R06-B (`256565a`)**: `npm ci` из lockfile; runner = Next standalone + прекомпилированные CJS-бандлы scheduler'а + минимальное `prisma` CLI-замыкание; нет `tsx`/`typescript`/`playwright`/dev `node_modules`; 1.79 GB → 792 MB. Образ `t97-pilot-256565a`, deploy-скрипт готов. |
 | B13 | `app.titanorgroup.fi`, Caddy host и public login link не готовы | Production нельзя открыть по утверждённому адресу | R11 |
 
@@ -135,7 +135,7 @@ Production cutover разрешается только после R12 и отд�
 | R04 | Security upgrade публичного сайта | R02 | Нет | **DONE** — `105680d` audit 8→0; **R04.1 `27e65cb`** — Vercel Preview regression (`output:'standalone'`×Vercel) исправлена, Preview `success`, CI 6/6. Отчёты `R04_DEPENDENCY_SECURITY_PUBLIC_SITE_RU.md` + `R04_1_VERCEL_PREVIEW_REPORT_RU.md`. Деплой сайта — отдельно. |
 | R05 | Security upgrade Titanor Time | R02 | Нет | **DONE + DEPLOYED на пилот 2026-08-30** (`t97-pilot-1e4dc92`; audit 8→0; регрессия 62/62; отчёт `R05_DEPENDENCY_SECURITY_RU.md`) |
 | R06 | Scheduler/readiness/Docker/operations | R01, R02, R05 | Нет | **R06-A DONE + DEPLOYED** (`t97-pilot-d15586c`). **R06-B DONE + DEPLOYED на пилот 2026-08-30** (`t97-pilot-256565a`, 792 MB было 1.79 GB): `npm ci` из lockfile, Next standalone + прекомпилированные CJS-бандлы scheduler'а + минимальное `prisma` CLI-замыкание, non-root, OCI labels, реальные healthchecks. **Инцидент R06-B.1**: при swap старый `npx tsx` scheduler убит SIGKILL → orphaned `SchedulerLease` → новый scheduler завис в `OVERLAPPING`; устранено точечным DELETE доказанно мёртвого holder'а; deploy-скрипт усилен (fail-closed verify, тело `/api/ready`, реальный exit healthcheck, Docker health обоих, детект+чистка stale-lease при переходе, flock+re-run guard, авто-rollback, `--init`). **Пилот стабилен >15 мин: оба контейнера `healthy`, scheduler `HEALTHY`, lease renew'ится, все фоновые операции идут; prod не тронут.** Отчёт `R06B_DOCKER_RUNTIME_REPORT_RU.md` (§ R06-B.1). |
-| R07 | Security hardening приложений/API | R02, R04, R05 | Нет | Не начат |
+| R07 | Security hardening приложений/API | R02, R04, R05 | Нет | **R07-A (Titanor Time) DONE** (`899862c`/`8f3795f`/`c413748`/`ecfb302`): (A) security headers + noindex + safe error/not-found; (B) trusted-proxy client IP `TITANOR_TRUSTED_PROXY_HOPS` + DB-backed shared rate limiter (миграция 97) — **B08**; (C) `requireUuidParam` до Prisma на 26 маршрутах — **B11**; (D) `guardApiRequest` helper + `/api/auth/{session,logout,logout-all}`. Log audit — уже соответствует. PASS-критерий выполнен (70 negative-tests). Отчёт `R07A_SECURITY_HARDENING_REPORT_RU.md`. **Остаток:** R07-A.1 (миграция ~130 маршрутов на guard, пошагово с ревью), R07-B (публичный сайт — отдельно, решение владельца). Пилот не переразвёртывался. |
 | R08 | GPS archive и безопасный retention | R01, R02, R06 | Нет | Не начат |
 | R09 | WORKER/FOREMAN/ADMIN UX | R03, R05, R07 | Нет | Не начат |
 | R10 | Release candidate и полная pilot acceptance | R03–R09 | Нет | Не начат |
@@ -374,6 +374,22 @@ R03, R04 и R05 можно разрабатывать независимо по�
 - magic-byte validation, size limits, re-encoding изображений, `nosniff`, безопасный `Content-Disposition`, permission checks и path traversal protection для uploads.
 
 **PASS:** negative/security regression tests проходят; malformed input не вызывает 500; rate-limit нельзя обойти подменой первого forwarded IP.
+
+**Статус:**
+- **R07-A** (Titanor Time) — DONE. `899862c` security headers/noindex/error-not-found;
+  `8f3795f` trusted-proxy client IP (`TITANOR_TRUSTED_PROXY_HOPS`) + DB-backed shared rate limiter
+  (`RateLimitCounter`, миграция 97) — **B08**; `c413748` `requireUuidParam` до Prisma на 26
+  маршрутах — **B11**; `guardApiRequest` helper + `/api/auth/{session,logout,logout-all}`.
+  Log-audit — уже соответствует (3 `console.*`, ни один не из списка ТЗ). PASS-критерий выполнен
+  (70 negative-проверок: `_test-client-ip` 26, `_test-rate-limit-db` 13, `_test-malformed-uuid` 14,
+  `_test-api-guard` 17). Отчёт `R07A_SECURITY_HARDENING_REPORT_RU.md`.
+- **R07-A.1** — миграция остальных ~130 маршрутов на `guardApiRequest`. Пошагово, с ревью каждого
+  (слепой codemod отклонён — риск неверного `csrf`/permission); естественно совмещается с R09.
+- **R07-B** (публичный сайт: admin login rate-limit, timing-safe пароль, CSRF logout, contact SMTP
+  timeout, uploads magic-byte/size/re-encode/nosniff/path-traversal) — отдельный заход, решение
+  владельца (public-site деплой отложен с R04).
+- **R11**: Caddy для `app.titanorgroup.fi` — `trusted_proxies_strict` + Cloudflare CIDR + очистка
+  поддельных forwarded; затем `TITANOR_TRUSTED_PROXY_HOPS=2`.
 
 ---
 

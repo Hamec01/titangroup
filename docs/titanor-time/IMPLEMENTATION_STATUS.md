@@ -1,5 +1,42 @@
 # Titanor Time — Implementation Status
 
+**`[2026-08-30]` R07-A — Security hardening & API robustness (Titanor Time) — DONE.** Отчёт
+`R07A_SECURITY_HARDENING_REPORT_RU.md`. Одна аддитивная миграция (**97** `RateLimitCounter`).
+Пилот НЕ переразвёртывался. Публичный сайт (R07-B) — отдельный заход (решение владельца).
+- **A (`899862c`)** — `next.config.mjs` `poweredByHeader:false` + security headers на `/:path*`
+  (nosniff, X-Frame-Options DENY, Referrer-Policy, COOP same-origin, Permissions-Policy
+  `geolocation=(self)` только, HSTS, X-Robots-Tag noindex). `app/robots.ts` `Disallow: /` + root
+  `metadata.robots`. `app/{error,global-error,not-found}.tsx` — двуязычные, self-contained,
+  никогда не рендерят `error.message`/stack (только `digest`). Проверено на собранном приложении.
+- **B (`8f3795f`)** — B08. `lib/client-ip.ts`: `X-Forwarded-For` парсится **справа минус hops**
+  (`xff[len - TITANOR_TRUSTED_PROXY_HOPS]`, default 1 = Caddy; prod = 2 для Cloudflare+Caddy,
+  флип через env без правки live-Caddy); leftmost никогда не доверяется; `CF-Connecting-IP`/
+  `X-Real-IP` не читаются. Заменил 7 per-route `clientIp()` (уязвимый `.split(',')[0]`).
+  `lib/rate-limit.ts` → `async`, DB-backed `RateLimitCounter` (1 строка/ключ, атомарный
+  `INSERT..ON CONFLICT DO UPDATE`, multi-instance + restart-safe, fail-OPEN при ошибке БД,
+  оппортунистический GC). 14 вызовов на `await`.
+- **C (`c413748`)** — B11. `lib/api-guard.ts` `isUuid`/`requireUuidParam(value, notFound,
+  requestId)` → отдаёт тот же `<ENTITY>_NOT_FOUND` 404 маршрута, не даёт не-UUID дойти до Prisma
+  (P2023→500). 26 динамических маршрутов (corrections/export-batches/review-scopes/timesheets/
+  reports по admin/foreman/worker). 49 уже валидировавших не тронуты;
+  `foreman/attendance/exceptions/[exceptionId]/edit` намеренно оставлен (403 до касания id).
+- **D** — `lib/api-guard.ts` `guardApiRequest(request, {csrf?, permission?, anyPermission?})` →
+  `{ok, session, requestId} | {ok:false, response}`; конверты/коды/сообщения байт-в-байт.
+  Мигрированы `/api/auth/{session,logout,logout-all}` (вручную, с проверкой). **Полная миграция
+  ~130 маршрутов = R07-A.1** (пошагово, с ревью; слепой codemod отклонён — многострочная форма
+  `jsonError(…CSRF_REJECTED…)` не распознавалась регекспом → риск `csrf:false` на mutating route).
+  До тех пор `guardApiRequest` — обязательный паттерн; немигрированные маршруты не изменены.
+- **Log-audit** — уже соответствует, изменений нет: 3 `console.*` в app+lib, ни один не логирует
+  tokens/cookies/hashes/GPS/персональные коды. Scheduler `logSafe` (R06-A) — только
+  event/outcome/errorCode/счётчики.
+- Тесты: `_test-client-ip` (unit, 26), `_test-rate-limit-db` (db, 13), `_test-malformed-uuid`
+  (db, 14), `_test-api-guard` (db, 17). typecheck 0, lint ok, unit 13 / db 57 / scheduler 5,
+  build ✓, миграция 97 с нуля чисто. CI: _после push_.
+- PASS-критерий R07 выполнен: negative-tests проходят; malformed input → 404 не 500; rate-limit
+  не обходится подменой первого forwarded IP.
+- R11: Caddy для `app.titanorgroup.fi` — `trusted_proxies_strict` + Cloudflare CIDR + очистка
+  поддельных forwarded, затем `TITANOR_TRUSTED_PROXY_HOPS=2`.
+
 **`[2026-08-30]` R06-B.1 — pilot deploy инцидент + усиление deploy-скрипта — DONE.**
 `R06B_DOCKER_RUNTIME_REPORT_RU.md` § R06-B.1. Скрипт `ops/titanor-time/deploy-pilot-256565a.sh`
 (копия в `/home/deploy/app-data/t97-pilot/deploy-256565a.sh`).
@@ -87,7 +124,7 @@ postcss 8.5.23, nanoid 3.3.18, дубль sharp@0.34.5 удалён). Slice B (`
 проверена). typecheck 0, lint ✓, build ✓, регрессия unit+db 62/62. browser smoke → R12.
 Pilot image `t97-pilot-1e4dc92` + `deploy-1e4dc92.sh` (чистый свап образа — R03 уже задеплоен, БД на 95). Ждёт запуска владельцем.
 
-Обновлено: 2026-08-30 Europe/Helsinki (R06-B DEPLOYED на пилот — `t97-pilot-256565a` 792 MB; инцидент R06-B.1 со stale SchedulerLease устранён, deploy-скрипт усилен; R05 свап образа прод ждёт владельца)
+Обновлено: 2026-08-30 Europe/Helsinki (R07-A DONE — trusted-proxy IP + DB rate limiter (B08), UUID-до-Prisma (B11), security headers, guardApiRequest helper; миграция 97; R07-A.1 guard-rollout + R07-B публичный сайт остаются. R06-B на пилоте `t97-pilot-256565a`)
 
 **`[2026-08-30]` R03 — учётные записи, профили и recovery без SMTP (production release roadmap) — в работе.**
 ТЗ §6–§7, roadmap §R03. Production/Caddy/DNS не трогаются. Перед первым pilot deploy — `pre-deploy` backup.
