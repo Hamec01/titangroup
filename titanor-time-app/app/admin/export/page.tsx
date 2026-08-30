@@ -1,3 +1,4 @@
+import { AccessDeniedNotice } from '@/components/admin/AccessDeniedNotice';
 import { redirect } from 'next/navigation';
 import { resolveServerSession } from '@/lib/server-session';
 import { hasPermission } from '@/lib/permissions';
@@ -7,7 +8,6 @@ import { getPeriodDetail } from '@/lib/periods';
 import { UUID_PATTERN } from '@/lib/attendance-exceptions';
 import { ExportHistoryView, type ExportHistoryOutcome, type RawExportFilters, type CreatePanelInfo } from '@/components/exports/ExportHistoryView';
 import { resolveAppLocale } from '@/lib/i18n/server';
-import { localeText } from '@/lib/i18n/locale';
 
 export const dynamic = 'force-dynamic';
 
@@ -34,11 +34,7 @@ export default async function AdminExportHistoryPage({ searchParams }: RoutePara
 
   if (!(await hasPermission(session.user.roles, REQUIRED_READ_PERMISSION))) {
     return (
-      <main className="setup-page">
-        <p className="login-error" role="alert">
-          {localeText(locale, `Access denied — this page requires the ${REQUIRED_READ_PERMISSION} permission.`, `Доступ запрещён — для этой страницы требуется право ${REQUIRED_READ_PERMISSION}.`)}
-        </p>
-      </main>
+      <AccessDeniedNotice area="exports" locale={locale} permission={REQUIRED_READ_PERMISSION} />
     );
   }
 

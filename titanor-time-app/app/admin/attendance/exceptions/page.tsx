@@ -1,3 +1,4 @@
+import { AccessDeniedNotice } from '@/components/admin/AccessDeniedNotice';
 import { redirect } from 'next/navigation';
 import { resolveServerSession } from '@/lib/server-session';
 import { hasPermission } from '@/lib/permissions';
@@ -34,11 +35,7 @@ export default async function AdminAttendanceExceptionsPage({ searchParams }: Ro
   // if attendance.exception.read.all were ever revoked from ADMIN) must not see this page.
   if (!(await hasPermission(session.user.roles, 'attendance.exception.read.all'))) {
     return (
-      <main className="setup-page">
-        <p className="login-error" role="alert">
-          {localeText(locale, 'Access denied — this page requires the attendance.exception.read.all permission.', 'Доступ запрещён — для этой страницы требуется право attendance.exception.read.all.')}
-        </p>
-      </main>
+      <AccessDeniedNotice area="attendance-issues" locale={locale} permission="attendance.exception.read.all" />
     );
   }
 

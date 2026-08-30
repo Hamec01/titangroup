@@ -1,3 +1,4 @@
+import { AccessDeniedNotice } from '@/components/admin/AccessDeniedNotice';
 import { redirect } from 'next/navigation';
 import { resolveServerSession } from '@/lib/server-session';
 import { hasPermission } from '@/lib/permissions';
@@ -5,7 +6,6 @@ import { getPeriodTimeReport, parsePeriodReportQuery, isValidPeriodId } from '@/
 import { listPeriodOptions } from '@/lib/attendance-overview-lookups';
 import { PeriodTimeReportView, type PeriodReportOutcome, type RawPeriodReportFilters } from '@/components/reports/PeriodTimeReportView';
 import { resolveAppLocale } from '@/lib/i18n/server';
-import { localeText } from '@/lib/i18n/locale';
 
 export const dynamic = 'force-dynamic';
 
@@ -32,11 +32,7 @@ export default async function AdminPeriodReportsPage({ searchParams }: RoutePara
   for (const permissionCode of REQUIRED_PERMISSIONS) {
     if (!(await hasPermission(session.user.roles, permissionCode))) {
       return (
-        <main className="setup-page">
-          <p className="login-error" role="alert">
-            {localeText(locale, `Access denied — this page requires the ${permissionCode} permission.`, `Доступ запрещён — для этой страницы требуется право ${permissionCode}.`)}
-          </p>
-        </main>
+        <AccessDeniedNotice area="reports" locale={locale} permission={permissionCode} />
       );
     }
   }

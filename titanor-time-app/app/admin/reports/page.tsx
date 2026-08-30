@@ -1,3 +1,4 @@
+import { AccessDeniedNotice } from '@/components/admin/AccessDeniedNotice';
 import { redirect } from 'next/navigation';
 import Link from 'next/link';
 import { resolveServerSession } from '@/lib/server-session';
@@ -9,7 +10,7 @@ import { listPeriodOptions } from '@/lib/attendance-overview-lookups';
 import { formatWorkedDuration, timesheetStatusLabel, dataSourceLabel } from '@/lib/reporting/report-format';
 import { AdminReportTabs } from '@/components/reports/AdminReportTabs';
 import { resolveAppLocale } from '@/lib/i18n/server';
-import { localeText, type AppLocale } from '@/lib/i18n/locale';
+import { type AppLocale } from '@/lib/i18n/locale';
 
 export const dynamic = 'force-dynamic';
 
@@ -38,11 +39,7 @@ export default async function AdminReportsPage({ searchParams }: RouteParams) {
   for (const permissionCode of REQUIRED_PERMISSIONS) {
     if (!(await hasPermission(session.user.roles, permissionCode))) {
       return (
-        <main className="setup-page">
-          <p className="login-error" role="alert">
-            {localeText(locale, `Access denied — this page requires the ${permissionCode} permission.`, `Доступ запрещён — для этой страницы требуется право ${permissionCode}.`)}
-          </p>
-        </main>
+        <AccessDeniedNotice area="reports" locale={locale} permission={permissionCode} />
       );
     }
   }

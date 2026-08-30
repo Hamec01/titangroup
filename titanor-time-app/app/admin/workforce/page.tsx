@@ -1,9 +1,9 @@
+import { AccessDeniedNotice } from '@/components/admin/AccessDeniedNotice';
 import { redirect } from 'next/navigation';
 import Link from 'next/link';
 import { resolveServerSession } from '@/lib/server-session';
 import { hasPermission } from '@/lib/permissions';
 import { resolveAppLocale } from '@/lib/i18n/server';
-import { localeText } from '@/lib/i18n/locale';
 import { listSiteOptionsForAdmin } from '@/lib/attendance-overview-lookups';
 import { buildOverviewQueryString } from '@/lib/attendance-overview-ui';
 import { listSelectableQualificationDefinitions } from '@/lib/qualification-catalog';
@@ -76,11 +76,7 @@ export default async function AdminWorkforcePage({ searchParams }: RouteParams) 
   for (const permissionCode of REQUIRED_PERMISSIONS) {
     if (!(await hasPermission(session.user.roles, permissionCode))) {
       return (
-        <main className="setup-page">
-          <p className="login-error" role="alert">
-            {localeText(locale, `Access denied — this page requires the ${permissionCode} permission.`, `Доступ запрещён — для этой страницы требуется право ${permissionCode}.`)}
-          </p>
-        </main>
+        <AccessDeniedNotice area="workforce" locale={locale} permission={permissionCode} />
       );
     }
   }

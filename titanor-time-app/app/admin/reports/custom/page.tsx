@@ -1,8 +1,8 @@
+import { AccessDeniedNotice } from '@/components/admin/AccessDeniedNotice';
 import { redirect } from 'next/navigation';
 import { resolveServerSession } from '@/lib/server-session';
 import { hasPermission } from '@/lib/permissions';
 import { resolveAppLocale } from '@/lib/i18n/server';
-import { localeText } from '@/lib/i18n/locale';
 import { listEmployeesForReportSelect } from '@/lib/users';
 import { listSiteOptionsForAdmin } from '@/lib/attendance-overview-lookups';
 import { AdminReportTabs } from '@/components/reports/AdminReportTabs';
@@ -27,11 +27,7 @@ export default async function AdminCustomReportPage() {
   for (const permissionCode of REQUIRED_PERMISSIONS) {
     if (!(await hasPermission(session.user.roles, permissionCode))) {
       return (
-        <main className="setup-page">
-          <p className="login-error" role="alert">
-            {localeText(locale, `Access denied — this page requires the ${permissionCode} permission.`, `Доступ запрещён — для этой страницы требуется право ${permissionCode}.`)}
-          </p>
-        </main>
+        <AccessDeniedNotice area="reports" locale={locale} permission={permissionCode} />
       );
     }
   }

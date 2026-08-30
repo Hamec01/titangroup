@@ -1,3 +1,4 @@
+import { AccessDeniedNotice } from '@/components/admin/AccessDeniedNotice';
 import { redirect } from 'next/navigation';
 import { resolveServerSession } from '@/lib/server-session';
 import { hasPermission } from '@/lib/permissions';
@@ -5,7 +6,6 @@ import { getExportBatchDetail, isValidExportBatchId, parsePageQuery } from '@/li
 import { getPeriodDetail } from '@/lib/periods';
 import { ExportBatchDetailView, type ExportBatchDetailOutcome } from '@/components/exports/ExportBatchDetailView';
 import { resolveAppLocale } from '@/lib/i18n/server';
-import { localeText } from '@/lib/i18n/locale';
 
 export const dynamic = 'force-dynamic';
 
@@ -31,11 +31,7 @@ export default async function AdminExportBatchDetailPage({ params, searchParams 
 
   if (!(await hasPermission(session.user.roles, REQUIRED_PERMISSION))) {
     return (
-      <main className="setup-page">
-        <p className="login-error" role="alert">
-          {localeText(locale, `Access denied — this page requires the ${REQUIRED_PERMISSION} permission.`, `Доступ запрещён — для этой страницы требуется право ${REQUIRED_PERMISSION}.`)}
-        </p>
-      </main>
+      <AccessDeniedNotice area="exports" locale={locale} permission={REQUIRED_PERMISSION} />
     );
   }
 

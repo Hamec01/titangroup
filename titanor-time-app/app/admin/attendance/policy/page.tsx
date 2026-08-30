@@ -1,3 +1,4 @@
+import { AccessDeniedNotice } from '@/components/admin/AccessDeniedNotice';
 import { redirect } from 'next/navigation';
 import { resolveServerSession } from '@/lib/server-session';
 import { hasPermission } from '@/lib/permissions';
@@ -24,11 +25,7 @@ export default async function AdminAttendancePolicyPage() {
   const canRead = await hasPermission(session.user.roles, 'attendance.policy.read');
   if (!canRead) {
     return (
-      <main className="setup-page">
-        <p className="login-error" role="alert">
-          {localeText(locale, 'Access denied — this page requires the attendance.policy.read permission.', 'Доступ запрещён — для этой страницы требуется право attendance.policy.read.')}
-        </p>
-      </main>
+      <AccessDeniedNotice area="attendance-policy" locale={locale} permission="attendance.policy.read" />
     );
   }
 

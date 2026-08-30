@@ -1,3 +1,4 @@
+import { AccessDeniedNotice } from '@/components/admin/AccessDeniedNotice';
 import Link from 'next/link';
 import { redirect } from 'next/navigation';
 import { resolveServerSession } from '@/lib/server-session';
@@ -88,13 +89,7 @@ export default async function AdminSetupPage() {
 
   const isAdmin = session.user.roles.includes('ADMIN') || session.user.roles.includes('SUPER_ADMIN');
   if (!isAdmin) {
-    return (
-      <main className="setup-page">
-        <p className="login-error" role="alert">
-          {ru ? 'Доступ запрещён — эта страница доступна только администратору.' : 'Access denied — this page requires the ADMIN or SUPER_ADMIN role.'}
-        </p>
-      </main>
-    );
+    return <AccessDeniedNotice area="setup" locale={locale} />;
   }
 
   const status = await getSetupStatus();
