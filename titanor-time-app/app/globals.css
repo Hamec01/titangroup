@@ -102,24 +102,39 @@ button:disabled {
   overflow-wrap: anywhere;
 }
 
-.account-reset-row {
+.account-sessions-list {
+  list-style: none;
+  margin: 12px 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.account-session-row {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 16px;
-  margin-top: 20px;
-  padding-top: 16px;
-  border-top: 1px solid var(--border);
+  gap: 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
 }
 
-.account-reset-row p {
-  margin: 0;
+.account-session-row strong {
+  display: block;
+  font-size: 0.95rem;
+}
+
+.account-session-meta {
+  display: block;
+  margin-top: 2px;
   color: var(--text-soft);
-  font-size: 0.9rem;
+  font-size: 0.82rem;
 }
 
 @media (max-width: 560px) {
-  .account-reset-row {
+  .account-session-row {
     align-items: flex-start;
     flex-direction: column;
   }

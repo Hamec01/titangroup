@@ -9,6 +9,7 @@ import { WORKER_STRINGS } from '@/lib/i18n/worker';
 import { getAccountSettings } from '@/lib/account';
 import { AccountSettingsForm } from '@/components/account/AccountSettingsForm';
 import { ChangePasswordForm } from '@/components/account/ChangePasswordForm';
+import { SessionsPanel } from '@/components/account/SessionsPanel';
 import { hasPermission } from '@/lib/permissions';
 import { listEmployeeProfessions, listProfessionCatalog } from '@/lib/professions';
 import { EmployeeProfessionsEditor } from '@/components/professions/EmployeeProfessionsEditor';
@@ -69,6 +70,7 @@ export default async function WorkerProfilePage() {
         <h1>{t.profileTitle}</h1>
         {account ? <AccountSettingsForm initialEmail={account.email} username={account.username} roles={account.roles} /> : null}
         {account ? <ChangePasswordForm /> : null}
+        {account ? <SessionsPanel /> : null}
         {canManageProfessions ? (
           <EmployeeProfessionsEditor
             employeeId={session.user.employeeId}

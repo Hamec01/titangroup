@@ -3,6 +3,7 @@ import { resolveServerSession } from '@/lib/server-session';
 import { getAccountSettings } from '@/lib/account';
 import { AccountSettingsForm } from '@/components/account/AccountSettingsForm';
 import { ChangePasswordForm } from '@/components/account/ChangePasswordForm';
+import { SessionsPanel } from '@/components/account/SessionsPanel';
 
 export const dynamic = 'force-dynamic';
 
@@ -20,6 +21,7 @@ export default async function AdminProfilePage() {
         <h1>{session.user.locale === 'RU' ? 'Профиль администратора' : 'Administrator profile'}</h1>
         <AccountSettingsForm initialEmail={account.email} username={account.username} roles={account.roles} />
         <ChangePasswordForm />
+        <SessionsPanel />
       </div>
     </main>
   );
