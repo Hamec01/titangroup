@@ -6,7 +6,7 @@
   live public site, Caddy, Cloudflare DNS, старый production scheduler. R06-B (Docker-оптимизация) и
   R07 не начаты. Pilot deploy **не выполнялся** — образ и скрипт подготовлены, остановка перед R06-B.
 - **Commits:** `8414d5f` (schema-aware `/api/ready`), `b9ce061` (scheduler diagnostics), + этот отчёт.
-  Git SHA кандидата: _<заполняется>_.
+  Git SHA кандидата: `d15586c`. Образ `titanor-time-app:t97-pilot-d15586c`.
 
 ---
 
@@ -93,7 +93,7 @@ Scheduler на старте зовёт `checkSchemaReadiness()`; несовме�
 | abandoned-shift auto-close | `_test-abandoned-shift-auto-close` (scheduler lane) |
 | GPS retention | `_test-retention-pacing` (24 ч пейсинг от завершения) |
 | heartbeat | `_test-scheduler-diagnostics` (format-2 round-trip + legacy read) |
-| graceful shutdown | код: SIGTERM/SIGINT → доработка итерации + `releaseLease` + `$disconnect` + exit 0 (проверяется в deploy script: `docker stop` без `SIGKILL`-таймаута) |
+| graceful shutdown | код: SIGTERM/SIGINT → доработка итерации + `releaseLease` + `$disconnect` + exit 0 (deploy script: `docker stop -t 30`, graceful до SIGKILL) |
 | restart recovery | lease TTL + `lastSuccessAt`/`lastRetentionSuccessAt` — process-local, пересоздаются при старте; первая итерация сразу делает tick + retention |
 | отсутствие overlapping ticks | `_test-scheduler-lease` (13 проверок) + `OVERLAPPING` state |
 
@@ -114,15 +114,15 @@ restored pilot copy. Production не трогается (пункт 7).
 
 ## 6. Кандидат образа + deploy script (пункты 9–11)
 
-- Образ: `titanor-time-app:t97-pilot-<sha>` — _<id, размер>_.
-- Скрипт `/home/deploy/app-data/t97-pilot/deploy-<sha>.sh`:
+- Образ: `titanor-time-app:t97-pilot-d15586c` — 1.79 ГБ.
+- Скрипт `/home/deploy/app-data/t97-pilot/deploy-d15586c.sh`:
   1. **обязательный pre-deploy backup** (`ops/titanor-time/backup-titanor-time.sh pre-deploy`);
   2. **production baseline guard** — фиксирует и в конце сверяет `titanor-time-app-1` image /
      StartedAt / RestartCount + `:latest` id; любое расхождение = ошибка;
-  3. `prisma migrate deploy` (95 → 96, `20260830120000_add_scheduler_lease`, аддитивная) +
+  3. `prisma migrate deploy` (95 → 96, `20260830120000_add_scheduler_lease`, аддитивная — restored-pilot тест PASS) +
      `migrate status` = «up to date»;
   4. пересоздание `t97-pilot-app` и `t97-pilot-scheduler` на новом образе **с `--health-cmd`**
-     (app → `curl -fsS localhost:3000/api/ready`; scheduler → `npx tsx scripts/attendance-scheduler-healthcheck.ts`);
+     (app → `node -e fetch(/api/ready)==200`; scheduler → `attendance-scheduler-healthcheck.ts`) — образ на `node:bookworm-slim`, без curl;
   5. verify: `/api/ready` = 200 `schema:current`, `/api/health` = 200, `/login` `/reset-password` = 200;
      scheduler heartbeat свежий + healthcheck exit 0; один успешный tick в логах; **negative check** —
      временно нет (не мутируем pilot БД); rollback-инструкция (переименованные `-pre-<sha>`).
