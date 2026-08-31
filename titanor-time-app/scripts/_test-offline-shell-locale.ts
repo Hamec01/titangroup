@@ -32,14 +32,15 @@ function check(name: string, cond: boolean, extra?: unknown) {
 
 // A string that renders on the offline shell's clocked-out screen, per locale. `wk-main-action`'s
 // aria-label is `t.checkIn` — 'Check in' (EN) / 'Отметить приход' (RU).
-const EXPECT: Record<string, { ariaLabel: RegExp; storedAfter: string }> = {
-  EN: { ariaLabel: /check in/i, storedAfter: 'EN' },
-  RU: { ariaLabel: /отметить приход/i, storedAfter: 'RU' },
-  FI: { ariaLabel: /отметить приход/i, storedAfter: 'RU' } // legacy FI folds to RU everywhere
+const EXPECT: Record<string, { ariaLabel: RegExp; storedAfter: string; periodYear: number }> = {
+  RU: { ariaLabel: /отметить приход/i, storedAfter: 'RU', periodYear: 2213 },
+  EN: { ariaLabel: /check in/i, storedAfter: 'EN', periodYear: 2214 },
+  FI: { ariaLabel: /отметить приход/i, storedAfter: 'RU', periodYear: 2215 } // legacy FI folds to RU everywhere
 };
 
 async function makeWorker(localeValue: 'EN' | 'RU' | 'FI') {
   const tag = randomUUID().slice(0, 6);
+  const year = EXPECT[localeValue].periodYear;
   const admin = await prisma.user.create({ data: { username: `admin-loc-${tag}`, status: 'ACTIVE', locale: 'EN' } });
   await prisma.userRole.create({ data: { userId: admin.id, roleId: (await prisma.role.findUniqueOrThrow({ where: { name: 'ADMIN' } })).id } });
   const site = await prisma.workSite.create({ data: { name: `Loc Site ${tag}` } });
@@ -50,7 +51,7 @@ async function makeWorker(localeValue: 'EN' | 'RU' | 'FI') {
   // User.locale is a raw string column; 'FI' is a legacy value the app folds to RU.
   const user = await prisma.user.create({ data: { username: `worker-loc-${tag}`, status: 'ACTIVE', locale: localeValue, employeeId: employee.id, passwordHash: await argon2.hash(password, { type: argon2.argon2id }) } });
   await prisma.userRole.create({ data: { userId: user.id, roleId: (await prisma.role.findUniqueOrThrow({ where: { name: 'WORKER' } })).id } });
-  const period = await createPeriod({ startDate: new Date('2213-01-01T00:00:00.000Z'), endDate: new Date('2213-01-14T00:00:00.000Z'), openedByUserId: admin.id, requestId: randomUUID() });
+  const period = await createPeriod({ startDate: new Date(`${year}-01-01T00:00:00.000Z`), endDate: new Date(`${year}-01-14T00:00:00.000Z`), openedByUserId: admin.id, requestId: randomUUID() });
   if ('code' in period) throw new Error(`period: ${period.code}`);
   return { username: user.username, password };
 }

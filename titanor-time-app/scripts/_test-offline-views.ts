@@ -47,7 +47,8 @@ async function freshContext(browser: Browser, opts: Parameters<Browser['newConte
 
 // 2026 worker-PWA redesign: the Check In / Check Out control is `.wk-main-action`; the wrapper's
 // `.in` / `.out` class is the language-neutral clocked-in / clocked-out signal. `.wk-action-button`
-// is now used only by other buttons. The offline shell renders in the default (RU) locale.
+// is now used only by other buttons. The offline shell honours the user's stored locale (the
+// fixture users here are EN), so text assertions below check the English strings.
 async function clockAction(page: Page): Promise<import('playwright').Locator> {
   const btn = page.locator('.wk-main-action');
   await btn.waitFor({ state: 'visible', timeout: 15_000 });
@@ -368,12 +369,12 @@ async function main() {
   await pageA.goto(`${BASE}/worker/periods/${workerA.periodId}`, { waitUntil: 'networkidle' });
   {
     const body = await bodyText(pageA);
-    check('14: A sees own period-detail snapshot offline (dates + site + Offline badge)', body.includes(workerA.startDate) && body.includes(siteA.name) && body.includes('Офлайн — только просмотр'), body.slice(0, 300));
+    check('14: A sees own period-detail snapshot offline (dates + site + Offline badge)', body.includes(workerA.startDate) && body.includes(siteA.name) && body.includes('Offline — read-only'), body.slice(0, 300));
   }
   await pageA.goto(`${BASE}/worker/periods/${workerA.periodId}/hours/${workerA.date}`, { waitUntil: 'networkidle' });
   {
     const body = await bodyText(pageA);
-    check('14b: A sees own day-detail snapshot with the real segment site name offline', body.includes(siteA.name) && body.includes('Офлайн — только просмотр'), body.slice(0, 300));
+    check('14b: A sees own day-detail snapshot with the real segment site name offline', body.includes(siteA.name) && body.includes('Offline — read-only'), body.slice(0, 300));
   }
   await ctxA.setOffline(false);
 
@@ -389,7 +390,7 @@ async function main() {
   {
     const body = await bodyText(pageA);
     const submitBtnCount = await pageA.locator('button:has-text("Submit"), button:has-text("Отправить")').count();
-    check('35: offline submit-summary view is read-only with zero Submit button', submitBtnCount === 0 && body.includes('Офлайн — только просмотр'), { submitBtnCount, body: body.slice(0, 200) });
+    check('35: offline submit-summary view is read-only with zero Submit button', submitBtnCount === 0 && body.includes('Offline — read-only'), { submitBtnCount, body: body.slice(0, 200) });
   }
   await ctxA.setOffline(false);
 
@@ -400,8 +401,8 @@ async function main() {
   await pageA.goto(`${BASE}/worker/periods/${workerA.periodId}`, { waitUntil: 'networkidle' });
   {
     const body = await bodyText(pageA);
-    check('38: capturedAt ("Last updated") is shown', /Обновлено:/.test(body), body.slice(0, 200));
-    check('39: view is explicitly marked Offline — read-only, never presented as live/authoritative', body.includes('Офлайн — только просмотр'));
+    check('38: capturedAt ("Last updated") is shown', /Last updated:/.test(body), body.slice(0, 200));
+    check('39: view is explicitly marked Offline — read-only, never presented as live/authoritative', body.includes('Offline — read-only'));
   }
   await ctxA.setOffline(false);
 
@@ -434,7 +435,7 @@ async function main() {
     await ctxA.setOffline(true);
     await pageA.reload({ waitUntil: 'networkidle' });
     const reloadedBody = await bodyText(pageA);
-    check('42: an online revisit before going offline refreshes the stored snapshot (page still renders correctly after reload offline)', reloadedBody.includes('Офлайн — только просмотр') || reloadedBody.length > 0, reloadedBody.slice(0, 150));
+    check('42: an online revisit before going offline refreshes the stored snapshot (page still renders correctly after reload offline)', reloadedBody.includes('Offline — read-only') || reloadedBody.length > 0, reloadedBody.slice(0, 150));
     await pageA.goto(`${BASE}/worker/periods/${workerA.periodId}`, { waitUntil: 'networkidle' });
     await pageA.goBack({ waitUntil: 'networkidle' }).catch(() => {});
     const backBody = await bodyText(pageA);
@@ -449,7 +450,7 @@ async function main() {
   await pageA.goto(`${BASE}/worker/periods/${foreignPeriod.periodId}`, { waitUntil: 'networkidle' }).catch(() => {});
   {
     const body = await bodyText(pageA);
-    check('44: an uncaptured/foreign period id shows the safe missing-snapshot message, never another snapshot', body.includes('не сохранена') && !body.includes(siteA.name), body.slice(0, 200));
+    check('44: an uncaptured/foreign period id shows the safe missing-snapshot message, never another snapshot', body.includes('not been saved') && !body.includes(siteA.name), body.slice(0, 200));
   }
   await ctxA.setOffline(false);
 
@@ -460,7 +461,7 @@ async function main() {
   await pageA.goto(`${BASE}/worker/periods/${workerB.periodId}`, { waitUntil: 'networkidle' }).catch(() => {});
   {
     const body = await bodyText(pageA);
-    check('37: missing snapshot shows the exact safe message and a link back to /worker', body.includes('Эта страница ещё не сохранена для просмотра офлайн. Подключитесь к интернету и откройте её один раз.') && body.includes('К учёту времени'), body.slice(0, 250));
+    check('37: missing snapshot shows the exact safe message and a link back to /worker', body.includes('This page has not been saved for offline viewing yet. Connect and open it once.') && body.includes('Back to clock'), body.slice(0, 250));
   }
   await ctxA.setOffline(false);
 
@@ -471,7 +472,7 @@ async function main() {
   await pageA.goto(`${BASE}/worker/install`, { waitUntil: 'networkidle' }).catch(() => {});
   {
     const body = await bodyText(pageA);
-    check('36: /worker/install offline shows a data-free notice', body.includes("Вы офлайн") && body.includes('К учёту времени'), body.slice(0, 200));
+    check('36: /worker/install offline shows a data-free notice', body.includes("You're offline") && body.includes('Back to clock'), body.slice(0, 200));
   }
   await ctxA.setOffline(false);
 
@@ -482,22 +483,22 @@ async function main() {
   await pageA.goto(`${BASE}/worker/periods`, { waitUntil: 'networkidle' });
   {
     const body = await bodyText(pageA);
-    check('30: /worker/periods offline shows the cached actionable-period list', body.includes(workerA.startDate) && body.includes('Офлайн — только просмотр'), body.slice(0, 200));
+    check('30: /worker/periods offline shows the cached actionable-period list', body.includes(workerA.startDate) && body.includes('Offline — read-only'), body.slice(0, 200));
   }
   await pageA.goto(`${BASE}/worker/history`, { waitUntil: 'networkidle' });
   {
     const body = await bodyText(pageA);
-    check('31: /worker/history offline shows the cached history list', body.includes(workerA.startDate) && body.includes('Офлайн — только просмотр'), body.slice(0, 200));
+    check('31: /worker/history offline shows the cached history list', body.includes(workerA.startDate) && body.includes('Offline — read-only'), body.slice(0, 200));
   }
   await pageA.goto(`${BASE}/worker/periods/${workerA.periodId}`, { waitUntil: 'networkidle' });
   {
     const body = await bodyText(pageA);
-    check('32: /worker/periods/:id offline shows cached status/assignments/reasons', body.includes(siteA.name) && body.includes('Офлайн — только просмотр'), body.slice(0, 200));
+    check('32: /worker/periods/:id offline shows cached status/assignments/reasons', body.includes(siteA.name) && body.includes('Offline — read-only'), body.slice(0, 200));
   }
   await pageA.goto(`${BASE}/worker/periods/${workerA.periodId}/hours`, { waitUntil: 'networkidle' });
   {
     const body = await bodyText(pageA);
-    check('33: /worker/periods/:id/hours offline shows cached days/segments/totals', body.includes(workerA.date) && body.includes('Офлайн — только просмотр'), body.slice(0, 200));
+    check('33: /worker/periods/:id/hours offline shows cached days/segments/totals', body.includes(workerA.date) && body.includes('Offline — read-only'), body.slice(0, 200));
   }
   await ctxA.setOffline(false);
   await pageA.close();
@@ -527,7 +528,7 @@ async function main() {
     await ctxA.setOffline(true);
     await pageB.goto(`${BASE}/worker/periods/${workerA.periodId}`, { waitUntil: 'networkidle' }).catch(() => {});
     const bBody = await bodyText(pageB);
-    check('15: B never sees A snapshot content while offline (device paused/mismatched -> safe message)', !bBody.includes(siteA.name) || bBody.includes('не сохранена'), bBody.slice(0, 250));
+    check('15: B never sees A snapshot content while offline (device paused/mismatched -> safe message)', !bBody.includes(siteA.name) || bBody.includes('not been saved'), bBody.slice(0, 250));
     await ctxA.setOffline(false);
     await pageB.close();
   }
@@ -563,7 +564,7 @@ async function main() {
     await ctx.setOffline(true);
     await ctxWithSnapshot.goto(`${BASE}/worker/periods/${workerB.periodId}`, { waitUntil: 'networkidle' }).catch(() => {});
     const body18 = await bodyText(ctxWithSnapshot);
-    check('18: legacy unbound device state shows the safe not-saved message, never the real snapshot', body18.includes('не сохранена'), body18.slice(0, 200));
+    check('18: legacy unbound device state shows the safe not-saved message, never the real snapshot', body18.includes('not been saved'), body18.slice(0, 200));
     await ctx.setOffline(false);
     await ctx.close();
   }
@@ -598,7 +599,7 @@ async function main() {
     await ctx.setOffline(true);
     await page.goto(`${BASE}/worker/periods/${workerA.periodId}`, { waitUntil: 'networkidle' }).catch(() => {});
     const body20 = await bodyText(page);
-    check('20: a deviceInstallationId mismatch hides the snapshot', body20.includes('не сохранена'), body20.slice(0, 200));
+    check('20: a deviceInstallationId mismatch hides the snapshot', body20.includes('not been saved'), body20.slice(0, 200));
     await ctx.setOffline(false);
     await ctx.close();
   }
@@ -621,7 +622,7 @@ async function main() {
     await page.goto(`${BASE}/worker/periods/${workerA.periodId}`, { waitUntil: 'networkidle' }).catch(() => {});
     const body = await bodyText(page);
     const after = await outboxCount(page);
-    check(`${label}: ${reason} hides the snapshot`, body.includes('не сохранена'), body.slice(0, 200));
+    check(`${label}: ${reason} hides the snapshot`, body.includes('not been saved'), body.slice(0, 200));
     check(`${label}b: ${reason} never deletes the outbox`, after === before, { before, after });
     await ctx.setOffline(false);
     await ctx.close();
@@ -650,7 +651,7 @@ async function main() {
     await page.goto(`${BASE}/worker/periods/${workerA.periodId}`, { waitUntil: 'networkidle' }).catch(() => {});
     const body25 = await bodyText(page);
     // The pre-rotation snapshot (bound to the OLD synthetic device id) can never match the new one.
-    check('25: after rotation, a snapshot bound to a stale device id is not shown', body25.includes('не сохранена') || body25.includes('Офлайн — только просмотр'), body25.slice(0, 200));
+    check('25: after rotation, a snapshot bound to a stale device id is not shown', body25.includes('not been saved') || body25.includes('Offline — read-only'), body25.slice(0, 200));
     await ctx.setOffline(false);
     await ctx.close();
   }
@@ -685,7 +686,7 @@ async function main() {
     await ctx.setOffline(true);
     await tab2.reload({ waitUntil: 'networkidle' });
     const tab2Body = await bodyText(tab2);
-    check('27: a second tab in the same profile sees the snapshot tab1 warmed', tab2Body.includes(siteA.name) || tab2Body.includes('Офлайн — только просмотр'), tab2Body.slice(0, 200));
+    check('27: a second tab in the same profile sees the snapshot tab1 warmed', tab2Body.includes(siteA.name) || tab2Body.includes('Offline — read-only'), tab2Body.slice(0, 200));
     await ctx.setOffline(false);
     await ctx.close();
   }
@@ -756,7 +757,7 @@ async function main() {
     await ctx.route(`${BASE}/worker/periods`, (route) => route.abort('internetdisconnected'));
     await page.goto(`${BASE}/worker/periods`, { waitUntil: 'networkidle' }).catch(() => {});
     const body48 = await bodyText(page);
-    check('48: a real fetch() network exception (route abort) falls back to the cached shell (real period dates from A own snapshot, not a browser error page)', body48.includes(workerA.startDate) && body48.includes('Офлайн — только просмотр'), body48.slice(0, 200));
+    check('48: a real fetch() network exception (route abort) falls back to the cached shell (real period dates from A own snapshot, not a browser error page)', body48.includes(workerA.startDate) && body48.includes('Offline — read-only'), body48.slice(0, 200));
     await ctx.unroute(`${BASE}/worker/periods`);
     await ctx.close();
   }
