@@ -40,7 +40,8 @@ Focused hotfix run:
 - role/permission matrix: **33/33**;
 - полный attendance→timesheet→approval flow с browser geolocation: **84/84**;
 - offline cold restart: **6/6**;
-- offline RU/EN/FI persistence: **12/12**;
+- offline RU/EN persistence + legacy `FI`→RU normalization: **12/12** (это не доказательство
+  полноценного финского перевода интерфейса);
 - PWA install/lifecycle/mobile: **59/59**.
 
 Полный browser-lane нового образа:
