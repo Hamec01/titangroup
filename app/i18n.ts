@@ -27,6 +27,7 @@ type Dictionary = {
     contact: string;
     career: string;
     cta: string;
+    login: string;
   };
   hero: {
     eyebrow: string;
@@ -95,7 +96,8 @@ export const dictionary: Record<Locale, Dictionary> = {
       services: 'Services',
       contact: 'Contact',
       career: 'Career',
-      cta: 'Contact us'
+      cta: 'Contact us',
+      login: 'Employee login'
     },
     hero: {
       eyebrow: 'Shipbuilding, steel structures and marine engineering',
@@ -225,7 +227,8 @@ export const dictionary: Record<Locale, Dictionary> = {
       services: 'Palvelut',
       contact: 'Yhteystiedot',
       career: 'Ura',
-      cta: 'Ota yhteyttä'
+      cta: 'Ota yhteyttä',
+      login: 'Työntekijän kirjautuminen'
     },
     hero: {
       eyebrow: 'Laivanrakennus, teräsrakenteet ja meritekniset palvelut',

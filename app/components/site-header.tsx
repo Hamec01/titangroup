@@ -11,6 +11,7 @@ type SiteHeaderProps = {
     contact: string;
     career: string;
     cta: string;
+    login: string;
   };
 };
 
@@ -61,6 +62,14 @@ export function SiteHeader({ active, locale, labels }: SiteHeaderProps) {
         ))}
       </div>
 
+      <a
+        className="header-login"
+        href="https://app.titanorgroup.fi"
+        rel="noopener"
+      >
+        {labels.login}
+      </a>
+
       <Link className="header-cta" href={ctaHref}>
         {labels.cta}
       </Link>
@@ -76,6 +85,9 @@ export function SiteHeader({ active, locale, labels }: SiteHeaderProps) {
           <Link href={`/${locale}/services`}>{labels.services}</Link>
           <Link href={`/${locale}/contact`}>{labels.contact}</Link>
           <Link href={`/${locale}/career`}>{labels.career}</Link>
+          <a href="https://app.titanorgroup.fi" rel="noopener">
+            {labels.login}
+          </a>
           <Link href={ctaHref}>{labels.cta}</Link>
           <div className="mobile-lang">
             {locales.map((lang) => (

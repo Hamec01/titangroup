@@ -1,5 +1,6 @@
 import { notFound } from 'next/navigation';
 import { isLocale, locales } from '../i18n';
+import { HtmlLang } from './html-lang';
 
 export function generateStaticParams() {
   return locales.map((lang) => ({ lang }));
@@ -17,5 +18,10 @@ export default async function LangLayout({ children, params }: LangLayoutProps) 
     notFound();
   }
 
-  return <>{children}</>;
+  return (
+    <>
+      <HtmlLang lang={lang} />
+      {children}
+    </>
+  );
 }
