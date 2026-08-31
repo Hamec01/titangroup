@@ -1,0 +1,7 @@
+restore_db            11.7s
+web_ready             3.9s
+sched_2ticks          207.9s
+rehearsal_backup+test 16.0s
+rb_stop_new           0.5s
+rb_restore_prev_dump  13.5s
+rb_boot_prev_image    3.2s

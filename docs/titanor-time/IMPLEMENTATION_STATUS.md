@@ -1,5 +1,28 @@
 # Titanor Time — Implementation Status
 
+**`[2026-08-31]` R12 — production-like rehearsal — PASS (автоматизируемая часть).** Отчёт
+`R12_REHEARSAL_RU.md`. Всё в disposable-окружении; **pilot / production / Caddy / DNS / публичный
+сайт не тронуты** (пилот прочитан только read-only `pg_dump`); cutover не начат.
+- **Snapshot пилота** (`backup-titanor-time.sh manual`): 98 миграций, 74 tbl/222 rout/40 trg/178 FK,
+  1727 rows, uploads 3 файла, GPS-manifest 6 verified-days, fingerprint `907d3219…`, SHA256SUMS OK.
+  Пилот после снапшота — без изменений.
+- **Restore + boot кандидата** (`TT_SMOKE=1 restore-test-titanor-time.sh`): **14/0** — `pg_restore
+  --no-owner --no-acl` в БД non-source-owner; миграции/структура/**все 74 row counts**/**fingerprint**
+  == backup; uploads 3 == manifest; `r12-candidate-367420e` → `/api/ready` 200.
+- **Live-stack rehearsal** (`ops/titanor-time/r12-rehearsal.sh`, owner `titanor_time_prod`): **10/0**
+  — migrate status up-to-date, web `schema:current` 98/98, scheduler healthcheck exit 0 + реальные
+  тики, session/token revocation (47→0, stale cookie 401, /login 200), re-backup+restore-test из
+  rehearsal PASS, rollback drill (previous image `schema:current`).
+- **Находка:** snapshot несёт живой `SchedulerLease` (TTL 90 мин) → новый scheduler `OVERLAPPING`
+  ~90 мин. Cutover-runbook шаг 11 расширен: `DELETE FROM "SchedulerLease"` после restore. Повторный
+  прогон — чистый.
+- **Тайминги:** restore 12 с · web ready 4 с · rollback механика ~17 с. **Downtime план: ~1–2 мин
+  реального простоя, maintenance-окно 10 мин.** Точный cutover-runbook (19 шагов) + rollback — в §4–5.
+- **Owner actions до R13/R14:** живой role-smoke реальными аккаунтами + device matrix (ТЗ §19.6) —
+  как на R10; gates (FI-строка, ufw, порт 3199); `docker builder prune` (диск 83%).
+- Артефакты: `R12_REHEARSAL_RU.md`, `ops/titanor-time/r12-rehearsal.sh`, `docs/titanor-time/baseline-r12/`.
+- **Следующее: R13** — owner evidence package + 3 подтверждения. **Cutover не начинать.**
+
 **`[2026-08-31]` R12-prep — browser-lane + языковой фикс — DONE. Новый R12-кандидат.** Отчёт
 `R12_PREP_BROWSER_LANE_RU.md`. Оговорка `R10_PILOT_ACCEPTANCE_REPORT_RU.md` §4 закрыта.
 - **Этап 1:** все 15 browser-lane тестов зелёные на образе R10-кандидата (0 дефектов продукта,

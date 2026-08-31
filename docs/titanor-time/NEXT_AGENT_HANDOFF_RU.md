@@ -1,9 +1,9 @@
 # Titanor Time — handoff для следующего агента
 
-- **Дата фиксации:** 2026-08-31 (обновлено: R11 PASS)
+- **Дата фиксации:** 2026-08-31 (обновлено: R12 rehearsal PASS)
 - **Ветка:** `feature/titanor-time-foundation`
 - **Главные документы:** `PRODUCTION_RELEASE_TZ_FINAL_RU.md`, `PRODUCTION_RELEASE_ROADMAP_RU.md`, `IMPLEMENTATION_STATUS.md`
-- **Текущий этап:** R11 PASS + **R12-prep DONE** (`R12_PREP_BROWSER_LANE_RU.md`) — browser-lane модернизирован, найденный языковой дефект offline-shell исправлен (`ef5548b`), **новый R12-кандидат** `titanor-time-app:r12-candidate-367420e` (git `367420e`), все 16 browser-lane тестов зелёные. Дальше — **R12** (production-like rehearsal этого кандидата).
+- **Текущий этап:** R11 PASS · R12-prep DONE (`R12_PREP_BROWSER_LANE_RU.md`) · **R12 rehearsal PASS** (`R12_REHEARSAL_RU.md`) — авто-часть: restore 14/0 + live-stack rehearsal 10/0 + browser-lane 16/16, всё на кандидате `titanor-time-app:r12-candidate-367420e` (digest `sha256:b5f80cbd…`), в disposable-окружении. Точный cutover-runbook + downtime + rollback — в отчёте. Дальше — **R13** (owner evidence package + 3 подтверждения) + owner-часть acceptance (role-smoke реальными аккаунтами, device matrix ТЗ §19.6).
 - **R10 manual acceptance:** CONFIRMED владельцем 2026-08-31 (реальные устройства + role-smoke, 0 P0/P1, FOREMAN skipped/not in scope)
 - **Инцидент 2026-08-31:** агент вызвал `caddy stop` в тесте → боевой Caddy лежал ~46 мин. Разбор + правило: `R11_INCIDENT_2026-08-31_caddy_outage.md`, `feedback_never_run_caddy_daemon_commands` (память). На этом хосте: только `caddy validate`/`adapt`, никаких `caddy stop/start/run`/bare `reload`.
 - **Production cutover:** запрещён до R12 PASS и отдельного подтверждения владельца на R13

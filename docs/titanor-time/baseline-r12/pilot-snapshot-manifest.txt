@@ -1,0 +1,27 @@
+environment         = pilot
+reason              = manual
+utc_timestamp       = 20260831T121948Z
+host                = vmi3407580
+db_container         = t97-pilot-db
+db_name              = titanor_time_t97
+app_image            = titanor-time-app:t97-pilot-edd950c (sha256:0282e68ffbfcb682d59ff6a366aeb7ef13209c1ed8063949dead1492959ef023)
+git_branch           = feature/titanor-time-foundation
+git_sha              = df6fc334ec1055d98d242d388333419f8114d386
+git_uncommitted_files = 0
+dump_bytes           = 492469
+dump_toc_entries     = 726
+uploads_files        = 3
+uploads_bytes        = 1023
+public_row_total     = 1727
+migration_history_sha256 = b6073f89d69f492d5580a658c0eae66f6047c12d57a3a8ce9f36d7ef3bb0d906
+gps_archive_verified_days = 6
+gps_archive_manifest_sha256 = 2f56aa77d98c35b30c0d3297c650438ac40de0bc211f2b1d4c9198ca6f1a58d9
+all_data_sha256      = 907d3219b301ad4b626158dad2bfc0c575e8c2fd67f04146f80b58da8e48608b
+--- structure ---
+migrations_applied=98
+migrations_unfinished=0
+migrations_rolledback=0
+public_tables=74
+public_routines=222
+triggers=40
+foreign_keys=178

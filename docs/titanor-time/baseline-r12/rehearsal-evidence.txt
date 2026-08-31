@@ -1,0 +1,31 @@
+== R12 production-like rehearsal ==
+snapshot: /tmp/claude-1000/-home-deploy-projects-titanorgroup-worktrees-titanor-time-foundation/e2496dfa-37dc-4201-b8cf-c0ce2d52de05/scratchpad/r12/snapshot/pilot-20260831T121948Z-manual
+image:    titanor-time-app:r12-candidate-367420e  digest=sha256:b5f80cbd1cff8c307581d283d54b7668987157d696943d48a3a51ff80915d883
+prev img: titanor-time-app:t97-pilot-edd950c  digest=sha256:0282e68ffbfcb682d59ff6a366aeb7ef13209c1ed8063949dead1492959ef023
+target:   db=titanor_time owner=titanor_time_prod (NOT the pilot's t97_app)
+date:     2026-08-31T12:30:45Z
+
+PASS: pg_restore --no-owner --no-acl into titanor_time (owner titanor_time_prod)
+PASS: cleared carried-over SchedulerLease (1 row -> 0)
+  (spot rows User+Employee+ClockEvent+TimesheetVersion in restore: 72; snapshot public_row_total=1727)
+PASS: migrate status: up to date, no pending migrations
+PASS: web /api/ready -> schema:current
+PASS: readiness: 98/98 migrations, aheadBy 0
+PASS: scheduler healthcheck exit 0 (heartbeat: {"format":2,"pid":1,"processStartedAt":"2026-08-31T12:31:07.968Z","lastTickCompletedAt":"2026-08-31T12:34:09.727Z","lastTickAt":"2026-08-31T12:34:09.727Z","last)
+PASS: revoked all 47 sessions; stale cookie -> 401, /login still 200
+PASS: backup taken from the REHEARSAL environment
+PASS: restore-test of the rehearsal backup PASSED
+-- rollback drill --
+  rollback restore ok
+PASS: rollback: previous image boots against the rolled-back DB, schema:current
+
+== R12 rehearsal: 10 passed, 0 failed ==
+-- timings (s) --
+restore_db            11.7s
+web_ready             3.9s
+sched_2ticks          207.9s
+rehearsal_backup+test 16.0s
+rb_stop_new           0.5s
+rb_restore_prev_dump  13.5s
+rb_boot_prev_image    3.2s
+evidence: /tmp/claude-1000/-home-deploy-projects-titanorgroup-worktrees-titanor-time-foundation/e2496dfa-37dc-4201-b8cf-c0ce2d52de05/scratchpad/r12/rehearsal-evidence

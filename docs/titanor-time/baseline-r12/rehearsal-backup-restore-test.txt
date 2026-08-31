@@ -1,0 +1,19 @@
+---- backup: /tmp/claude-1000/-home-deploy-projects-titanorgroup-worktrees-titanor-time-foundation/e2496dfa-37dc-4201-b8cf-c0ce2d52de05/scratchpad/r12/rehearsal-evidence/rehearsal-backup/rehearsal-20260831T123438Z-manual
+PASS: gps-archive-manifest.json is valid JSON
+PASS: backup SHA256SUMS verify (staged from /tmp/claude-1000/-home-deploy-projects-titanorgroup-worktrees-titanor-time-foundation/e2496dfa-37dc-4201-b8cf-c0ce2d52de05/scratchpad/r12/rehearsal-evidence/rehearsal-backup/rehearsal-20260831T123438Z-manual)
+---- start disposable postgres:16 (tt-restore-test-20260831T123442Z-606199-db)
+---- pg_restore --no-owner --no-acl into tt_restore (owner tt_restore_owner, not the source role)
+PASS: pg_restore completed with --exit-on-error
+PASS: migrations applied: 98 (== backup)
+PASS: no unfinished/rolled-back migrations in the restore
+PASS: migration-history hash matches
+PASS: public tables: 74
+PASS: public routines: 222
+PASS: triggers: 40
+PASS: foreign keys: 178
+PASS: per-table row counts identical for all 74 public tables
+PASS: all-data fingerprint matches the backup exactly
+PASS: uploads recorded as empty (uploads.empty present)
+
+RESTORE TEST: 13 passed, 0 failed
+PASS

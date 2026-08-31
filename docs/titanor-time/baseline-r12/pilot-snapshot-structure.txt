@@ -1,0 +1,7 @@
+migrations_applied=98
+migrations_unfinished=0
+migrations_rolledback=0
+public_tables=74
+public_routines=222
+triggers=40
+foreign_keys=178
