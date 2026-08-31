@@ -3041,6 +3041,163 @@ button:disabled {
   display: flex;
   align-items: center;
   gap: 12px;
+  flex-wrap: wrap;
+}
+
+/* CUSTOMER_REPORT_SCOPE_PICKER_RU.md — the sites / workers scope picker on /admin/reports/customer.
+   Reuses .worker-card's max-width + the R09.6 body overflow-x guard; every panel is self-scrolling. */
+.scope-mode {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px 14px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 20px;
+}
+.scope-mode legend {
+  font-weight: 600;
+  padding: 0 4px;
+}
+.scope-mode label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.scope-panel {
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  padding: 12px 14px;
+  display: grid;
+  gap: 10px;
+}
+.scope-panel.is-disabled {
+  opacity: 0.55;
+}
+.scope-panel-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 4px 12px;
+}
+.scope-panel-head h3 {
+  margin: 0;
+  font-size: 1rem;
+}
+.scope-count {
+  margin: 0;
+  color: var(--text-soft);
+  font-size: 0.88rem;
+}
+.scope-panel-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.scope-search {
+  flex: 1 1 200px;
+  min-width: 0;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: rgba(7, 11, 17, 0.5);
+  color: var(--text);
+}
+.scope-search:focus-visible {
+  outline: 2px solid var(--accent-light);
+  outline-offset: 1px;
+}
+.scope-bulk {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.scope-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 6px;
+  max-height: 340px;
+  overflow-y: auto;
+}
+.scope-row {
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 6px;
+  background: rgba(7, 11, 17, 0.5);
+}
+.scope-row.is-selected {
+  border-color: var(--accent-light);
+  background: rgba(82, 130, 168, 0.16);
+}
+.scope-row-label {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 10px 12px;
+  min-height: 48px;
+  cursor: pointer;
+}
+.scope-row-label input {
+  width: 20px;
+  height: 20px;
+  flex-shrink: 0;
+  margin-top: 1px;
+}
+.scope-row-label input:focus-visible {
+  outline: 2px solid var(--accent-light);
+  outline-offset: 2px;
+}
+.scope-row-body {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.scope-row-primary {
+  overflow-wrap: anywhere;
+}
+.scope-row-secondary {
+  color: var(--text-soft);
+  font-size: 0.85rem;
+  overflow-wrap: anywhere;
+}
+
+.scope-pager {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  font-size: 0.88rem;
+  flex-wrap: wrap;
+}
+.scope-empty {
+  margin: 0;
+  color: var(--text-soft);
+  font-size: 0.9rem;
+}
+.scope-notice {
+  margin: 0;
+  padding: 8px 12px;
+  border: 1px solid var(--accent-light);
+  border-radius: 6px;
+  background: rgba(82, 130, 168, 0.12);
+  font-size: 0.9rem;
+}
+.scope-summary {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px 14px;
+  display: grid;
+  gap: 4px;
+}
+.scope-summary p {
+  margin: 0;
+}
+.scope-workers-wrap {
+  display: grid;
+  gap: 10px;
 }
 
 .ov-summary-grid {

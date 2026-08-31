@@ -63,6 +63,8 @@
     { "file": "_test-custom-report-canonical.ts", "lane": "db", "note": "Canonical custom-report row shape." },
     { "file": "_test-custom-report-pdf-csv.ts", "lane": "db", "note": "Custom report PDF + CSV rendering (pdfkit in-process)." },
     { "file": "_test-customer-hours.ts", "lane": "db", "note": "Customer-hours export (T13)." },
+    { "file": "_test-customer-report-scope.ts", "lane": "db", "note": "/admin/reports/customer scope picker — parseCustomerReportScope (lenient URL, explicit ALL/PICK, never 'empty = all'), serializeScopeToExportParams (maps back onto the existing export API, absent list = all), resolveCustomerScopeWorkers (assigned OR canonical hours, historical hours never hidden, one row per worker with all their selected sites)." },
+    { "file": "_test-customer-report-scope-ui.ts", "lane": "browser", "note": "/admin/reports/customer scope picker UI (Chromium) — sites panel -> workers-of-selected-sites panel -> summary -> Show & check; search by name/number/site, 20/page pagination, 'select all' spans every page, deselect after bulk, re-click toggles, site change prunes out-of-scope workers with a notice, URL round-trips on reload, RU/EN, keyboard + <label for>, no horizontal overflow desktop/mobile, ALL/ALL == the legacy no-params call, zero console errors. Seeds 28 sites + 55 workers on top of buildFixture. Desktop 1440 + mobile 390 screenshots." },
     { "file": "_test-export-batch-schema.ts", "lane": "db", "note": "ExportBatch schema + Prisma round-trip." },
     { "file": "_test-gps-accuracy-threshold.ts", "lane": "db", "note": "evaluateGpsReading accuracy threshold outcomes." },
     { "file": "_test-gps-approximate-sync.ts", "lane": "db", "note": "T14 approximate-GPS offline sync + site-flag auto-resolve." },

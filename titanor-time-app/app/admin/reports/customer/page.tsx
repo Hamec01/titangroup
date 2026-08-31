@@ -3,8 +3,8 @@ import { redirect } from 'next/navigation';
 import { resolveServerSession } from '@/lib/server-session';
 import { hasPermission } from '@/lib/permissions';
 import { resolveAppLocale } from '@/lib/i18n/server';
-import { listEmployeesForReportSelect } from '@/lib/users';
 import { listSiteOptionsForAdmin } from '@/lib/attendance-overview-lookups';
+import { parseCustomerReportScope } from '@/lib/reporting/customer-report-scope';
 import { AdminReportTabs } from '@/components/reports/AdminReportTabs';
 import { CustomerHoursForm } from './CustomerHoursForm';
 
@@ -13,7 +13,9 @@ export const dynamic = 'force-dynamic';
 // T13.11 — Customer Project Working Hours. Same permission set as the custom report endpoint.
 const REQUIRED_PERMISSIONS = ['worker.read.all', 'site.read.all', 'timesheet.read.all', 'export.read'];
 
-export default async function AdminCustomerHoursPage() {
+type RouteParams = { searchParams: Promise<Record<string, string | string[] | undefined>> };
+
+export default async function AdminCustomerHoursPage({ searchParams }: RouteParams) {
   const session = await resolveServerSession();
   if (!session) {
     redirect('/login');
@@ -29,7 +31,12 @@ export default async function AdminCustomerHoursPage() {
     }
   }
 
-  const [employees, sites] = await Promise.all([listEmployeesForReportSelect(), listSiteOptionsForAdmin()]);
+  const sp = await searchParams;
+  // CUSTOMER_REPORT_SCOPE_PICKER_RU.md §4 — the URL is the source of truth. The site list is small
+  // and bounded; the worker list is fetched by the client from /api/admin/reports/customer/scope
+  // once dates + sites are chosen (it depends on the date range).
+  const sites = await listSiteOptionsForAdmin();
+  const initial = parseCustomerReportScope(sp);
 
   return (
     <main className="setup-page">
@@ -41,11 +48,7 @@ export default async function AdminCustomerHoursPage() {
             ? 'Документ заказчику: подтверждённые (окончательно одобренные) часы по объекту за период. Без зарплат, ставок и TES.'
             : 'A document for the customer: confirmed (final-approved) hours by site for a date range. No salary, rates or TES.'}
         </p>
-        <CustomerHoursForm
-          employeeOptions={employees.map((e) => ({ id: e.id, label: `${e.lastName} ${e.firstName} (${e.employeeNumber})` }))}
-          siteOptions={sites.map((s) => ({ id: s.id, label: s.name }))}
-          locale={locale}
-        />
+        <CustomerHoursForm allSites={sites} initial={initial} locale={locale} />
       </div>
     </main>
   );
