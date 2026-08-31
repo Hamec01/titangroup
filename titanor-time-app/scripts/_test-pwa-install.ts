@@ -338,9 +338,18 @@ async function main() {
     const page = await newPageAs(ctx, worker.token);
     await page.goto(`${BASE}/worker/install`, { waitUntil: 'networkidle' });
     await page.waitForFunction(() => !document.body.innerText.includes('Checking install options'));
+    await page.waitForTimeout(1500);
     const body = await bodyText(page);
-    check('24: unsupported browser (no serviceWorker) shows a neutral, non-alarming message', body.includes('may not support installing'), body.slice(0, 300));
-    check('24b: unsupported browser page remains otherwise usable (back link present)', body.includes('Back to clock'));
+    // Chromium dropped the hard service-worker requirement for installability, so "no serviceWorker"
+    // no longer routes to a bare "can't install" state — the page still shows manual install
+    // guidance and adds the neutral note that offline mode won't be available. The scenario's point
+    // is that this is communicated calmly, never as an error/failure.
+    check(
+      '24: no serviceWorker -> a neutral, non-alarming note that offline mode may be unavailable',
+      body.includes('Offline mode may not be available') && !/\berror\b|\bfailed\b/i.test(body),
+      body.slice(0, 400)
+    );
+    check('24b: the page remains otherwise usable (back link present)', body.includes('Back to clock'));
     await ctx.close();
   }
 
