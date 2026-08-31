@@ -1,25 +1,31 @@
 # Titanor Time — Implementation Status
 
-**`[2026-08-31]` R12-prep — модернизация browser-lane — DONE.** Отчёт `R12_PREP_BROWSER_LANE_RU.md`.
-Оговорка из `R10_PILOT_ACCEPTANCE_REPORT_RU.md` §4 закрыта: **все 15 browser-lane тестов зелёные**
-на образе кандидата `t97-pilot-edd950c` (свежая disposable PG16, изоляция на тест). **0 дефектов
-продукта** — только устаревшие ожидания тестов (`2ebe3e5` не пересобирался; менялись только
-`scripts/_test-*` и `ops/`).
-- 9 тестов техдолга починены: `_test-offline-cold-restart` 6/0, `_test-pwa-install` 59/0,
-  `_test-qualifications-browser-qa` 26/0, `_test-t9-setup-lifecycle` 66/0, `_test-t9-full-flow` 84/0,
-  `_test-offline-views` 71/0, `_test-t9-setup-ui` 26/0, `_test-t9-restart-persistence`
-  (prepare 5/0 + verify 18/0), `_test-worker-dossier-browser-qa` 31/0.
-- Причины: PWA-редизайн (`.wk-main-action` / `.wk-main-action-wrap.{in,out}`, статус-лист),
-  i18n RU-дефолт (offline shell + UI-созданные работники), T13.5 (`/admin/qualifications` →
-  `/admin/workforce`), онбординг (worker → `/admin/workers/<id>`, чек-лист 5 строк, assignment
-  авто-открывает период), убран reason-gate у работника (T10/T12), T12 unified review, Chromium
-  снял SW-требование установки, `page.waitForURL()` виснет на App Router soft-nav → хелпер `waitPath()`.
-- **Новое:** `ops/titanor-time/run-restart-persistence.sh` (two-phase), `run-worker-dossier-qa.sh`
-  + `scripts/_qa-seed-worker-dossier.ts` (seed, которого не было); `run-browser-acceptance.sh` SKIP
-  сокращён.
-- **Latent bug (backlog, не блокер):** offline shell рендерит RU даже для EN-пользователя
-  (`AppLocaleProvider` затирает localStorage дефолтом `OfflineShellClient` до `readClientLocale()`).
-- **Следующее: R12** — production-like rehearsal (browser-lane больше не блокирует полную acceptance-матрицу).
+**`[2026-08-31]` R12-prep — browser-lane + языковой фикс — DONE. Новый R12-кандидат.** Отчёт
+`R12_PREP_BROWSER_LANE_RU.md`. Оговорка `R10_PILOT_ACCEPTANCE_REPORT_RU.md` §4 закрыта.
+- **Этап 1:** все 15 browser-lane тестов зелёные на образе R10-кандидата (0 дефектов продукта,
+  только устаревшие ожидания). 9 тестов техдолга починены. Причины: PWA-редизайн (`.wk-main-action`),
+  i18n, T13.5 (`/admin/workforce`), онбординг (5-строчный чек-лист, worker → `/admin/workers/<id>`),
+  убран worker reason-gate (T10/T12), T12 unified review, Chromium снял SW-требование установки,
+  `page.waitForURL()` виснет → хелпер `waitPath()`.
+- **Этап 1 нашёл latent bug:** offline PWA-оболочка рендерила RU для EN/FI-пользователя и залипала
+  на RU (`AppLocaleProvider` затирал `localStorage['titanor-time-locale']` RU-плейсхолдером
+  `OfflineShellClient` до `readClientLocale()`).
+- **Этап 2 — фикс `ef5548b`** (минимальный product): `AppLocaleProvider` получил проп `persist`
+  (default true); offline shell передаёт `persist={false}` (только читает выбор). IndexedDB/outbox/
+  cache/device-binding/безопасность не тронуты. Регрессия — новый `_test-offline-shell-locale`
+  (RU/EN/FI cold restart).
+- **Новый R12-кандидат:** git HEAD **`367420e`** (product-код = `ef5548b`; выше — только `scripts/`
+  + manifest), образ **`titanor-time-app:r12-candidate-367420e`**, digest **`sha256:b5f80cbd1cff8c307581d283d54b7668987157d696943d48a3a51ff80915d883`**.
+- **Все 16 browser-lane тестов зелёные на новом кандидате** (изоляция на тест + 2 dedicated runner):
+  role-matrix 32/0, foreman-redirect 10/0, report-rounding, csv-export 201/0, period-report 110/0,
+  export-ui 87/0, cold-restart 6/0, pwa-install 59/0, qualifications-qa 26/0, setup-lifecycle 66/0,
+  full-flow 84/0, offline-views 71/0, offline-shell-locale 12/0, setup-ui 26/0, restart-persistence
+  (prepare 5/0 + verify 18/0), worker-dossier 31/0.
+- **Новое ops:** `run-restart-persistence.sh` (two-phase), `run-worker-dossier-qa.sh` +
+  `scripts/_qa-seed-worker-dossier.ts`; `run-browser-acceptance.sh` SKIP сокращён; логи в
+  `docs/titanor-time/baseline-r12-prep/`.
+- **Следующее: R12** — production-like rehearsal на полностью disposable-окружении, кандидат
+  `r12-candidate-367420e`.
 
 **`[2026-08-31]` R11 — домен / Caddy / public login — PASS.** Отчёт `R11_DOMAIN_CADDY_REPORT_RU.md`.
 Вариант A (grey-cloud). `app.titanorgroup.fi` в `/etc/caddy/Caddyfile`: TLS Let's Encrypt (CN

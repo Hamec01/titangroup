@@ -3,7 +3,7 @@
 - **Дата фиксации:** 2026-08-31 (обновлено: R11 PASS)
 - **Ветка:** `feature/titanor-time-foundation`
 - **Главные документы:** `PRODUCTION_RELEASE_TZ_FINAL_RU.md`, `PRODUCTION_RELEASE_ROADMAP_RU.md`, `IMPLEMENTATION_STATUS.md`
-- **Текущий этап:** R11 PASS + **R12-prep (browser-lane) DONE** (`R12_PREP_BROWSER_LANE_RU.md`) — все 15 browser-lane тестов зелёные на образе кандидата, оговорка R10 §4 снята. Дальше — **R12** (production-like rehearsal).
+- **Текущий этап:** R11 PASS + **R12-prep DONE** (`R12_PREP_BROWSER_LANE_RU.md`) — browser-lane модернизирован, найденный языковой дефект offline-shell исправлен (`ef5548b`), **новый R12-кандидат** `titanor-time-app:r12-candidate-367420e` (git `367420e`), все 16 browser-lane тестов зелёные. Дальше — **R12** (production-like rehearsal этого кандидата).
 - **R10 manual acceptance:** CONFIRMED владельцем 2026-08-31 (реальные устройства + role-smoke, 0 P0/P1, FOREMAN skipped/not in scope)
 - **Инцидент 2026-08-31:** агент вызвал `caddy stop` в тесте → боевой Caddy лежал ~46 мин. Разбор + правило: `R11_INCIDENT_2026-08-31_caddy_outage.md`, `feedback_never_run_caddy_daemon_commands` (память). На этом хосте: только `caddy validate`/`adapt`, никаких `caddy stop/start/run`/bare `reload`.
 - **Production cutover:** запрещён до R12 PASS и отдельного подтверждения владельца на R13
@@ -114,14 +114,18 @@ Browser-lane — DONE (§6).
 
 R11 должен завершиться отчётом и инструкцией владельцу, что именно добавить в Cloudflare DNS. Если агент имеет доступ и владелец явно разрешил DNS-запись, можно подготовить изменение, но production cutover всё равно не начинать.
 
-## 6. Оговорка до R12 — ЗАКРЫТА (2026-08-31)
+## 6. Оговорка до R12 — ЗАКРЫТА + новый кандидат (2026-08-31)
 
-R10 §4 нашёл техдолг browser-lane (устаревшие с августа UI-тесты). **Модернизация завершена**
-(`R12_PREP_BROWSER_LANE_RU.md`): все 15 browser-lane тестов зелёные на образе кандидата
-`t97-pilot-edd950c`, 0 дефектов продукта, кандидат `2ebe3e5` не пересобирался. Прогон:
-`ops/titanor-time/run-browser-acceptance.sh` + `run-restart-persistence.sh` +
-`run-worker-dossier-qa.sh`. Один latent bug зафиксирован в backlog (offline-shell RU для
-EN-пользователя). R12 может воспроизводить полную acceptance-матрицу.
+R10 §4 (техдолг browser-lane) закрыт: `R12_PREP_BROWSER_LANE_RU.md`. Модернизация нашла один
+языковой дефект offline PWA-оболочки (RU для EN/FI-пользователя) — **исправлен** `ef5548b`
+(минимальный product-коммит: `AppLocaleProvider` проп `persist`, offline shell `persist={false}`).
+
+**Новый R12-кандидат:** git HEAD `367420e` (product-код = `ef5548b`, выше — только тесты/manifest),
+образ `titanor-time-app:r12-candidate-367420e`, digest в `R12_PREP_BROWSER_LANE_RU.md`. Все 16
+browser-lane тестов зелёные на этом кандидате. Прогон: `ops/titanor-time/run-browser-acceptance.sh`
++ `run-restart-persistence.sh` + `run-worker-dossier-qa.sh`. Логи: `baseline-r12-prep/`.
+
+**R12 проверяет именно `r12-candidate-367420e`** (не R10-образ `t97-pilot-edd950c`).
 
 ## 7. Backlog, не блокирующий production
 

@@ -1,0 +1,22 @@
+== T9.5 restart persistence ==
+   image: titanor-time-app:t97-pilot-edd950c
+   date:  2026-08-31T09:37:35Z
+
+DB migrated
+app ready on :39666
+
+>> 1/4  _test-t9-full-flow.ts  (seed the T9.4 fixture)
+{"pass":84,"fail":0}
+
+84 passed, 0 failed (T9.4 full flow)
+
+>> 2/4  _test-t9-restart-persistence.ts  PHASE=prepare
+{"pass":5,"fail":0,"phase":"prepare"}
+
+>> 3/4  docker restart tt-rp-app  (DB + volume stay up)
+   app healthy again
+
+>> 4/4  _test-t9-restart-persistence.ts  PHASE=verify
+{"pass":18,"fail":0,"phase":"verify"}
+
+== T9.5 restart persistence PASS ==

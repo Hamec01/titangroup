@@ -1,0 +1,11 @@
+== browser acceptance ==
+   image:    titanor-time-app:r12-candidate-2c015d4
+   tests:    2
+   date:     2026-08-31T11:35:18Z
+
+template DB migrated
+
+  PASS          _test-offline-shell-locale.ts  22s  12 passed, 0 failed
+  PASS          _test-offline-views.ts  324s  71 passed, 0 failed
+
+== 2 pass / 0 fail / 0 skip-harness ==
