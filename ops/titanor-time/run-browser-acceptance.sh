@@ -27,9 +27,13 @@ DBPORT="${DBPORT:-55460}"
 BASEPORT="${BASEPORT:-4300}"
 WORK="$(mktemp -d /tmp/tt-bacc.XXXXXX)"
 
-# These need a bespoke harness the stock lane also lacks — a two-phase (prepare / restart / verify)
-# driver, or a DB already carrying T9 fixture rows. Skipped here, reported as SKIP-HARNESS.
-SKIP='_test-t9-restart-persistence.ts _test-t9-setup-ui.ts _test-worker-dossier-browser-qa.ts'
+# These have their own dedicated runners because the per-test isolation here can't provide what
+# they need — SKIP-HARNESS here, run them separately:
+#   _test-t9-restart-persistence.ts  -> ops/titanor-time/run-restart-persistence.sh  (two-phase:
+#                                       seed via _test-t9-full-flow, prepare, docker restart, verify)
+#   _test-worker-dossier-browser-qa.ts -> ops/titanor-time/run-worker-dossier-qa.sh (needs the
+#                                       scripts/_qa-seed-worker-dossier.ts fixture seeded first)
+SKIP='_test-t9-restart-persistence.ts _test-worker-dossier-browser-qa.ts'
 
 docker image inspect "$IMAGE" >/dev/null 2>&1 || { echo "image $IMAGE not found — build it first" >&2; exit 1; }
 [ -r "$PILOT_ENV" ] || { echo "$PILOT_ENV not readable" >&2; exit 1; }

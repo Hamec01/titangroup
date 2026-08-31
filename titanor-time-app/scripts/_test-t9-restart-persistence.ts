@@ -346,7 +346,8 @@ async function verify(): Promise<void> {
     const siteText = await readText(adminPage, `/admin/sites/${manifest.site.id}`);
     check('verify: ADMIN session survives and renders fixture site/worker', siteText.includes(manifest.site.name) && siteText.includes(manifest.worker.lastName));
     const timesheetText = await readText(adminPage, `/admin/timesheets/${manifest.timesheetId}`);
-    check('verify: ADMIN sees final-approved V2 after restart', timesheetText.includes('FINAL_APPROVED') && timesheetText.includes('version 2'));
+    // The detail page shows the human status label ("Final approved") + "· version 2", not the raw enum.
+    check('verify: ADMIN sees final-approved V2 after restart', /final approved/i.test(timesheetText) && /version 2/i.test(timesheetText), timesheetText.slice(0, 200));
     const reportText = await readText(adminPage, `/admin/reports?employeeId=${manifest.worker.employeeId}&periodId=${manifest.periodId}`);
     check('verify: ADMIN report still renders canonical 420 minutes', /7\s*h\s*0\s*min/.test(reportText));
 
@@ -354,8 +355,11 @@ async function verify(): Promise<void> {
     workerPage.on('console', (message) => { if (message.type() === 'error') browserErrors.push(message.text()); });
     const periodText = await readText(workerPage, `/worker/periods/${manifest.periodId}`);
     check('verify: WORKER session survives and sees finalized period/site', periodText.includes('Finalized') && periodText.includes(manifest.site.name));
-    const clockText = await readText(workerPage, '/worker');
-    check('verify: WORKER clock state is still clocked out', clockText.includes('Clocked out'));
+    await readText(workerPage, '/worker');
+    // The 2026 PWA redesign moved the "Clocked out" wording into the status sheet; the language-
+    // neutral clocked-out signal on the main screen is `.wk-main-action-wrap.out`.
+    const clockedOut = await workerPage.locator('.wk-main-action-wrap.out').count();
+    check('verify: WORKER clock state is still clocked out', clockedOut > 0);
 
     const workerReport = await apiGet(`/api/admin/reports/workers/${manifest.worker.employeeId}?periodId=${manifest.periodId}`, manifest.admin.sessionToken);
     check('verify: report API returns FINAL_APPROVED V2 and 420 minutes', workerReport.status === 200 && workerReport.body?.timesheet?.status === 'FINAL_APPROVED' && workerReport.body?.timesheet?.versionNumber === 2 && workerReport.body?.total?.workedMinutes === 420, workerReport.body?.total);
