@@ -2,9 +2,12 @@
 
 - **Основание:** `PRODUCTION_RELEASE_ROADMAP_RU.md` R13; ТЗ §20/§22.
 - **Дата:** 2026-08-31.
-- **Кандидат:** `titanor-time-app:r12-candidate-367420e`
-  (digest `sha256:b5f80cbd1cff8c307581d283d54b7668987157d696943d48a3a51ff80915d883`).
-- **Статус:** R12 rehearsal PASS (авто-часть). Осталась owner-часть acceptance + R13 checkpoint.
+- **Текущий hotfix-кандидат:** `titanor-time-app:r13-hotfix-1416503`
+  (image ID `sha256:864267bb1698dc43d585fb0a094345766a1eff7afc006d778c42fc7eff5c4bbb`).
+  Предыдущий R12-кандидат `367420e` заменён и не может идти в R14.
+- **Статус:** автоматизированная device/role acceptance пройдена с hotfix `1416503`; полный отчёт —
+  `R13_AUTOMATED_ACCEPTANCE_RU.md`. Из-за изменения product-кода новый образ должен повторно пройти
+  R12 rehearsal. Осталась короткая owner-часть acceptance + R13 checkpoint.
   **Production cutover / R14 / maintenance window — не начаты и не подтверждены.**
 
 ---
@@ -144,13 +147,13 @@ Dangling images — **0**.
 
 | пункт | значение |
 |---|---|
-| Git SHA / release tag | HEAD `feature/titanor-time-foundation`; product-код `ef5548b` |
-| image tag / ID / size | `titanor-time-app:r12-candidate-367420e` · `sha256:b5f80cbd1cff8c307581d283d54b7668987157d696943d48a3a51ff80915d883` · 792 MB · revision `367420e` · created 2026-08-31T11:45:24Z |
+| Git SHA / release tag | hotfix HEAD `1416503`; предыдущий R12-кандидат `367420e` более не финальный |
+| image tag / ID | `titanor-time-app:r13-hotfix-1416503` · `sha256:864267bb1698dc43d585fb0a094345766a1eff7afc006d778c42fc7eff5c4bbb` |
 | migration count / status | 98 applied, 0 unfinished/rolled-back; schema current (fresh + restored pilot) |
 | baseline / final row-count manifests | `docs/titanor-time/baseline-r12/pilot-snapshot-manifest.txt` — 1727 rows, `all_data_sha256 907d3219…` |
 | backup paths / sizes / checksums | snapshot `pilot-20260831T121948Z-manual` (db.dump 492 469 б, SHA256SUMS OK); финальный — на R14 шаг 7 |
-| restore / rehearsal evidence | `docs/titanor-time/baseline-r12/` (restore-smoke 14/0, rehearsal 10/0, timings) |
-| test / acceptance / dependency reports | `R12_PREP_BROWSER_LANE_RU.md` (16/16), `R10_PILOT_ACCEPTANCE_REPORT_RU.md` (80/80 unit+db+sched, restore 13/13, 0 CVE), этот checklist §4 |
+| restore / rehearsal evidence | `docs/titanor-time/baseline-r12/` относится к `367420e`; для hotfix `1416503` требуется повтор R12 |
+| test / acceptance / dependency reports | `R13_AUTOMATED_ACCEPTANCE_RU.md` (16/16 browser files), `R10_PILOT_ACCEPTANCE_REPORT_RU.md` (80/80 unit+db+sched, restore 13/13, 0 CVE), этот checklist §4 |
 | точное maintenance window | **не подтверждено владельцем** (roadmap R13 п.2) |
 | ожидаемый downtime | ~1–2 мин реального простоя, окно 10 мин (`R12_REHEARSAL_RU.md` §5) |
 | DNS status | `app.titanorgroup.fi` → `84.247.130.242` (DNS only), TLS Let's Encrypt до 2026-11-29, 503 holding |

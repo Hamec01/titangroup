@@ -3,7 +3,7 @@
 - **Дата фиксации:** 2026-08-31 (обновлено: R12 rehearsal PASS)
 - **Ветка:** `feature/titanor-time-foundation`
 - **Главные документы:** `PRODUCTION_RELEASE_TZ_FINAL_RU.md`, `PRODUCTION_RELEASE_ROADMAP_RU.md`, `IMPLEMENTATION_STATUS.md`
-- **Текущий этап:** R11 PASS · R12-prep DONE · R12 rehearsal PASS · **R13 prep DONE** (`R13_PREP_RU.md`) — решения владельца зафиксированы, на пилоте созданы тест-аккаунты `r13-{super,admin,worker,foreman}` (пароли переданы владельцу приватно, не в Git), owner-checklist A–E + evidence package готовы, docker cleanup-план (не выполнен). Кандидат `titanor-time-app:r12-candidate-367420e` (digest `sha256:b5f80cbd…`). **Ждёт owner-часть R13:** ручная acceptance по checklist + 3 подтверждения (pilot acceptance / maintenance window / cutover). **R14/cutover не начинать.**
+- **Текущий этап:** R11 PASS · R12 rehearsal был PASS на `367420e` · R13 automation нашла и исправила admin-login landing (`1416503`). Новый образ `titanor-time-app:r13-hotfix-1416503` (ID `sha256:864267bb…`) прошёл **16/16 browser files**, GPS/full-flow/PWA/offline/mobile/restart/dossier зелёны (`R13_AUTOMATED_ACCEPTANCE_RU.md`). **Из-за product-изменения обязателен повтор R12 restore/rehearsal на новом образе**, затем owner checkpoint. **R14/cutover не начинать.**
 - **R10 manual acceptance:** CONFIRMED владельцем 2026-08-31 (реальные устройства + role-smoke, 0 P0/P1, FOREMAN skipped/not in scope)
 - **Инцидент 2026-08-31:** агент вызвал `caddy stop` в тесте → боевой Caddy лежал ~46 мин. Разбор + правило: `R11_INCIDENT_2026-08-31_caddy_outage.md`, `feedback_never_run_caddy_daemon_commands` (память). На этом хосте: только `caddy validate`/`adapt`, никаких `caddy stop/start/run`/bare `reload`.
 - **Production cutover:** запрещён до R12 PASS и отдельного подтверждения владельца на R13
@@ -163,4 +163,3 @@ git log --oneline -5
 Если владелец ещё не подтвердил R10 manual acceptance — не начинать R11, а помочь ему пройти checklist.
 
 Если acceptance подтверждён — начинать R11 с read-only аудита Caddy/DNS/public-site link и подготовить безопасный plan/runbook. Production cutover не выполнять.
-
