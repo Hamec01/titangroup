@@ -19,12 +19,16 @@
 
 ### Прогоны-доказательства (`docs/titanor-time/baseline-r12-prep/`)
 
+Полный прогон на **пересобранном финальном образе** `r12-candidate-367420e`
+(`full-verification-r12-candidate-367420e.txt`):
+
 | прогон | результат |
 |---|---|
-| `run-browser-acceptance.sh` (14 изолированных) | 12/2 → фикс тест-ожиданий → 14/0 |
-| `_test-offline-shell-locale` + `_test-offline-views` (перепрогон) | 12/0 + 71/0 |
-| `run-restart-persistence.sh` | full-flow 84/0 · prepare 5/0 · verify 18/0 |
-| `run-worker-dossier-qa.sh` | seed ok · 31/0 |
+| `run-browser-acceptance.sh` (14 изолированных, свежая PG16 + контейнер на тест) | **14 pass / 0 fail** |
+| `run-restart-persistence.sh` (two-phase + docker restart) | full-flow 84/0 · prepare 5/0 · verify 18/0 — **PASS** |
+| `run-worker-dossier-qa.sh` (seed + browser) | seed ok · 31/0 — **PASS** |
+
+Итого **16/16 browser-lane тестов зелёные** на финальном кандидате.
 
 ---
 

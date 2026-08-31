@@ -1,0 +1,59 @@
+== browser acceptance ==
+   image:    titanor-time-app:r12-candidate-367420e
+   tests:    16
+   date:     2026-08-31T11:48:50Z
+
+template DB migrated
+
+  PASS          _test-csv-export.ts  19s  201 passed, 0 failed
+  PASS          _test-period-time-report.ts  9s  
+  PASS          _test-report-rounding-consistency.ts  8s  
+  PASS          _test-foreman-admin-redirect.ts  10s  
+  PASS          _test-export-ui.ts  73s  87 passed, 0 failed
+  PASS          _test-offline-cold-restart.ts  15s  6 passed, 0 failed
+  PASS          _test-offline-shell-locale.ts  18s  12 passed, 0 failed
+  PASS          _test-offline-views.ts  1107s  71 passed, 0 failed
+  PASS          _test-pwa-install.ts  44s  59 passed, 0 failed
+  PASS          _test-qualifications-browser-qa.ts  26s  
+  PASS          _test-t9-full-flow.ts  59s  84 passed, 0 failed
+  SKIP-HARNESS  _test-t9-restart-persistence.ts
+  PASS          _test-t9-role-matrix.ts  14s  32 passed, 0 failed
+  PASS          _test-t9-setup-lifecycle.ts  42s  66 passed, 0 failed
+  PASS          _test-t9-setup-ui.ts  42s  26 passed, 0 failed
+  SKIP-HARNESS  _test-worker-dossier-browser-qa.ts
+
+== 14 pass / 0 fail / 2 skip-harness ==
+=====SPLIT-RP=====
+== T9.5 restart persistence ==
+   image: titanor-time-app:r12-candidate-367420e
+   date:  2026-08-31T12:15:09Z
+
+DB migrated
+app ready on :39666
+
+>> 1/4  _test-t9-full-flow.ts  (seed the T9.4 fixture)
+{"pass":84,"fail":0}
+
+84 passed, 0 failed (T9.4 full flow)
+
+>> 2/4  _test-t9-restart-persistence.ts  PHASE=prepare
+{"pass":5,"fail":0,"phase":"prepare"}
+
+>> 3/4  docker restart tt-rp-app  (DB + volume stay up)
+   app healthy again
+
+>> 4/4  _test-t9-restart-persistence.ts  PHASE=verify
+{"pass":18,"fail":0,"phase":"verify"}
+
+== T9.5 restart persistence PASS ==
+=====SPLIT-WD=====
+== worker dossier QA ==
+   image: titanor-time-app:r12-candidate-367420e
+
+app ready on :3931
+>> seed
+{"ok":true,"employeeId":"98b171e6-2b76-44c2-b501-a9b467364341","adminId":"1948715c-fd5d-4d70-aa16-f1007f6350b9","workerId":"012a3de8-dd86-4d08-932e-da8481faefb1"}
+>> test
+{"pass":31,"fail":0}
+
+== worker dossier QA PASS ==

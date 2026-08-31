@@ -1,0 +1,363 @@
+#0 building with "default" instance using docker driver
+
+#1 [internal] load build definition from Dockerfile
+#1 transferring dockerfile: 6.44kB 0.0s done
+#1 DONE 0.1s
+
+#2 [internal] load metadata for docker.io/library/node:22-bookworm-slim
+#2 DONE 0.1s
+
+#3 [internal] load build context
+#3 DONE 0.0s
+
+#4 [dependencies 1/4] FROM docker.io/library/node:22-bookworm-slim@sha256:d649c27dae7ba0137b3cef5dd75baa422c08dc3d9e3fc0c23dfb172dc3cc6436
+#4 resolve docker.io/library/node:22-bookworm-slim@sha256:d649c27dae7ba0137b3cef5dd75baa422c08dc3d9e3fc0c23dfb172dc3cc6436 0.1s done
+#4 DONE 0.1s
+
+#3 [internal] load build context
+#3 transferring context: 29.33kB 0.1s
+#3 transferring context: 164.69kB 0.6s done
+#3 DONE 1.0s
+
+#5 [builder  3/10] RUN apt-get update && apt-get install -y --no-install-recommends openssl     && rm -rf /var/lib/apt/lists/*
+#5 CACHED
+
+#6 [dependencies 3/4] COPY titanor-time-app/package.json titanor-time-app/package-lock.json ./
+#6 CACHED
+
+#7 [dependencies 4/4] RUN npm ci
+#7 CACHED
+
+#8 [dependencies 2/4] WORKDIR /app
+#8 CACHED
+
+#9 [builder  4/10] COPY --from=dependencies /app/node_modules ./node_modules
+#9 CACHED
+
+#10 [builder  5/10] COPY titanor-time-app/ ./
+#10 DONE 1.7s
+
+#11 [builder  6/10] COPY prisma ./prisma
+#11 DONE 0.4s
+
+#12 [builder  7/10] RUN npx prisma generate --schema prisma/schema.prisma
+#12 8.445 Prisma schema loaded from prisma/schema.prisma
+#12 12.42 
+#12 12.42 ✔ Generated Prisma Client (v6.19.3) to ./node_modules/@prisma/client in 1.69s
+#12 12.42 
+#12 12.42 Start by importing your Prisma Client (See: https://pris.ly/d/importing-client)
+#12 12.42 
+#12 12.42 Tip: Interested in query caching in just a few lines of code? Try Accelerate today! https://pris.ly/tip-3-accelerate
+#12 12.42 
+#12 12.51 npm notice
+#12 12.51 npm notice New major version of npm available! 10.9.8 -> 12.0.2
+#12 12.51 npm notice Changelog: https://github.com/npm/cli/releases/tag/v12.0.2
+#12 12.51 npm notice To update run: npm install -g npm@12.0.2
+#12 12.51 npm notice
+#12 DONE 12.9s
+
+#13 [builder  8/10] RUN npm run build
+#13 1.281 
+#13 1.281 > titanor-time@0.1.0 build
+#13 1.281 > next build
+#13 1.281 
+#13 3.396 ▲ Next.js 16.3.3 (Turbopack)
+#13 3.448 ✓ Running next.config.mjs took 51ms
+#13 3.613 
+#13 3.780   Creating an optimized production build ...
+#13 58.06 ✓ Compiled successfully in 54s
+#13 58.07   Running TypeScript ...
+#13 101.1   Finished TypeScript in 43s ...
+#13 101.2   Collecting page data using 3 workers ...
+#13 105.1   Generating static pages using 3 workers (0/12) ...
+#13 105.5   Generating static pages using 3 workers (3/12) 
+#13 105.6   Generating static pages using 3 workers (6/12) 
+#13 105.8   Generating static pages using 3 workers (9/12) 
+#13 105.8 ✓ Generating static pages using 3 workers (12/12) in 737ms
+#13 105.8   Finalizing page optimization ...
+#13 109.1 
+#13 109.1 Route (app)
+#13 109.1 ┌ ƒ /
+#13 109.1 ├ ƒ /_not-found
+#13 109.1 ├ ƒ /activate
+#13 109.1 ├ ƒ /activate-account
+#13 109.1 ├ ƒ /activate-account/[token]
+#13 109.1 ├ ƒ /activate/[token]
+#13 109.1 ├ ƒ /admin
+#13 109.1 ├ ƒ /admin/assignments
+#13 109.1 ├ ƒ /admin/assignments/new
+#13 109.1 ├ ƒ /admin/attendance/exceptions
+#13 109.1 ├ ƒ /admin/attendance/exceptions/[exceptionId]
+#13 109.1 ├ ƒ /admin/attendance/policy
+#13 109.1 ├ ƒ /admin/cities
+#13 109.1 ├ ƒ /admin/cities/new
+#13 109.1 ├ ƒ /admin/corrections
+#13 109.1 ├ ƒ /admin/corrections/[correctionRequestId]
+#13 109.1 ├ ƒ /admin/corrections/[correctionRequestId]/days/[date]
+#13 109.1 ├ ƒ /admin/export
+#13 109.1 ├ ƒ /admin/export/[batchId]
+#13 109.1 ├ ƒ /admin/periods
+#13 109.1 ├ ƒ /admin/periods/[periodId]
+#13 109.1 ├ ƒ /admin/periods/new
+#13 109.1 ├ ƒ /admin/profile
+#13 109.1 ├ ƒ /admin/qualifications
+#13 109.1 ├ ƒ /admin/reports
+#13 109.1 ├ ƒ /admin/reports/custom
+#13 109.1 ├ ƒ /admin/reports/customer
+#13 109.1 ├ ƒ /admin/reports/periods
+#13 109.1 ├ ƒ /admin/reports/sites
+#13 109.1 ├ ƒ /admin/review
+#13 109.1 ├ ƒ /admin/review-scopes
+#13 109.1 ├ ƒ /admin/review-scopes/[reviewScopeId]
+#13 109.1 ├ ƒ /admin/setup
+#13 109.1 ├ ƒ /admin/sites
+#13 109.1 ├ ƒ /admin/sites/[siteId]
+#13 109.1 ├ ƒ /admin/sites/new
+#13 109.1 ├ ƒ /admin/submission-cycles
+#13 109.1 ├ ƒ /admin/templates
+#13 109.1 ├ ƒ /admin/templates/[templateId]
+#13 109.1 ├ ƒ /admin/templates/new
+#13 109.1 ├ ƒ /admin/timesheets
+#13 109.1 ├ ƒ /admin/timesheets/[timesheetId]
+#13 109.1 ├ ƒ /admin/users
+#13 109.1 ├ ƒ /admin/users/new
+#13 109.1 ├ ƒ /admin/work-areas
+#13 109.1 ├ ƒ /admin/workers
+#13 109.1 ├ ƒ /admin/workers/[employeeId]
+#13 109.1 ├ ƒ /admin/workers/[employeeId]/locations
+#13 109.1 ├ ƒ /admin/workers/[employeeId]/profile
+#13 109.1 ├ ƒ /admin/workers/[employeeId]/timeline
+#13 109.1 ├ ƒ /admin/workers/new
+#13 109.1 ├ ƒ /admin/workforce
+#13 109.1 ├ ƒ /api/admin/assignments
+#13 109.1 ├ ƒ /api/admin/assignments/[assignmentId]
+#13 109.1 ├ ƒ /api/admin/assignments/[assignmentId]/end
+#13 109.1 ├ ƒ /api/admin/assignments/[assignmentId]/promote
+#13 109.1 ├ ƒ /api/admin/assignments/[assignmentId]/split
+#13 109.1 ├ ƒ /api/admin/assignments/validate-overlap
+#13 109.1 ├ ƒ /api/admin/attendance/exceptions
+#13 109.1 ├ ƒ /api/admin/attendance/exceptions/[exceptionId]
+#13 109.1 ├ ƒ /api/admin/attendance/exceptions/[exceptionId]/edit
+#13 109.1 ├ ƒ /api/admin/attendance/exceptions/[exceptionId]/resolve
+#13 109.1 ├ ƒ /api/admin/attendance/exceptions/bulk-acknowledge-gps
+#13 109.1 ├ ƒ /api/admin/attendance/policy
+#13 109.1 ├ ƒ /api/admin/attendance/workers/[employeeId]/locations
+#13 109.1 ├ ƒ /api/admin/cities
+#13 109.1 ├ ƒ /api/admin/cities/[cityId]
+#13 109.1 ├ ƒ /api/admin/corrections
+#13 109.1 ├ ƒ /api/admin/corrections/[correctionRequestId]
+#13 109.1 ├ ƒ /api/admin/corrections/[correctionRequestId]/apply-in-review
+#13 109.1 ├ ƒ /api/admin/corrections/[correctionRequestId]/days/[date]
+#13 109.1 ├ ƒ /api/admin/corrections/[correctionRequestId]/decide
+#13 109.1 ├ ƒ /api/admin/corrections/[correctionRequestId]/discard
+#13 109.1 ├ ƒ /api/admin/corrections/[correctionRequestId]/draft
+#13 109.1 ├ ƒ /api/admin/corrections/[correctionRequestId]/submit
+#13 109.1 ├ ƒ /api/admin/export-batches
+#13 109.1 ├ ƒ /api/admin/export-batches/[batchId]
+#13 109.1 ├ ƒ /api/admin/export-batches/[batchId]/download
+#13 109.1 ├ ƒ /api/admin/foreman-assignments
+#13 109.1 ├ ƒ /api/admin/foreman-assignments/[foremanAssignmentId]/end
+#13 109.1 ├ ƒ /api/admin/geocoding/search
+#13 109.1 ├ ƒ /api/admin/notifications
+#13 109.1 ├ ƒ /api/admin/notifications/[notificationId]/dismiss
+#13 109.1 ├ ƒ /api/admin/overview
+#13 109.1 ├ ƒ /api/admin/periods
+#13 109.1 ├ ƒ /api/admin/periods/[periodId]
+#13 109.1 ├ ƒ /api/admin/periods/[periodId]/export
+#13 109.1 ├ ƒ /api/admin/periods/[periodId]/lock
+#13 109.1 ├ ƒ /api/admin/periods/current
+#13 109.1 ├ ƒ /api/admin/professions
+#13 109.1 ├ ƒ /api/admin/qualifications
+#13 109.1 ├ ƒ /api/admin/reports/custom/export
+#13 109.1 ├ ƒ /api/admin/reports/customer/export
+#13 109.1 ├ ƒ /api/admin/reports/periods/[periodId]
+#13 109.1 ├ ƒ /api/admin/reports/sites/[siteId]
+#13 109.1 ├ ƒ /api/admin/reports/workers/[employeeId]
+#13 109.1 ├ ƒ /api/admin/review-queue
+#13 109.1 ├ ƒ /api/admin/review-scopes
+#13 109.1 ├ ƒ /api/admin/review-scopes/[reviewScopeId]
+#13 109.1 ├ ƒ /api/admin/review-scopes/[reviewScopeId]/approve
+#13 109.1 ├ ƒ /api/admin/review-scopes/[reviewScopeId]/return
+#13 109.1 ├ ƒ /api/admin/setup-status
+#13 109.1 ├ ƒ /api/admin/sites
+#13 109.1 ├ ƒ /api/admin/sites/[siteId]
+#13 109.1 ├ ƒ /api/admin/sites/[siteId]/geofence-versions
+#13 109.1 ├ ƒ /api/admin/sites/[siteId]/work-areas
+#13 109.1 ├ ƒ /api/admin/sites/[siteId]/work-areas/[workAreaId]
+#13 109.1 ├ ƒ /api/admin/templates
+#13 109.1 ├ ƒ /api/admin/templates/[templateId]
+#13 109.1 ├ ƒ /api/admin/timesheets
+#13 109.1 ├ ƒ /api/admin/timesheets/[timesheetId]
+#13 109.1 ├ ƒ /api/admin/timesheets/[timesheetId]/approve
+#13 109.1 ├ ƒ /api/admin/timesheets/[timesheetId]/correction
+#13 109.1 ├ ƒ /api/admin/timesheets/[timesheetId]/direct-edit
+#13 109.1 ├ ƒ /api/admin/timesheets/[timesheetId]/final-approve
+#13 109.1 ├ ƒ /api/admin/timesheets/[timesheetId]/return
+#13 109.1 ├ ƒ /api/admin/users
+#13 109.1 ├ ƒ /api/admin/users/[userId]/activation
+#13 109.1 ├ ƒ /api/admin/users/[userId]/recovery
+#13 109.1 ├ ƒ /api/admin/users/admins
+#13 109.1 ├ ƒ /api/admin/workers
+#13 109.1 ├ ƒ /api/admin/workers/[employeeId]
+#13 109.1 ├ ƒ /api/admin/workers/[employeeId]/activation
+#13 109.1 ├ ƒ /api/admin/workers/[employeeId]/deactivate
+#13 109.1 ├ ƒ /api/admin/workers/[employeeId]/dossier
+#13 109.1 ├ ƒ /api/admin/workers/[employeeId]/professions
+#13 109.1 ├ ƒ /api/admin/workers/[employeeId]/professions/[employeeProfessionId]
+#13 109.1 ├ ƒ /api/admin/workers/[employeeId]/profile
+#13 109.1 ├ ƒ /api/admin/workers/[employeeId]/profile/contract
+#13 109.1 ├ ƒ /api/admin/workers/[employeeId]/profile/personal-identity-code
+#13 109.1 ├ ƒ /api/admin/workers/[employeeId]/profile/photo
+#13 109.1 ├ ƒ /api/admin/workers/[employeeId]/profile/qualifications
+#13 109.1 ├ ƒ /api/admin/workers/[employeeId]/profile/qualifications/[qualificationId]
+#13 109.1 ├ ƒ /api/admin/workers/[employeeId]/profile/qualifications/[qualificationId]/photo
+#13 109.1 ├ ƒ /api/admin/workers/[employeeId]/recovery
+#13 109.1 ├ ƒ /api/admin/workers/[employeeId]/regenerate-username
+#13 109.1 ├ ƒ /api/admin/workers/[employeeId]/timesheet-schedule
+#13 109.1 ├ ƒ /api/admin/workforce/export
+#13 109.1 ├ ƒ /api/auth/activate
+#13 109.1 ├ ƒ /api/auth/activate-account
+#13 109.1 ├ ƒ /api/auth/change-password
+#13 109.1 ├ ƒ /api/auth/login
+#13 109.1 ├ ƒ /api/auth/logout
+#13 109.1 ├ ƒ /api/auth/logout-all
+#13 109.1 ├ ƒ /api/auth/password-reset/confirm
+#13 109.1 ├ ƒ /api/auth/session
+#13 109.1 ├ ƒ /api/auth/set-account-password
+#13 109.1 ├ ƒ /api/auth/set-initial-password
+#13 109.1 ├ ƒ /api/foreman/attendance/exceptions
+#13 109.1 ├ ƒ /api/foreman/attendance/exceptions/[exceptionId]
+#13 109.1 ├ ƒ /api/foreman/attendance/exceptions/[exceptionId]/edit
+#13 109.1 ├ ƒ /api/foreman/attendance/exceptions/[exceptionId]/resolve
+#13 109.1 ├ ƒ /api/foreman/overview
+#13 109.1 ├ ƒ /api/foreman/reports/sites/[siteId]
+#13 109.1 ├ ƒ /api/foreman/review-scopes
+#13 109.1 ├ ƒ /api/foreman/review-scopes/[reviewScopeId]/approve
+#13 109.1 ├ ƒ /api/foreman/review-scopes/[reviewScopeId]/return
+#13 109.1 ├ ƒ /api/foreman/review-scopes/bulk-approve
+#13 109.1 ├ ƒ /api/foreman/timesheets/[timesheetId]
+#13 109.1 ├ ƒ /api/foreman/workers
+#13 109.1 ├ ƒ /api/health
+#13 109.1 ├ ƒ /api/me/account
+#13 109.1 ├ ƒ /api/me/locale
+#13 109.1 ├ ƒ /api/me/sessions
+#13 109.1 ├ ƒ /api/me/sessions/[sessionId]
+#13 109.1 ├ ƒ /api/qualification-definitions
+#13 109.1 ├ ƒ /api/ready
+#13 109.1 ├ ƒ /api/worker/assignments/current
+#13 109.1 ├ ƒ /api/worker/attendance/check-in
+#13 109.1 ├ ƒ /api/worker/attendance/check-out
+#13 109.1 ├ ƒ /api/worker/attendance/clock-state
+#13 109.1 ├ ƒ /api/worker/attendance/context
+#13 109.1 ├ ƒ /api/worker/attendance/presence
+#13 109.1 ├ ƒ /api/worker/attendance/switch-site
+#13 109.1 ├ ƒ /api/worker/attendance/sync
+#13 109.1 ├ ƒ /api/worker/context
+#13 109.1 ├ ƒ /api/worker/notifications
+#13 109.1 ├ ƒ /api/worker/notifications/[notificationId]/dismiss
+#13 109.1 ├ ƒ /api/worker/periods/actionable
+#13 109.1 ├ ƒ /api/worker/periods/current
+#13 109.1 ├ ƒ /api/worker/professions
+#13 109.1 ├ ƒ /api/worker/professions/[employeeProfessionId]
+#13 109.1 ├ ƒ /api/worker/profile
+#13 109.1 ├ ƒ /api/worker/profile/personal-identity-code
+#13 109.1 ├ ƒ /api/worker/profile/photo
+#13 109.1 ├ ƒ /api/worker/profile/qualifications
+#13 109.1 ├ ƒ /api/worker/profile/qualifications/[qualificationId]
+#13 109.1 ├ ƒ /api/worker/profile/qualifications/[qualificationId]/photo
+#13 109.1 ├ ƒ /api/worker/timesheets
+#13 109.1 ├ ƒ /api/worker/timesheets/[timesheetId]
+#13 109.1 ├ ƒ /api/worker/timesheets/[timesheetId]/current-version
+#13 109.1 ├ ƒ /api/worker/timesheets/[timesheetId]/days/[date]
+#13 109.1 ├ ƒ /api/worker/timesheets/[timesheetId]/draft
+#13 109.1 ├ ƒ /api/worker/timesheets/[timesheetId]/reopen
+#13 109.1 ├ ƒ /api/worker/timesheets/[timesheetId]/submit
+#13 109.1 ├ ƒ /foreman
+#13 109.1 ├ ƒ /foreman/attendance/exceptions
+#13 109.1 ├ ƒ /foreman/attendance/exceptions/[exceptionId]
+#13 109.1 ├ ƒ /foreman/reports/sites
+#13 109.1 ├ ƒ /foreman/review
+#13 109.1 ├ ƒ /foreman/review/[timesheetId]
+#13 109.1 ├ ƒ /foreman/review/exceptions
+#13 109.1 ├ ƒ /foreman/review/standard
+#13 109.1 ├ ƒ /foreman/workers
+#13 109.1 ├ ƒ /guide
+#13 109.1 ├ ƒ /login
+#13 109.1 ├ ƒ /reset-password
+#13 109.1 ├ ○ /robots.txt
+#13 109.1 ├ ƒ /set-account-password
+#13 109.1 ├ ƒ /set-password
+#13 109.1 ├ ƒ /worker
+#13 109.1 ├ ƒ /worker-offline
+#13 109.1 ├ ƒ /worker/history
+#13 109.1 ├ ƒ /worker/install
+#13 109.1 ├ ƒ /worker/periods
+#13 109.1 ├ ƒ /worker/periods/[periodId]
+#13 109.1 ├ ƒ /worker/periods/[periodId]/hours
+#13 109.1 ├ ƒ /worker/periods/[periodId]/hours/[date]
+#13 109.1 ├ ƒ /worker/periods/[periodId]/submit
+#13 109.1 └ ƒ /worker/profile
+#13 109.1 
+#13 109.1 
+#13 109.1 ƒ Proxy (Middleware)
+#13 109.1 
+#13 109.1 ○  (Static)   prerendered as static content
+#13 109.1 ƒ  (Dynamic)  server-rendered on demand
+#13 109.1 
+#13 DONE 109.6s
+
+#14 [builder  9/10] RUN node scripts/build-runtime-scripts.mjs
+#14 1.199 
+#14 1.199   .runtime/attendance-auto-submit-scheduler.cjs  91.6kb
+#14 1.199   .runtime/attendance-auto-submit-tick.cjs       24.3kb
+#14 1.199   .runtime/gps-archive.cjs                       23.2kb
+#14 1.199   .runtime/bootstrap-super-admin.cjs              9.3kb
+#14 1.199   .runtime/reset-password.cjs                     7.5kb
+#14 1.199   .runtime/attendance-scheduler-healthcheck.cjs   4.9kb
+#14 1.199 
+#14 1.199 ⚡ Done in 168ms
+#14 1.208 R06-B: built runtime bundles -> attendance-auto-submit-scheduler, attendance-scheduler-healthcheck, attendance-auto-submit-tick, bootstrap-super-admin, reset-password, gps-archive
+#14 1.208 R06-B: external (expected): @prisma/client, argon2, node:crypto, node:fs/promises, node:os, node:path, node:zlib
+#14 DONE 1.4s
+
+#15 [builder 10/10] RUN node scripts/assemble-prisma-tools.mjs
+#15 7.493 R06-B: .prisma-tools assembled — 33 packages, 2 dead engine files pruned, ~138 MB
+#15 7.493 R06-B: schema-engine kept: schema-engine-debian-openssl-3.0.x
+#15 DONE 8.1s
+
+#16 [runner  3/11] RUN apt-get update && apt-get install -y --no-install-recommends openssl     && rm -rf /var/lib/apt/lists/*
+#16 CACHED
+
+#17 [runner  4/11] COPY --from=builder --chown=node:node /app/.next/standalone ./
+#17 DONE 1.9s
+
+#18 [runner  5/11] COPY --from=builder --chown=node:node /app/.next/static ./.next/static
+#18 DONE 0.3s
+
+#19 [runner  6/11] COPY --from=builder --chown=node:node /app/public ./public
+#19 DONE 0.1s
+
+#20 [runner  7/11] COPY --from=builder --chown=node:node /app/assets ./assets
+#20 DONE 0.1s
+
+#21 [runner  8/11] COPY --from=builder --chown=node:node /app/.runtime ./.runtime
+#21 DONE 0.1s
+
+#22 [runner  9/11] COPY --from=builder --chown=node:node /app/.prisma-tools ./.prisma-tools
+#22 DONE 1.8s
+
+#23 [runner 10/11] COPY --from=builder --chown=node:node /app/prisma ./prisma
+#23 DONE 0.2s
+
+#24 [runner 11/11] RUN mkdir -p /app/uploads && chown -R node:node /app/uploads
+#24 DONE 0.9s
+
+#25 exporting to image
+#25 exporting layers
+#25 exporting layers 14.6s done
+#25 exporting manifest sha256:b5f80cbd1cff8c307581d283d54b7668987157d696943d48a3a51ff80915d883 0.0s done
+#25 exporting config sha256:54cdc202f90b99a29d1a2beec8ef8ee23604cec4a60a0a072e13a1beac791658 0.0s done
+#25 naming to docker.io/library/titanor-time-app:r12-candidate-367420e done
+#25 unpacking to docker.io/library/titanor-time-app:r12-candidate-367420e
+#25 unpacking to docker.io/library/titanor-time-app:r12-candidate-367420e 6.4s done
+#25 DONE 21.0s
