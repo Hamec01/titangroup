@@ -54,12 +54,23 @@ async function login(base: string, identifier: string, password: string): Promis
   return match[1];
 }
 
+// Next.js App Router soft navigations (router.push) don't fire a 'load' event, and
+// page.waitForURL() in this Playwright version can hang waiting for one even after the URL has
+// changed. Polling location.pathname+search is reliable for both soft and hard navigations.
+async function waitPath(page: Page, pattern: RegExp, timeout = 15000): Promise<void> {
+  await page.waitForFunction(
+    (src) => new RegExp(src).test(window.location.pathname + window.location.search),
+    pattern.source,
+    { timeout }
+  );
+}
+
 async function uiLogin(page: Page, identifier: string, password: string, expectUrlPattern: RegExp): Promise<void> {
   await page.goto(`${BASE}/login`, { waitUntil: 'networkidle' });
   await page.locator('#identifier').fill(identifier);
   await page.locator('#password').fill(password);
   await page.locator('.login-submit').click();
-  await page.waitForURL(expectUrlPattern, { timeout: 15000 });
+  await waitPath(page, expectUrlPattern);
 }
 
 function forbiddenAuditTerms(): string[] {
@@ -102,7 +113,7 @@ async function main() {
   await admin.goto(`${BASE}/admin/sites/new`, { waitUntil: 'networkidle' });
   await admin.locator('#site-name').fill(siteName);
   await admin.locator('.login-submit').click();
-  await admin.waitForURL(/\/admin\/setup/, { timeout: 15000 });
+  await waitPath(admin, /\/admin\/setup/);
   const createdSite = await prisma.workSite.findFirstOrThrow({ where: { name: siteName } });
   const siteId = createdSite.id;
   check('A2: site created via real UI form, redirected to /admin/setup', /^[0-9a-f-]{36}$/.test(siteId), siteId);
@@ -115,7 +126,7 @@ async function main() {
     await admin.locator('#site-name').fill(dblSiteName);
     const submitBtn = admin.locator('.login-submit');
     await Promise.all([submitBtn.click({ force: true }), submitBtn.click({ force: true }).catch(() => {})]);
-    await admin.waitForURL(/\/admin\/setup/, { timeout: 15000 });
+    await waitPath(admin, /\/admin\/setup/, 15000);
     const dblCount = await prisma.workSite.count({ where: { name: dblSiteName } });
     check('A14: rapid double-click on an idempotent create form (site) produces exactly one row', dblCount === 1, dblCount);
   }
@@ -139,7 +150,7 @@ async function main() {
   await admin.goto(`${BASE}/admin/templates/new`, { waitUntil: 'networkidle' });
   await admin.locator('#template-name').fill(templateName);
   await admin.locator('.login-submit').click();
-  await admin.waitForURL(/\/admin\/setup/, { timeout: 15000 });
+  await waitPath(admin, /\/admin\/setup/, 15000);
   check('A5: template created via real UI form', true);
 
   const workerLastName = `Flowworker${run}`;
@@ -147,9 +158,14 @@ async function main() {
   await admin.locator('#worker-first-name').fill('Flow');
   await admin.locator('#worker-last-name').fill(workerLastName);
   await admin.locator('.login-submit').click();
-  await admin.waitForURL(/\/admin\/setup/, { timeout: 15000 });
+  // T9.7 onboarding: creating a worker now opens that worker's profile, not /admin/setup.
+  await waitPath(admin, /\/admin\/workers\/[0-9a-f-]{36}$/, 15000);
   const workerEmployee = await prisma.employee.findFirstOrThrow({ where: { lastName: workerLastName } });
   const workerUser = await prisma.user.findFirstOrThrow({ where: { employeeId: workerEmployee.id } });
+  // UI-created workers now default to the RU locale; this flow test asserts the English worker
+  // strings, so pin this one worker to EN (the RU rendering has its own coverage in
+  // _test-offline-views). Not a behaviour change — locale is a per-user setting.
+  await prisma.user.update({ where: { id: workerUser.id }, data: { locale: 'EN' } });
   check('A6: worker created via real UI form', true, workerEmployee.id);
 
   await admin.goto(`${BASE}/admin/assignments/new`, { waitUntil: 'networkidle' });
@@ -158,7 +174,7 @@ async function main() {
   await admin.locator('#assignment-valid-from').fill('2020-01-01');
   await admin.locator('#assignment-is-primary').check();
   await admin.locator('.login-submit').click();
-  await admin.waitForURL(/\/admin\/setup/, { timeout: 15000 });
+  await waitPath(admin, /\/admin\/setup/, 15000);
   const assignmentRow = await prisma.siteAssignment.findFirstOrThrow({ where: { employeeId: workerEmployee.id, siteId } });
   check('A7: worker assigned to site via real UI form', true, assignmentRow.id);
 
@@ -184,7 +200,7 @@ async function main() {
   await admin.locator('#period-start').fill(helsinkiToday);
   await admin.locator('#period-end').fill(periodEnd);
   await admin.locator('.login-submit').click();
-  await admin.waitForURL(/\/admin\/periods\/[0-9a-f-]{36}$/, { timeout: 15000 });
+  await waitPath(admin, /\/admin\/periods\/[0-9a-f-]{36}$/, 15000);
   const periodRow = await prisma.payrollPeriod.findFirstOrThrow({ where: { startDate: new Date(`${helsinkiToday}T00:00:00.000Z`) } });
   const periodId = periodRow.id;
   check('A9: OPEN payroll period covering today created via real UI form', periodRow.status === 'OPEN', periodRow.status);
@@ -213,26 +229,26 @@ async function main() {
     const workerActivateText = await p.locator('body').innerText();
     check('A11a: /activate/[token] confirms the correct worker identity', workerActivateText.includes('Flow') && workerActivateText.includes(workerLastName[0]));
     await p.locator('a.login-submit', { hasText: 'Continue' }).click();
-    await p.waitForURL(/\/set-password/, { timeout: 10000 });
+    await waitPath(p, /\/set-password/, 10000);
     await p.locator('#password').fill(workerPassword);
     await p.locator('#confirm-password').fill(workerPassword);
     await p.locator('button[type="submit"].login-submit').click();
     await p.waitForSelector('text=Account activated', { timeout: 10000 });
     await p.locator('button', { hasText: 'Continue' }).click();
-    await p.waitForURL(/\/worker/, { timeout: 10000 });
+    await waitPath(p, /\/worker/, 10000);
     check('A11b: worker activation completes (auto-login lands on /worker)', p.url().includes('/worker'));
 
     await p.goto(`${BASE}/activate-account/${foremanCode}`, { waitUntil: 'networkidle' });
     const foremanActivateText = await p.locator('body').innerText();
     check('A12a: /activate-account/[token] confirms a foreman identity page renders', foremanActivateText.includes('Activate'));
     await p.locator('a.login-submit', { hasText: 'Continue' }).click();
-    await p.waitForURL(/\/set-account-password/, { timeout: 10000 });
+    await waitPath(p, /\/set-account-password/, 10000);
     await p.locator('#password').fill(foremanPassword);
     await p.locator('#confirm-password').fill(foremanPassword);
     await p.locator('button[type="submit"].login-submit').click();
     await p.waitForSelector('text=Account activated', { timeout: 10000 });
     await p.locator('button', { hasText: 'Continue' }).click();
-    await p.waitForURL(/\/foreman/, { timeout: 10000 });
+    await waitPath(p, /\/foreman/, 10000);
     check('A12b: foreman activation completes (auto-login lands on /foreman)', p.url().includes('/foreman'));
 
     await activationCtx.close();
@@ -247,23 +263,27 @@ async function main() {
   const worker = await workerCtx.newPage();
   await uiLogin(worker, workerUser.username, workerPassword, /\/worker/);
   await worker.waitForLoadState('networkidle');
-  await worker.locator('.wk-action-button', { hasText: 'Check in' }).waitFor({ state: 'visible' });
+  // 2026 PWA redesign: the clock control is `.wk-main-action`; `.wk-main-action-wrap.out` / `.in`
+  // is the language-neutral clocked-out / clocked-in signal.
+  const mainAction = worker.locator('.wk-main-action');
+  await worker.locator('.wk-main-action-wrap.out').waitFor({ state: 'visible', timeout: 20000 });
   check('B1/B2: worker logs in with the credentials just set and lands on /worker', worker.url().includes('/worker'));
 
   const checkInText = await worker.locator('body').innerText();
   check('B3: assigned site is offered for check-in', checkInText.includes(siteName));
 
-  await worker.locator('.wk-action-button', { hasText: 'Check in' }).click();
-  await worker.waitForTimeout(1500);
+  await mainAction.click();
+  await worker.locator('.wk-main-action-wrap.in').waitFor({ state: 'visible', timeout: 15000 });
+  await worker.waitForTimeout(1000);
   const openShiftAfterCheckIn = await prisma.employeeOpenShift.findFirst({ where: { employeeId: workerEmployee.id } });
   const checkInEventCountAfter = await prisma.clockEvent.count({ where: { employeeId: workerEmployee.id, operationType: 'CHECK_IN' } });
   check('B5a: EmployeeOpenShift exists after real Check In (GPS inside geofence)', openShiftAfterCheckIn !== null, openShiftAfterCheckIn);
   check('B5b: exactly one CHECK_IN ClockEvent recorded', checkInEventCountAfter === 1, checkInEventCountAfter);
-  const clockedInText = await worker.locator('body').innerText();
-  check('B5c: UI reflects Clocked in state', clockedInText.includes('Clocked in'));
+  check('B5c: UI reflects Clocked in state', (await worker.locator('.wk-main-action-wrap.in').count()) > 0);
 
-  await worker.locator('.wk-action-button', { hasText: 'Check out' }).click();
-  await worker.waitForTimeout(1500);
+  await mainAction.click();
+  await worker.locator('.wk-main-action-wrap.out').waitFor({ state: 'visible', timeout: 15000 });
+  await worker.waitForTimeout(1000);
   const openShiftAfterCheckOut = await prisma.employeeOpenShift.findFirst({ where: { employeeId: workerEmployee.id } });
   const clockShift = await prisma.clockShift.findFirst({ where: { employeeId: workerEmployee.id } });
   const checkOutEventCountAfter = await prisma.clockEvent.count({ where: { employeeId: workerEmployee.id, operationType: 'CHECK_OUT' } });
@@ -272,7 +292,7 @@ async function main() {
 
   await worker.goto(`${BASE}/worker/periods/${periodId}/hours`, { waitUntil: 'networkidle' });
   await worker.locator('.wk-day-item', { hasText: helsinkiToday }).click();
-  await worker.waitForURL(new RegExp(`/hours/${helsinkiToday}`), { timeout: 10000 });
+  await waitPath(worker, new RegExp(`/hours/${helsinkiToday}`), 10000);
 
   // The template auto-selected by /admin/assignments/new (exactly one active template existed)
   // pre-populates a planned segment on working weekdays — remove any pre-existing segment(s) first
@@ -290,21 +310,15 @@ async function main() {
   const breakInputsV1 = worker.locator('.wk-break-row input[type="time"]');
   await breakInputsV1.nth(0).fill('12:00');
   await breakInputsV1.nth(1).fill('12:30');
-  const clockAdjustmentReason = `Replace brief clock test with full reported shift ${run}`;
-  const adjustmentCountBeforeReasonGate = await prisma.clockShiftAdjustment.count({ where: { employeeId: workerEmployee.id } });
+  // T10/T12: a worker fixing their own draft before sending it is no longer asked for a reason —
+  // Save persists directly. The immutable ClockShiftAdjustment is still written server-side, with
+  // a default reason.
   await worker.locator('button', { hasText: 'Save' }).click();
-  await worker.locator('[role="alert"]', { hasText: 'A reason is required when changing or removing recorded Check In/Out time.' }).waitFor();
-  const adjustmentCountAfterReasonGate = await prisma.clockShiftAdjustment.count({ where: { employeeId: workerEmployee.id } });
-  check(
-    'B10a: changing a clock-origin interval without a reason is blocked client-side with zero partial adjustment',
-    worker.url().endsWith(`/hours/${helsinkiToday}`) && adjustmentCountAfterReasonGate === adjustmentCountBeforeReasonGate
-  );
-  await worker.locator('#clock-adjustment-reason').fill(clockAdjustmentReason);
-  await worker.locator('button', { hasText: 'Save' }).click();
-  await worker.waitForURL(new RegExp(`/hours$`), { timeout: 10000 });
+  await waitPath(worker, new RegExp(`/hours$`), 10000);
   check('B9/B10: day saved (08:00-16:00, unpaid break 12:00-12:30), redirected to hours list', true);
-  const clockAdjustment = await prisma.clockShiftAdjustment.findFirst({ where: { employeeId: workerEmployee.id, reason: clockAdjustmentReason } });
-  check('B10b: changing the materialized clock interval records an immutable reason-backed adjustment', clockAdjustment?.changeType === 'REMOVED', clockAdjustment);
+  const clockAdjustment = await prisma.clockShiftAdjustment.findFirst({ where: { employeeId: workerEmployee.id } });
+  check('B10a: a worker self-edit is not gated behind a reason prompt', new URL(worker.url()).pathname.endsWith('/hours'));
+  check('B10b: removing the materialized clock interval still records an immutable REMOVED adjustment', clockAdjustment?.changeType === 'REMOVED' && typeof clockAdjustment.reason === 'string' && clockAdjustment.reason.length > 0, clockAdjustment);
 
   const hoursListTextV1 = await worker.locator('body').innerText();
   check('B10c: worker hours list shows worked 7h 30m, not gross 8h', hoursListTextV1.includes('7h 30m') && !hoursListTextV1.includes('8h ·'));
@@ -332,7 +346,7 @@ async function main() {
   const submitSummaryV1 = await worker.locator('body').innerText();
   check('B12: submit summary shows canonical worked time 7h 30m', submitSummaryV1.includes('7h 30m total'), submitSummaryV1.slice(0, 300));
   await worker.locator('.wk-action-button', { hasText: 'Submit timesheet' }).click();
-  await worker.waitForURL(new RegExp(`/worker/periods/${periodId}$`), { timeout: 10000 });
+  await waitPath(worker, new RegExp(`/worker/periods/${periodId}$`), 10000);
 
   const timesheetAfterSubmit1 = await prisma.timesheet.findUniqueOrThrow({ where: { id: timesheetForWorker.id } });
   check('B14a: Timesheet.status = SUBMITTED after first submit', timesheetAfterSubmit1.status === 'SUBMITTED', timesheetAfterSubmit1.status);
@@ -373,14 +387,14 @@ async function main() {
   const v1ReviewRow = admin2.locator('tr', { hasText: `Flow ${workerLastName}` });
   check('C2: ADMIN fallback queue sees the SITE scope without a ForemanAssignment', await v1ReviewRow.count() === 1);
   await v1ReviewRow.locator('a').click();
-  await admin2.waitForURL(/\/admin\/review-scopes\/[0-9a-f-]+/, { timeout: 10000 });
+  await waitPath(admin2, /\/admin\/review-scopes\/[0-9a-f-]+/, 10000);
   const reviewDetailText = await admin2.locator('body').innerText();
   check('C3: ADMIN sees the correct worker/site/version and canonical 7h 30m on the review card', reviewDetailText.includes(`Flow ${workerLastName}`) && reviewDetailText.includes(siteName) && reviewDetailText.includes('version 1') && reviewDetailText.includes('7h 30m'));
 
   const returnReasonText = `Break duration needs correction ${run}`;
   await admin2.locator('#return-reason').fill(returnReasonText);
   await admin2.locator('button', { hasText: 'Return to worker' }).click();
-  await admin2.waitForURL(/\/admin\/review-scopes$/, { timeout: 10000 });
+  await waitPath(admin2, /\/admin\/review-scopes$/, 10000);
 
   const v1ScopeAfterReturn = await prisma.timesheetReviewScope.findUniqueOrThrow({ where: { id: v1Scopes[0].id } });
   check('C5a: scope transitioned to RETURNED', v1ScopeAfterReturn.status === 'RETURNED', v1ScopeAfterReturn.status);
@@ -397,12 +411,12 @@ async function main() {
   // ======================= D. WORKER — correction =======================
   await worker.goto(`${BASE}/worker/periods/${periodId}`, { waitUntil: 'networkidle' });
   const returnedPageText = await worker.locator('body').innerText();
-  check('D2: worker sees RETURNED status and the exact ADMIN review reason', returnedPageText.includes('Returned for correction') && returnedPageText.includes(returnReasonText));
+  check('D2: worker sees the returned/reopened state and the exact ADMIN review reason', returnedPageText.includes('Open for edits again') && returnedPageText.includes(returnReasonText), returnedPageText.slice(0, 400));
 
   await worker.goto(`${BASE}/worker/periods/${periodId}/hours/${helsinkiToday}`, { waitUntil: 'networkidle' });
   await worker.locator('.wk-break-row input[type="time"]').nth(1).fill('13:00');
   await worker.locator('button', { hasText: 'Save' }).click();
-  await worker.waitForURL(new RegExp(`/hours$`), { timeout: 10000 });
+  await waitPath(worker, new RegExp(`/hours$`), 10000);
 
   await worker.goto(`${BASE}/worker/periods/${periodId}/hours/${helsinkiToday}`, { waitUntil: 'networkidle' });
   const reloadedBreakEnd = await worker.locator('.wk-break-row input[type="time"]').nth(1).inputValue();
@@ -413,7 +427,7 @@ async function main() {
 
   await worker.goto(`${BASE}/worker/periods/${periodId}/submit`, { waitUntil: 'networkidle' });
   await worker.locator('.wk-action-button', { hasText: 'Submit timesheet' }).click();
-  await worker.waitForURL(new RegExp(`/worker/periods/${periodId}$`), { timeout: 10000 });
+  await waitPath(worker, new RegExp(`/worker/periods/${periodId}$`), 10000);
 
   const timesheetAfterResubmit = await prisma.timesheet.findUniqueOrThrow({ where: { id: timesheetForWorker.id } });
   check('D8a: Timesheet.status = SUBMITTED again', timesheetAfterResubmit.status === 'SUBMITTED', timesheetAfterResubmit.status);
@@ -447,12 +461,12 @@ async function main() {
   await admin2.goto(`${BASE}/admin/review-scopes`, { waitUntil: 'networkidle' });
   const v2ReviewRow = admin2.locator('tr', { hasText: `Flow ${workerLastName}` });
   await v2ReviewRow.locator('a').click();
-  await admin2.waitForURL(/\/admin\/review-scopes\/[0-9a-f-]+/, { timeout: 10000 });
+  await waitPath(admin2, /\/admin\/review-scopes\/[0-9a-f-]+/, 10000);
   const v2ReviewText = await admin2.locator('body').innerText();
   check('E2: ADMIN fallback sees version 2 and canonical 7h in the review card', v2ReviewText.includes('version 2') && v2ReviewText.includes('7h'), v2ReviewText.slice(0, 250));
 
   await admin2.locator('button', { hasText: 'Approve' }).click();
-  await admin2.waitForURL(/\/admin\/review-scopes$/, { timeout: 10000 });
+  await waitPath(admin2, /\/admin\/review-scopes$/, 10000);
 
   const v2ScopeAfterApprove = await prisma.timesheetReviewScope.findUniqueOrThrow({ where: { id: v2Scopes[0].id } });
   check('E4a: scope = APPROVED', v2ScopeAfterApprove.status === 'APPROVED', v2ScopeAfterApprove.status);
@@ -474,12 +488,14 @@ async function main() {
   const finalQueueText = await admin2.locator('body').innerText();
   check('F2: timesheet appears in the final-approval queue', finalQueueText.includes(`Flow ${workerLastName}`));
   await admin2.locator('a', { hasText: periodRow.startDate.toISOString().slice(0, 10) }).click();
-  await admin2.waitForURL(/\/admin\/timesheets\/[0-9a-f-]+/, { timeout: 10000 });
+  await waitPath(admin2, /\/admin\/timesheets\/[0-9a-f-]+/, 10000);
   const finalDetailText = await admin2.locator('body').innerText();
   check('F4/F5: admin sees current V2 as canonical 7h, with no blocking reasons', finalDetailText.includes('Final approve') && finalDetailText.includes('7h') && !finalDetailText.toLowerCase().includes('blocked'));
 
   await admin2.locator('button', { hasText: 'Final approve' }).click();
-  await admin2.waitForURL(/\/admin\/timesheets$/, { timeout: 10000 });
+  // T12 unified review: Final approve returns to the review hub (/admin/review) rather than the
+  // old /admin/timesheets queue.
+  await waitPath(admin2, /\/admin\/(review|timesheets)$/, 10000);
 
   const timesheetAfterFinal = await prisma.timesheet.findUniqueOrThrow({ where: { id: timesheetForWorker.id } });
   check('F6a: Timesheet.status = FINAL_APPROVED', timesheetAfterFinal.status === 'FINAL_APPROVED', timesheetAfterFinal.status);
@@ -512,8 +528,11 @@ async function main() {
 
   await admin2.goto(`${BASE}/admin?status=FINAL_APPROVED`, { waitUntil: 'networkidle' });
   const overviewText = await admin2.locator('body').innerText();
-  check('G4a: operational overview shows the timesheet as FINAL_APPROVED', overviewText.includes(`Flow ${workerLastName}`));
-  check('G4b: overview shows Reported 420 (backend-computed, not UI-recalculated)', /Reported\s*7\s*h\s*0\s*m/i.test(overviewText) || overviewText.includes('Reported'), overviewText.slice(overviewText.indexOf('Flow'), overviewText.indexOf('Flow') + 300));
+  check('G4a: operational overview lists the worker with the Final Approved state', overviewText.includes(`Flow ${workerLastName}`) && /final approved/i.test(overviewText));
+  // The T9 "Today" dashboard is an operational view of *today's recorded time* (this scenario's
+  // clock shift is ~1s, so ~0 min today is correct here) — the reported/canonical period total is
+  // verified by the worker/site/period reports above (G1-G3), not by this screen.
+  check('G4b: the worker row carries an operational today/status cell, not a UI-recomputed total', /finished|working|not started/i.test(overviewText), overviewText.slice(overviewText.indexOf('Flow'), overviewText.indexOf('Flow') + 200));
 
   // API-level reconciliation — T8.1 worker total == T8.2 site worker total == T8.3 site/company total.
   const cookieAdmin = await login(BASE, adminUsername, adminPassword);
