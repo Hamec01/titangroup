@@ -1,0 +1,30 @@
+# R14 — Caddy-блок для app.titanorgroup.fi (production, reverse_proxy на новый стек).
+# Заменяет R11 holding-блок (503) целиком. Топология: Вариант A (grey-cloud),
+# Caddy сам держит сертификат Let's Encrypt, TITANOR_TRUSTED_PROXY_HOPS не задаётся.
+#
+# Форма зеркалит рабочий pilot-блок t97-dd686bc3d4.84.247.130.242.nip.io:
+# минимальные заголовки на уровне Caddy (приложение ставит свой полный набор R07-A),
+# reverse_proxy на loopback-порт нового prod-web 127.0.0.1:3199.
+#
+# Применение — ТОЛЬКО `ops/titanor-time/r14/apply-caddy-r14.sh` под root, В КОНЦЕ
+# maintenance-окна (шаг 17 runbook), когда 127.0.0.1:3199/api/ready уже отдаёт 200.
+# Откат — `apply-caddy-r14.sh --rollback` (возвращает R11 holding-503).
+
+app.titanorgroup.fi {
+	encode zstd gzip
+	reverse_proxy 127.0.0.1:3199
+
+	header {
+		X-Content-Type-Options nosniff
+		Referrer-Policy strict-origin-when-cross-origin
+		X-Frame-Options SAMEORIGIN
+		Strict-Transport-Security "max-age=63072000"
+		-X-Powered-By
+		-Server
+	}
+
+	log {
+		output file /var/log/caddy/titanor-time-app-access.log
+		format json
+	}
+}
