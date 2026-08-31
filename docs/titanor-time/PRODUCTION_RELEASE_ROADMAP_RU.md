@@ -5,7 +5,7 @@
 - **Основание:** [PRODUCTION_RELEASE_TZ_FINAL_RU.md](./PRODUCTION_RELEASE_TZ_FINAL_RU.md)
 - **Целевой адрес:** `https://app.titanorgroup.fi`
 - **Источник production-кода и данных:** проверенное pilot-окружение
-- **Текущий вердикт:** исправления можно начинать; production cutover пока запрещён
+- **Текущий вердикт:** R14 production cutover PASS; приложение открыто, идёт R15 наблюдение
 
 ---
 
@@ -139,11 +139,11 @@ Production cutover разрешается только после R12 и отд�
 | R08 | GPS archive и безопасный retention | R01, R02, R06 | Нет | **DEPLOYED + PASS 2026-08-30** (`9bcf16f`…`e720e4d`) — пилот `titanor-time-app:t97-pilot-6a47ed3`, DB 98/98, app+scheduler `healthy`. Миграция 98 `GpsArchiveDay`; `lib/gps-archive*` (AES-256-GCM+gzip, sorted-key JSONL, manifest без координат); `.runtime/gps-archive.cjs` write/promote; `gps-archive-titanor-time.sh` + systemd `titanor-time-gps-archive@pilot.timer` `enabled` (05:10 UTC, staging→off-box `/mnt/250gb` c SHA-256, как R01); archive-gated retention (delete только за VERIFIED+covered дни; нет ключа → 0); backup bundle `gps-archive-manifest.json`. `deploy-pilot-6a47ed3.sh` (владелец); disposable-verify 17/0; первый прогон архива 5 дней → 5 VERIFIED. Rollback-контейнеры `-pre-6a47ed3` сохранены. **Открыто (вне R08, не блокер):** worker-notice + PII-политика — внутреннее приложение фирмы, текст утверждает ответственное лицо Titanor; **R08.1** (читаемый TXT/CSV экспорт из архива по запросу, ТЗ §9.4). |
 | R09 | WORKER/FOREMAN/ADMIN UX | R03, R05, R07 | Нет | **DEPLOYED + PASS 2026-08-30** (`d5a8d24`…`a07e477`) — пилот `titanor-time-app:t97-pilot-edd950c`, app+scheduler `healthy` restarts 0, `/api/ready` `schema:current` applied=98 (БД не менялась). Объём сужен владельцем: **весь FOREMAN UI исключён** (backlog), R09.9 — backlog. Ни одной миграции. R09.1 `/admin/users` поиск+фильтры+пагинация; R09.2 человеческие причины запрета (13 admin-страниц, `AccessDeniedNotice`); R09.5 «истекающие документы» карточка в task-center; R09.6 overflow sweep ADMIN+WORKER (**B10 закрыт**); R09.7 `WorkerClockPanel` split 1160→951 (ноль изменений поведения); R09.8 `WorkerCardNav` — навигация по 4 раздельным страницам карточки работника; R09.10 no-op (не тронуто ни одного `route.ts`); R09.11 отчёт + browser-чек-лист. 5 новых test-файлов. `deploy-pilot-edd950c.sh` (read-only `migrate status`, без `migrate deploy`); disposable-verify PASS; владелец запустил — DEPLOY OK, production unchanged, rollback-контейнеры `-pre-edd950c` сохранены. Отчёт `R09_UX_REPORT_RU.md`, browser-чек-лист `R09_BROWSER_ACCEPTANCE_RU.md`. |
 | R10 | Release candidate и полная pilot acceptance | R03–R09 | Нет | **PASS с оговоркой 2026-08-31.** Frozen candidate `2ebe3e5` (рантайм == образ `t97-pilot-edd950c`, миграции 98). Автоматика на образе кандидата: unit 17 + db 58 + scheduler 5 = **80/80**; регрессия R03–R09 зелёная; `npm audit` 0/0 (оба app); fresh-DB migrate 98/0 + идемпотентно; restore-test **13/13** (fingerprint точный); пилот `/api/ready` schema:current + scheduler healthy. `_test-t9-role-matrix` 32/0 + 3 report-теста зелёные после `2ebe3e5`. **Оговорка:** 9 UI-тестов browser-lane устарели с ~2026-08-20 (i18n/PWA-редизайн/онбординг/T10-D/T13/R07-A/R09.2) — **0 дефектов продукта**, всё перекрыто db/unit + ручной приёмкой; модернизировать до R12; добавлен `ops/titanor-time/run-browser-acceptance.sh`. Отчёты `R10_PILOT_ACCEPTANCE_REPORT_RU.md` / `R10_RELEASE_MANIFEST_RU.md` / `R10_MIGRATION_REPORT_RU.md` / `R10_MANUAL_ACCEPTANCE_CHECKLIST_RU.md`. Owner actions: device acceptance §19.6 + живой role-smoke + `docker builder prune` + подтвердить pilot acceptance → разблокирует R11. Pilot deploy не нужен (рантайм не менялся). |
-| R11 | Domain/Caddy/public login preparation | R04, R10 | Caddy staging; DNS только по команде | Не начат |
-| R12 | Production-like rehearsal и release evidence | R10, R11 | Нет | Не начат |
-| R13 | Owner production checkpoint | R12 | Решение владельца | Не начат |
-| R14 | Production cutover | R13 | Да | Запрещён до подтверждения |
-| R15 | Наблюдение, backup следующего дня, закрытие релиза | R14 | Да | Не начат |
+| R11 | Domain/Caddy/public login preparation | R04, R10 | Caddy staging; DNS только по команде | **PASS 2026-08-31** |
+| R12 | Production-like rehearsal и release evidence | R10, R11 | Нет | **PASS 2026-08-31** |
+| R13 | Owner production checkpoint | R12 | Решение владельца | **PASS 2026-08-31** |
+| R14 | Production cutover | R13 | Да | **PASS 2026-08-31** (`R14_CUTOVER_REPORT_RU.md`) |
+| R15 | Наблюдение, backup следующего дня, закрытие релиза | R14 | Да | **В процессе** |
 
 Рабочая цепочка:
 

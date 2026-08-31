@@ -1,18 +1,26 @@
 # Titanor Time — handoff для следующего агента
 
-- **Дата фиксации:** 2026-08-31 (обновлено: R13 pilot acceptance CONFIRMED)
+- **Дата фиксации:** 2026-08-31 (обновлено: R14 production cutover PASS)
 - **Ветка:** `feature/titanor-time-foundation`
 - **Главные документы:** `PRODUCTION_RELEASE_TZ_FINAL_RU.md`, `PRODUCTION_RELEASE_ROADMAP_RU.md`, `IMPLEMENTATION_STATUS.md`
-- **Текущий этап:** R11/R12/R13 PASS. **R14 подготовлен полностью, cutover НЕ начат.**
+- **Текущий этап:** R11/R12/R13/R14 PASS. **Production открыт; следующий этап — R15.**
+  - Отчёт: `R14_CUTOVER_REPORT_RU.md`; исполнительный runbook: `R14_CUTOVER_RUNBOOK_RU.md`.
+  - `app.titanorgroup.fi` → production `127.0.0.1:3199`: ready 200, schema 98/98.
+  - `titanor-time-prod-{app,scheduler,db}` healthy; scheduler тикает; old prod и pilot app/scheduler
+    остановлены и сохранены для rollback.
+  - Public site `titanorgroup-web:site-ba04adf`: `/en` + `/fi` login links deployed; rollback container
+    `titanorgroup-web-1-pre-r14` сохранён.
+  - Не удалять rollback targets/backups и не запускать builder prune до завершения R15.
   - R13 pilot/device acceptance ПОДТВЕРЖДЕНА владельцем 2026-08-31, 0 P0/P1 (`R13_ACCEPTANCE_RU.md`).
   - Релизный образ заморожен без пересборки: `titanor-time-app:r14-release-1416503` = `titanor-time-app:r13-hotfix-1416503` = `sha256:864267bb1698dc43d585fb0a094345766a1eff7afc006d778c42fc7eff5c4bbb` (+ off-disk tar.gz).
   - `r13-*` тест-аккаунты обезврежены (DEACTIVATED + сняты test-links; аудит-след цел).
-  - Языковая модель — `LANGUAGE_MODEL_RU.md`. Публичный сайт: `/fi` `<html lang>` + Employee-login ссылка написаны (`af829fe`), НЕ задеплоены (ship на R14 через `ops/site/deploy-site-r14.sh`).
-  - **R14 автоматизация готова** (`184263e`): `ops/titanor-time/r14/{preflight,cutover,rollback,apply-caddy}-r14.sh` + `caddy-app-block-r14.txt`. preflight 32 PASS / 0 FAIL. disposable restore-test с образом релиза 14/14. `R14_CUTOVER_RUNBOOK_RU.md` §6 — точный список команд (sudo только у владельца).
-  - HEAD ветки `184263e`, запушен. Осталось от владельца: создать prod `app.env` (13 ключей), назначить окно (≥15 мин), дать «старт», быть на связи для sudo шага 17. **R14/cutover НЕ начинать до нового явного разрешения.**
+  - Языковая модель — `LANGUAGE_MODEL_RU.md`. Публичный сайт: `/fi` client-side `<html lang>` fix
+    и Employee-login ссылка задеплоены в R14; полноценный SSR `lang="fi"` остаётся backlog.
+  - R14 ops-автоматизация и фактический результат — `R14_CUTOVER_RUNBOOK_RU.md` /
+    `R14_CUTOVER_REPORT_RU.md`; Caddy frozen-pilot проверка исправлена в `ba04adf`.
 - **R10 manual acceptance:** CONFIRMED владельцем 2026-08-31 (реальные устройства + role-smoke, 0 P0/P1, FOREMAN skipped/not in scope)
 - **Инцидент 2026-08-31:** агент вызвал `caddy stop` в тесте → боевой Caddy лежал ~46 мин. Разбор + правило: `R11_INCIDENT_2026-08-31_caddy_outage.md`, `feedback_never_run_caddy_daemon_commands` (память). На этом хосте: только `caddy validate`/`adapt`, никаких `caddy stop/start/run`/bare `reload`.
-- **Production cutover:** запрещён. Pilot acceptance получено; ещё нужны maintenance-окно + явное разрешение начать R14 (оба — отдельно).
+- **Production cutover:** R14 PASS 2026-08-31. Новые destructive/deploy-действия требуют отдельного разрешения; сейчас только R15 observation/backup.
 
 Этот файл — короткая точка входа для нового агента/нового ПК. Перед любой работой сначала прочитать:
 
@@ -23,31 +31,27 @@
 
 ## 1. Где мы сейчас
 
-R00–R13 завершены. **R13 pilot/device acceptance ПОДТВЕРЖДЕНА владельцем 2026-08-31, 0 P0/P1**
-(`R13_ACCEPTANCE_RU.md`). Дальше — только R14 (cutover), и он ждёт **двух отдельных**
-подтверждений владельца: (2) конкретное maintenance-окно, (3) явное разрешение начать cutover.
-Всё остальное к R14 готово: релизный образ заморожен под неизменяемым тегом, ветка запушена,
-`r13-*` тест-аккаунты обезврежены, языковая модель зафиксирована, runbook+preflight написаны.
+R00–R14 завершены. **R14 production cutover PASS 2026-08-31** (`R14_CUTOVER_REPORT_RU.md`).
+Публичный домен обслуживает новый стек, данные перенесены из финального pilot snapshot, Caddy и
+public-site deploy завершены. Сейчас выполняется R15: наблюдение, следующий backup и проверка restore.
 
 R00–R09 завершены и задеплоены/проверены в нужных окружениях. R10 завершён как release candidate acceptance: **PASS с оговоркой** (закрыта в R12-prep). R10 не требовал нового pilot-deploy, потому что рантайм кандидата совпадает с уже задеплоенным R09-образом.
 
-Пилот сейчас считается основным источником будущего production:
+Текущее production-состояние:
 
-- `t97-pilot-app` и `t97-pilot-scheduler` на `titanor-time-app:t97-pilot-edd950c`;
-- DB пилота: 98 миграций, `/api/ready` возвращает `schema:current`;
-- scheduler здоровый, lease обновляется, фоновые операции идут;
+- `titanor-time-prod-app` и `titanor-time-prod-scheduler` используют `r14-release-1416503`;
+- production DB: 98 миграций, `/api/ready` возвращает `schema:current`;
+- production scheduler healthy, lease обновляется, фоновые операции идут;
 - GPS archive R08 включён: `titanor-time-gps-archive@pilot.timer` enabled, первый прогон 5/5 VERIFIED;
-- R09 UX для ADMIN/WORKER задеплоен, БД в R09 не менялась;
-- публичный сайт `titanorgroup.fi` задеплоен с R04+R07-B на `titanorgroup-web:site-3321c09`, contact delivery вручную подтверждён владельцем;
-- текущий production Titanor Time не менялся и остаётся старым окружением до R14.
+- публичный сайт работает на `titanorgroup-web:site-ba04adf`;
+- old prod и pilot app/scheduler остановлены и сохранены как rollback targets; их DB не удалять до R15.
 
-Production-перенос ещё не начат. Цель R14 — сделать pilot-БД и pilot-файлы production-базой/данными. Старая production-БД считается неважной, но всё равно должна быть сохранена backup'ом перед заменой.
+Финальный pilot snapshot стал production-базой/данными; старый production backup и оба rollback
+окружения сохранены. Пути и checksums перечислены в `R14_CUTOVER_REPORT_RU.md`.
 
 ## 2. Что нельзя делать без отдельного разрешения
 
-- Не начинать R14/cutover.
-- **Не менять Caddy, DNS, live production, pilot-БД, публичный сайт** — после R11 владелец
-  заморозил их до отдельного разрешения (2026-08-31).
+- Не выполнять новый deploy, rollback или изменения Caddy/DNS/live production без отдельного разрешения.
 - **`docker builder prune` пока не запускать** (владелец, 2026-08-31). Read-only `docker builder du`
   + безопасный план очистки без удаления используемых образов — `R13_PREP_RU.md` §5.
 - Не запускать rollback и не удалять rollback-контейнеры без отдельной причины.
@@ -181,10 +185,7 @@ git log --oneline -5
 
 Если worktree грязный — сначала понять, чьи изменения. Не включать чужие изменения в commit.
 
-**Сейчас:** прочитать `R13_ACCEPTANCE_RU.md`, `R14_CUTOVER_RUNBOOK_RU.md` (особенно §0 ограничения
-и §6 команды), `LANGUAGE_MODEL_RU.md`. Вся подготовка R14 закрыта (скрипты `ops/titanor-time/r14/`,
-preflight 32/0, restore-test 14/14, `af829fe` сайт). **Не начинать R14/cutover** без нового явного
-разрешения владельца + назначенного окна + созданного prod `app.env`. Когда владелец даст «старт»:
-`bash ops/titanor-time/r14/preflight-r14.sh` → `bash ops/titanor-time/r14/cutover-r14.sh --go` →
-владелец сам `sudo bash ops/titanor-time/r14/apply-caddy-r14.sh` → `bash ops/site/deploy-site-r14.sh`.
-Ничего в production/pilot/Caddy/DNS/публичном сайте руками не менять.
+**Сейчас:** прочитать `R14_CUTOVER_REPORT_RU.md`, затем начать только R15 read-only observation и
+следующий backup/restore verification. Не повторять cutover-скрипт: новый production уже работает.
+Не удалять old-prod/pilot/site rollback-контейнеры, DB volumes, Caddy backup или release tarball.
+Ничего в production/Caddy/DNS/публичном сайте руками не менять без отдельного разрешения владельца.

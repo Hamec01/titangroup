@@ -7,16 +7,11 @@
   (`sha256:864267bb1698dc43d585fb0a094345766a1eff7afc006d778c42fc7eff5c4bbb`).
 - **Rollback-образ:** `titanor-time-app:t97-pilot-edd950c` (`sha256:0282e68f…`, rev `edd950c`) — на месте.
 
-> ## ⛔ CUTOVER НЕ НАЧАТ
-> **Статус 2026-08-31:** вся подготовка готова (§2 preflight 32/0, §2.3 скрипты, disposable
-> restore-test 14/14). Владелец подтвердил приёмку R13 и дал разрешение на R14 «строго по этому
-> runbook», но первое окно (18:10–18:20 EEST) было слишком коротким и стартовало через минуты —
-> агент корректно **не начал**. Ждём: **новое maintenance-окно** (≥15 мин, дата+время) + владелец
-> на связи для sudo-команды шага 17 (пароль sudo не передаётся — владелец выполняет сам). До нового
-> явного «старт» — не начинать. Pilot acceptance — `R13_ACCEPTANCE_RU.md`.
->
-> **Владельцу остаётся ровно одно техническое действие до окна:** создать
-> `/home/deploy/app-data/titanor-time-prod/app.env` (P3 в §6.1).
+> ## ✅ R14 CUTOVER PASS
+> **Статус 2026-08-31:** runbook выполнен. Новый production-стек healthy, Caddy переключён на
+> `127.0.0.1:3199`, публичный `/api/ready` 200 `schema:current` 98/98, public-site login links
+> задеплоены. Старый production и pilot app/scheduler сохранены остановленными для rollback.
+> Фактические доказательства, таймлайн и backup paths: `R14_CUTOVER_REPORT_RU.md`.
 
 ---
 

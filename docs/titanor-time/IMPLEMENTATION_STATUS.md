@@ -1,5 +1,17 @@
 # Titanor Time — Implementation Status
 
+**`[2026-08-31]` R14 — PRODUCTION CUTOVER PASS.** Отчёт `R14_CUTOVER_REPORT_RU.md`.
+- `app.titanorgroup.fi` открыт: `/login` 200, `/api/ready` 200 `schema:current` 98/98.
+- Новый стек `titanor-time-prod-{app,scheduler,db}` healthy, RestartCount 0; web только
+  `127.0.0.1:3199`; scheduler HEALTHY со свежими тиками.
+- Финальный pilot snapshot: 1782 rows, 3 uploads, checksums OK; restore 98 migrations / 0 failed;
+  sessions отозваны, scheduler lease очищен. Старый prod и pilot сохранены остановленными для rollback.
+- Caddy переключён на `reverse_proxy 127.0.0.1:3199`; TLS/headers/vhost regression PASS.
+- Public site обновлён на `titanorgroup-web:site-ba04adf`: EN/FI Employee-login ссылки PASS;
+  on-box + off-box backup сохранены. Следующий этап — R15 observation/backup.
+- Первая Caddy-попытка безопасно abort до изменения конфигурации из-за ожидаемого pilot 502;
+  ops-проверка исправлена и запушена в `ba04adf`, повторный switch PASS.
+
 **`[2026-08-31]` R14 — подготовка ЗАВЕРШЕНА. Cutover НЕ начат (ждёт окно + prod app.env + «старт»).**
 Runbook `R14_CUTOVER_RUNBOOK_RU.md` (§0 ограничения, §6 точные команды). Владелец подтвердил приёмку
 R13 и дал разрешение на R14 «строго по runbook»; первое окно 18:10–18:20 EEST было слишком коротким
