@@ -33,7 +33,10 @@ const at = (day: Date, h: number) => new Date(day.getTime() + h * 3600_000);
   const B = '22222222-2222-4222-8222-222222222222';
 
   let s = parseCustomerReportScope({});
-  check('parse: empty -> NONE / NONE (never "all")', s.siteMode === 'NONE' && s.workerMode === 'NONE' && s.dateFrom === null, s);
+  check('parse: empty -> site-first NONE / NONE (never "all")', s.scopeBasis === 'SITES' && s.siteMode === 'NONE' && s.workerMode === 'NONE' && s.dateFrom === null, s);
+
+  s = parseCustomerReportScope({ scopeBy: 'workers', workerIds: A });
+  check('parse: scopeBy=workers -> direct workers + all sites', s.scopeBasis === 'WORKERS' && s.siteMode === 'ALL' && s.workerMode === 'PICK', s);
 
   s = parseCustomerReportScope({ sites: 'all', workers: 'all', dateFrom: '2026-01-01', dateTo: '2026-01-31' });
   check('parse: sites=all workers=all -> ALL / ALL', s.siteMode === 'ALL' && s.workerMode === 'ALL' && s.siteIds.length === 0, s);
@@ -67,7 +70,7 @@ const at = (day: Date, h: number) => new Date(day.getTime() + h * 3600_000);
   const base = { dateFrom: '2026-01-01', dateTo: '2026-01-31', customer: 'Meyer', projectReference: '' };
   const scopeIds = [W1, W2, W3];
 
-  const mk = (o: Partial<CustomerReportScope>): CustomerReportScope => ({ ...base, customer: base.customer, projectReference: '', siteMode: 'ALL', siteIds: [], workerMode: 'ALL', workerIds: [], workerExcludeIds: [], ...o });
+  const mk = (o: Partial<CustomerReportScope>): CustomerReportScope => ({ ...base, scopeBasis: 'SITES', customer: base.customer, projectReference: '', siteMode: 'ALL', siteIds: [], workerMode: 'ALL', workerIds: [], workerExcludeIds: [], ...o });
 
   let p = serializeScopeToExportParams(mk({ siteMode: 'ALL', workerMode: 'ALL' }), scopeIds);
   check('serialize: ALL/ALL -> no siteIds, no employeeIds, customer kept', !!p && !p.has('siteIds') && !p.has('employeeIds') && p.get('customer') === 'Meyer', p?.toString());
@@ -159,6 +162,10 @@ async function main() {
   const a4 = await mkAssignment(w4.id, siteA.id, admin, ASG_START, new Date('2098-06-04T00:00:00.000Z'));
   await mkWorkedTimesheet(admin, w4.id, siteA.id, a4.id, dayBase);
 
+  // W5 — employed in the range, but has no site assignment and no hours yet. It must be available
+  // in the direct worker picker, while correctly staying absent from every site-first list.
+  const w5 = await mkEmployee('W5');
+
   // ---- scenario 1: one site (A) -> W1 (asg+hrs), W3 (asg only), W4 (asg-ends-mid-range + hrs) — not W2
   {
     const r = await resolveCustomerScopeWorkers({ siteMode: 'PICK', siteIds: [siteA.id], dateFrom: from, dateTo: to });
@@ -196,6 +203,17 @@ async function main() {
     const r = await resolveCustomerScopeWorkers({ siteMode: 'ALL', siteIds: [], dateFrom: from, dateTo: to });
     const ids = new Set(r.map((w) => w.employeeId));
     check('ALL: W1..W4 all present, siteIds empty in ALL mode', [w1.id, w2.id, w3.id, w4.id].every((id) => ids.has(id)) && r.every((w) => w.siteIds.length === 0), r.map((w) => w.siteIds.length));
+  }
+
+  // ---- direct worker mode: independent of assignment; site history is still shown ---------
+  {
+    const r = await resolveCustomerScopeWorkers({ scopeBasis: 'WORKERS', siteMode: 'ALL', siteIds: [], dateFrom: from, dateTo: to });
+    const ids = new Set(r.map((w) => w.employeeId));
+    check('direct: employed worker without a site is present', ids.has(w5.id), [...ids]);
+    const w5row = r.find((w) => w.employeeId === w5.id);
+    check('direct: unassigned worker has an empty site list and no false status', !!w5row && w5row.siteIds.length === 0 && !w5row.assigned && !w5row.hasHours, w5row);
+    const w3row = r.find((w) => w.employeeId === w3.id);
+    check('direct: worker who changed/worked across sites shows both sites', !!w3row && w3row.siteIds.includes(siteA.id) && w3row.siteIds.includes(siteB.id), w3row);
   }
 
   // ---- range with no periods & after every assignment ended -> W4 gone (ended 06-04), W1/W3 stay (open asg)

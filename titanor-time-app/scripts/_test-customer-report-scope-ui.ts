@@ -49,13 +49,22 @@ async function main(): Promise<void> {
     sites.push(s);
   }
   const bigSite = sites[0]; // gets many workers -> paginated worker list
+  let multiSiteEmployeeNumber = '';
   for (let i = 0; i < 55; i++) {
     const emp = await prisma.employee.create({ data: { employeeNumber: `QA-${run}-${String(i).padStart(3, '0')}`, firstName: `Qa${i}`, lastName: `Scope${String(i).padStart(3, '0')}` } });
     await prisma.employment.create({ data: { employeeId: emp.id, active: true, startDate: ASG_START } });
     // first 30 on bigSite, the rest spread over sites[1..]
     const site = i < 30 ? bigSite : sites[1 + (i % 27)];
     await prisma.siteAssignment.create({ data: { employeeId: emp.id, siteId: site.id, isPrimary: true, validFrom: ASG_START, validTo: null, assignedByUserId: adminId } });
+    if (i === 54) {
+      multiSiteEmployeeNumber = emp.employeeNumber;
+      await prisma.siteAssignment.create({ data: { employeeId: emp.id, siteId: sites[2].id, isPrimary: false, validFrom: ASG_START, validTo: null, assignedByUserId: adminId } });
+    }
   }
+  const unassigned = await prisma.employee.create({
+    data: { employeeNumber: `QA-${run}-NO-SITE`, firstName: 'NoSite', lastName: 'Worker' }
+  });
+  await prisma.employment.create({ data: { employeeId: unassigned.id, active: true, startDate: ASG_START } });
 
   const browser = await chromium.launch({ headless: true });
   const consoleErrors: string[] = [];
@@ -176,6 +185,26 @@ async function main(): Promise<void> {
   check('16: ALL/ALL serializes to the same params as the legacy call', JSON.stringify(viaScope.report.grandTotal) === JSON.stringify(viaLegacy.report.grandTotal));
   // and the picker's "Show & check" button becomes enabled for ALL/ALL
   check('16: "Show & check" enabled for ALL/ALL', !(await page.locator('.exc-apply-button').first().isDisabled()));
+
+  // Direct worker mode: no site is required; an unassigned worker stays findable and a worker
+  // associated with multiple sites shows that history in the same list.
+  await page.goto(`${BASE}/admin/reports/customer?dateFrom=2098-06-01&dateTo=2098-06-30&scopeBy=workers`, { waitUntil: 'networkidle' });
+  await page.waitForSelector('.scope-workers-wrap .scope-row', { timeout: 10000 });
+  check('direct: "By workers" mode is selected', await page.getByLabel('By workers').isChecked());
+  check('direct: site picker is hidden', (await page.locator('.scope-panel').count()) === 1, await page.locator('.scope-panel').count());
+  const directPanel = page.locator('.scope-workers-wrap .scope-panel');
+  await directPanel.locator('.scope-search').fill(unassigned.employeeNumber);
+  await page.waitForTimeout(150);
+  check('direct: unassigned worker is searchable', (await directPanel.locator('.scope-row').count()) === 1);
+  check('direct: unassigned worker is labelled clearly', (await directPanel.locator('.scope-row').innerText()).includes('No site assigned in this period'));
+  await directPanel.locator('.scope-row-label').click();
+  await page.waitForTimeout(600);
+  check('direct: URL preserves worker-first mode and explicit worker', page.url().includes('scopeBy=workers') && page.url().includes('workerIds='), page.url());
+  check('direct: report can run without choosing a site', !(await page.locator('.exc-apply-button').isDisabled()));
+  await directPanel.locator('.scope-search').fill(multiSiteEmployeeNumber);
+  await page.waitForTimeout(150);
+  const multiSiteText = await directPanel.locator('.scope-row').innerText();
+  check('direct: multi-site worker shows both associated sites', multiSiteText.includes(sites[2].name) && multiSiteText.includes(sites[1 + (54 % 27)].name), multiSiteText);
 
   // 14: keyboard + labels — do this from a known PICK state (bigSite selected, no bulk select)
   await page.goto(`${BASE}/admin/reports/customer?dateFrom=2098-06-01&dateTo=2098-06-30&siteIds=${bigSite.id}`, { waitUntil: 'networkidle' });

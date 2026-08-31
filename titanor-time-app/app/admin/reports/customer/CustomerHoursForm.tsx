@@ -1,7 +1,7 @@
 'use client';
 
 // docs/titanor-time/CUSTOMER_REPORT_SCOPE_PICKER_RU.md — the scope picker for the customer hours
-// report. Flow: dates -> Sites panel -> Workers of the selected sites -> selection summary ->
+// report. Flow: dates -> choose by Sites or Workers -> selection panel(s) -> selection summary ->
 // "Show & check" -> result. URL is the source of truth (reload / Back-Forward / shared link
 // reproduce the selection). Explicit ALL / PICK modes — an empty list never silently means "the
 // whole company". Serializes back onto the EXISTING export API params (absent list = "all"), so the
@@ -11,7 +11,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { usePathname, useRouter } from 'next/navigation';
 import { localeText } from '@/lib/i18n/locale';
 import { ScopePickerPanel, type ScopeItem } from '@/components/reports/ScopePickerPanel';
-import { serializeScopeToExportParams, type CustomerReportScope, type ScopeMode } from '@/lib/reporting/customer-report-scope';
+import { serializeScopeToExportParams, type CustomerReportScope, type ScopeBasis } from '@/lib/reporting/customer-report-scope';
 
 interface SiteOption {
   id: string;
@@ -57,6 +57,7 @@ export function CustomerHoursForm({ allSites, initial, locale }: { allSites: Sit
   const [dateTo, setDateTo] = useState(initial.dateTo ?? '');
   const [customer, setCustomer] = useState(initial.customer);
   const [projectReference, setProjectReference] = useState(initial.projectReference);
+  const [scopeBasis, setScopeBasis] = useState<ScopeBasis>(initial.scopeBasis);
 
   // The picker only offers two visible modes: "Choose sites" (PICK) and "All sites" (ALL). A URL
   // that carried neither (siteMode NONE) opens in PICK with nothing selected — the report button
@@ -85,9 +86,9 @@ export function CustomerHoursForm({ allSites, initial, locale }: { allSites: Sit
   const [preview, setPreview] = useState<Preview | null>(null);
 
   const datesValid = !!dateFrom && !!dateTo && dateFrom <= dateTo;
-  const siteScopeReady = datesValid && (siteMode === 'ALL' || (siteMode === 'PICK' && siteIds.size > 0));
+  const siteScopeReady = datesValid && (scopeBasis === 'WORKERS' || siteMode === 'ALL' || (siteMode === 'PICK' && siteIds.size > 0));
   const sortedSiteIds = useMemo(() => [...siteIds].sort(), [siteIds]);
-  const scopeKey = `${siteMode}|${sortedSiteIds.join(',')}|${dateFrom}|${dateTo}`;
+  const scopeKey = `${scopeBasis}|${siteMode}|${sortedSiteIds.join(',')}|${dateFrom}|${dateTo}`;
 
   // ---- fetch the in-scope worker list whenever sites / dates change --------------------------
   useEffect(() => {
@@ -100,8 +101,8 @@ export function CustomerHoursForm({ allSites, initial, locale }: { allSites: Sit
       setScopeLoading(true);
       setScopeError(null);
       try {
-        const q = new URLSearchParams({ dateFrom, dateTo, siteMode });
-        for (const id of sortedSiteIds) q.append('siteIds', id);
+        const q = new URLSearchParams({ dateFrom, dateTo, siteMode: scopeBasis === 'WORKERS' ? 'ALL' : siteMode, scopeBasis });
+        if (scopeBasis === 'SITES') for (const id of sortedSiteIds) q.append('siteIds', id);
         const r = await fetch(`/api/admin/reports/customer/scope?${q.toString()}`, { credentials: 'same-origin' });
         if (cancelled) return;
         if (!r.ok) {
@@ -154,7 +155,9 @@ export function CustomerHoursForm({ allSites, initial, locale }: { allSites: Sit
     if (dateTo) p.set('dateTo', dateTo);
     if (customer.trim()) p.set('customer', customer.trim());
     if (projectReference.trim()) p.set('projectReference', projectReference.trim());
-    if (siteMode === 'ALL') p.set('sites', 'all');
+    if (scopeBasis === 'WORKERS') {
+      p.set('scopeBy', 'workers');
+    } else if (siteMode === 'ALL') p.set('sites', 'all');
     else for (const id of sortedSiteIds) p.append('siteIds', id);
     if (workersAllMode) {
       p.set('workers', 'all');
@@ -163,7 +166,7 @@ export function CustomerHoursForm({ allSites, initial, locale }: { allSites: Sit
       for (const id of [...workerIds].sort()) p.append('workerIds', id);
     }
     return `${pathname}?${p.toString()}`;
-  }, [dateFrom, dateTo, customer, projectReference, siteMode, sortedSiteIds, workersAllMode, workerIds, pathname]);
+  }, [dateFrom, dateTo, customer, projectReference, scopeBasis, siteMode, sortedSiteIds, workersAllMode, workerIds, pathname]);
 
   useEffect(() => {
     const handle = setTimeout(() => {
@@ -194,6 +197,7 @@ export function CustomerHoursForm({ allSites, initial, locale }: { allSites: Sit
       else if (w.assigned) chips.push(t('assigned to site', 'назначен на объект'));
       const secondaryParts = [`#${w.employeeNumber}`];
       if (sites.length) secondaryParts.push(sites.join(', '));
+      else if (scopeBasis === 'WORKERS') secondaryParts.push(t('No site assigned in this period', 'Объект за этот период не назначен'));
       if (chips.length) secondaryParts.push(chips.join(', '));
       return {
         id: w.employeeId,
@@ -202,7 +206,19 @@ export function CustomerHoursForm({ allSites, initial, locale }: { allSites: Sit
         searchText: `${w.lastName} ${w.firstName} ${w.employeeNumber} ${sites.join(' ')}`.toLowerCase()
       };
     });
-  }, [scopeWorkers, siteName, locale]);
+  }, [scopeWorkers, siteName, locale, scopeBasis]);
+
+  const changeScopeBasis = (next: ScopeBasis) => {
+    if (next === scopeBasis) return;
+    setScopeBasis(next);
+    setScopeWorkers(null);
+    setWorkersAllMode(false);
+    workersAllModeRef.current = false;
+    workerExcludeRef.current = new Set();
+    setWorkerIds(new Set());
+    setPrunedCount(0);
+    setPreview(null);
+  };
 
   const toggleWorker = (id: string) => {
     setPrunedCount(0);
@@ -233,12 +249,13 @@ export function CustomerHoursForm({ allSites, initial, locale }: { allSites: Sit
 
   // ---- current explicit scope (for serialization + summary) ---------------------------------
   const currentScope: CustomerReportScope = {
+    scopeBasis,
     dateFrom: dateFrom || null,
     dateTo: dateTo || null,
     customer,
     projectReference,
-    siteMode,
-    siteIds: siteMode === 'PICK' ? sortedSiteIds : [],
+    siteMode: scopeBasis === 'WORKERS' ? 'ALL' : siteMode,
+    siteIds: scopeBasis === 'SITES' && siteMode === 'PICK' ? sortedSiteIds : [],
     workerMode: workersAllMode ? 'ALL' : workerIds.size > 0 ? 'PICK' : 'NONE',
     workerIds: workersAllMode ? [] : [...workerIds],
     workerExcludeIds: workersAllMode ? [...workerExcludeRef.current] : []
@@ -278,7 +295,9 @@ export function CustomerHoursForm({ allSites, initial, locale }: { allSites: Sit
 
   // ---- selection summary (ТЗ §7) --------------------------------------------------------
   const sitesSummary =
-    siteMode === 'ALL'
+    scopeBasis === 'WORKERS'
+      ? t('all sites where the selected workers recorded hours', 'все объекты, где выбранные работники записали часы')
+      : siteMode === 'ALL'
       ? t('all', 'все')
       : siteIds.size === 1
         ? siteName.get([...siteIds][0]) ?? t('1 selected', 'выбран 1')
@@ -286,7 +305,9 @@ export function CustomerHoursForm({ allSites, initial, locale }: { allSites: Sit
   const workersSummary = !scopeWorkers
     ? '—'
     : workersAllMode && workerExcludeRef.current.size === 0
-      ? t('all workers of the selected sites', 'все работники выбранных объектов')
+      ? scopeBasis === 'WORKERS'
+        ? t('all workers', 'все работники')
+        : t('all workers of the selected sites', 'все работники выбранных объектов')
       : t(`${workerIds.size} of ${scopeWorkers.length} selected`, `выбрано ${workerIds.size} из ${scopeWorkers.length}`);
 
   return (
@@ -310,8 +331,23 @@ export function CustomerHoursForm({ allSites, initial, locale }: { allSites: Sit
         </div>
       </div>
 
-      {/* ---- 1. Sites ---- */}
       <fieldset className="scope-mode">
+        <legend>{t('How to choose', 'Как выбрать')}</legend>
+        <label>
+          <input type="radio" name="ch-scope-basis" checked={scopeBasis === 'SITES'} onChange={() => changeScopeBasis('SITES')} /> {t('By sites', 'По объектам')}
+        </label>
+        <label>
+          <input type="radio" name="ch-scope-basis" checked={scopeBasis === 'WORKERS'} onChange={() => changeScopeBasis('WORKERS')} /> {t('By workers', 'По работникам')}
+        </label>
+        <p className="setup-subtitle">
+          {scopeBasis === 'WORKERS'
+            ? t('Choose workers directly, even if they have no current site or changed sites.', 'Выберите работников напрямую — даже если объект не назначен или работник сменил объект.')
+            : t('Choose sites first, then their workers.', 'Сначала выберите объекты, затем их работников.')}
+        </p>
+      </fieldset>
+
+      {/* ---- 1. Sites ---- */}
+      {scopeBasis === 'SITES' && <fieldset className="scope-mode">
         <legend>{t('Sites', 'Объекты')}</legend>
         <label>
           <input type="radio" name="ch-site-mode" checked={siteMode === 'PICK'} onChange={() => setSiteMode('PICK')} /> {t('Choose sites', 'Выбрать объекты')}
@@ -319,9 +355,9 @@ export function CustomerHoursForm({ allSites, initial, locale }: { allSites: Sit
         <label>
           <input type="radio" name="ch-site-mode" checked={siteMode === 'ALL'} onChange={() => setSiteMode('ALL')} /> {t('All sites', 'Все объекты')}
         </label>
-      </fieldset>
+      </fieldset>}
 
-      {siteMode === 'PICK' && (
+      {scopeBasis === 'SITES' && siteMode === 'PICK' && (
         <ScopePickerPanel
           title={t('Sites', 'Объекты')}
           items={siteItems}
@@ -364,7 +400,7 @@ export function CustomerHoursForm({ allSites, initial, locale }: { allSites: Sit
                 </p>
               )}
               <ScopePickerPanel
-                title={t('Workers of the selected sites', 'Работники выбранных объектов')}
+                title={scopeBasis === 'WORKERS' ? t('Workers', 'Работники') : t('Workers of the selected sites', 'Работники выбранных объектов')}
                 items={workerItems}
                 selectedIds={workerIds}
                 onToggle={toggleWorker}
@@ -375,11 +411,15 @@ export function CustomerHoursForm({ allSites, initial, locale }: { allSites: Sit
                   count: (n, tot) => t(`Workers selected: ${n} of ${tot}`, `Выбрано работников: ${n} из ${tot}`),
                   searchPlaceholder: t('Search by name or employee number', 'Поиск по имени, фамилии, табельному номеру'),
                   selectAll:
-                    siteMode === 'PICK' && siteIds.size === 1
+                    scopeBasis === 'WORKERS'
+                      ? t('Select all workers', 'Выбрать всех работников')
+                      : siteMode === 'PICK' && siteIds.size === 1
                       ? t(`Select all workers of "${siteName.get([...siteIds][0]) ?? ''}"`, `Выбрать всех работников объекта «${siteName.get([...siteIds][0]) ?? ''}»`)
                       : t('Select all workers of the selected sites', 'Выбрать всех работников выбранных объектов'),
                   clearAll: t('Clear all', 'Снять выбор со всех'),
-                  empty: t('No workers on the selected sites in this period.', 'На выбранных объектах за период работников нет.'),
+                  empty: scopeBasis === 'WORKERS'
+                    ? t('No workers in this period.', 'За этот период работников нет.')
+                    : t('No workers on the selected sites in this period.', 'На выбранных объектах за период работников нет.'),
                   noMatch: t('No workers match the search.', 'Нет работников по запросу.'),
                   page: (c, tot) => t(`Page ${c} of ${tot}`, `Страница ${c} из ${tot}`),
                   prev: t('Previous', 'Назад'),
@@ -418,7 +458,7 @@ export function CustomerHoursForm({ allSites, initial, locale }: { allSites: Sit
           <span className="setup-subtitle">
             {!datesValid
               ? t('Set both dates.', 'Укажите обе даты.')
-              : siteMode === 'PICK' && siteIds.size === 0
+              : scopeBasis === 'SITES' && siteMode === 'PICK' && siteIds.size === 0
                 ? t('Choose sites or "All sites".', 'Выберите объекты или режим «Все объекты».')
                 : !scopeWorkers
                   ? t('Loading…', 'Загрузка…')

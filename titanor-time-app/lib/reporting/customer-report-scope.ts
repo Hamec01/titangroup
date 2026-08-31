@@ -11,11 +11,14 @@ import { resolveCanonicalSource } from '@/lib/reporting/canonical-source';
 type PrismaLike = typeof defaultPrisma;
 
 export type ScopeMode = 'ALL' | 'PICK' | 'NONE';
+export type ScopeBasis = 'SITES' | 'WORKERS';
 
 /** Result of parsing the customer-report URL params. `NONE` = the user has not made an explicit
  *  choice yet (neither "all" nor a concrete pick) — the report must stay blocked, never silently
  *  treated as "the whole company" (ТЗ §6). */
 export interface CustomerReportScope {
+  /** SITES = site-first narrowing; WORKERS = direct worker selection across all their sites. */
+  scopeBasis: ScopeBasis;
   dateFrom: string | null;
   dateTo: string | null;
   customer: string;
@@ -54,11 +57,13 @@ export function parseCustomerReportScope(params: Record<string, string | string[
   const workerIds = Array.from(new Set(toList(params.workerIds)));
   const workersAll = one(params.workers)?.toLowerCase() === 'all';
   const workerExcludeIds = Array.from(new Set(toList(params.wx)));
+  const scopeBasis: ScopeBasis = one(params.scopeBy)?.toLowerCase() === 'workers' ? 'WORKERS' : 'SITES';
 
-  const siteMode: ScopeMode = siteIds.length > 0 ? 'PICK' : sitesAll ? 'ALL' : 'NONE';
+  const siteMode: ScopeMode = scopeBasis === 'WORKERS' ? 'ALL' : siteIds.length > 0 ? 'PICK' : sitesAll ? 'ALL' : 'NONE';
   const workerMode: ScopeMode = workersAll ? 'ALL' : workerIds.length > 0 ? 'PICK' : 'NONE';
 
   return {
+    scopeBasis,
     dateFrom: rawFrom && DATE_RE.test(rawFrom) ? rawFrom : null,
     dateTo: rawTo && DATE_RE.test(rawTo) ? rawTo : null,
     customer: (one(params.customer) ?? '').slice(0, 200),
@@ -76,13 +81,15 @@ export interface ScopeWorker {
   firstName: string;
   lastName: string;
   employeeNumber: string;
-  /** Which of the *selected* sites this worker relates to (empty in ALL-sites mode). */
+  /** Related selected sites; in direct-worker mode, all related sites in the date range. */
   siteIds: string[];
   assigned: boolean;
   hasHours: boolean;
 }
 
 export interface ResolveScopeWorkersInput {
+  /** WORKERS includes employees independently of their site assignment. */
+  scopeBasis?: ScopeBasis;
   siteMode: 'ALL' | 'PICK';
   /** Required when siteMode === 'PICK'. */
   siteIds: string[];
@@ -97,17 +104,19 @@ export interface ResolveScopeWorkersInput {
  * range. Historical hours are never hidden because a current assignment has ended (`hasHours` does
  * not look at `validTo`). A worker on several selected sites appears once, with all their sites.
  *
- * Query count (independent of worker/site counts): periods, timesheets, workSegments,
- * draftSegments, siteAssignments, employees = 6. All `select`-narrowed, no per-row queries.
+ * Direct-worker mode additionally includes every Employment overlapping the range, so a worker
+ * without a site remains selectable. Query count (independent of worker/site counts): 6 in
+ * site-first mode, 7 in direct-worker mode. All `select`-narrowed, no per-row queries.
  */
 export async function resolveCustomerScopeWorkers(input: ResolveScopeWorkersInput, client: PrismaLike = defaultPrisma): Promise<ScopeWorker[]> {
   const dateFrom = new Date(`${input.dateFrom}T00:00:00.000Z`);
   const dateTo = new Date(`${input.dateTo}T00:00:00.000Z`);
-  const pickIds = input.siteMode === 'PICK' ? Array.from(new Set(input.siteIds.map((s) => s.toLowerCase()))).filter((s) => UUID_PATTERN.test(s)) : [];
-  if (input.siteMode === 'PICK' && pickIds.length === 0) {
+  const directWorkers = input.scopeBasis === 'WORKERS';
+  const pickIds = !directWorkers && input.siteMode === 'PICK' ? Array.from(new Set(input.siteIds.map((s) => s.toLowerCase()))).filter((s) => UUID_PATTERN.test(s)) : [];
+  if (!directWorkers && input.siteMode === 'PICK' && pickIds.length === 0) {
     return [];
   }
-  const siteFilter = input.siteMode === 'PICK' ? { siteId: { in: pickIds } } : {};
+  const siteFilter = !directWorkers && input.siteMode === 'PICK' ? { siteId: { in: pickIds } } : {};
   const dateFilter = { date: { gte: dateFrom, lte: dateTo } };
 
   const periods = await client.payrollPeriod.findMany({
@@ -133,7 +142,7 @@ export async function resolveCustomerScopeWorkers(input: ResolveScopeWorkersInpu
   const versionIds = [...versionIdToEmployee.keys()];
   const draftIds = [...draftIdToEmployee.keys()];
 
-  const [versionSegs, draftSegs, assignments] = await Promise.all([
+  const [versionSegs, draftSegs, assignments, employments] = await Promise.all([
     versionIds.length
       ? client.workSegment.findMany({ where: { timesheetVersionId: { in: versionIds }, ...dateFilter, ...siteFilter }, select: { timesheetVersionId: true, siteId: true }, distinct: ['timesheetVersionId', 'siteId'] })
       : Promise.resolve([]),
@@ -141,10 +150,17 @@ export async function resolveCustomerScopeWorkers(input: ResolveScopeWorkersInpu
       ? client.timesheetDraftSegment.findMany({ where: { draftId: { in: draftIds }, ...dateFilter, ...siteFilter }, select: { draftId: true, siteId: true }, distinct: ['draftId', 'siteId'] })
       : Promise.resolve([]),
     client.siteAssignment.findMany({
-      where: { ...(input.siteMode === 'PICK' ? { siteId: { in: pickIds } } : {}), validFrom: { lte: dateTo }, OR: [{ validTo: null }, { validTo: { gte: dateFrom } }] },
+      where: { ...(!directWorkers && input.siteMode === 'PICK' ? { siteId: { in: pickIds } } : {}), validFrom: { lte: dateTo }, OR: [{ validTo: null }, { validTo: { gte: dateFrom } }] },
       select: { employeeId: true, siteId: true },
       distinct: ['employeeId', 'siteId']
-    })
+    }),
+    directWorkers
+      ? client.employment.findMany({
+          where: { startDate: { lte: dateTo }, OR: [{ endDate: null }, { endDate: { gte: dateFrom } }] },
+          select: { employeeId: true },
+          distinct: ['employeeId']
+        })
+      : Promise.resolve([])
   ]);
 
   // employeeId -> { assigned, hasHours, siteIds:Set }
@@ -156,11 +172,16 @@ export async function resolveCustomerScopeWorkers(input: ResolveScopeWorkersInpu
       acc.set(employeeId, e);
     }
     e[kind] = true;
-    if (input.siteMode === 'PICK') e.siteIds.add(siteId);
+    if (directWorkers || input.siteMode === 'PICK') e.siteIds.add(siteId);
   };
   for (const s of versionSegs) bump(versionIdToEmployee.get(s.timesheetVersionId)!, s.siteId, 'hasHours');
   for (const s of draftSegs) bump(draftIdToEmployee.get(s.draftId)!, s.siteId, 'hasHours');
   for (const a of assignments) bump(a.employeeId, a.siteId, 'assigned');
+  for (const employment of employments) {
+    if (!acc.has(employment.employeeId)) {
+      acc.set(employment.employeeId, { assigned: false, hasHours: false, siteIds: new Set() });
+    }
+  }
 
   if (acc.size === 0) return [];
 

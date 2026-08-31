@@ -34,7 +34,7 @@ export default async function AdminCustomerHoursPage({ searchParams }: RoutePara
   const sp = await searchParams;
   // CUSTOMER_REPORT_SCOPE_PICKER_RU.md §4 — the URL is the source of truth. The site list is small
   // and bounded; the worker list is fetched by the client from /api/admin/reports/customer/scope
-  // once dates + sites are chosen (it depends on the date range).
+  // once dates plus the site-first/direct-worker mode are ready (it depends on the date range).
   const sites = await listSiteOptionsForAdmin();
   const initial = parseCustomerReportScope(sp);
 

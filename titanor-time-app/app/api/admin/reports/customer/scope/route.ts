@@ -9,7 +9,7 @@ import { MAX_CUSTOM_REPORT_DAYS } from '@/lib/reporting/custom-time-report';
 import { resolveCustomerScopeWorkers } from '@/lib/reporting/customer-report-scope';
 
 // docs/titanor-time/CUSTOMER_REPORT_SCOPE_PICKER_RU.md §5 — read-only "which workers are in scope for
-// these sites + date range" lookup for the /admin/reports/customer scope picker. Same permission set
+// these sites/date range or directly across workers" lookup for the customer scope picker. Same permission set
 // as the export route; never writes, never an ExportBatch, never an AuditEvent.
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
@@ -47,12 +47,13 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   }
 
   const siteMode = (sp.get('siteMode') ?? '').toUpperCase() === 'ALL' ? 'ALL' : 'PICK';
+  const scopeBasis = (sp.get('scopeBasis') ?? '').toUpperCase() === 'WORKERS' ? 'WORKERS' : 'SITES';
   const siteIds = sp
     .getAll('siteIds')
     .flatMap((v) => v.split(','))
     .map((s) => s.trim().toLowerCase())
     .filter((s) => s.length > 0);
-  if (siteMode === 'PICK') {
+  if (scopeBasis === 'SITES' && siteMode === 'PICK') {
     if (siteIds.length === 0) {
       return NextResponse.json({ workers: [] }, { status: 200, headers: { 'Cache-Control': 'private, no-store', 'X-Request-Id': requestId } });
     }
@@ -61,7 +62,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     }
   }
 
-  const workers = await resolveCustomerScopeWorkers({ siteMode, siteIds, dateFrom, dateTo });
+  const workers = await resolveCustomerScopeWorkers({ scopeBasis, siteMode, siteIds, dateFrom, dateTo });
 
   return NextResponse.json(
     { workers },
