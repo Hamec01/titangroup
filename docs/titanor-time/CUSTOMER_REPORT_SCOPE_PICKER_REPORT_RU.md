@@ -110,7 +110,7 @@
 
 ## 7. `git`
 
-Commit `<sha>` — `feat(time): scope picker for the customer hours report (/admin/reports/customer)`.
+Commit `ecaf87a` — `feat(time): scope picker for the customer hours report (/admin/reports/customer)`.
 Рабочее дерево чистое после коммита. Ветка `feature/titanor-time-foundation`.
 
 ## 8. Подтверждение изоляции
