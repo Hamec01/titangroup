@@ -3,7 +3,13 @@
 - **Дата фиксации:** 2026-08-31 (обновлено: R13 pilot acceptance CONFIRMED)
 - **Ветка:** `feature/titanor-time-foundation`
 - **Главные документы:** `PRODUCTION_RELEASE_TZ_FINAL_RU.md`, `PRODUCTION_RELEASE_ROADMAP_RU.md`, `IMPLEMENTATION_STATUS.md`
-- **Текущий этап:** R11 PASS · R12 PASS · **R13 PASS — pilot/device acceptance ПОДТВЕРЖДЕНА владельцем 2026-08-31, 0 P0/P1** (`R13_ACCEPTANCE_RU.md`). Релизный образ заморожен: `titanor-time-app:r14-release-1416503` = `sha256:864267bb1698dc43d585fb0a094345766a1eff7afc006d778c42fc7eff5c4bbb` (тот же ID, что `r13-hotfix-1416503`, без пересборки; off-disk tar.gz). 4 коммита (`1416503`,`f19661c`,`fb1138f`,`c758caa`) запушены в `origin/feature/titanor-time-foundation` (HEAD `c758caa`). Одноразовые `r13-*` аккаунты обезврежены (DEACTIVATED + сняты test-links; аудит-след сохранён). Языковая модель зафиксирована — `LANGUAGE_MODEL_RU.md`. R14 runbook+preflight готовы — `R14_CUTOVER_RUNBOOK_RU.md`. **Ждём ТОЛЬКО два подтверждения владельца: (2) maintenance-окно, (3) явное разрешение начать cutover. R14/cutover НЕ начинать.**
+- **Текущий этап:** R11/R12/R13 PASS. **R14 подготовлен полностью, cutover НЕ начат.**
+  - R13 pilot/device acceptance ПОДТВЕРЖДЕНА владельцем 2026-08-31, 0 P0/P1 (`R13_ACCEPTANCE_RU.md`).
+  - Релизный образ заморожен без пересборки: `titanor-time-app:r14-release-1416503` = `titanor-time-app:r13-hotfix-1416503` = `sha256:864267bb1698dc43d585fb0a094345766a1eff7afc006d778c42fc7eff5c4bbb` (+ off-disk tar.gz).
+  - `r13-*` тест-аккаунты обезврежены (DEACTIVATED + сняты test-links; аудит-след цел).
+  - Языковая модель — `LANGUAGE_MODEL_RU.md`. Публичный сайт: `/fi` `<html lang>` + Employee-login ссылка написаны (`af829fe`), НЕ задеплоены (ship на R14 через `ops/site/deploy-site-r14.sh`).
+  - **R14 автоматизация готова** (`184263e`): `ops/titanor-time/r14/{preflight,cutover,rollback,apply-caddy}-r14.sh` + `caddy-app-block-r14.txt`. preflight 32 PASS / 0 FAIL. disposable restore-test с образом релиза 14/14. `R14_CUTOVER_RUNBOOK_RU.md` §6 — точный список команд (sudo только у владельца).
+  - HEAD ветки `184263e`, запушен. Осталось от владельца: создать prod `app.env` (13 ключей), назначить окно (≥15 мин), дать «старт», быть на связи для sudo шага 17. **R14/cutover НЕ начинать до нового явного разрешения.**
 - **R10 manual acceptance:** CONFIRMED владельцем 2026-08-31 (реальные устройства + role-smoke, 0 P0/P1, FOREMAN skipped/not in scope)
 - **Инцидент 2026-08-31:** агент вызвал `caddy stop` в тесте → боевой Caddy лежал ~46 мин. Разбор + правило: `R11_INCIDENT_2026-08-31_caddy_outage.md`, `feedback_never_run_caddy_daemon_commands` (память). На этом хосте: только `caddy validate`/`adapt`, никаких `caddy stop/start/run`/bare `reload`.
 - **Production cutover:** запрещён. Pilot acceptance получено; ещё нужны maintenance-окно + явное разрешение начать R14 (оба — отдельно).
@@ -175,8 +181,10 @@ git log --oneline -5
 
 Если worktree грязный — сначала понять, чьи изменения. Не включать чужие изменения в commit.
 
-**Сейчас:** прочитать `R13_ACCEPTANCE_RU.md`, `R14_CUTOVER_RUNBOOK_RU.md`, `LANGUAGE_MODEL_RU.md`.
-Pilot acceptance получено. **Не начинать R14/cutover** без обоих подтверждений владельца
-(окно + разрешение). Можно доделывать preflight-заготовки из `R14_CUTOVER_RUNBOOK_RU.md` §2.3
-(код/скрипты, без деплоя): Caddy reverse-proxy блок, prod-стек compose, site-deploy скрипт,
-ещё один disposable restore-test. Ничего в production/pilot/Caddy/DNS/публичном сайте не менять.
+**Сейчас:** прочитать `R13_ACCEPTANCE_RU.md`, `R14_CUTOVER_RUNBOOK_RU.md` (особенно §0 ограничения
+и §6 команды), `LANGUAGE_MODEL_RU.md`. Вся подготовка R14 закрыта (скрипты `ops/titanor-time/r14/`,
+preflight 32/0, restore-test 14/14, `af829fe` сайт). **Не начинать R14/cutover** без нового явного
+разрешения владельца + назначенного окна + созданного prod `app.env`. Когда владелец даст «старт»:
+`bash ops/titanor-time/r14/preflight-r14.sh` → `bash ops/titanor-time/r14/cutover-r14.sh --go` →
+владелец сам `sudo bash ops/titanor-time/r14/apply-caddy-r14.sh` → `bash ops/site/deploy-site-r14.sh`.
+Ничего в production/pilot/Caddy/DNS/публичном сайте руками не менять.

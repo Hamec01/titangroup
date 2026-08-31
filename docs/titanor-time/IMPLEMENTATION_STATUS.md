@@ -1,5 +1,26 @@
 # Titanor Time — Implementation Status
 
+**`[2026-08-31]` R14 — подготовка ЗАВЕРШЕНА. Cutover НЕ начат (ждёт окно + prod app.env + «старт»).**
+Runbook `R14_CUTOVER_RUNBOOK_RU.md` (§0 ограничения, §6 точные команды). Владелец подтвердил приёмку
+R13 и дал разрешение на R14 «строго по runbook»; первое окно 18:10–18:20 EEST было слишком коротким
+и стартовало через минуты — агент корректно НЕ начал, ждём новое окно.
+- **Скрипты** (`184263e`, всё `bash -n` чисто, ничего не выполнялось):
+  `ops/titanor-time/r14/preflight-r14.sh` (32 read-only проверки, без sudo — **32 PASS / 0 FAIL**),
+  `cutover-r14.sh --go` (шаги 3–16: stop old prod → **обязательный backup old-prod** → freeze pilot
+  → final snapshot → prod net+db → `pg_restore --no-owner --no-acl` → `DELETE UserSession` +
+  **`DELETE SchedulerLease`** → `migrate status` → web `127.0.0.1:3199` + scheduler → reconcile →
+  header/endpoint checks; fail-closed → авто-rollback), `rollback-r14.sh`,
+  `apply-caddy-r14.sh` (**шаг 17, sudo — только владелец**: swap 503→`reverse_proxy 127.0.0.1:3199`,
+  validate/reload/verify/regression, `--rollback` возвращает 503), `caddy-app-block-r14.txt`
+  (`caddy validate`: Valid обе стороны).
+- **Публичный сайт** (`af829fe`, tsc+build чисто, НЕ задеплоено): `/fi` `<html lang>` через клиентский
+  эффект `app/[lang]/html-lang.tsx` (SSR остаётся `en`, правится на гидрации); `nav.login` ссылка на
+  `app.titanorgroup.fi` (EN «Employee login» / FI «Työntekijän kirjautuminen»). Ship: `ops/site/deploy-site-r14.sh`.
+- **Финальная страховка:** disposable `restore-test` на свежем post-cleanup snapshot
+  `pilot-20260831T152444Z-manual` с образом `r14-release-1416503` — **14/14 PASS**.
+- **Осталось от владельца:** prod `/home/deploy/app-data/titanor-time-prod/app.env` (13 ключей),
+  новое окно (≥15 мин), явный «старт», быть на связи для sudo шага 17.
+
 **`[2026-08-31]` R13 — контрольная точка владельца — PASS. R14 подготовлен, cutover НЕ начат.**
 Отчёт `R13_ACCEPTANCE_RU.md`; runbook `R14_CUTOVER_RUNBOOK_RU.md`; языковая модель `LANGUAGE_MODEL_RU.md`.
 - **Pilot / device acceptance ПОДТВЕРЖДЕНА владельцем 2026-08-31** (iPhone PWA/иконка/Check In-Out/GPS

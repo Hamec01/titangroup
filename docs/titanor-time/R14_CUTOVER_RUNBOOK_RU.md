@@ -7,11 +7,16 @@
   (`sha256:864267bb1698dc43d585fb0a094345766a1eff7afc006d778c42fc7eff5c4bbb`).
 - **Rollback-образ:** `titanor-time-app:t97-pilot-edd950c` (`sha256:0282e68f…`, rev `edd950c`) — на месте.
 
-> ## ⛔ CUTOVER НЕ НАЧАТ И НЕ РАЗРЕШЁН
-> Нужны **два отдельных** подтверждения владельца (roadmap R13 п.2 и п.3):
-> 1. конкретное **maintenance-окно** (дата + время, 10 минут);
-> 2. **явное разрешение начать production cutover**.
-> Pilot acceptance (п.1) уже получено — `R13_ACCEPTANCE_RU.md`.
+> ## ⛔ CUTOVER НЕ НАЧАТ
+> **Статус 2026-08-31:** вся подготовка готова (§2 preflight 32/0, §2.3 скрипты, disposable
+> restore-test 14/14). Владелец подтвердил приёмку R13 и дал разрешение на R14 «строго по этому
+> runbook», но первое окно (18:10–18:20 EEST) было слишком коротким и стартовало через минуты —
+> агент корректно **не начал**. Ждём: **новое maintenance-окно** (≥15 мин, дата+время) + владелец
+> на связи для sudo-команды шага 17 (пароль sudo не передаётся — владелец выполняет сам). До нового
+> явного «старт» — не начинать. Pilot acceptance — `R13_ACCEPTANCE_RU.md`.
+>
+> **Владельцу остаётся ровно одно техническое действие до окна:** создать
+> `/home/deploy/app-data/titanor-time-prod/app.env` (P3 в §6.1).
 
 ---
 
@@ -55,6 +60,11 @@
 
 ## 2. PREFLIGHT (можно и нужно прогнать ДО окна; ничего не меняет)
 
+**Автоматизировано:** `bash ops/titanor-time/r14/preflight-r14.sh` — 32 read-only проверки, без
+sudo, ничего не меняет. Последний прогон 2026-08-31 18:23 EEST: **32 PASS / 0 FAIL / 3 TODO**
+(TODO = prod `app.env` ещё не создан; git-sync — закрыт коммитом `184263e`). Прогонять перед
+каждым окном.
+
 ### 2.1 Уже проверено 2026-08-31 (read-only)
 
 | проверка | результат |
@@ -83,27 +93,43 @@
 - [ ] `caddy fmt` косметика Caddyfile — опционально, отдельно.
 - [ ] `git fetch` в worktree, убедиться, что HEAD ветки не ушёл вперёд другой сессией.
 
-### 2.3 Заготовки, которые надо доделать до окна (код/скрипты, без деплоя)
+### 2.3 Заготовки — ГОТОВЫ (2026-08-31, коммиты `184263e` + `af829fe`)
 
-- [ ] **Caddy reverse-proxy блок** для `app.titanorgroup.fi`: взять `ops/titanor-time/r11/caddy-app-block.txt`,
-      убрать `root`, оба `header {}`, `handle {}`, `handle_errors {}`, добавить строку
-      `reverse_proxy 127.0.0.1:3199` (+ оставить `encode`, `log`). Сохранить как
-      `ops/titanor-time/r11/caddy-app-block-r14.txt`. Проверить `caddy adapt` в scratchpad
-      (с `admin off` в тестовом конфиге — НЕ трогать live admin API; урок инцидента 2026-08-31).
-- [ ] **compose/`docker run` для `titanor-time-prod-*`** — по образцу `compose.titanor-time.yaml`
-      (порт `127.0.0.1:3199:3000`, сеть `titanor-time-prod-net`, env-file prod, bind uploads prod,
-      scheduler = тот же образ, `command: ["node", ".runtime/attendance-auto-submit-scheduler.cjs"]`).
-- [ ] **`ops/site/deploy-site-<sha>.sh`** для публикации Employee-login ссылки (образец
-      `deploy-site-r07b.sh`) — если ссылку публикуем на R14.
-- [ ] прогнать `restore-test-titanor-time.sh` на свежем pilot snapshot ещё раз (disposable) —
-      финальная страховка перед окном.
+- [x] **Caddy reverse-proxy блок** — `ops/titanor-time/r14/caddy-app-block-r14.txt`
+      (`reverse_proxy 127.0.0.1:3199` + минимальные заголовки как в pilot-блоке). `caddy validate`
+      обеих сторон (switch и `--rollback`) в scratchpad — **Valid configuration**.
+- [x] **`titanor-time-prod-*` стек** — не отдельный compose, а `ops/titanor-time/r14/cutover-r14.sh`
+      (`docker run` web `127.0.0.1:3199:3000` + scheduler, сеть `titanor-time-prod-net`, том
+      `titanor-time-prod-db-data`, env-file prod). Механика restore/boot/reconcile/rollback —
+      та, что дала 10/10 в `r12-rehearsal.sh`.
+- [x] **`ops/site/deploy-site-r14.sh`** — публикует `af829fe` (`/fi` `<html lang>` + Employee-login
+      ссылка). `VERIFY_PORT=3198` (3199 занят prod). Smoke-first + auto-rollback.
+- [x] **disposable `restore-test`** на свежем post-cleanup snapshot `pilot-20260831T152444Z-manual`
+      с образом релиза — **14/14 PASS** (98 миграций, все 74 row counts, fingerprint, uploads 3,
+      `/api/ready` 200).
+
+**Осталось только от владельца:** создать `/home/deploy/app-data/titanor-time-prod/app.env`
+(13 ключей, крипто-ключи скопировать из pilot `app.env`, `chmod 600`), назначить окно, дать
+разрешение. Всё остальное готово.
 
 ---
 
 ## 3. ИСПОЛНЕНИЕ (только после обоих подтверждений §0)
 
-Окно = шаги 6–13 (write-freeze пилота → boot нового prod). Шаги 1–5 — подготовка внутри
-maintenance, приложение ещё старое/в holding. Шаги 14–16 — уже с рабочим приложением.
+**Три команды, в этом порядке** (точный список с sudo — §7):
+
+1. `bash ops/titanor-time/r14/preflight-r14.sh` — финальный read-only gate (без sudo). Должно быть 0 FAIL.
+2. `bash ops/titanor-time/r14/cutover-r14.sh --go` — runbook шаги 3–16 (без sudo, без Caddy, без DNS).
+   Fail-closed: любая ошибка → авто-rollback (old prod + pilot обратно). Внутри — обязательный
+   backup старой prod-БД (C4), `DELETE FROM "SchedulerLease"` (C3), bind только `127.0.0.1:3199` (C1).
+3. **Владелец, sudo:** `sudo bash ops/titanor-time/r14/apply-caddy-r14.sh` — шаг 17 (switch Caddy).
+4. (если решено) `bash ops/site/deploy-site-r14.sh` — шаг 18 (Employee-login ссылка + `/fi` lang).
+
+Между шагом 2 и 3 — **owner smoke на `http://127.0.0.1:3199`** (SSH-туннель), пока `app.titanorgroup.fi`
+ещё на 503. Если smoke плохой — `bash ops/titanor-time/r14/rollback-r14.sh`, Caddy не трогали.
+
+Окно = внутренняя часть шага 2 (freeze пилота → boot нового prod, ~1–2 мин). Ниже — что делает
+каждый шаг и как проверяется (скрипт делает это сам):
 
 | # | шаг | проверка |
 |---|---|---|
@@ -123,9 +149,9 @@ maintenance, приложение ещё старое/в holding. Шаги 14–
 | 14 | `docker run` **scheduler** из того же образа (`command` scheduler), env-file prod, только prod-net. Дождаться ≥2 успешных тика, `node .runtime/attendance-scheduler-healthcheck.cjs` exit 0, нет `OVERLAPPING`. | healthcheck exit 0; heartbeat `lastOutcome:ok`, `consecutiveFailures:0` |
 | 15 | Сверить с финальным manifest (шаг 7): row counts по таблицам, migration status. | всё совпало |
 | 16 | **Owner smoke на `127.0.0.1:3199`** (SSH-туннель): вход SUPER_ADMIN / ADMIN / WORKER / FOREMAN (реальные аккаунты), clock + GPS + offline, отчёты worker/site/period + PDF + CSV, uploads. | все роли входят; clock/reports/uploads работают |
-| 17 | **Caddy switch (C5):** заменить блок `app.titanorgroup.fi` на reverse-proxy вариант (`caddy-app-block-r14.txt`). `sudo cp` бэкап Caddyfile → правка → `sudo caddy validate --config /etc/caddy/Caddyfile` → `sudo systemctl reload caddy` (или `caddy reload --address 127.0.0.1:2019`). | `caddy validate` = Valid; `systemctl is-active caddy` = active; `curl -I https://app.titanorgroup.fi` → 200, `/api/ready` 200 |
-| 18 | (Если решено) Опубликовать Employee-login ссылку на `titanorgroup.fi`: `ops/site/deploy-site-<sha>.sh` (build → backup volume → throwaway smoke → swap с auto-rollback → re-check, что Titanor Time и другие vhost не задеты). | `titanorgroup.fi/en` и `/fi` показывают ссылку; регрессия vhost чиста |
-| 19 | Завершить maintenance. Зафиксировать время открытия и фактический downtime. Старую prod-БД/стек **не удалять**. | — |
+| 17 | **Caddy switch (C5) — владелец, sudo:** `sudo bash ops/titanor-time/r14/apply-caddy-r14.sh`. Скрипт: проверяет `127.0.0.1:3199/api/ready` 200 → baseline 5 vhost → бэкап Caddyfile → swap блок `app.titanorgroup.fi` на `reverse_proxy 127.0.0.1:3199` → `caddy validate` → `systemctl reload caddy` → verify + регрессия. Fail-closed. | `caddy validate` = Valid; `https://app.titanorgroup.fi/api/ready` 200 `schema:current`; `/login` 200; 5 vhost без изменений |
+| 18 | (Если решено) `bash ops/site/deploy-site-r14.sh` — Employee-login ссылка + `/fi` `<html lang>` (`af829fe`). build → backup обоих volume on+off box → throwaway smoke `:3198` → swap с auto-rollback → re-check `titanor-time-prod-*` не задет. | `/en` и `/fi` показывают ссылку на `app.titanorgroup.fi`; `/fi` FI-контент; регрессия vhost чиста |
+| 19 | Завершить maintenance. Зафиксировать время открытия и фактический downtime. Старую prod-БД/стек **не удалять** (rollback-таргет ≥ до конца R15). | — |
 
 ---
 
@@ -144,20 +170,73 @@ maintenance, приложение ещё старое/в holding. Шаги 14–
 тиков или `OVERLAPPING`; ключевые роли не входят; clock/uploads системно сломаны; потеря данных;
 TLS/Caddy ведёт не туда.
 
-| # | шаг | время |
+- **Во время шага 2 (`cutover-r14.sh`):** любая ошибка → **авто-rollback** внутри скрипта
+  (stop/rm `titanor-time-prod-*` web+scheduler, `docker start` old prod db+web+scheduler,
+  `docker start` пилот). Старую prod-БД скрипт только читал (`pg_dump`) — восстанавливать нечего.
+- **Вручную** (после «успешного» cutover, до/после Caddy): `bash ops/titanor-time/r14/rollback-r14.sh`
+  (то же самое; без sudo).
+- **Если Caddy уже переключён (после шага 17):** дополнительно
+  `sudo bash ops/titanor-time/r14/apply-caddy-r14.sh --rollback` — вернёт `app.titanorgroup.fi`
+  на 503 holding (проверено offline, конфиг после отката байт-в-байт равен текущему live).
+
+| # | что | время |
 |---|---|---|
-| 1 | `docker stop titanor-time-prod-scheduler titanor-time-prod-app` | ~0.5 с |
-| 2 | Если Caddy уже переключён (шаг 17): вернуть блок `app.titanorgroup.fi` на **503 holding** (бэкап Caddyfile) → `caddy validate` → `systemctl reload caddy`. Если cutover прервался до шага 17 — Caddy не трогаем (уже 503). | ~10 с |
-| 3 | Снять write-freeze со старого prod: `docker start titanor-time-db-1 titanor-time-app-1 titanor-time-scheduler-1`. (Старую prod-БД восстанавливать из backup шага 5 только если она была изменена — по плану R14 её не трогаем вообще.) | ~5 с |
-| 4 | Снять write-freeze с пилота: `docker start t97-pilot-app t97-pilot-scheduler`. Проверить `/api/ready` 200. | ~10 с |
-| 5 | Зафиксировать причину. Не удалять `titanor-time-prod-*` до разбора. | — |
+| 1 | `docker rm -f titanor-time-prod-app titanor-time-prod-scheduler` (prod-db + том оставить для разбора) | ~0.5 с |
+| 2 | Caddy: если переключали — `sudo bash ops/titanor-time/r14/apply-caddy-r14.sh --rollback`. Не переключали — не трогаем (уже 503). | ~10 с |
+| 3 | `docker start titanor-time-db-1` → `docker start titanor-time-app-1 titanor-time-scheduler-1` | ~5 с |
+| 4 | `docker start t97-pilot-app t97-pilot-scheduler` → `/api/ready` 200 на `:3200` и `:3297` | ~10 с |
+| 5 | Зафиксировать причину. `titanor-time-prod-db` + том `titanor-time-prod-db-data` не удалять до разбора. | — |
 
 Репетиция rollback (`R12_REHEARSAL_RU.md` §3): stop нового стека → restore предыдущего dump →
 boot `t97-pilot-edd950c` → `/api/ready` `schema:current` — **PASS**, ~17 с механики.
 
-## 6. После cutover
+---
+
+## 6. Точный список команд (для владельца)
+
+Не-sudo команды может выполнить агент; **sudo — только владелец в своём терминале.**
+`REPO=/home/deploy/projects/titanorgroup-worktrees/titanor-time-foundation`
+
+### 7.1 До окна
+
+| # | кто | команда |
+|---|---|---|
+| P1 | владелец, sudo | `sudo ufw status verbose` — read-only, убедиться внешний 3199 закрыт, **ничего не открывать** |
+| P2 | владелец, sudo | `sudo caddy validate --config /etc/caddy/Caddyfile` → `Valid configuration` |
+| P3 | владелец | создать `/home/deploy/app-data/titanor-time-prod/app.env` — 13 ключей (§1), крипто-ключи скопировать из `/home/deploy/app-data/t97-pilot/app.env`, `DATABASE_URL=postgresql://titanor_time_prod:<pw>@titanor-time-prod-db:5432/titanor_time`, `POSTGRES_USER=titanor_time_prod`, `POSTGRES_DB=titanor_time`, `PORT=3000`, `HOSTNAME=0.0.0.0`, `NODE_ENV=production`, `NEXT_TELEMETRY_DISABLED=1`. Затем `chmod 600`. |
+| P4 | агент/владелец | `bash $REPO/ops/titanor-time/r14/preflight-r14.sh` → **0 FAIL** |
+
+### 7.2 В окне
+
+| # | кто | команда | ожидание |
+|---|---|---|---|
+| 1 | агент/владелец | `bash $REPO/ops/titanor-time/r14/preflight-r14.sh` | 0 FAIL |
+| 2 | агент/владелец | `bash $REPO/ops/titanor-time/r14/cutover-r14.sh --go` | `CUTOVER STEPS 3–16: OK` |
+| 3 | владелец | SSH-туннель + smoke на `http://127.0.0.1:3199` (4 роли, clock/GPS/offline, отчёты, uploads) | всё работает |
+| 4 | **владелец, sudo** | `sudo bash $REPO/ops/titanor-time/r14/apply-caddy-r14.sh` | `R14 Caddy switch OK` |
+| 5 | агент/владелец | (если решено) `bash $REPO/ops/site/deploy-site-r14.sh` | `DEPLOY OK` |
+| 6 | владелец | зафиксировать время открытия и фактический downtime | — |
+
+### 7.3 Rollback (если что-то не так)
+
+| ситуация | команда |
+|---|---|
+| ошибка внутри шага 2 | ничего — `cutover-r14.sh` откатывается сам |
+| плохой smoke (шаг 3), Caddy ещё не трогали | `bash $REPO/ops/titanor-time/r14/rollback-r14.sh` |
+| плохо после шага 4 (Caddy уже переключён) | `sudo bash $REPO/ops/titanor-time/r14/apply-caddy-r14.sh --rollback` **и** `bash $REPO/ops/titanor-time/r14/rollback-r14.sh` |
+| плохой деплой сайта (шаг 5) | `deploy-site-r14.sh` откатывается сам; вручную: `docker rm -f titanorgroup-web-1 && docker rename titanorgroup-web-1-pre-r14 titanorgroup-web-1 && docker start titanorgroup-web-1` |
+
+## 7. После cutover
 
 - R15 — наблюдение (`PRODUCTION_RELEASE_ROADMAP_RU.md` R15).
 - Старый стек `titanor-time-*-1` — оставить остановленным как быстрый rollback ≥ до конца R15.
+  Пилот `t97-pilot-app`/`-scheduler` — тоже остаются остановленными (frozen); `t97-pilot-db`
+  можно оставить up для сверки. Пилотный URL `t97-…nip.io` начнёт отдавать 502 — это ожидаемо,
+  vhost можно убрать из Caddy позже отдельно.
+- Убрать rollback-контейнеры сайта (`docker rm titanorgroup-web-1-pre-r14`) и `-pre-*` пилота —
+  только когда владелец доволен, вручную.
 - `docker builder prune` — только когда владелец готов (сейчас C6 запрещает).
 - Вариант B (orange-cloud + `trusted_proxies_strict` + `TITANOR_TRUSTED_PROXY_HOPS=2`) — отдельно после R15.
+- Обновить `IMPLEMENTATION_STATUS.md`, `NEXT_AGENT_HANDOFF_RU.md`, память; написать R14-отчёт
+  (фактический downtime, версии/образы, health/ready, вход по ролям, scheduler, Caddy/TLS,
+  публичный сайт, готовность rollback) — как просил владелец.
