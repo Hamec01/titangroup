@@ -108,6 +108,7 @@
     { "file": "_test-foreman-admin-redirect.ts", "lane": "browser", "note": "HTTP only (no Chromium): /foreman -> /admin redirect for ADMIN/SUPER_ADMIN. Needs a running standalone server (buildFixture)." },
     { "file": "_test-export-ui.ts", "lane": "browser", "note": "Export admin UI — Chromium." },
     { "file": "_test-offline-cold-restart.ts", "lane": "browser", "note": "PWA offline cold-restart — Chromium." },
+    { "file": "_test-offline-shell-locale.ts", "lane": "browser", "note": "Offline PWA shell keeps the stored RU/EN/FI choice (no RU-default clobber) — Chromium." },
     { "file": "_test-offline-views.ts", "lane": "browser", "note": "Offline worker views — Chromium." },
     { "file": "_test-pwa-install.ts", "lane": "browser", "note": "PWA install flow — Chromium." },
     { "file": "_test-qualifications-browser-qa.ts", "lane": "browser", "note": "Qualifications admin UI — Chromium." },
