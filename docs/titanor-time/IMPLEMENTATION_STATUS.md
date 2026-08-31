@@ -1,5 +1,17 @@
 # Titanor Time — Implementation Status
 
+**`[2026-08-31]` R13 — подготовка + evidence package — DONE (ждёт owner-часть).** `R13_PREP_RU.md`.
+- Решения владельца зафиксированы: FI-ссылка «Työntekijän kirjautuminen»; production web bind
+  только `127.0.0.1:3199`; `ufw` — только read-only, внешний 3199 не открывать; после restore
+  обязательно `DELETE FROM "SchedulerLease"` до scheduler; `docker builder prune` отложен.
+- **На пилоте созданы R13 тест-аккаунты** `r13-super/admin/worker/foreman` (все ACTIVE, вход
+  проверен 200, роли верны; worker+foreman привязаны к Meyer Turku Shipyard). Пароли — приватно
+  владельцу, не в Git. Убрать после R13.
+- **Docker read-only анализ:** build cache 67.5 GB (~45 GB reclaimable), диск `/` 83 %, dangling 0.
+  Безопасный план очистки (~20 GB без `builder prune`, ~65 GB с ним) — `R13_PREP_RU.md` §5, НЕ выполнен.
+- Owner-checklist R13 (A–E), evidence package, 3 подтверждения — `R13_PREP_RU.md` §4/§6/§7.
+- **Cutover / R14 / maintenance window — не начаты и не подтверждены.**
+
 **`[2026-08-31]` R12 — production-like rehearsal — PASS (автоматизируемая часть).** Отчёт
 `R12_REHEARSAL_RU.md`. Всё в disposable-окружении; **pilot / production / Caddy / DNS / публичный
 сайт не тронуты** (пилот прочитан только read-only `pg_dump`); cutover не начат.

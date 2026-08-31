@@ -3,7 +3,7 @@
 - **Дата фиксации:** 2026-08-31 (обновлено: R12 rehearsal PASS)
 - **Ветка:** `feature/titanor-time-foundation`
 - **Главные документы:** `PRODUCTION_RELEASE_TZ_FINAL_RU.md`, `PRODUCTION_RELEASE_ROADMAP_RU.md`, `IMPLEMENTATION_STATUS.md`
-- **Текущий этап:** R11 PASS · R12-prep DONE (`R12_PREP_BROWSER_LANE_RU.md`) · **R12 rehearsal PASS** (`R12_REHEARSAL_RU.md`) — авто-часть: restore 14/0 + live-stack rehearsal 10/0 + browser-lane 16/16, всё на кандидате `titanor-time-app:r12-candidate-367420e` (digest `sha256:b5f80cbd…`), в disposable-окружении. Точный cutover-runbook + downtime + rollback — в отчёте. Дальше — **R13** (owner evidence package + 3 подтверждения) + owner-часть acceptance (role-smoke реальными аккаунтами, device matrix ТЗ §19.6).
+- **Текущий этап:** R11 PASS · R12-prep DONE · R12 rehearsal PASS · **R13 prep DONE** (`R13_PREP_RU.md`) — решения владельца зафиксированы, на пилоте созданы тест-аккаунты `r13-{super,admin,worker,foreman}` (пароли переданы владельцу приватно, не в Git), owner-checklist A–E + evidence package готовы, docker cleanup-план (не выполнен). Кандидат `titanor-time-app:r12-candidate-367420e` (digest `sha256:b5f80cbd…`). **Ждёт owner-часть R13:** ручная acceptance по checklist + 3 подтверждения (pilot acceptance / maintenance window / cutover). **R14/cutover не начинать.**
 - **R10 manual acceptance:** CONFIRMED владельцем 2026-08-31 (реальные устройства + role-smoke, 0 P0/P1, FOREMAN skipped/not in scope)
 - **Инцидент 2026-08-31:** агент вызвал `caddy stop` в тесте → боевой Caddy лежал ~46 мин. Разбор + правило: `R11_INCIDENT_2026-08-31_caddy_outage.md`, `feedback_never_run_caddy_daemon_commands` (память). На этом хосте: только `caddy validate`/`adapt`, никаких `caddy stop/start/run`/bare `reload`.
 - **Production cutover:** запрещён до R12 PASS и отдельного подтверждения владельца на R13
@@ -36,7 +36,8 @@ Production-перенос ещё не начат. Цель R14 — сделат�
 - Не начинать R14/cutover.
 - **Не менять Caddy, DNS, live production, pilot-БД, публичный сайт** — после R11 владелец
   заморозил их до отдельного разрешения (2026-08-31).
-- **`docker builder prune` пока не запускать** (владелец, 2026-08-31).
+- **`docker builder prune` пока не запускать** (владелец, 2026-08-31). Read-only `docker builder du`
+  + безопасный план очистки без удаления используемых образов — `R13_PREP_RU.md` §5.
 - Не запускать rollback и не удалять rollback-контейнеры без отдельной причины.
 - Не печатать secrets, cookies, recovery-коды, password hashes, GPS archive key или персональные координаты в чат/логи/markdown.
 - **На этом хосте: только `caddy validate` / `caddy adapt`. Никаких `caddy stop/start/run` и
@@ -45,14 +46,15 @@ Production-перенос ещё не начат. Цель R14 — сделат�
 - Не расширять scope на FOREMAN UX: заказчик это не обсуждал, владелец исключил FOREMAN UI из R09.
 - Не делать глубокую единую карточку работника до production: в R09 выбран только порядок и навигация.
 
-### Gates перед R14 (зафиксированы владельцем 2026-08-31)
+### Gates перед R14 — зафиксированы владельцем 2026-08-31 (все РЕШЕНЫ)
 
-1. **FI-строка Employee login** для публичного сайта — владелец выбирает «Kirjaudu sisään» или
-   «Työntekijän kirjautuminen».
-2. **`ufw`** — владелец подтверждает правила (22/80/443) и решает про внешние `8000`/`8080` (ardor).
-3. **Порт production `3199`** — владелец подтверждает (или называет другой) для `titanor-time-prod-*`.
-
-Ни один из gate не блокирует R12 rehearsal, но все три должны быть закрыты до R14.
+1. **FI-строка Employee login:** `login` FI = **«Työntekijän kirjautuminen»**, EN = «Employee login».
+   Код — `app/components/site-header.tsx` + `app/i18n.ts` (R11 §5); деплой на R14.
+2. **Firewall:** `ufw` — только **read-only проверить**; **внешний порт 3199 открывать НЕЛЬЗЯ.**
+   Production web bind — **только `127.0.0.1:3199`** (за Caddy).
+3. **Порт production:** **`127.0.0.1:3199`** (только loopback), стек `titanor-time-prod-*`.
+4. **Scheduler после restore:** ОБЯЗАТЕЛЬНО `DELETE FROM "SchedulerLease"` до запуска scheduler
+   (иначе OVERLAPPING ~90 мин; runbook `R12_REHEARSAL_RU.md` шаг 11).
 
 ## 3. Что уже сделано по этапам
 

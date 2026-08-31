@@ -243,7 +243,7 @@ holding-страница — `ops/titanor-time/r11/holding/index.html` (RU + EN,
 
 - `app/i18n.ts` — в `nav` добавить `login`:
   - EN: `login: 'Employee login'`
-  - FI: `login: 'Kirjaudu sisään'` **или** `'Työntekijän kirjautuminen'` (§9 вопрос 4)
+  - FI: `login: 'Työntekijän kirjautuminen'` (решено владельцем 2026-08-31)
 - `app/components/site-header.tsx`:
   - расширить `SiteHeaderProps.labels` полем `login: string`;
   - в `nav-desktop` и в `mobile-panel` добавить `<a>` (не `next/link` — внешний абсолютный URL):
@@ -318,9 +318,8 @@ holding-страница — `ops/titanor-time/r11/holding/index.html` (RU + EN,
 1. ~~Cloudflare~~ → **Вариант A (grey-cloud) на запуск, B после R15.**
 2. ~~Ссылка Employee login~~ → **на R14.**
 3. ~~Holding-страница~~ → **брендированный HTML** `ops/titanor-time/r11/holding/index.html` (RU+EN).
-
-**Ещё открыто (не блокирует применение §3):**
-4. **FI-строка входа** (нужна к R14): «Kirjaudu sisään» или «Työntekijän kirjautuminen»?
-5. **Firewall:** подтвердить правила `ufw` (22/80/443); ограничивать ли внешние `8000`/`8080` (ardor staging)?
-6. **Доступ:** оставить запуск `apply-caddy-r11.sh` за владельцем, или выдать `deploy` sudoers-пункт на этот скрипт?
-7. **Порт production `3199`** (§6) — устраивает или заменить?
+4. ~~FI-строка входа~~ → **`login` FI = «Työntekijän kirjautuminen»** (EN = «Employee login»).
+5. ~~Firewall~~ → **`ufw` пока только read-only проверить; внешний порт 3199 открывать НЕЛЬЗЯ**
+   (production web bind — только `127.0.0.1:3199`, за Caddy). Про `8000`/`8080` (ardor) — отдельно.
+6. **Доступ:** оставить запуск `apply-caddy-r11.sh` за владельцем (не выдавать sudoers) — на R14.
+7. ~~Порт production~~ → **`127.0.0.1:3199`** (только loopback).
