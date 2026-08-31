@@ -32,13 +32,15 @@ function check(name: string, cond: boolean, extra?: unknown) {
 
 // A string that renders on the offline shell's clocked-out screen, per locale. `wk-main-action`'s
 // aria-label is `t.checkIn` — 'Check in' (EN) / 'Отметить приход' (RU).
-const EXPECT: Record<string, { ariaLabel: RegExp; storedAfter: string; periodYear: number }> = {
+type LocaleCase = 'RU' | 'EN' | 'FI';
+
+const EXPECT: Record<LocaleCase, { ariaLabel: RegExp; storedAfter: string; periodYear: number }> = {
   RU: { ariaLabel: /отметить приход/i, storedAfter: 'RU', periodYear: 2213 },
   EN: { ariaLabel: /check in/i, storedAfter: 'EN', periodYear: 2214 },
   FI: { ariaLabel: /отметить приход/i, storedAfter: 'RU', periodYear: 2215 } // legacy FI folds to RU everywhere
 };
 
-async function makeWorker(localeValue: 'EN' | 'RU' | 'FI') {
+async function makeWorker(localeValue: LocaleCase) {
   const tag = randomUUID().slice(0, 6);
   const year = EXPECT[localeValue].periodYear;
   const admin = await prisma.user.create({ data: { username: `admin-loc-${tag}`, status: 'ACTIVE', locale: 'EN' } });
@@ -56,7 +58,7 @@ async function makeWorker(localeValue: 'EN' | 'RU' | 'FI') {
   return { username: user.username, password };
 }
 
-async function runLocale(localeValue: keyof typeof EXPECT) {
+async function runLocale(localeValue: LocaleCase) {
   const { username, password } = await makeWorker(localeValue);
   const profileDir = mkdtempSync(path.join(tmpdir(), `titanor-shell-locale-${localeValue}-`));
   const expect = EXPECT[localeValue];
@@ -111,7 +113,7 @@ async function runLocale(localeValue: keyof typeof EXPECT) {
 }
 
 async function main() {
-  for (const loc of ['RU', 'EN', 'FI'] as (keyof typeof EXPECT)[]) {
+  for (const loc of ['RU', 'EN', 'FI'] as const) {
     await runLocale(loc);
   }
   console.log(JSON.stringify({ pass, fail }));

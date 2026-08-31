@@ -163,9 +163,23 @@ async function main() {
   const deniedBody = await deniedBeforeBadBody.json().catch(() => null);
   check('Cross-cutting: permission denial (403) happens even with a malformed JSON body — denied before body parsing', deniedBeforeBadBody.status === 403 && deniedBody?.error?.code === 'FORBIDDEN', deniedBody);
 
-  // ---- UI-level cross-cutting: /admin/** for FOREMAN/WORKER never renders admin content (browser) ----
+  // ---- UI-level cross-cutting: post-login homes + /admin/** denial (browser) ----
   {
     const browser = await chromium.launch({ headless: true });
+
+    const adminPage = await browser.newPage();
+    await adminPage.goto(`${BASE}/login`, { waitUntil: 'networkidle' });
+    await adminPage.locator('#identifier').fill(fx.admin.username);
+    await adminPage.locator('#password').fill(fx.admin.password);
+    await adminPage.locator('.login-submit').click();
+    await adminPage.waitForURL(/\/admin(?:\?.*)?$/, { timeout: 15000 });
+    check(
+      'UI: ADMIN login lands on Today/Overview (/admin), not the setup checklist',
+      new URL(adminPage.url()).pathname === '/admin',
+      adminPage.url()
+    );
+    await adminPage.close();
+
     const page = await browser.newPage();
     await page.goto(`${BASE}/login`, { waitUntil: 'networkidle' });
     await page.locator('#identifier').fill(fx.foreman.username);

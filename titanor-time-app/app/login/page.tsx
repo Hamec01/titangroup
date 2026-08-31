@@ -18,17 +18,12 @@ import { recordAuthenticatedUser } from '@/lib/offline-outbox/device';
 // mutating request, checked server-side by POST /api/auth/login.
 const CSRF_HEADER_VALUE = 'titanor-time';
 
-// docs/titanor-time/01_SCREEN_MAP.md §1 (/login "Куда") gives the real
-// target routes (/admin, /worker/periods/[periodId]), none of which are
-// built yet. Per this task's explicit instruction, the destinations below
-// are the owner-specified ones for this checkpoint — SUPER_ADMIN/ADMIN and
-// FOREMAN destinations don't exist as real pages yet either (only the next
-// checkpoint, /admin/setup, is planned), so this redirect will 404 until
-// those land. Not a bug in this page — no placeholder page is faked in to
-// hide that.
+// docs/titanor-time/PRODUCTION_RELEASE_TZ_FINAL_RU.md §19.5: the operational
+// Today/Overview page is the normal ADMIN/SUPER_ADMIN landing. Setup remains
+// available from the admin navigation, but is no longer the post-login home.
 function resolveHomeRoute(roles: string[]): string | null {
   if (roles.includes('SUPER_ADMIN') || roles.includes('ADMIN')) {
-    return '/admin/setup';
+    return '/admin';
   }
   if (roles.includes('FOREMAN')) {
     return '/foreman';
