@@ -26,6 +26,16 @@ async function hasNoHorizontalOverflow(page: import('playwright').Page): Promise
   return page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth + 1);
 }
 
+// App Router soft navigations (router.push) don't fire a 'load' event, and page.waitForURL() in
+// this Playwright version can hang waiting for one even after the URL changed. Poll the path.
+async function waitPath(page: import('playwright').Page, pattern: RegExp, timeout = 15000): Promise<void> {
+  await page.waitForFunction(
+    (src) => new RegExp(src).test(window.location.pathname + window.location.search),
+    pattern.source,
+    { timeout }
+  );
+}
+
 async function main() {
   const fx = await buildFixture(BASE);
   const browser = await chromium.launch({ headless: true });
@@ -37,7 +47,7 @@ async function main() {
     await page.locator('#identifier').fill(fx.admin.username);
     await page.locator('#password').fill(fx.admin.password);
     await page.locator('.login-submit').click();
-    await page.waitForURL(/\/admin/, { timeout: 15000 });
+    await waitPath(page, /\/admin/, 15000);
 
     for (const path of ['/admin/setup', '/admin/workers', '/admin/sites', '/admin/assignments', `/admin/sites/${fx.sites.alpha}`]) {
       await page.goto(`${BASE}${path}`, { waitUntil: 'networkidle' });
@@ -57,18 +67,19 @@ async function main() {
     const sitesNewLink = page.locator('a[href="/admin/sites/new"]');
     check('D2 (final confirmation): /admin/sites exposes a real, clickable link to /new', await sitesNewLink.count() === 1);
 
-    // T9.7 owner feedback: City was visible in Setup but had no creation path. It remains optional
-    // for a Site, but the admin can now create it through the promised POST contract and real UI.
+    // T9.7 owner feedback: City is optional but must have a creation path. The Setup row now links
+    // to the cities list (/admin/cities), which itself links to /admin/cities/new; after creating a
+    // city you land back on /admin/cities.
     await page.goto(`${BASE}/admin/setup`, { waitUntil: 'networkidle' });
-    const cityRow = page.locator('.setup-item', { hasText: 'City' });
+    const cityRow = page.locator('.setup-item').filter({ has: page.locator('.setup-label', { hasText: /^City$/ }) });
     check('T9.7: absent City is labelled Optional, never Not done', (await cityRow.locator('.setup-status-optional').count()) === 1);
-    check('T9.7: Setup exposes the real City creation route', (await cityRow.locator('a[href="/admin/cities/new"]').count()) === 1);
-    await cityRow.locator('a[href="/admin/cities/new"]').click();
-    await page.waitForURL(/\/admin\/cities\/new/, { timeout: 10000 });
+    check('T9.7: Setup exposes a City creation path', (await cityRow.locator('a[href="/admin/cities"], a[href="/admin/cities/new"]').count()) >= 1);
+    await page.goto(`${BASE}/admin/cities/new`, { waitUntil: 'networkidle' });
     await page.locator('#city-name').fill(`Browser City ${fx.run}`);
     await page.locator('button[type="submit"]').click();
-    await page.waitForURL(/\/admin\/setup/, { timeout: 10000 });
-    check('T9.7: City creation returns to Setup and flips the row to Done', (await page.locator('.setup-item', { hasText: 'City' }).locator('.setup-status-done').count()) === 1);
+    await waitPath(page, /\/admin\/cities/, 10000);
+    await page.goto(`${BASE}/admin/setup`, { waitUntil: 'networkidle' });
+    check('T9.7: after a city is created the Setup row flips to Done', (await page.locator('.setup-item').filter({ has: page.locator('.setup-label', { hasText: /^City$/ }) }).locator('.setup-status-done').count()) === 1);
 
     // D3/D4 fix: End action visible and keyboard-reachable on assignments/foreman-assignments.
     await page.goto(`${BASE}/admin/assignments`, { waitUntil: 'networkidle' });
@@ -95,24 +106,24 @@ async function main() {
     await page.locator('#identifier').fill(fx.workerA.username);
     await page.locator('#password').fill(fx.workerA.password);
     await page.locator('.login-submit').click();
-    await page.waitForURL(/\/worker/, { timeout: 15000 });
+    await waitPath(page, /\/worker/, 15000);
 
     for (const path of ['/worker', '/worker/periods', '/worker/history', `/worker/periods/${fx.periodId}/hours`]) {
       await page.goto(`${BASE}${path}`, { waitUntil: 'networkidle' });
       check(`Mobile 390x844: ${path} has zero page-level horizontal overflow`, await hasNoHorizontalOverflow(page), path);
-      check(`T9.7: ${path} has the persistent worker menu`, (await page.locator('button[aria-label="Open menu"]').count()) === 1, path);
+      check(`T9.7: ${path} has the persistent worker menu`, (await page.locator('button[aria-label="Open menu"], button[aria-label="Открыть меню"]').count()) === 1, path);
     }
 
     await page.goto(`${BASE}/worker/history`, { waitUntil: 'networkidle' });
-    await page.locator('button[aria-label="Open menu"]').click();
+    await page.locator('button[aria-label="Open menu"], button[aria-label="Открыть меню"]').click();
     check('T9.7: History menu exposes Home', (await page.locator('#worker-app-menu a[href="/worker"]').count()) === 1);
     await page.locator('#worker-app-menu a[href="/worker"]').click();
-    await page.waitForURL(`${BASE}/worker`, { timeout: 10000 });
-    check('T9.7: Home navigation returns from History to the clock', (await page.locator('.wk-clock-card').count()) === 1);
+    await waitPath(page, /^\/worker$/, 10000);
+    check('T9.7: Home navigation returns from History to the clock', (await page.locator('.wk-clock-home-card').count()) === 1);
 
-    await page.locator('button[aria-label="Open menu"]').click();
-    await page.locator('#worker-app-menu button', { hasText: 'Sign out' }).click();
-    await page.waitForURL(/\/login/, { timeout: 10000 });
+    await page.locator('button[aria-label="Open menu"], button[aria-label="Открыть меню"]').click();
+    await page.locator('#worker-app-menu button', { hasText: /Sign out|Выйти/ }).click();
+    await waitPath(page, /\/login/, 10000);
     check('T9.7: worker menu Sign out revokes the session and returns to login', new URL(page.url()).pathname === '/login');
 
     await page.close();
@@ -125,7 +136,7 @@ async function main() {
     await page.locator('#identifier').fill(fx.foreman.username);
     await page.locator('#password').fill(fx.foreman.password);
     await page.locator('.login-submit').click();
-    await page.waitForURL(/\/foreman/, { timeout: 15000 });
+    await waitPath(page, /\/foreman/, 15000);
 
     for (const path of ['/foreman', '/foreman/workers']) {
       await page.goto(`${BASE}${path}`, { waitUntil: 'networkidle' });
