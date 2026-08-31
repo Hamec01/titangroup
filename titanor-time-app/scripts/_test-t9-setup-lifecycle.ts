@@ -77,7 +77,10 @@ async function main() {
 
   await jsonFetch(`${BASE}/api/admin/assignments`, { method: 'POST', headers: authHeaders(freshCookie, { 'Idempotency-Key': randomUUID() }), body: JSON.stringify({ employeeId: workerARes.body.employee.id, siteId: checklistSiteId, templateId: checklistTemplateId, validFrom: '2020-01-01', isPrimary: true }) });
   const status7 = await jsonFetch(`${BASE}/api/admin/setup-status`, { headers: authHeaders(freshCookie) });
-  check('7: after assignment — hasAssignment flips true, hasOpenPeriod still false', status7.body.hasAssignment === true && !status7.body.hasOpenPeriod, status7.body);
+  // T9.7 onboarding change: creating the first assignment now auto-opens the current payroll
+  // period (the standalone "open a period" step was removed from the checklist), so hasOpenPeriod
+  // flips true here rather than on a later explicit period POST.
+  check('7: after assignment — hasAssignment flips true and the current period is auto-opened', status7.body.hasAssignment === true && status7.body.hasOpenPeriod === true, status7.body);
 
   const helsinkiToday = new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Helsinki' }).format(new Date());
   const periodEnd = new Date(`${helsinkiToday}T00:00:00.000Z`);
@@ -102,16 +105,19 @@ async function main() {
     const workerHref = await workerAction.getAttribute('href');
     check('9: fully-set-up Worker checklist item links to /admin/workers (Manage), not /new', workerHref === '/admin/workers', workerHref);
 
+    // The checklist is 5 required rows now (Site / WorkArea / Template / Worker / Assignment);
+    // "open a period" was dropped (auto-opened on assignment) and City / a submission-schedule row
+    // are separate/optional. This fixture has the 5 through Assignment -> 5 "Done".
     await page.reload({ waitUntil: 'networkidle' });
     const doneCountAfterReload = await page.locator('.setup-status-done').count();
-    check('10: reload preserves 6 Done items (Site/WorkArea/Template/Worker/Assignment/Period)', doneCountAfterReload === 6, doneCountAfterReload);
+    check('10: reload preserves 5 Done items (Site/WorkArea/Template/Worker/Assignment)', doneCountAfterReload === 5, doneCountAfterReload);
 
     await page.goto(`${BASE}/admin/workers`, { waitUntil: 'networkidle' });
     await page.goBack({ waitUntil: 'networkidle' });
     const doneCountAfterBack = await page.locator('.setup-status-done').count();
-    check('10b: back navigation to /admin/setup still shows correct (non-stale) 6 Done items', doneCountAfterBack === 6, doneCountAfterBack);
+    check('10b: back navigation to /admin/setup still shows correct (non-stale) 5 Done items', doneCountAfterBack === 5, doneCountAfterBack);
 
-    check('11: checklist is a force-dynamic Server Component with zero client-side state (structural — verified by 10/10b matching DB truth after navigation)', doneCountAfterReload === 6 && doneCountAfterBack === 6);
+    check('11: checklist is a force-dynamic Server Component with zero client-side state (structural — verified by 10/10b matching DB truth after navigation)', doneCountAfterReload === 5 && doneCountAfterBack === 5);
 
     // T9.7 real-owner finding: activation belongs to account ownership, not operational setup.
     // The owner can issue QR immediately and attaches site/schedule inline on the worker profile.
@@ -122,7 +128,7 @@ async function main() {
       return Boolean(employee?.value && site?.value);
     });
     check('T9.7/G1: unassigned worker profile can issue activation immediately', (await page.locator('button', { hasText: 'Issue activation code' }).count()) === 1);
-    check('T9.7/G2: site/work-schedule form is embedded in the worker profile', (await page.locator('.worker-work-setup').count()) === 1);
+    check('T9.7/G2: the guided site/work-schedule form is embedded in the worker profile', (await page.locator('form:has(#assignment-employee):has(#assignment-site)').count()) === 1);
     check('T9.7/G3: inline form locks the intended worker', await page.locator('#assignment-employee').inputValue() === workerBRes.body.employee.id && await page.locator('#assignment-employee').isDisabled());
     check('T9.7/G4: guided form defaults start date to Helsinki today', await page.locator('#assignment-valid-from').inputValue() === helsinkiToday);
     check('T9.7/G5: guided first assignment defaults to primary', await page.locator('#assignment-is-primary').isChecked());
@@ -202,7 +208,7 @@ async function main() {
   await page.locator('#worker-last-name').fill(uniqueLast);
   await page.locator('.login-submit').click();
   await page.waitForURL(/\/admin\/workers\/[0-9a-f-]+$/, { timeout: 10000 });
-  check('3: creating a worker opens that worker profile with immediate activation and inline work setup', (await page.locator('button', { hasText: 'Issue activation code' }).count()) === 1 && (await page.locator('.worker-work-setup').count()) === 1);
+  check('3: creating a worker opens that worker profile with immediate activation and inline work setup', (await page.locator('button', { hasText: 'Issue activation code' }).count()) === 1 && (await page.locator('form:has(#assignment-employee):has(#assignment-site)').count()) === 1);
 
   // 4: both workers (A and the newly clicked one) appear separately in the list.
   await page.goto(`${BASE}/admin/workers`, { waitUntil: 'networkidle' });
