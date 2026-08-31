@@ -1,5 +1,25 @@
 # Titanor Time — Implementation Status
 
+**`[2026-08-31]` Customer-report scope picker (`/admin/reports/customer`) — код + тесты готовы,
+НЕ задеплоено.** Design note `CUSTOMER_REPORT_SCOPE_PICKER_RU.md`, отчёт
+`CUSTOMER_REPORT_SCOPE_PICKER_REPORT_RU.md`. Commit `ecaf87a` (+ `2a5b3be` docs). Изолированно:
+production / Caddy / DNS / prod-БД / rollback-контейнеры **не тронуты**, ни одной миграции.
+- Нативные `<select multiple>` заменены на: панель «Объекты» (поиск, 20/стр, чекбоксы, выбрать
+  все/снять, счётчик) → панель «Работники выбранных объектов» → резюме → «Показать и проверить».
+- Модель: `resolveCustomerScopeWorkers` (новый `lib/reporting/customer-report-scope.ts`) — работник
+  в списке если назначение на объект пересекает диапазон ИЛИ есть canonical-часы на объекте в
+  диапазоне (исторические часы не скрываются). 6 set-based read-only запросов. Новый read-only
+  эндпоинт `/api/admin/reports/customer/scope`.
+- Явные режимы ALL/PICK — «пусто = все» убрано; но сериализуется обратно в существующий export API
+  (отсутствие `siteIds`/`employeeIds` = «все»), URL не несёт сотни ID. `_test-customer-hours.ts` не
+  изменён, зелёный — отчёт/PDF/CSV идентичны для того же scope.
+- **Не изменено:** canonical worked-time, округление, статусы, readiness, PDF/CSV, final-gating,
+  permissions, Prisma schema, export-route.
+- Тесты: `_test-customer-report-scope.ts` (db 25/0), `_test-customer-report-scope-ui.ts`
+  (browser/Chromium 30/0, ТЗ §10 п.5-7/9-17 + desktop-1440 & mobile-390 скриншоты в
+  `baseline-customer-scope/`). typecheck 0, lint ok, build ok, **db-lane 64/64**.
+- Ждёт просмотра владельцем → отдельное разрешение на deploy.
+
 **`[2026-08-31]` R14 — PRODUCTION CUTOVER PASS.** Отчёт `R14_CUTOVER_REPORT_RU.md`.
 - `app.titanorgroup.fi` открыт: `/login` 200, `/api/ready` 200 `schema:current` 98/98.
 - Новый стек `titanor-time-prod-{app,scheduler,db}` healthy, RestartCount 0; web только
