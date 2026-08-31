@@ -3,7 +3,7 @@
 - **Дата фиксации:** 2026-08-31 (обновлено: R12 rehearsal PASS)
 - **Ветка:** `feature/titanor-time-foundation`
 - **Главные документы:** `PRODUCTION_RELEASE_TZ_FINAL_RU.md`, `PRODUCTION_RELEASE_ROADMAP_RU.md`, `IMPLEMENTATION_STATUS.md`
-- **Текущий этап:** R11 PASS · R12 rehearsal был PASS на `367420e` · R13 automation нашла и исправила admin-login landing (`1416503`). Новый образ `titanor-time-app:r13-hotfix-1416503` (ID `sha256:864267bb…`) прошёл **16/16 browser files**, GPS/full-flow/PWA/offline/mobile/restart/dossier зелёны (`R13_AUTOMATED_ACCEPTANCE_RU.md`). **Из-за product-изменения обязателен повтор R12 restore/rehearsal на новом образе**, затем owner checkpoint. **R14/cutover не начинать.**
+- **Текущий этап:** R11 PASS · R13 automation нашла и исправила admin-login landing (`1416503`). Образ `titanor-time-app:r13-hotfix-1416503` (ID `sha256:864267bb…`) прошёл **16/16 browser files**, GPS/full-flow/PWA/offline/mobile/restart/dossier, затем повтор R12 на fresh pilot snapshot: **restore 14/14 + rehearsal 10/10 + rollback PASS** (`R13_AUTOMATED_ACCEPTANCE_RU.md`). Остался owner checkpoint и три явных подтверждения. **R14/cutover не начинать.**
 - **R10 manual acceptance:** CONFIRMED владельцем 2026-08-31 (реальные устройства + role-smoke, 0 P0/P1, FOREMAN skipped/not in scope)
 - **Инцидент 2026-08-31:** агент вызвал `caddy stop` в тесте → боевой Caddy лежал ~46 мин. Разбор + правило: `R11_INCIDENT_2026-08-31_caddy_outage.md`, `feedback_never_run_caddy_daemon_commands` (память). На этом хосте: только `caddy validate`/`adapt`, никаких `caddy stop/start/run`/bare `reload`.
 - **Production cutover:** запрещён до R12 PASS и отдельного подтверждения владельца на R13

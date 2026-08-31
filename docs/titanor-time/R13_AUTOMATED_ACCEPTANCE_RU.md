@@ -73,7 +73,18 @@ Disposable containers/networks удалены. `titanor-time-app:latest` не п
 паролей/rate-limit и удаление одноразовых `r13-*` данных. Они меняют состояние аккаунтов и должны
 выполняться владельцем либо на отдельной fixture.
 
-Так как исправлен product-код и изменился image digest, прежний R12 rehearsal относится к
-`r12-candidate-367420e`. Перед R14 новый `r13-hotfix-1416503` (или итоговый образ от этого commit)
-обязан повторно пройти R12 restore/rehearsal и получить новый release manifest. До этого R13 нельзя
-закрывать окончательно, а R14 начинать нельзя.
+## 6. Повтор R12 на hotfix-кандидате
+
+После product-изменения R12 повторён на точном образе `r13-hotfix-1416503` и свежем
+read-only snapshot pilot (98 миграций, 74 таблицы, 1795 строк, 3 upload-файла):
+
+- full restore-smoke: **14/14 PASS** — `--no-owner --no-acl`, все 74 row counts, migration
+  history, structure, uploads и all-data fingerprint совпали;
+- live-stack rehearsal: **10/10 PASS** — `SchedulerLease` 1→0, schema 98/98, web ready,
+  настоящие scheduler ticks + healthcheck, session revocation, rehearsal backup→restore-test;
+- rollback drill: предыдущий `t97-pilot-edd950c` загрузился на откаченной БД с
+  `schema:current`;
+- measured: restore 9.0 s, web ready 2.7 s, rollback restore+boot 16.6 s.
+
+Вся rehearsal-среда disposable; pilot только read-only `pg_dump`. R12 technical gate для
+hotfix-кандидата закрыт. R14 по-прежнему запрещён до отдельных owner-подтверждений.
