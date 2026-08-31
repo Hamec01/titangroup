@@ -1,12 +1,12 @@
 # Titanor Time — handoff для следующего агента
 
-- **Дата фиксации:** 2026-08-31 (обновлено: R12 rehearsal PASS)
+- **Дата фиксации:** 2026-08-31 (обновлено: R13 pilot acceptance CONFIRMED)
 - **Ветка:** `feature/titanor-time-foundation`
 - **Главные документы:** `PRODUCTION_RELEASE_TZ_FINAL_RU.md`, `PRODUCTION_RELEASE_ROADMAP_RU.md`, `IMPLEMENTATION_STATUS.md`
-- **Текущий этап:** R11 PASS · R13 automation нашла и исправила admin-login landing (`1416503`). Образ `titanor-time-app:r13-hotfix-1416503` (ID `sha256:864267bb…`) прошёл **16/16 browser files**, GPS/full-flow/PWA/offline/mobile/restart/dossier, затем повтор R12 на fresh pilot snapshot: **restore 14/14 + rehearsal 10/10 + rollback PASS** (`R13_AUTOMATED_ACCEPTANCE_RU.md`). Остался owner checkpoint и три явных подтверждения. **R14/cutover не начинать.**
+- **Текущий этап:** R11 PASS · R12 PASS · **R13 PASS — pilot/device acceptance ПОДТВЕРЖДЕНА владельцем 2026-08-31, 0 P0/P1** (`R13_ACCEPTANCE_RU.md`). Релизный образ заморожен: `titanor-time-app:r14-release-1416503` = `sha256:864267bb1698dc43d585fb0a094345766a1eff7afc006d778c42fc7eff5c4bbb` (тот же ID, что `r13-hotfix-1416503`, без пересборки; off-disk tar.gz). 4 коммита (`1416503`,`f19661c`,`fb1138f`,`c758caa`) запушены в `origin/feature/titanor-time-foundation` (HEAD `c758caa`). Одноразовые `r13-*` аккаунты обезврежены (DEACTIVATED + сняты test-links; аудит-след сохранён). Языковая модель зафиксирована — `LANGUAGE_MODEL_RU.md`. R14 runbook+preflight готовы — `R14_CUTOVER_RUNBOOK_RU.md`. **Ждём ТОЛЬКО два подтверждения владельца: (2) maintenance-окно, (3) явное разрешение начать cutover. R14/cutover НЕ начинать.**
 - **R10 manual acceptance:** CONFIRMED владельцем 2026-08-31 (реальные устройства + role-smoke, 0 P0/P1, FOREMAN skipped/not in scope)
 - **Инцидент 2026-08-31:** агент вызвал `caddy stop` в тесте → боевой Caddy лежал ~46 мин. Разбор + правило: `R11_INCIDENT_2026-08-31_caddy_outage.md`, `feedback_never_run_caddy_daemon_commands` (память). На этом хосте: только `caddy validate`/`adapt`, никаких `caddy stop/start/run`/bare `reload`.
-- **Production cutover:** запрещён до R12 PASS и отдельного подтверждения владельца на R13
+- **Production cutover:** запрещён. Pilot acceptance получено; ещё нужны maintenance-окно + явное разрешение начать R14 (оба — отдельно).
 
 Этот файл — короткая точка входа для нового агента/нового ПК. Перед любой работой сначала прочитать:
 
@@ -17,7 +17,13 @@
 
 ## 1. Где мы сейчас
 
-R00–R09 завершены и задеплоены/проверены в нужных окружениях. R10 завершён как release candidate acceptance: **PASS с оговоркой**. R10 не требовал нового pilot-deploy, потому что рантайм кандидата совпадает с уже задеплоенным R09-образом.
+R00–R13 завершены. **R13 pilot/device acceptance ПОДТВЕРЖДЕНА владельцем 2026-08-31, 0 P0/P1**
+(`R13_ACCEPTANCE_RU.md`). Дальше — только R14 (cutover), и он ждёт **двух отдельных**
+подтверждений владельца: (2) конкретное maintenance-окно, (3) явное разрешение начать cutover.
+Всё остальное к R14 готово: релизный образ заморожен под неизменяемым тегом, ветка запушена,
+`r13-*` тест-аккаунты обезврежены, языковая модель зафиксирована, runbook+preflight написаны.
+
+R00–R09 завершены и задеплоены/проверены в нужных окружениях. R10 завершён как release candidate acceptance: **PASS с оговоркой** (закрыта в R12-prep). R10 не требовал нового pilot-deploy, потому что рантайм кандидата совпадает с уже задеплоенным R09-образом.
 
 Пилот сейчас считается основным источником будущего production:
 
@@ -46,7 +52,7 @@ Production-перенос ещё не начат. Цель R14 — сделат�
 - Не расширять scope на FOREMAN UX: заказчик это не обсуждал, владелец исключил FOREMAN UI из R09.
 - Не делать глубокую единую карточку работника до production: в R09 выбран только порядок и навигация.
 
-### Gates перед R14 — зафиксированы владельцем 2026-08-31 (все РЕШЕНЫ)
+### Gates перед R14 — зафиксированы владельцем 2026-08-31 (все РЕШЕНЫ, сведены в `R14_CUTOVER_RUNBOOK_RU.md` §0)
 
 1. **FI-строка Employee login:** `login` FI = **«Työntekijän kirjautuminen»**, EN = «Employee login».
    Код — `app/components/site-header.tsx` + `app/i18n.ts` (R11 §5); деплой на R14.
@@ -54,7 +60,15 @@ Production-перенос ещё не начат. Цель R14 — сделат�
    Production web bind — **только `127.0.0.1:3199`** (за Caddy).
 3. **Порт production:** **`127.0.0.1:3199`** (только loopback), стек `titanor-time-prod-*`.
 4. **Scheduler после restore:** ОБЯЗАТЕЛЬНО `DELETE FROM "SchedulerLease"` до запуска scheduler
-   (иначе OVERLAPPING ~90 мин; runbook `R12_REHEARSAL_RU.md` шаг 11).
+   (иначе OVERLAPPING ~90 мин; `R14_CUTOVER_RUNBOOK_RU.md` шаг 11).
+5. **Обязательный backup старой prod-БД + uploads** до restore (`R14_CUTOVER_RUNBOOK_RU.md` шаг 5).
+6. **Caddy:** только `validate`/`adapt` или `reload --address 127.0.0.1:2019` / `systemctl reload`.
+   Никаких `caddy stop/start/run`/bare `reload`. `app.titanorgroup.fi` держит 503 до конца окна.
+7. **`docker builder prune` — не запускать.** **DNS — не менять.**
+8. **Языковая модель** (`LANGUAGE_MODEL_RU.md`): приложение — RU+EN (FI UI не нужен, FI — только
+   в экспортируемых документах позже); публичный сайт — FI+EN, без русского; `/fi` → `lang="fi"`,
+   `/en` → `lang="en"`. Приложение уже соответствует. На сайте открыт 1 пункт: `/fi` отдаёт
+   `<html lang="en">` — фикс готов (§2.1 того файла), НЕ применён, решение владельца когда.
 
 ## 3. Что уже сделано по этапам
 
@@ -137,7 +151,8 @@ browser-lane тестов зелёные на этом кандидате. Пр�
 - R09.9 split крупных admin-модулей.
 - R08.1 читаемый TXT/CSV экспорт GPS-архива по запросу.
 - Public site contact cards: `mailto:` ссылки корректны, но у владельца Chrome/Windows не открыл compose из-за локального mailto-handler. Позже добавить "Copy email" и/или переход к встроенной форме.
-- `/fi` на публичном сайте всё ещё может отдавать `<html lang="en">`; это отдельный i18n backlog.
+- `/fi` на публичном сайте отдаёт `<html lang="en">` (контент FI корректен). Канон + минимальный
+  фикс — `LANGUAGE_MODEL_RU.md` §2.1. НЕ применён (сайт заморожен); решение владельца — когда.
 
 ## 8. Состояние безопасности и данных
 
@@ -160,6 +175,8 @@ git log --oneline -5
 
 Если worktree грязный — сначала понять, чьи изменения. Не включать чужие изменения в commit.
 
-Если владелец ещё не подтвердил R10 manual acceptance — не начинать R11, а помочь ему пройти checklist.
-
-Если acceptance подтверждён — начинать R11 с read-only аудита Caddy/DNS/public-site link и подготовить безопасный plan/runbook. Production cutover не выполнять.
+**Сейчас:** прочитать `R13_ACCEPTANCE_RU.md`, `R14_CUTOVER_RUNBOOK_RU.md`, `LANGUAGE_MODEL_RU.md`.
+Pilot acceptance получено. **Не начинать R14/cutover** без обоих подтверждений владельца
+(окно + разрешение). Можно доделывать preflight-заготовки из `R14_CUTOVER_RUNBOOK_RU.md` §2.3
+(код/скрипты, без деплоя): Caddy reverse-proxy блок, prod-стек compose, site-deploy скрипт,
+ещё один disposable restore-test. Ничего в production/pilot/Caddy/DNS/публичном сайте не менять.

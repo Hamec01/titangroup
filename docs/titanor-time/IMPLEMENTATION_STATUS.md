@@ -1,5 +1,36 @@
 # Titanor Time — Implementation Status
 
+**`[2026-08-31]` R13 — контрольная точка владельца — PASS. R14 подготовлен, cutover НЕ начат.**
+Отчёт `R13_ACCEPTANCE_RU.md`; runbook `R14_CUTOVER_RUNBOOK_RU.md`; языковая модель `LANGUAGE_MODEL_RU.md`.
+- **Pilot / device acceptance ПОДТВЕРЖДЕНА владельцем 2026-08-31** (iPhone PWA/иконка/Check In-Out/GPS
+  + автоматизация Codex). **Открытых P0/P1 — 0.** Roadmap R13 подтверждение №1 — закрыто.
+- **4 коммита запушены** в `origin/feature/titanor-time-foundation` (fast-forward `a7982c6..c758caa`):
+  `1416503` (product hotfix — admin login landing), `f19661c`/`fb1138f`/`c758caa` (docs). История не переписана.
+- **Релизный образ заморожен без пересборки:** `docker tag titanor-time-app:r13-hotfix-1416503`
+  → **`titanor-time-app:r14-release-1416503`**. `docker image inspect` до/после — ID идентичен
+  **`sha256:864267bb1698dc43d585fb0a094345766a1eff7afc006d778c42fc7eff5c4bbb`** (containerd store: `.Id` == manifest digest).
+  Off-disk: `/home/deploy/backups/titanor-time-prod-release/…r14-release-1416503.tar.gz` (184 MB,
+  `sha256 38d3214cda…`), `docker load` round-trip → тот же digest.
+- **Языковая модель зафиксирована** (`LANGUAGE_MODEL_RU.md`): приложение — **RU+EN только** (FI UI не
+  нужен; FI — только в экспортируемых документах позже; код уже соответствует). Публичный сайт —
+  **FI+EN, без русского** (`app/i18n.ts` `['fi','en']`, `/` → `/en`, Cyrillic-скан пуст). Открыт 1
+  пункт: `/fi` отдаёт `<html lang="en">` (контент FI корректен) — минимальный фикс описан, НЕ применён
+  (сайт заморожен), решение владельца — когда (до/вместе/после R14).
+- **Одноразовые `r13-*` аккаунты обезврежены** (одна транзакция, после backup
+  `pilot-20260831T144658Z-manual`): 4 `User` → `DEACTIVATED` + `passwordHash`/`employeeId` NULL;
+  удалены 14 `UserSession`, 4 `UserRole`, 1 `ForemanAssignment`, employee `R13-20a872` + 1 `Employment`
+  + 1 `SiteAssignment` + 4 `WorkerDeviceInstallation`. **Hard-delete невозможен:** 14 immutable
+  `AuditEvent LOGIN_SUCCEEDED` (`trg_audit_event_immutable`) + `actorUserId` ON DELETE RESTRICT —
+  аудит-след пилота сохранён. Admin-покрытие (2 SUPER_ADMIN + 1 ADMIN) цело. Пилот: `/api/ready`
+  200 `schema:current` 98/98. Пароли не печатались.
+- **R14 preflight** (`R14_CUTOVER_RUNBOOK_RU.md` §2): порт 3199 свободен; rollback-образ
+  `t97-pilot-edd950c` на месте; old-prod `titanor_time` ≈12 MB / pilot ≈16 MB; диск `/` 84 %;
+  все ограничения владельца (bind 127.0.0.1:3199, DNS не трогать, `DELETE SchedulerLease`,
+  обязательный backup old-prod, Caddy без daemon-команд, без `builder prune`, 503 до конца окна)
+  сведены в §0. Требует владельца/sudo: `ufw` read-only, `caddy validate`, бэкап Caddyfile, `app.env`.
+- **Осталось от владельца (roadmap R13 п.2, п.3):** конкретное maintenance-окно (10 мин) +
+  явное разрешение начать cutover. **Оба — отдельно. R14 НЕ начат.**
+
 **`[2026-08-31]` R13 — подготовка + evidence package — DONE (ждёт owner-часть).** `R13_PREP_RU.md`.
 - Решения владельца зафиксированы: FI-ссылка «Työntekijän kirjautuminen»; production web bind
   только `127.0.0.1:3199`; `ufw` — только read-only, внешний 3199 не открывать; после restore

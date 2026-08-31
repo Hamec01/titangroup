@@ -2,13 +2,15 @@
 
 - **Основание:** `PRODUCTION_RELEASE_ROADMAP_RU.md` R13; ТЗ §20/§22.
 - **Дата:** 2026-08-31.
-- **Текущий hotfix-кандидат:** `titanor-time-app:r13-hotfix-1416503`
+- **Релизный образ (заморожен, без пересборки):** `titanor-time-app:r14-release-1416503`
+  = `titanor-time-app:r13-hotfix-1416503`
   (image ID `sha256:864267bb1698dc43d585fb0a094345766a1eff7afc006d778c42fc7eff5c4bbb`).
   Предыдущий R12-кандидат `367420e` заменён и не может идти в R14.
-- **Статус:** автоматизированная device/role acceptance и повтор R12 на hotfix `1416503`
-  пройдены; полный отчёт — `R13_AUTOMATED_ACCEPTANCE_RU.md`. Осталась короткая
-  owner-часть acceptance + R13 checkpoint.
-  **Production cutover / R14 / maintenance window — не начаты и не подтверждены.**
+- **Статус:** ⟶ **R13 ЗАКРЫТ. Pilot acceptance ПОДТВЕРЖДЕНА владельцем 2026-08-31, 0 P0/P1**
+  (`R13_ACCEPTANCE_RU.md`). Этот файл — подготовительный; актуальны:
+  `R13_ACCEPTANCE_RU.md` (приёмка + evidence), `R14_CUTOVER_RUNBOOK_RU.md` (исполнение),
+  `LANGUAGE_MODEL_RU.md` (языки). Автоматизация — `R13_AUTOMATED_ACCEPTANCE_RU.md`.
+  **Production cutover / R14 / maintenance window — НЕ начаты; ждём подтверждения №2 и №3 (§7).**
 
 ---
 
@@ -46,8 +48,10 @@
 | WORKER | `r13-worker` | Employee `R13-…`, Employment active, SiteAssignment (primary) → **Meyer Turku Shipyard** |
 | FOREMAN | `r13-foreman` | ForemanAssignment → **Meyer Turku Shipyard** |
 
-Убрать после R13: удалить всех `User where username like 'r13-%'` + их Employee/Employment/
-SiteAssignment/ForemanAssignment (одноразовый скрипт не коммитился).
+**СДЕЛАНО 2026-08-31 (`R13_ACCEPTANCE_RU.md` §4):** аккаунты обезврежены одной транзакцией —
+4 `User` → `DEACTIVATED` + `passwordHash`/`employeeId` NULL; удалены сессии/роли/foreman-assignment,
+employee `R13-20a872` + Employment/SiteAssignment/WorkerDeviceInstallation. Hard-delete невозможен
+(14 immutable `AuditEvent LOGIN_SUCCEEDED` + `actorUserId` ON DELETE RESTRICT) — аудит пилота цел.
 
 ## 4. Owner-checklist R13 (коротко)
 
