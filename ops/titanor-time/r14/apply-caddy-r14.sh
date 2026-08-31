@@ -29,9 +29,9 @@ VHOSTS=(
   "https://titanorgroup.fi"
   "https://www.titanorgroup.fi"
   "https://collabstudio.run"
-  "https://t97-dd686bc3d4.84.247.130.242.nip.io/login"
   "https://84-247-130-242.sslip.io"
 )
+FROZEN_PILOT_VHOST="https://t97-dd686bc3d4.84.247.130.242.nip.io/login"
 
 die() { echo "ABORTED: $*" >&2; exit 1; }
 [ "$(id -u)" = 0 ] || die "run as root (sudo)"
@@ -72,6 +72,12 @@ verify_common() {
     c="$(code_of "$u")"
     case "$c" in 000|5??) restore "$BACKUP"; die "$u -> $c after reload — backup restored";; *) printf '   ok  %-50s %s\n' "$u" "$c";; esac
   done
+  # The cutover intentionally stops the pilot web at step 6 and keeps its Caddy
+  # route in place for later cleanup. Caddy therefore returns 502 for this one
+  # vhost both before and after the app.titanorgroup.fi switch.
+  c="$(code_of "$FROZEN_PILOT_VHOST")"
+  [ "$c" = 502 ] || { restore "$BACKUP"; die "$FROZEN_PILOT_VHOST -> $c (expected 502 for frozen pilot) — backup restored"; }
+  printf '   ok  %-50s %s (frozen pilot, expected)\n' "$FROZEN_PILOT_VHOST" "$c"
 }
 
 # ---------------------------------------------------------------- rollback mode
@@ -114,6 +120,9 @@ for u in "${VHOSTS[@]}"; do
   printf '   %-50s %s\n' "$u" "$c"
   case "$c" in 000|5??) die "$u is already $c BEFORE any change — refusing to touch Caddy";; esac
 done
+pilot_c="$(code_of "$FROZEN_PILOT_VHOST")"
+printf '   %-50s %s (frozen pilot, expected)\n' "$FROZEN_PILOT_VHOST" "$pilot_c"
+[ "$pilot_c" = 502 ] || die "$FROZEN_PILOT_VHOST is $pilot_c before change (expected 502 for frozen pilot)"
 echo "   https://$DOMAIN (holding) -> $(code_of "https://$DOMAIN")"
 
 echo ">> backup $CADDYFILE -> $BACKUP"
