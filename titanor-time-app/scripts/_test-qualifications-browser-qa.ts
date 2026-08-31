@@ -55,8 +55,10 @@ async function main(): Promise<void> {
     await page.locator('.login-submit').click();
     await page.waitForURL(/\/admin/, { timeout: 15000 });
 
-    // --- /admin/qualifications ---
+    // --- /admin/workforce (T13.5 — the qualifications matrix became the workforce matrix;
+    //     /admin/qualifications now permanent-redirects here, carrying the query string) ---
     await page.goto(`${BASE}/admin/qualifications`, { waitUntil: 'networkidle' });
+    check('matrix: /admin/qualifications redirects to the workforce matrix', page.url().includes('/admin/workforce'), page.url());
     check('matrix: page title visible', await page.locator('h1').first().isVisible());
     const chipButtons = page.locator('.qual-chip-button');
     const chipCount = await chipButtons.count();
@@ -71,12 +73,12 @@ async function main(): Promise<void> {
       await page.keyboard.press('Escape');
       check('matrix: chip popover closes on Escape', !(await popover.isVisible().catch(() => false)));
     }
-    // Filter usability: apply a search filter.
-    await page.locator('#qm-search').fill(fx.workerA.employeeId.slice(0, 0)); // no-op fill, ensures field usable
-    await page.selectOption('#qm-status', 'CRITICAL');
-    await page.getByRole('button', { name: /Apply|Применить/ }).click();
+    // Filter usability: the expiry-status filter (T13 renamed #qm-status -> #wf-status; the old
+    // free-text #qm-search field was dropped in the restructure).
+    await page.selectOption('#wf-status', 'CRITICAL');
+    await page.getByRole('button', { name: /^(Apply|Применить)$/ }).click();
     await page.waitForLoadState('networkidle');
-    check('matrix: status filter navigates with query param', page.url().includes('status=CRITICAL'));
+    check('matrix: status filter navigates with query param', page.url().includes('status=CRITICAL'), page.url());
     const bodyWidthDesktopMatrix = await page.evaluate(() => document.documentElement.scrollWidth);
     check('matrix desktop: no horizontal overflow', bodyWidthDesktopMatrix <= DESKTOP_VIEWPORT.width + 1, bodyWidthDesktopMatrix);
 
@@ -93,9 +95,11 @@ async function main(): Promise<void> {
     // --- Notification center: bell / drawer / dismiss ---
     await page.goto(`${BASE}/admin`, { waitUntil: 'networkidle' });
     await page.waitForTimeout(500); // initial notification fetch
-    const bell = page.locator('.notif-bell-button');
+    // The admin header now carries two `.notif-bell-button`s (T12 added the review-queue bell) —
+    // the qualifications Notification Center's bell is the one labelled "N active notifications".
+    const bell = page.getByRole('button', { name: /active notification|активных уведомлений/i });
     check('notification bell: visible in header', await bell.isVisible());
-    const badge = page.locator('.notif-badge');
+    const badge = bell.locator('.notif-badge');
     const hasBadge = await badge.isVisible().catch(() => false);
     check('notification bell: badge shows a count when active notifications exist', hasBadge);
     await bell.click();
@@ -154,8 +158,8 @@ async function main(): Promise<void> {
 
     await page.goto(`${BASE}/admin`, { waitUntil: 'networkidle' });
     await page.waitForTimeout(500);
-    const mobileBell = page.locator('.notif-bell-button');
-    if (await mobileBell.isVisible()) {
+    const mobileBell = page.getByRole('button', { name: /active notification|активных уведомлений/i });
+    if (await mobileBell.isVisible().catch(() => false)) {
       await mobileBell.click();
       const mobileDrawer = page.locator('.notif-drawer');
       check('notification drawer mobile: opens', await mobileDrawer.isVisible());
