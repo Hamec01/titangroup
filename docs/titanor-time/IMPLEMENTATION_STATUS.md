@@ -1,5 +1,20 @@
 # Titanor Time — Implementation Status
 
+**`[2026-08-31]` R11 — домен / Caddy / public login — PASS.** Отчёт `R11_DOMAIN_CADDY_REPORT_RU.md`.
+Вариант A (grey-cloud). `app.titanorgroup.fi` в `/etc/caddy/Caddyfile`: TLS Let's Encrypt (CN
+`app.titanorgroup.fi`, до 2026-11-29), `http→https` 308, **503 holding** (брендированная RU+EN
+страница `/var/www/titanor-time-holding/`), заголовки HSTS/X-Robots noindex/nosniff/X-Frame DENY/
+no-store, `Server`+`X-Powered-By` убраны. Приложение пользователям **не открыто** до R14.
+Регрессия 5 существующих vhost — чисто (titanorgroup.fi 307, collabstudio 200, pilot /login 200 +
+`/api/ready` 98/98, ardor 200). DNS: владелец создал `A app → 84.247.130.242` (DNS only). Live
+Titanor Time / prod БД / MX не тронуты. Заголовки пришлось продублировать в `handle_errors`
+(ответ 503 идёт мимо site-level `header`). Backups Caddyfile: `…072400Z`, `…073655Z`.
+- **Отложено на R14:** Employee-login ссылка на `titanorgroup.fi` (EN/FI) — решение владельца;
+  переключение Caddy holding → `reverse_proxy 127.0.0.1:3199`; перенос pilot БД/uploads.
+- **Открыто (не блокер):** FI-строка входа, правила `ufw`, порт 3199, `docker builder prune`,
+  `caddy fmt` (косметика), модернизация browser-lane до R12.
+- Commit: `R11_DOMAIN_CADDY_REPORT_RU.md` + правка `caddy-app-block.txt` (дубль заголовков).
+
 **`[2026-08-31]` ИНЦИДЕНТ — Caddy остановлен ~46 мин (08:41–09:27 CEST), все публичные сайты
 недоступны.** Причина: агент выполнил `caddy stop` при проверке конфига R11 в scratchpad — команда
 ушла в admin API `localhost:2019` боевого Caddy. Данные/DNS/контейнеры/Caddyfile не затронуты.

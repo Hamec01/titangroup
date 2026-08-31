@@ -1,10 +1,11 @@
 # Titanor Time — handoff для следующего агента
 
-- **Дата фиксации:** 2026-08-31 (обновлено: R11 начат)
+- **Дата фиксации:** 2026-08-31 (обновлено: R11 PASS)
 - **Ветка:** `feature/titanor-time-foundation`
 - **Главные документы:** `PRODUCTION_RELEASE_TZ_FINAL_RU.md`, `PRODUCTION_RELEASE_ROADMAP_RU.md`, `IMPLEMENTATION_STATUS.md`
-- **Текущий этап:** R11 (домен/Caddy/public login) — read-only аудит + план готовы, см. `R11_DOMAIN_CADDY_PLAN_RU.md`; ждёт решения владельца по §9 (grey- vs orange-cloud) и создания DNS-записи
+- **Текущий этап:** R11 **PASS** (`R11_DOMAIN_CADDY_REPORT_RU.md`) — `app.titanorgroup.fi` = 503 holding, TLS/редиректы/заголовки ок, приложение не открыто до R14. Дальше — R12 (rehearsal; сначала browser-lane).
 - **R10 manual acceptance:** CONFIRMED владельцем 2026-08-31 (реальные устройства + role-smoke, 0 P0/P1, FOREMAN skipped/not in scope)
+- **Инцидент 2026-08-31:** агент вызвал `caddy stop` в тесте → боевой Caddy лежал ~46 мин. Разбор + правило: `R11_INCIDENT_2026-08-31_caddy_outage.md`, `feedback_never_run_caddy_daemon_commands` (память). На этом хосте: только `caddy validate`/`adapt`, никаких `caddy stop/start/run`/bare `reload`.
 - **Production cutover:** запрещён до R12 PASS и отдельного подтверждения владельца на R13
 
 Этот файл — короткая точка входа для нового агента/нового ПК. Перед любой работой сначала прочитать:
@@ -69,24 +70,23 @@ R10 manual acceptance — **CONFIRMED 2026-08-31** (device + role-smoke PASS, FO
 
 Backlog, не блокирующий: модернизация browser-lane — **обязательна до R12**, не смешивать с R11.
 
-## 5. Текущий этап: R11 — в работе
+## 5. R11 — PASS (2026-08-31)
 
-R11 — подготовка `app.titanorgroup.fi`, Caddy и ссылки входа с публичного сайта. Это ещё не production cutover.
+`R11_DOMAIN_CADDY_PLAN_RU.md` (план/аудит) + `R11_DOMAIN_CADDY_REPORT_RU.md` (отчёт).
 
-**Сделано (2026-08-31):** read-only аудит инфраструктуры + полный план/runbook —
-`R11_DOMAIN_CADDY_PLAN_RU.md`. Ключевые находки: Caddy 2.6.2 (нет `trusted_proxies_strict` —
-нужен апгрейд для orange-cloud); Cloudflare сейчас grey-cloud; `app.titanorgroup.fi` не существует;
-Titanor Time никогда не был публичным (старый prod `:3200` не в Caddy); приложение домен-специфичной
-настройки не требует.
+**Сделано:** Вариант A (grey-cloud). Владелец создал `A app.titanorgroup.fi → 84.247.130.242`
+(DNS only). Блок `app.titanorgroup.fi` в `/etc/caddy/Caddyfile` (см. `ops/titanor-time/r11/`):
+TLS Let's Encrypt, `http→https` 308, **503 holding** (RU+EN, `/var/www/titanor-time-holding/`),
+заголовки безопасности (продублированы в `handle_errors` — 503 идёт мимо site-level `header`),
+`Server`/`X-Powered-By` убраны. Регрессия 5 vhost — чисто. Приложение **не открыто** до R14.
 
-**Решения владельца (2026-08-31):** Вариант A (grey-cloud) на запуск, B после R15; Employee-login
-ссылка на сайте — на R14. Артефакты готовы: `ops/titanor-time/r11/` (`caddy-app-block.txt`,
-`holding/index.html`, `apply-caddy-r11.sh`).
+**Отложено на R14:** Employee-login ссылка на `titanorgroup.fi` (EN/FI, решение владельца);
+Caddy holding → `reverse_proxy 127.0.0.1:3199`; перенос pilot БД/uploads.
 
-**Дальше:** владелец создаёт DNS-запись `A app → 84.247.130.242` (**DNS only**) в Cloudflare →
-`sudo bash ops/titanor-time/r11/apply-caddy-r11.sh` → агент: verify + `R11_DOMAIN_CADDY_REPORT_RU.md`.
+**Открыто (не блокер):** FI-строка входа, правила `ufw`, порт 3199, `caddy fmt` (косметика),
+модернизация browser-lane (до R12).
 
-Ожидаемый scope R11 (полностью раскрыт в плане):
+Исходный scope R11 из roadmap (для справки):
 
 - проверить текущий Caddy config и маршруты;
 - подготовить host для `app.titanorgroup.fi`;

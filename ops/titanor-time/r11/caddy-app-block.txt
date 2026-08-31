@@ -1,19 +1,21 @@
 # R11 — Caddy-блок для app.titanorgroup.fi (holding / maintenance).
 # Вставляется в /etc/caddy/Caddyfile ПОСЛЕ блока t97-dd686bc3d4.84.247.130.242.nip.io.
-# Применять скриптом ops/titanor-time/r11/apply-caddy-r11.sh (от root) ПОСЛЕ того,
+# Применять по docs/titanor-time/R11_DOMAIN_CADDY_PLAN_RU.md §3.3 ПОСЛЕ того,
 # как владелец создал DNS-запись A app -> 84.247.130.242 (DNS only) в Cloudflare.
 #
 # Вариант A (grey-cloud): Caddy сам берёт сертификат Let's Encrypt, TITANOR_TRUSTED_PROXY_HOPS=1.
-# Проверено `caddy adapt` на Caddy 2.6.2.
+# Проверено `caddy validate` + `caddy adapt` на Caddy 2.6.2.
 #
-# НА R14 (production cutover): удалить `handle { error ... 503 }` + `handle_errors { ... }`
-# и `root`/`header Cache-Control`, добавить одну строку:  reverse_proxy 127.0.0.1:3199
+# Заголовки безопасности продублированы в handle_errors: ответ 503 рендерится ОТДЕЛЬНЫМ
+# error-маршрутом, мимо site-level `header` (проверено вживую 2026-08-31 — без дубля
+# HSTS/X-Robots/-Server на 503 не попадали).
+#
+# НА R14 (production cutover): удалить `root`, оба `header {}`, `handle {}`, `handle_errors {}`
+# и добавить одну строку:  reverse_proxy 127.0.0.1:3199
 
 app.titanorgroup.fi {
 	encode zstd gzip
-
 	root * /var/www/titanor-time-holding
-	header Cache-Control "no-store"
 
 	header {
 		X-Content-Type-Options nosniff
@@ -21,6 +23,7 @@ app.titanorgroup.fi {
 		X-Frame-Options DENY
 		Strict-Transport-Security "max-age=63072000"
 		X-Robots-Tag "noindex, nofollow"
+		Cache-Control "no-store"
 		-X-Powered-By
 		-Server
 	}
@@ -30,6 +33,16 @@ app.titanorgroup.fi {
 	}
 
 	handle_errors {
+		header {
+			X-Content-Type-Options nosniff
+			Referrer-Policy strict-origin-when-cross-origin
+			X-Frame-Options DENY
+			Strict-Transport-Security "max-age=63072000"
+			X-Robots-Tag "noindex, nofollow"
+			Cache-Control "no-store"
+			-X-Powered-By
+			-Server
+		}
 		rewrite * /index.html
 		file_server
 	}
