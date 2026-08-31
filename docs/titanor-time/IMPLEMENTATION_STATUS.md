@@ -1,5 +1,15 @@
 # Titanor Time — Implementation Status
 
+**`[2026-08-31]` Customer report — прямой выбор работников — DEPLOYED + PASS.**
+Коммит `e9e7c62`, отчёт `CUSTOMER_REPORT_DIRECT_WORKER_DEPLOY_RU.md`.
+- Добавлен режим «По работникам»: сотрудник доступен без объекта; сменивший объект показывает все
+  связанные объекты за диапазон. Старый режим «По объектам» сохранён.
+- DB/UI/customer-hours regression PASS; lint/typecheck/build PASS. Схема, расчёты, PDF/CSV и
+  readiness не менялись.
+- Web-only production deploy: образ `titanor-time-app:customer-worker-scope-e9e7c62`, ready 200,
+  healthy/restarts 0. Scheduler/DB/Caddy/DNS не менялись. Предыдущий web сохранён как
+  `titanor-time-prod-app-pre-e9e7c62`; verified on-box/off-box backup сохранён.
+
 **`[2026-08-31]` Customer-report scope picker (`/admin/reports/customer`) — DEPLOYED + PASS.**
 Design note `CUSTOMER_REPORT_SCOPE_PICKER_RU.md`, test report
 `CUSTOMER_REPORT_SCOPE_PICKER_REPORT_RU.md`, deploy report

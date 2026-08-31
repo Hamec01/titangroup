@@ -21,10 +21,10 @@
 - **R10 manual acceptance:** CONFIRMED владельцем 2026-08-31 (реальные устройства + role-smoke, 0 P0/P1, FOREMAN skipped/not in scope)
 - **Инцидент 2026-08-31:** агент вызвал `caddy stop` в тесте → боевой Caddy лежал ~46 мин. Разбор + правило: `R11_INCIDENT_2026-08-31_caddy_outage.md`, `feedback_never_run_caddy_daemon_commands` (память). На этом хосте: только `caddy validate`/`adapt`, никаких `caddy stop/start/run`/bare `reload`.
 - **Production cutover:** R14 PASS 2026-08-31. Новые destructive/deploy-действия требуют отдельного разрешения; сейчас только R15 observation/backup.
-- **Post-R14 UI deploy:** customer-report scope picker DEPLOYED + PASS (`c6f9cb4`, отчёт
-  `CUSTOMER_REPORT_SCOPE_PICKER_DEPLOY_RU.md`). Production web image
-  `titanor-time-app:customer-scope-c6f9cb4`; rollback container
-  `titanor-time-prod-app-pre-c6f9cb4` не удалять до owner-smoke/наблюдения.
+- **Post-R14 UI deploy:** scope picker + прямой выбор работников DEPLOYED + PASS (`e9e7c62`, отчёты
+  `CUSTOMER_REPORT_SCOPE_PICKER_DEPLOY_RU.md` и `CUSTOMER_REPORT_DIRECT_WORKER_DEPLOY_RU.md`).
+  Production web image `titanor-time-app:customer-worker-scope-e9e7c62`; ближайший rollback
+  `titanor-time-prod-app-pre-e9e7c62` не удалять до owner-smoke/наблюдения.
 
 Этот файл — короткая точка входа для нового агента/нового ПК. Перед любой работой сначала прочитать:
 
@@ -43,7 +43,8 @@ R00–R09 завершены и задеплоены/проверены в ну�
 
 Текущее production-состояние:
 
-- `titanor-time-prod-app` и `titanor-time-prod-scheduler` используют `r14-release-1416503`;
+- `titanor-time-prod-app` использует `customer-worker-scope-e9e7c62`; scheduler намеренно остаётся
+  на `r14-release-1416503`;
 - production DB: 98 миграций, `/api/ready` возвращает `schema:current`;
 - production scheduler healthy, lease обновляется, фоновые операции идут;
 - GPS archive R08 включён: `titanor-time-gps-archive@pilot.timer` enabled, первый прогон 5/5 VERIFIED;
