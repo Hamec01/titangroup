@@ -112,9 +112,10 @@ LOCAL=$(git rev-parse HEAD); ORIGIN=$(git rev-parse origin/feature/titanor-time-
 echo
 echo "==================== $P PASS · $F FAIL · $W TODO ===================="
 if [ "$F" -eq 0 ]; then
-  echo "Non-sudo preflight: READY. TODO items above need the owner (prod app.env / sudo)."
-  echo "R13 acceptance + R14 permission: given. Still needed: a scheduled window + prod app.env"
-  echo "+ owner online for the sudo step 17. Do NOT run cutover-r14.sh before the owner says go."
+  echo "Non-sudo preflight: READY."
+  [ "$W" -gt 0 ] && echo "Resolve the TODO line(s) above first."
+  echo "R13 acceptance + R14 permission: given. Still needed: a scheduled window (>=15 min) and"
+  echo "the owner online for the sudo step 17. Do NOT run cutover-r14.sh before the owner says go."
   exit 0
 else
   echo "NOT READY — resolve the FAIL lines above."
