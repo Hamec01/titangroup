@@ -153,10 +153,14 @@ function OfflineShellContent() {
 }
 
 export function OfflineShellClient() {
+  // Mounts with the SSR-safe default, then resolves the real stored RU/EN/FI choice in an effect
+  // (never synchronously — that would disagree with the cached server render and warn on hydrate).
+  // `persist={false}`: the offline shell only READS this preference; letting AppLocaleProvider
+  // write the transient default back would clobber the user's stored choice with RU.
   const [locale, setLocale] = useState<AppLocale>(DEFAULT_APP_LOCALE);
   useEffect(() => setLocale(readClientLocale()), []);
   return (
-    <AppLocaleProvider locale={locale}>
+    <AppLocaleProvider locale={locale} persist={false}>
       <OfflineShellContent />
     </AppLocaleProvider>
   );
