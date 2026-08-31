@@ -13,14 +13,22 @@ R10 manual acceptance **CONFIRMED владельцем** (реальные ус�
   без Origin-allowlist, регистрации нет, security-заголовки от приложения → домен-специфичной
   настройки не требует. Диск `/` 81 %, RAM тесно, `sudo` с паролем (правка `/etc/caddy/Caddyfile` —
   владельцем).
-- **Решение (ожидает владельца):** Вариант A grey-cloud (`HOPS=1`, Caddy как есть, рекомендуется на
-  запуск) vs Вариант B orange-cloud (апгрейд Caddy + `trusted_proxies_strict` + CF CIDR + `HOPS=2`).
-  Рекомендация — фазово: A на R14, B отдельным усилением после R15.
-- **План R11:** staged-блок Caddy `app.titanorgroup.fi` → holding 503 (noindex); точная CF DNS-инструкция
-  (`A app 84.247.130.242`, **DNS only**, TTL Auto); Employee-login ссылка в `app/components/site-header.tsx`
-  + `app/i18n.ts` (EN/FI, рекомендация — публиковать на R14); production upstream зафиксирован
-  (`titanor-time-prod-*`, порт `3199`). 6 открытых вопросов владельцу в §9 плана.
-- Commit — только docs (этот статус + `R11_DOMAIN_CADDY_PLAN_RU.md` + handoff). **Production cutover не начинать.**
+- **Решения владельца (2026-08-31):** Cloudflare — **фазово: Вариант A (grey-cloud) на запуск**
+  (`HOPS=1`, Caddy 2.6.2 не апгрейдится), Вариант B (orange-cloud) отдельным усилением после R15.
+  Employee-login ссылка на сайте — **публиковать на R14**, не на R11.
+- **Готовые артефакты `ops/titanor-time/r11/`:** `caddy-app-block.txt` (блок `app.titanorgroup.fi`
+  → holding 503, проверен `caddy adapt` + runtime на 2.6.2 — `error`+`handle_errors`+`file_server`
+  держит 503), `holding/index.html` (RU+EN, самодостаточная), `apply-caddy-r11.sh` (от root:
+  DNS-check → backup → append → validate → reload → verify → регресс 4 vhost; auto-rollback;
+  `--rollback`).
+- **CF DNS-инструкция владельцу:** `A` `app` → `84.247.130.242`, **Proxy DNS only**, TTL Auto.
+  Больше ничего не менять. Агент DNS сам не трогает.
+- **Production upstream зафиксирован:** `titanor-time-prod-*`, порт `127.0.0.1:3199`, env по образцу
+  pilot. Это R14.
+- **Ждём:** владелец создаёт DNS-запись + запускает `sudo bash ops/titanor-time/r11/apply-caddy-r11.sh`.
+  Затем агент: verify + `R11_DOMAIN_CADDY_REPORT_RU.md`.
+- Ещё открыто (не блокирует): FI-строка входа, правила `ufw`, sudoers для скрипта, порт 3199 — §9 плана.
+- Commit — только docs + `ops/titanor-time/r11/`. **Production cutover не начинать.**
 
 **`[2026-08-31]` R10 — release candidate + full pilot acceptance — PASS с оговоркой.** Отчёты
 `R10_PILOT_ACCEPTANCE_REPORT_RU.md`, `R10_RELEASE_MANIFEST_RU.md`, `R10_MIGRATION_REPORT_RU.md`,

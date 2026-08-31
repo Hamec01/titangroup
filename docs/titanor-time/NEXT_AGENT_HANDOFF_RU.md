@@ -79,8 +79,12 @@ R11 — подготовка `app.titanorgroup.fi`, Caddy и ссылки вхо
 Titanor Time никогда не был публичным (старый prod `:3200` не в Caddy); приложение домен-специфичной
 настройки не требует.
 
-**Дальше по плану:** владелец выбирает Вариант A/B и создаёт DNS-запись → агент применяет
-staged-блок Caddy (holding 503) → проверка TLS/редиректов/регрессий → отчёт `R11_DOMAIN_CADDY_REPORT_RU.md`.
+**Решения владельца (2026-08-31):** Вариант A (grey-cloud) на запуск, B после R15; Employee-login
+ссылка на сайте — на R14. Артефакты готовы: `ops/titanor-time/r11/` (`caddy-app-block.txt`,
+`holding/index.html`, `apply-caddy-r11.sh`).
+
+**Дальше:** владелец создаёт DNS-запись `A app → 84.247.130.242` (**DNS only**) в Cloudflare →
+`sudo bash ops/titanor-time/r11/apply-caddy-r11.sh` → агент: verify + `R11_DOMAIN_CADDY_REPORT_RU.md`.
 
 Ожидаемый scope R11 (полностью раскрыт в плане):
 

@@ -7,9 +7,24 @@
 - **Статус R10 manual acceptance:** **CONFIRMED владельцем 2026-08-31** — быстрая ручная проверка
   на реальных устройствах и основных ролях пройдена, открытых P0/P1 нет, `FOREMAN` отмечен
   skipped / not in scope. Это разблокировало R11.
-- **Что сделано этим документом:** только read-only аудит и план. **Ни одного изменения
-  инфраструктуры, Caddy, DNS, приложения или БД не внесено.** Production cutover (R14) не начат
-  и остаётся запрещённым.
+- **Что сделано этим документом:** только read-only аудит, план и **готовые к применению
+  артефакты** (`ops/titanor-time/r11/`). **Ни одного изменения инфраструктуры, Caddy, DNS,
+  приложения или БД не внесено.** Production cutover (R14) не начат и остаётся запрещённым.
+
+### Решения владельца (2026-08-31)
+
+1. **Cloudflare: фазово — Вариант A (grey-cloud) сейчас, Вариант B (orange-cloud) отдельным
+   усилением после R15.** → на запуск: `TITANOR_TRUSTED_PROXY_HOPS=1`, Caddy 2.6.2 не апгрейдится.
+2. **Ссылку Employee login на публичном сайте публиковать на R14** (в maintenance-окне), не на R11.
+   Код/строки/deploy-скрипт готовятся заранее (§5), но не деплоятся.
+
+### Готовые артефакты (`ops/titanor-time/r11/`)
+
+| файл | назначение |
+|---|---|
+| `caddy-app-block.txt` | точный Caddy-блок `app.titanorgroup.fi` → holding 503 (проверен `caddy adapt` на 2.6.2) |
+| `holding/index.html` | самодостаточная holding-страница (RU + EN, dark, без внешних ресурсов) |
+| `apply-caddy-r11.sh` | применение от root: DNS-check → holding → backup Caddyfile → append → validate → reload → verify (503/TLS/заголовки/редирект) → регресс 4 vhost; **auto-rollback** на любой ошибке; `--rollback` восстанавливает backup |
 
 ---
 
@@ -126,48 +141,21 @@
 > Проектные документы (`lib/client-ip.ts`, `R07A_...`, `R07B_...`) описывают hops=2 как
 > production-таргет — это остаётся верным как **конечная** цель; фазовость лишь разносит риск.
 
-**Это решение за владельцем** — см. §9 вопрос 1.
+**Решение владельца (2026-08-31): Вариант A на запуск, B — после R15.**
 
 ---
 
-## 3. План — Вариант A (grey-cloud, рекомендуемый на запуск)
+## 3. План — Вариант A (grey-cloud) — ВЫБРАН
 
-### 3.1 Блок Caddy (staged, применять по §3.3)
+### 3.1 Блок Caddy
 
-Добавить в `/etc/caddy/Caddyfile` (после блока pilot):
+Точный блок — `ops/titanor-time/r11/caddy-app-block.txt` (проверен `caddy adapt` на 2.6.2).
+holding-страница — `ops/titanor-time/r11/holding/index.html` (RU + EN, brandmark, dark, без
+внешних ресурсов). Схема: `error … 503` + `handle_errors` рендерит `index.html` — статус
+остаётся **503** (в Caddy 2.6.2 нет `file_server { status }` и heredoc; этот паттерн работает).
 
-```caddyfile
-app.titanorgroup.fi {
-	encode zstd gzip
-
-	# R11: домен готов, приложение пользователям НЕ открыто до R14.
-	# На R14 этот handle заменяется на: reverse_proxy 127.0.0.1:3199
-	handle {
-		respond "Titanor Time — идёт подготовка к запуску. Скоро откроется." 503 {
-			close
-		}
-	}
-
-	header {
-		X-Content-Type-Options nosniff
-		Referrer-Policy strict-origin-when-cross-origin
-		X-Frame-Options DENY
-		Strict-Transport-Security "max-age=63072000"
-		X-Robots-Tag "noindex, nofollow"
-		-X-Powered-By
-		-Server
-	}
-
-	log {
-		output file /var/log/caddy/titanor-time-app-access.log
-		format json
-	}
-}
-```
-
-(Опция: брендированная holding-страница вместо строки — положить статический `index.html` в
-`/var/www/titanor-time-holding/` и заменить `handle` на `root * /var/www/titanor-time-holding`
-+ `file_server` + `@notroot` → 503. Решает владелец, §9 вопрос 3.)
+На R14: удалить `root` / `header Cache-Control` / `handle` / `handle_errors`, добавить
+`reverse_proxy 127.0.0.1:3199`.
 
 ### 3.2 DNS-инструкция владельцу (Cloudflare dashboard → DNS → Records → Add record)
 
@@ -183,25 +171,22 @@ app.titanorgroup.fi {
 
 ### 3.3 Порядок выполнения
 
-| # | кто | шаг | проверка / rollback |
-|---|---|---|---|
-| 1 | агент | подготовить блок §3.1 + этот план. **Не применять.** | — |
-| 2 | **владелец** | создать A-запись `app` по §3.2, подтвердить в чат | — |
-| 3 | агент | `dig +short app.titanorgroup.fi` → `84.247.130.242` | если пусто — ждать propagation |
-| 4 | **владелец** (sudo) | `cp /etc/caddy/Caddyfile /etc/caddy/Caddyfile.backup-before-r11-$(date +%Y%m%dT%H%M%SZ)`; вставить блок §3.1 | — |
-| 5 | агент | `caddy validate --config /etc/caddy/Caddyfile` → Valid | если invalid — откатить файл из backup |
-| 6 | владелец (sudo) `systemctl reload caddy` **или** агент `caddy reload --config /etc/caddy/Caddyfile` | применить | reload не роняет соединения; при ошибке — restore backup + reload |
-| 7 | агент | дождаться сертификата: `curl -sI https://app.titanorgroup.fi` → `HTTP/2 503` + валидный TLS; в логах Caddy `certificate obtained` | ACME может занять до ~1–2 мин |
-| 8 | агент | проверить: `http://app.titanorgroup.fi` → 308 на HTTPS; тело 503 holding; заголовки `strict-transport-security`, `x-robots-tag: noindex`, **нет** `x-powered-by`/`server` | — |
-| 9 | агент | регресс: `curl -sI` каждого — `titanorgroup.fi`, `www.titanorgroup.fi`, `collabstudio.run`, `t97-…nip.io/login`, `84-247-130-242.sslip.io` → без изменений | если регресс — restore backup + reload |
-| 10 | агент | отчёт `R11_DOMAIN_CADDY_REPORT_RU.md`, обновить `IMPLEMENTATION_STATUS.md`, handoff | — |
+| # | кто | шаг |
+|---|---|---|
+| 1 | агент | ✅ артефакты `ops/titanor-time/r11/` готовы, план обновлён. **Не применено.** |
+| 2 | **владелец** | создать A-запись `app` по §3.2 в Cloudflare, подтвердить в чат |
+| 3 | **владелец** (sudo) | `sudo bash ops/titanor-time/r11/apply-caddy-r11.sh` — скрипт сам делает DNS-check, backup, append, validate, reload, verify (503/TLS/заголовки/http→https), регресс 4 vhost; **auto-rollback** на любой ошибке |
+| 4 | агент | независимо перепроверить (`curl -sI` нового домена + 4 существующих), логи Caddy на `certificate obtained` |
+| 5 | агент | отчёт `R11_DOMAIN_CADDY_REPORT_RU.md`, обновить `IMPLEMENTATION_STATUS.md` + handoff |
+
+> Если у `deploy` появится sudoers-пункт на скрипт — шаг 3 может выполнить агент. Пока `sudo`
+> с паролем → запускает владелец.
 
 ### 3.4 Rollback (полный)
 
-1. `cp /etc/caddy/Caddyfile.backup-before-r11-<ts> /etc/caddy/Caddyfile`
-2. `caddy reload --config /etc/caddy/Caddyfile` (или `systemctl reload caddy`)
-3. DNS-запись `app` можно оставить (ведёт на несуществующий vhost → Caddy отдаст дефолтный
-   ответ / TLS SNI-ошибку) либо владелец удалит её в Cloudflare.
+`sudo bash ops/titanor-time/r11/apply-caddy-r11.sh --rollback` — восстанавливает самый свежий
+`/etc/caddy/Caddyfile.backup-before-r11-*` и перезагружает Caddy. DNS-запись `app` можно
+оставить (ведёт в никуда) либо владелец удалит её в Cloudflare.
 
 ### 3.5 `TITANOR_TRUSTED_PROXY_HOPS`
 
@@ -282,9 +267,8 @@ app.titanorgroup.fi {
 
 ### 5.3 Когда публиковать
 
-**Рекомендация: придержать до R14** (тот же maintenance window) — чтобы пользователи не жали
-на ссылку, ведущую на 503. Альтернатива — опубликовать на R11 с явным текстом «скоро». Решает
-владелец (§9 вопрос 2).
+**Решение владельца (2026-08-31): на R14**, в maintenance-окне, когда `app.titanorgroup.fi`
+уже работает. На R11 код/строки/deploy-скрипт готовятся, но не деплоятся.
 
 ---
 
@@ -308,8 +292,8 @@ app.titanorgroup.fi {
 - [ ] Отдаёт holding/maintenance (503, `x-robots-tag: noindex`) — приложение пользователям **не** открыто.
 - [ ] Заголовки безопасности присутствуют; `X-Powered-By` / `Server` убраны.
 - [ ] `titanorgroup.fi`, `www`, `collabstudio.run`, pilot `t97-…nip.io`, ardor `sslip.io` — без регрессий.
-- [ ] (если делали §5) сайт показывает Employee login → `https://app.titanorgroup.fi` в EN и FI.
 - [ ] Изменения в БД / live Titanor Time / MX — **нет**. DNS изменена только добавлением `app` A-записи.
+- [ ] Employee-login ссылка — код/строки/deploy-скрипт подготовлены (§5), деплой отложен на R14.
 - [ ] `R11_DOMAIN_CADDY_REPORT_RU.md` + этот runbook + `IMPLEMENTATION_STATUS.md` + handoff обновлены.
 - [ ] Backup `/etc/caddy/Caddyfile` сохранён до изменения.
 
@@ -328,12 +312,15 @@ app.titanorgroup.fi {
 
 ---
 
-## 9. Открытые вопросы владельцу
+## 9. Вопросы владельцу
 
-1. **Cloudflare:** Вариант A (grey-cloud, на запуск; рекомендуется) или сразу Вариант B (orange-cloud)?
-2. **Ссылку Employee login на сайте** публиковать на R11 (ведёт на «идёт подготовка») или на R14?
-3. **Holding-страница:** простая строка (RU) достаточно, или нужен брендированный HTML (RU/EN)?
-4. **FI-строка входа:** «Kirjaudu sisään» или «Työntekijän kirjautuminen»?
+**Решено 2026-08-31:**
+1. ~~Cloudflare~~ → **Вариант A (grey-cloud) на запуск, B после R15.**
+2. ~~Ссылка Employee login~~ → **на R14.**
+3. ~~Holding-страница~~ → **брендированный HTML** `ops/titanor-time/r11/holding/index.html` (RU+EN).
+
+**Ещё открыто (не блокирует применение §3):**
+4. **FI-строка входа** (нужна к R14): «Kirjaudu sisään» или «Työntekijän kirjautuminen»?
 5. **Firewall:** подтвердить правила `ufw` (22/80/443); ограничивать ли внешние `8000`/`8080` (ardor staging)?
-6. **Доступ:** редактирование `/etc/caddy/Caddyfile` требует root — владелец делает сам, выдаёт
-   sudoers-пункт на `systemctl reload caddy` + правку файла, или иной способ?
+6. **Доступ:** оставить запуск `apply-caddy-r11.sh` за владельцем, или выдать `deploy` sudoers-пункт на этот скрипт?
+7. **Порт production `3199`** (§6) — устраивает или заменить?
