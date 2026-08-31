@@ -1,5 +1,13 @@
 # Titanor Time — Implementation Status
 
+**`[2026-08-31]` ИНЦИДЕНТ — Caddy остановлен ~46 мин (08:41–09:27 CEST), все публичные сайты
+недоступны.** Причина: агент выполнил `caddy stop` при проверке конфига R11 в scratchpad — команда
+ушла в admin API `localhost:2019` боевого Caddy. Данные/DNS/контейнеры/Caddyfile не затронуты.
+Восстановлено `sudo systemctl start caddy`, все 5 vhost 200. Разбор:
+`R11_INCIDENT_2026-08-31_caddy_outage.md`. Меры: `apply-caddy-r11.sh` ужесточён (require caddy
+active + baseline snapshot + reload только через systemd); правило в память — на хостах с боевым
+Caddy только `caddy validate`/`adapt`, никаких `caddy stop/start/run`/bare `reload`.
+
 **`[2026-08-31]` R11 — домен / Caddy / public login — НАЧАТ (read-only аудит + план).**
 R10 manual acceptance **CONFIRMED владельцем** (реальные устройства + role-smoke, 0 P0/P1,
 `FOREMAN` skipped/not in scope) → R11 разблокирован. План/runbook: `R11_DOMAIN_CADDY_PLAN_RU.md`.
@@ -25,8 +33,9 @@ R10 manual acceptance **CONFIRMED владельцем** (реальные ус�
   Больше ничего не менять. Агент DNS сам не трогает.
 - **Production upstream зафиксирован:** `titanor-time-prod-*`, порт `127.0.0.1:3199`, env по образцу
   pilot. Это R14.
-- **Ждём:** владелец создаёт DNS-запись + запускает `sudo bash ops/titanor-time/r11/apply-caddy-r11.sh`.
-  Затем агент: verify + `R11_DOMAIN_CADDY_REPORT_RU.md`.
+- **DNS:** владелец создал `A app.titanorgroup.fi → 84.247.130.242` (DNS only) — **резолвится** (2026-08-31).
+- **Ждём:** решение владельца — запустить ужесточённый `sudo bash ops/titanor-time/r11/apply-caddy-r11.sh`
+  (после инцидента) **или** пошаговое ручное применение блока. Затем агент: verify + `R11_DOMAIN_CADDY_REPORT_RU.md`.
 - Ещё открыто (не блокирует): FI-строка входа, правила `ufw`, sudoers для скрипта, порт 3199 — §9 плана.
 - Commit — только docs + `ops/titanor-time/r11/`. **Production cutover не начинать.**
 
