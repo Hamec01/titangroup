@@ -1,5 +1,27 @@
 # Titanor Time — Implementation Status
 
+**`[2026-08-31]` R11 — домен / Caddy / public login — НАЧАТ (read-only аудит + план).**
+R10 manual acceptance **CONFIRMED владельцем** (реальные устройства + role-smoke, 0 P0/P1,
+`FOREMAN` skipped/not in scope) → R11 разблокирован. План/runbook: `R11_DOMAIN_CADDY_PLAN_RU.md`.
+**Никаких изменений инфраструктуры/Caddy/DNS/приложения/БД не внесено.** Production cutover (R14)
+не начат и запрещён.
+- **Аудит (read-only):** Caddy **2.6.2** host-systemd (Ubuntu-пакет, не офиц. репо) — `trusted_proxies_strict`
+  нет (появился в 2.7) → orange-cloud требует апгрейда Caddy. `titanorgroup.fi` NS=Cloudflare, A →
+  `84.247.130.242` напрямую, **проксирование CF выключено (grey-cloud)**. `app.titanorgroup.fi` —
+  записи нет. Старый prod `titanor-time-app-1` (`:3200`) в Caddy отсутствует — **Titanor Time
+  никогда не был публичным**, R14 = первый запуск. Приложение: cookie host-only, CSRF header-based
+  без Origin-allowlist, регистрации нет, security-заголовки от приложения → домен-специфичной
+  настройки не требует. Диск `/` 81 %, RAM тесно, `sudo` с паролем (правка `/etc/caddy/Caddyfile` —
+  владельцем).
+- **Решение (ожидает владельца):** Вариант A grey-cloud (`HOPS=1`, Caddy как есть, рекомендуется на
+  запуск) vs Вариант B orange-cloud (апгрейд Caddy + `trusted_proxies_strict` + CF CIDR + `HOPS=2`).
+  Рекомендация — фазово: A на R14, B отдельным усилением после R15.
+- **План R11:** staged-блок Caddy `app.titanorgroup.fi` → holding 503 (noindex); точная CF DNS-инструкция
+  (`A app 84.247.130.242`, **DNS only**, TTL Auto); Employee-login ссылка в `app/components/site-header.tsx`
+  + `app/i18n.ts` (EN/FI, рекомендация — публиковать на R14); production upstream зафиксирован
+  (`titanor-time-prod-*`, порт `3199`). 6 открытых вопросов владельцу в §9 плана.
+- Commit — только docs (этот статус + `R11_DOMAIN_CADDY_PLAN_RU.md` + handoff). **Production cutover не начинать.**
+
 **`[2026-08-31]` R10 — release candidate + full pilot acceptance — PASS с оговоркой.** Отчёты
 `R10_PILOT_ACCEPTANCE_REPORT_RU.md`, `R10_RELEASE_MANIFEST_RU.md`, `R10_MIGRATION_REPORT_RU.md`,
 `R10_MANUAL_ACCEPTANCE_CHECKLIST_RU.md`. Frozen candidate **`2ebe3e5`** — рантайм и все 98 миграций

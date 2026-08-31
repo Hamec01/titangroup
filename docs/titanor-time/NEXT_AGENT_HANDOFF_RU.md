@@ -1,9 +1,10 @@
 # Titanor Time — handoff для следующего агента
 
-- **Дата фиксации:** 2026-08-31
+- **Дата фиксации:** 2026-08-31 (обновлено: R11 начат)
 - **Ветка:** `feature/titanor-time-foundation`
 - **Главные документы:** `PRODUCTION_RELEASE_TZ_FINAL_RU.md`, `PRODUCTION_RELEASE_ROADMAP_RU.md`, `IMPLEMENTATION_STATUS.md`
-- **Текущий этап:** после R10, перед R11
+- **Текущий этап:** R11 (домен/Caddy/public login) — read-only аудит + план готовы, см. `R11_DOMAIN_CADDY_PLAN_RU.md`; ждёт решения владельца по §9 (grey- vs orange-cloud) и создания DNS-записи
+- **R10 manual acceptance:** CONFIRMED владельцем 2026-08-31 (реальные устройства + role-smoke, 0 P0/P1, FOREMAN skipped/not in scope)
 - **Production cutover:** запрещён до R12 PASS и отдельного подтверждения владельца на R13
 
 Этот файл — короткая точка входа для нового агента/нового ПК. Перед любой работой сначала прочитать:
@@ -55,31 +56,33 @@ Production-перенос ещё не начат. Цель R14 — сделат�
 - **R09:** UX для ADMIN/WORKER, users search/filter/pagination, human access denied notices, document attention, overflow sweep, worker clock panel split, worker card nav, deployed на pilot.
 - **R10:** release candidate + pilot acceptance evidence, PASS с оговоркой; pilot deploy не нужен.
 
-## 4. Открытые owner actions перед R11
+## 4. Открытые owner actions на R11
 
-Владелец должен выполнить/подтвердить R10 manual acceptance:
+R10 manual acceptance — **CONFIRMED 2026-08-31** (device + role-smoke PASS, FOREMAN skipped/not in scope, 0 P0/P1). R11 разблокирован и начат.
 
-- реальные устройства: iPhone/Safari, Android/Chrome, desktop;
-- живой role-smoke на пилоте: `SUPER_ADMIN`, `ADMIN`, `WORKER`; `FOREMAN` можно отметить skipped/not in scope, если реального сценария сейчас нет;
-- вход по username и email;
-- основные worker/admin сценарии по `R10_MANUAL_ACCEPTANCE_CHECKLIST_RU.md`;
-- `docker builder prune` на хосте для освобождения build cache, когда владелец готов.
+Осталось от владельца на R11 (см. `R11_DOMAIN_CADDY_PLAN_RU.md` §9):
 
-Если ручная проверка найдёт P0/P1 дефект, R11 не начинать: дефект фиксируется отдельным hotfix-кандидатом с повторной проверкой.
+- ответить на 6 вопросов §9 плана — главный: **Cloudflare grey-cloud (Вариант A, рекомендуется) или orange-cloud (Вариант B)**;
+- создать DNS-запись `app.titanorgroup.fi` в Cloudflare по инструкции плана (`A` → `84.247.130.242`, **DNS only**, TTL Auto) — агент DNS сам не меняет;
+- правка `/etc/caddy/Caddyfile` требует root (у `deploy` sudo с паролем) — владелец делает сам или выдаёт доступ;
+- `docker builder prune` на хосте (диск `/` 81 %), когда готов.
 
-Если ручная проверка PASS или только мелкие backlog-замечания, владелец пишет:
+Backlog, не блокирующий: модернизация browser-lane — **обязательна до R12**, не смешивать с R11.
 
-```text
-R10 manual acceptance confirmed.
-Можно начинать R11 домен/Caddy/DNS preparation.
-Production cutover не начинать.
-```
+## 5. Текущий этап: R11 — в работе
 
-## 5. Следующий этап: R11
+R11 — подготовка `app.titanorgroup.fi`, Caddy и ссылки входа с публичного сайта. Это ещё не production cutover.
 
-R11 — это подготовка `app.titanorgroup.fi`, Caddy и ссылки входа с публичного сайта. Это ещё не production cutover.
+**Сделано (2026-08-31):** read-only аудит инфраструктуры + полный план/runbook —
+`R11_DOMAIN_CADDY_PLAN_RU.md`. Ключевые находки: Caddy 2.6.2 (нет `trusted_proxies_strict` —
+нужен апгрейд для orange-cloud); Cloudflare сейчас grey-cloud; `app.titanorgroup.fi` не существует;
+Titanor Time никогда не был публичным (старый prod `:3200` не в Caddy); приложение домен-специфичной
+настройки не требует.
 
-Ожидаемый scope R11:
+**Дальше по плану:** владелец выбирает Вариант A/B и создаёт DNS-запись → агент применяет
+staged-блок Caddy (holding 503) → проверка TLS/редиректов/регрессий → отчёт `R11_DOMAIN_CADDY_REPORT_RU.md`.
+
+Ожидаемый scope R11 (полностью раскрыт в плане):
 
 - проверить текущий Caddy config и маршруты;
 - подготовить host для `app.titanorgroup.fi`;
