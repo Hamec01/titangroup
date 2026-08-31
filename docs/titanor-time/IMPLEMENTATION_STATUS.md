@@ -1,5 +1,26 @@
 # Titanor Time — Implementation Status
 
+**`[2026-08-31]` R12-prep — модернизация browser-lane — DONE.** Отчёт `R12_PREP_BROWSER_LANE_RU.md`.
+Оговорка из `R10_PILOT_ACCEPTANCE_REPORT_RU.md` §4 закрыта: **все 15 browser-lane тестов зелёные**
+на образе кандидата `t97-pilot-edd950c` (свежая disposable PG16, изоляция на тест). **0 дефектов
+продукта** — только устаревшие ожидания тестов (`2ebe3e5` не пересобирался; менялись только
+`scripts/_test-*` и `ops/`).
+- 9 тестов техдолга починены: `_test-offline-cold-restart` 6/0, `_test-pwa-install` 59/0,
+  `_test-qualifications-browser-qa` 26/0, `_test-t9-setup-lifecycle` 66/0, `_test-t9-full-flow` 84/0,
+  `_test-offline-views` 71/0, `_test-t9-setup-ui` 26/0, `_test-t9-restart-persistence`
+  (prepare 5/0 + verify 18/0), `_test-worker-dossier-browser-qa` 31/0.
+- Причины: PWA-редизайн (`.wk-main-action` / `.wk-main-action-wrap.{in,out}`, статус-лист),
+  i18n RU-дефолт (offline shell + UI-созданные работники), T13.5 (`/admin/qualifications` →
+  `/admin/workforce`), онбординг (worker → `/admin/workers/<id>`, чек-лист 5 строк, assignment
+  авто-открывает период), убран reason-gate у работника (T10/T12), T12 unified review, Chromium
+  снял SW-требование установки, `page.waitForURL()` виснет на App Router soft-nav → хелпер `waitPath()`.
+- **Новое:** `ops/titanor-time/run-restart-persistence.sh` (two-phase), `run-worker-dossier-qa.sh`
+  + `scripts/_qa-seed-worker-dossier.ts` (seed, которого не было); `run-browser-acceptance.sh` SKIP
+  сокращён.
+- **Latent bug (backlog, не блокер):** offline shell рендерит RU даже для EN-пользователя
+  (`AppLocaleProvider` затирает localStorage дефолтом `OfflineShellClient` до `readClientLocale()`).
+- **Следующее: R12** — production-like rehearsal (browser-lane больше не блокирует полную acceptance-матрицу).
+
 **`[2026-08-31]` R11 — домен / Caddy / public login — PASS.** Отчёт `R11_DOMAIN_CADDY_REPORT_RU.md`.
 Вариант A (grey-cloud). `app.titanorgroup.fi` в `/etc/caddy/Caddyfile`: TLS Let's Encrypt (CN
 `app.titanorgroup.fi`, до 2026-11-29), `http→https` 308, **503 holding** (брендированная RU+EN

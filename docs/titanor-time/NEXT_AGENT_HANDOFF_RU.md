@@ -3,7 +3,7 @@
 - **Дата фиксации:** 2026-08-31 (обновлено: R11 PASS)
 - **Ветка:** `feature/titanor-time-foundation`
 - **Главные документы:** `PRODUCTION_RELEASE_TZ_FINAL_RU.md`, `PRODUCTION_RELEASE_ROADMAP_RU.md`, `IMPLEMENTATION_STATUS.md`
-- **Текущий этап:** R11 **PASS** (`R11_DOMAIN_CADDY_REPORT_RU.md`) — `app.titanorgroup.fi` = 503 holding, TLS/редиректы/заголовки ок, приложение не открыто до R14. Дальше — R12 (rehearsal; сначала browser-lane).
+- **Текущий этап:** R11 PASS + **R12-prep (browser-lane) DONE** (`R12_PREP_BROWSER_LANE_RU.md`) — все 15 browser-lane тестов зелёные на образе кандидата, оговорка R10 §4 снята. Дальше — **R12** (production-like rehearsal).
 - **R10 manual acceptance:** CONFIRMED владельцем 2026-08-31 (реальные устройства + role-smoke, 0 P0/P1, FOREMAN skipped/not in scope)
 - **Инцидент 2026-08-31:** агент вызвал `caddy stop` в тесте → боевой Caddy лежал ~46 мин. Разбор + правило: `R11_INCIDENT_2026-08-31_caddy_outage.md`, `feedback_never_run_caddy_daemon_commands` (память). На этом хосте: только `caddy validate`/`adapt`, никаких `caddy stop/start/run`/bare `reload`.
 - **Production cutover:** запрещён до R12 PASS и отдельного подтверждения владельца на R13
@@ -80,7 +80,7 @@ R10 manual acceptance — **CONFIRMED 2026-08-31** (device + role-smoke PASS, FO
 - правка `/etc/caddy/Caddyfile` требует root (у `deploy` sudo с паролем) — владелец делает сам или выдаёт доступ;
 - `docker builder prune` на хосте (диск `/` 81 %), когда готов.
 
-Backlog, не блокирующий: модернизация browser-lane — **обязательна до R12**, не смешивать с R11.
+Backlog: модернизация browser-lane — **DONE** (`R12_PREP_BROWSER_LANE_RU.md`).
 
 ## 5. R11 — PASS (2026-08-31)
 
@@ -95,8 +95,8 @@ TLS Let's Encrypt, `http→https` 308, **503 holding** (RU+EN, `/var/www/titanor
 **Отложено на R14:** Employee-login ссылка на `titanorgroup.fi` (EN/FI, решение владельца);
 Caddy holding → `reverse_proxy 127.0.0.1:3199`; перенос pilot БД/uploads.
 
-**Открыто (не блокер):** FI-строка входа, правила `ufw`, порт 3199, `caddy fmt` (косметика),
-модернизация browser-lane (до R12).
+**Открыто (не блокер):** FI-строка входа, правила `ufw`, порт 3199, `caddy fmt` (косметика).
+Browser-lane — DONE (§6).
 
 Исходный scope R11 из roadmap (для справки):
 
@@ -114,11 +114,14 @@ Caddy holding → `reverse_proxy 127.0.0.1:3199`; перенос pilot БД/uplo
 
 R11 должен завершиться отчётом и инструкцией владельцу, что именно добавить в Cloudflare DNS. Если агент имеет доступ и владелец явно разрешил DNS-запись, можно подготовить изменение, но production cutover всё равно не начинать.
 
-## 6. Обязательная оговорка до R12
+## 6. Оговорка до R12 — ЗАКРЫТА (2026-08-31)
 
-R10 нашёл техдолг browser-lane: часть UI-тестов устарела с августа из-за реальных изменений продукта. Это не признано дефектом продукта, но **модернизацию browser-lane нужно завершить до R12**, потому что R12 должен повторить production-like rehearsal и полную acceptance matrix.
-
-Не смешивать это с R11, если R11 можно выполнить без изменения тестов. Если R12 начинается, сначала привести browser-lane в актуальное состояние или явно включить это в R12-prep.
+R10 §4 нашёл техдолг browser-lane (устаревшие с августа UI-тесты). **Модернизация завершена**
+(`R12_PREP_BROWSER_LANE_RU.md`): все 15 browser-lane тестов зелёные на образе кандидата
+`t97-pilot-edd950c`, 0 дефектов продукта, кандидат `2ebe3e5` не пересобирался. Прогон:
+`ops/titanor-time/run-browser-acceptance.sh` + `run-restart-persistence.sh` +
+`run-worker-dossier-qa.sh`. Один latent bug зафиксирован в backlog (offline-shell RU для
+EN-пользователя). R12 может воспроизводить полную acceptance-матрицу.
 
 ## 7. Backlog, не блокирующий production
 
