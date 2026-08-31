@@ -61,7 +61,7 @@ async function main() {
 
   try {
     // ---- Session 1: online login, warm the offline shell cache ----
-    let ctx = await chromium.launchPersistentContext(profileDir, { headless: true });
+    let ctx = await chromium.launchPersistentContext(profileDir, { headless: true, permissions: ['geolocation'], geolocation: { latitude: 60.1699, longitude: 24.9384 } });
     ctx.setDefaultTimeout(60_000);
     ctx.setDefaultNavigationTimeout(60_000);
     let page = ctx.pages()[0] ?? (await ctx.newPage());
@@ -92,7 +92,7 @@ async function main() {
     await ctx.close();
 
     // ---- Session 2: full process relaunch, genuinely offline, cold navigation to /worker ----
-    ctx = await chromium.launchPersistentContext(profileDir, { headless: true });
+    ctx = await chromium.launchPersistentContext(profileDir, { headless: true, permissions: ['geolocation'], geolocation: { latitude: 60.1699, longitude: 24.9384 } });
     ctx.setDefaultTimeout(60_000);
     ctx.setDefaultNavigationTimeout(60_000);
     ctx.on('serviceworker', () => {});
@@ -102,24 +102,41 @@ async function main() {
     const body1 = (await page.locator('body').innerText()) ?? '';
     check('29: cold restart (new process, genuinely offline) renders the cached clock shell, not a browser error page', body1.length > 0 && !body1.includes('ERR_INTERNET_DISCONNECTED'), body1.slice(0, 200));
 
-    const checkInBtn = page.locator('.wk-action-button', { hasText: 'Check In' });
-    await checkInBtn.waitFor({ state: 'visible', timeout: 15_000 });
-    await checkInBtn.click({ timeout: 8000 });
-    await page.waitForTimeout(500);
-    check('29b: offline Check In after cold restart reflects Clocked in', (await page.locator('body').innerText()).includes('Clocked in'));
+    // 2026 worker-PWA redesign: the big Check In / Check Out control is `.wk-main-action` inside
+    // `.wk-main-action-wrap`, whose `.in` / `.out` class is the language-neutral clocked-out /
+    // clocked-in signal (the "Clocked in / out" wording itself now lives only in the status sheet).
+    // The offline shell renders in the default locale (RU). Geolocation is pre-granted on both
+    // contexts so Check In does not open the "finding your location" wait. Manual sync ("Sync now")
+    // also moved into the status sheet — `.wk-status-card` opens it, `.wk-clock-secondary-button`.
+    const mainAction = page.locator('.wk-main-action');
+    const clockInAnyway = () => page.locator('.wk-return-notice .wk-clock-secondary-button').first();
+    const waitWrap = async (cls: 'in' | 'out'): Promise<boolean> => {
+      try {
+        await page.locator(`.wk-main-action-wrap.${cls}`).waitFor({ state: 'visible', timeout: 15_000 });
+        return true;
+      } catch {
+        return false;
+      }
+    };
+    await mainAction.waitFor({ state: 'visible', timeout: 15_000 });
+    check('29a: cold offline shell opens clocked-out with a Check In action', await waitWrap('out'));
 
-    const checkOutBtn = page.locator('.wk-action-button', { hasText: 'Check Out' });
-    await checkOutBtn.click();
-    await page.waitForTimeout(500);
-    check('29c: offline Check Out after cold restart reflects Clocked out', (await page.locator('body').innerText()).includes('Clocked out'));
+    await mainAction.click();
+    if (await clockInAnyway().count()) await clockInAnyway().click({ timeout: 5000 }).catch(() => {});
+    check('29b: offline Check In after cold restart flips the action to clocked-in', await waitWrap('in'));
+
+    await mainAction.click();
+    if (await clockInAnyway().count()) await clockInAnyway().click({ timeout: 5000 }).catch(() => {});
+    check('29c: offline Check Out after cold restart returns the action to clocked-out', await waitWrap('out'));
 
     await ctx.setOffline(false);
-    await page.waitForTimeout(1000);
-    const syncNowBtn = page.locator('.wk-sync-now-button');
+    await page.waitForTimeout(1500);
+    await page.locator('.wk-status-card').click().catch(() => {});
+    const syncNowBtn = page.locator('.wk-status-sheet .wk-clock-secondary-button');
     if (await syncNowBtn.count()) {
       await syncNowBtn.click({ timeout: 5000 }).catch(() => {});
     }
-    await page.waitForTimeout(3000);
+    await page.waitForTimeout(5000);
 
     const shift = await prisma.clockShift.findFirst({ where: { employeeId: employee.id } });
     check('29d: after reconnect, sync produces exactly one closed ClockShift', !!shift && shift.recordedEndAt !== null, shift);
