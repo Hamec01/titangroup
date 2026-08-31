@@ -21,6 +21,10 @@
 - **R10 manual acceptance:** CONFIRMED владельцем 2026-08-31 (реальные устройства + role-smoke, 0 P0/P1, FOREMAN skipped/not in scope)
 - **Инцидент 2026-08-31:** агент вызвал `caddy stop` в тесте → боевой Caddy лежал ~46 мин. Разбор + правило: `R11_INCIDENT_2026-08-31_caddy_outage.md`, `feedback_never_run_caddy_daemon_commands` (память). На этом хосте: только `caddy validate`/`adapt`, никаких `caddy stop/start/run`/bare `reload`.
 - **Production cutover:** R14 PASS 2026-08-31. Новые destructive/deploy-действия требуют отдельного разрешения; сейчас только R15 observation/backup.
+- **Post-R14 UI deploy:** customer-report scope picker DEPLOYED + PASS (`c6f9cb4`, отчёт
+  `CUSTOMER_REPORT_SCOPE_PICKER_DEPLOY_RU.md`). Production web image
+  `titanor-time-app:customer-scope-c6f9cb4`; rollback container
+  `titanor-time-prod-app-pre-c6f9cb4` не удалять до owner-smoke/наблюдения.
 
 Этот файл — короткая точка входа для нового агента/нового ПК. Перед любой работой сначала прочитать:
 

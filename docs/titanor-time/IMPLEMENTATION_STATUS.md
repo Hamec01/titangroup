@@ -1,9 +1,9 @@
 # Titanor Time — Implementation Status
 
-**`[2026-08-31]` Customer-report scope picker (`/admin/reports/customer`) — код + тесты готовы,
-НЕ задеплоено.** Design note `CUSTOMER_REPORT_SCOPE_PICKER_RU.md`, отчёт
-`CUSTOMER_REPORT_SCOPE_PICKER_REPORT_RU.md`. Commit `ecaf87a` (+ `2a5b3be` docs). Изолированно:
-production / Caddy / DNS / prod-БД / rollback-контейнеры **не тронуты**, ни одной миграции.
+**`[2026-08-31]` Customer-report scope picker (`/admin/reports/customer`) — DEPLOYED + PASS.**
+Design note `CUSTOMER_REPORT_SCOPE_PICKER_RU.md`, test report
+`CUSTOMER_REPORT_SCOPE_PICKER_REPORT_RU.md`, deploy report
+`CUSTOMER_REPORT_SCOPE_PICKER_DEPLOY_RU.md`. Product commit `ecaf87a`, deployed source `c6f9cb4`.
 - Нативные `<select multiple>` заменены на: панель «Объекты» (поиск, 20/стр, чекбоксы, выбрать
   все/снять, счётчик) → панель «Работники выбранных объектов» → резюме → «Показать и проверить».
 - Модель: `resolveCustomerScopeWorkers` (новый `lib/reporting/customer-report-scope.ts`) — работник
@@ -18,7 +18,10 @@ production / Caddy / DNS / prod-БД / rollback-контейнеры **не тр
 - Тесты: `_test-customer-report-scope.ts` (db 25/0), `_test-customer-report-scope-ui.ts`
   (browser/Chromium 30/0, ТЗ §10 п.5-7/9-17 + desktop-1440 & mobile-390 скриншоты в
   `baseline-customer-scope/`). typecheck 0, lint ok, build ok, **db-lane 64/64**.
-- Ждёт просмотра владельцем → отдельное разрешение на deploy.
+- Владелец просмотрел screenshots и разрешил deploy. Immutable image
+  `titanor-time-app:customer-scope-c6f9cb4`; web-only swap ~4 с. Новый web healthy/restarts 0;
+  scheduler+DB не перезапускались и healthy. Verified backup on-box+off-box; старый web сохранён
+  как `titanor-time-prod-app-pre-c6f9cb4` для rollback.
 
 **`[2026-08-31]` R14 — PRODUCTION CUTOVER PASS.** Отчёт `R14_CUTOVER_REPORT_RU.md`.
 - `app.titanorgroup.fi` открыт: `/login` 200, `/api/ready` 200 `schema:current` 98/98.
