@@ -21,9 +21,9 @@
 |---|---|
 | clock / GPS / offline sync / обработка табеля на проде | ⏳ нужна проверка реальным worker |
 | uploads / отчёты (экран + PDF + CSV) / audit events | ⏳ |
-| **дождаться и проверить автоматический backup** | ⚠️→✅ (частично): систем-таймеры были только `@pilot`. Env для `@production` — `ops/titanor-time/systemd/{backup,gps-archive}-production.env.example` (`0032c22`). Ручной прогон как `deploy`: `production-20260901T065748Z-scheduled` (503 744 б, 1789 rows, 98 миграций, on+off-box `SHA256SUMS` OK). **Таймер `@production` ещё не enabled — нужен sudo владельца (§ ниже).** |
+| **дождаться и проверить автоматический backup** | ✅ Env-файлы установлены в `/etc/titanor-time/` (root:root 0600), таймер **`titanor-time-backup@production.timer` enabled+active** 2026-09-01 09:02 (04:10 UTC ежедневно); `@pilot` таймеры disabled. Ручной прогон как `deploy`: `production-20260901T065748Z-scheduled` (503 744 б, 1789 rows, 98 миграций, on+off-box `SHA256SUMS` OK). Первый автоматический — 2026-09-02 04:10 UTC, проверить. |
 | restore-проверка из production backup | ✅ `restore-test` этого бэкапа: **14/14** (74 таблицы, fingerprint, uploads 3, `/api/ready` 200) |
-| GPS archive / retention на проде | ✅ ручной прогон `gps-archive` exit 0 (`sealableDays:0` — раньше 90 дней нечего запечатывать); таймер `@production` — sudo владельца |
+| GPS archive / retention на проде | ✅ `titanor-time-gps-archive@production.timer` enabled+active (05:10 UTC); ручной прогон `gps-archive` exit 0 (`sealableDays:0` — раньше 90 дней нечего запечатывать) |
 | место на storage | ✅ диск / 85%; build cache 71 GB (prune отложен до sign-off) |
 
 ## Фаза 3 — 72 ч + период стабильности (не начата)
@@ -39,35 +39,17 @@
 
 - снос пилота и старого prod: контейнеры + БД + volume'ы + ~19 GB старых образов
   `t97-pilot-*`; `docker builder prune` (~50 GB); затем `docker volume prune`
-- отключить `titanor-time-backup@pilot.timer` и `titanor-time-gps-archive@pilot.timer`
+- `@pilot` таймеры уже отключены 2026-09-01 (пилот app заморожен)
 
 ---
 
-## Действие владельца сейчас — включить `@production` таймеры (sudo)
+## Лог R15
 
-`REPO=/home/deploy/projects/titanorgroup-worktrees/titanor-time-foundation`
-
-```bash
-# 1. установить env-файлы (root:root, 0600)
-sudo install -m 0600 -o root -g root \
-  "$REPO/ops/titanor-time/systemd/backup-production.env.example" \
-  /etc/titanor-time/backup-production.env
-sudo install -m 0600 -o root -g root \
-  "$REPO/ops/titanor-time/systemd/gps-archive-production.env.example" \
-  /etc/titanor-time/gps-archive-production.env
-
-# 2. включить таймеры (шаблоны titanor-time-{backup,gps-archive}@.timer уже в системе)
-sudo systemctl enable --now titanor-time-backup@production.timer
-sudo systemctl enable --now titanor-time-gps-archive@production.timer
-
-# 3. проверить
-systemctl list-timers 'titanor-time-*@production*'
-#   backup:      *-*-* 04:10:00 UTC
-#   gps-archive: *-*-* 05:10:00 UTC
-
-# 4. (опционально, чтобы не было ложных FAILED-алертов от замороженного пилота)
-sudo systemctl disable --now titanor-time-backup@pilot.timer titanor-time-gps-archive@pilot.timer
-```
-
-Ручной прогон уже доказал весь путь (dump + off-box mirror + checksums + restore-test 14/14),
-так что после `enable --now` первый автоматический прогон в 04:10 UTC должен просто повториться.
+| дата (UTC) | событие |
+|---|---|
+| 2026-08-31 15:48 | cutover, prod live |
+| 2026-08-31 20:49 / 21:52 | post-R14 UI-деплои (`customer-scope-c6f9cb4`, `customer-worker-scope-e9e7c62`) — `*-pre-deploy` backup каждый |
+| 2026-09-01 06:57 | первый ручной `production-...-scheduled` backup + off-box + restore-test 14/14 + gps-archive exit 0 |
+| 2026-09-01 09:02 | `@production` backup+gps таймеры enabled (04:10 / 05:10 UTC daily); `@pilot` disabled; env в `/etc/titanor-time/` |
+| 2026-09-02 04:10 | ⏳ первый автоматический production backup — проверить |
+| 2026-09-03 15:48 | ⏳ 72 ч; собрать report → owner sign-off |
