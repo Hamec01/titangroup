@@ -7,7 +7,7 @@ import type { AppLocale } from './locale';
 // those directly. Kept as a data module (not JSX) so the content itself stays easy to review/edit
 // without touching component code.
 //
-// Last brought current: 2026-08-29 (T13.1–T13.11, T14–T17). Covers: grouped admin nav, the notification
+// Last brought current: 2026-09-01. Covers: grouped admin nav, the notification
 // bell + review-queue badge, the worker dossier, the workforce matrix (professions + qualification
 // filters + PDF/CSV export), worker professions, the unified "Awaiting approval" screen, the three
 // ways to change a timesheet, marking sick-leave/vacation from review, the configurable GPS
@@ -210,6 +210,32 @@ export const GUIDE_CONTENT: Record<AppLocale, GuideContent> = {
     changelogTitle: 'Что нового',
     changelogIntro: 'Коротко — что менялось в системе за последнее время. Самое свежее сверху.',
     changelog: [
+      {
+        date: '31 августа — 1 сентября 2026',
+        items: [
+          'Titanor Time открыт по постоянному адресу app.titanorgroup.fi. На основном сайте Titanor Group появилась отдельная ссылка для входа работников. Старые тестовые адреса больше не нужны.',
+          'После входа руководитель сразу попадает на экран «Сегодня». Там видно, кто сейчас работает, на каком объекте, когда начал и закончил смену, сколько часов набрал сегодня и кому нужно внимание.',
+          'Отчёт для заказчика стал намного удобнее. Объекты и работники показываются большим списком с поиском, галочками и кнопкой «Выбрать всех». Можно выбрать всех работников одного объекта или снять отдельных людей повторным нажатием.',
+          'В отчёте для заказчика теперь можно начинать не с объекта, а сразу с работника. Это удобно, если объект ещё не назначен или человек переходил между объектами: система покажет его часы за выбранные даты и не потеряет старое место работы.',
+          'Система запоминает выбранный язык даже без интернета. После перезапуска приложение больше не возвращается самовольно на русский или английский.',
+          'Интерфейс лучше работает на телефонах: длинные таблицы больше не растягивают страницу вбок, а в карточке работника есть одинаковая навигация между общей информацией, досье, историей и картой.',
+          'В списке пользователей появились поиск по имени или email, фильтры по роли и состоянию учётной записи, а также страницы для больших списков. Сообщения об отсутствии доступа теперь объясняют обычными словами, что делать дальше.'
+        ]
+      },
+      {
+        date: '20–30 августа 2026 — основная работа стала проще',
+        items: [
+          'Панель начальника и приложение работника переведены на русский и английский. Язык можно переключить в шапке, а отчёты для заказчика и бухгалтерии остаются на английском.',
+          'Первоначальная настройка собрана в понятную цепочку: создать объект и график, добавить работника, назначить ему место и выбрать, как часто он сдаёт табель. Текущие периоды создаются сами — вручную открывать их обычно не нужно.',
+          'На странице работника можно сразу назначить объект, рабочую зону, график и недельный или двухнедельный цикл сдачи табеля. Там же выдаётся ссылка и QR-код для установки приложения.',
+          'Адрес объекта можно найти на бесплатной карте. Точка ставится по адресу, её можно проверить и поправить, а затем выбрать радиус рабочей зоны.',
+          'Главный экран работника переделан для телефона: крупная кнопка «Приход / Уход», имя, дата, выбранный объект, часы за сегодня, последние дни и меню с быстрым возвратом на главную.',
+          'Отметки прихода и ухода сразу появляются в часах работника и у руководителя. Время приводится к понятным получасовым шагам по правилам компании.',
+          'Работник может пользоваться сохранёнными страницами и делать отметки без интернета. Когда связь появляется, приложение отправляет накопленное само и не показывает данные другого пользователя телефона.',
+          'Появились восстановление доступа по коду от администратора, самостоятельная смена пароля и список устройств, где выполнен вход. Лишний сеанс можно завершить отдельно или выйти везде сразу.',
+          'История выгрузок CSV доступна в панели администратора: файл можно скачать повторно и проверить, к какому периоду он относится.'
+        ]
+      },
       {
         date: 'Приложение работника, 29 августа 2026',
         items: [
@@ -422,6 +448,32 @@ export const GUIDE_CONTENT: Record<AppLocale, GuideContent> = {
     changelogTitle: 'What\'s new',
     changelogIntro: 'A short list of what has changed in the system recently. Newest first.',
     changelog: [
+      {
+        date: '31 August – 1 September 2026',
+        items: [
+          'Titanor Time is now available at its permanent address, app.titanorgroup.fi. The main Titanor Group website has a separate employee sign-in link, so the old test addresses are no longer needed.',
+          'After signing in, a manager goes straight to Today. It shows who is working now, their site, check-in and check-out times, today\'s hours, and who needs attention.',
+          'The customer-hours report is much easier to use. Sites and workers appear in large searchable lists with checkboxes and a Select all button. You can select everyone on a site, then remove individual people with another click.',
+          'The customer-hours report can now start with a worker instead of a site. This helps when a worker has no current site or moved between sites: their hours for the chosen dates remain easy to find.',
+          'The app remembers the chosen language even without internet. Restarting it no longer unexpectedly switches back to Russian or English.',
+          'The interface works better on phones: wide tables no longer stretch the whole page sideways, and every worker card has the same navigation between overview, dossier, history and map.',
+          'The user list now has search by name or email, role and account-status filters, and pages for long lists. Access-denied messages now explain in plain language what to do next.'
+        ]
+      },
+      {
+        date: '20–30 August 2026 — everyday work made simpler',
+        items: [
+          'The manager panel and worker app are available in Russian and English. The language switch is in the header, while customer and payroll reports stay in English.',
+          'Initial setup now follows a clear path: create a site and schedule, add a worker, assign their workplace, and choose how often they submit a timesheet. Current periods are created automatically, so they normally do not need to be opened by hand.',
+          'A worker\'s page lets the manager assign the site, work area, schedule, and weekly or two-week submission cycle in one place. The install link and QR code are issued there too.',
+          'A site address can be found on a free map. The location is placed from the address, can be checked or adjusted, and then given a work-zone radius.',
+          'The worker home screen was redesigned for phones: one large Check In / Check Out button, the worker\'s name, date, selected site, today\'s hours, recent days, and a menu with a direct Home link.',
+          'Check-in and check-out appear in the worker\'s hours and the manager\'s view straight away. Time follows the company\'s clear half-hour rounding rules.',
+          'Workers can use saved pages and clock in or out without internet. When the connection returns, the app sends the saved actions itself and never shows another account\'s stored information.',
+          'Account recovery with a code from an administrator, self-service password change, and a list of signed-in devices are available. A single session can be ended, or the user can sign out everywhere.',
+          'CSV export history is available in the admin panel, so a file can be downloaded again and its reporting period checked.'
+        ]
+      },
       {
         date: 'Worker app, 29 August 2026',
         items: [

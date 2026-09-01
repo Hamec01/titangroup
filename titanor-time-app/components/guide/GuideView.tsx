@@ -111,20 +111,24 @@ export function GuideView({ initialLocale, homeHref }: { initialLocale: AppLocal
         </section>
 
         <section className="guide-section">
-          <h2 className="wk-section-title">{t.changelogTitle}</h2>
-          <p>{t.changelogIntro}</p>
-          {t.changelog.map((entry) => (
-            <div key={entry.date} className="guide-change-entry">
-              <h3>{entry.date}</h3>
-              <ul className="guide-tips">
-                {entry.items.map((item, i) => (
-                  <li key={i} className="policy-notice">
-                    {item}
-                  </li>
-                ))}
-              </ul>
+          <details className="owner-secondary-panel guide-reference-group guide-changelog-group">
+            <summary>{t.changelogTitle}</summary>
+            <div className="guide-changelog-content">
+              <p>{t.changelogIntro}</p>
+              {t.changelog.map((entry) => (
+                <div key={entry.date} className="guide-change-entry">
+                  <h3>{entry.date}</h3>
+                  <ul className="guide-tips">
+                    {entry.items.map((item, i) => (
+                      <li key={i} className="policy-notice">
+                        {item}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              ))}
             </div>
-          ))}
+          </details>
         </section>
 
         <p>
