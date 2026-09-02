@@ -1,18 +1,21 @@
 import { randomUUID } from 'node:crypto';
-import { Prisma } from '@prisma/client';
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
-import { earliestAssignmentEndDate } from '@/lib/workers';
 import { jsonError, successHeaders, type ApiErrorBody } from '@/lib/api-error';
 import { resolveAuthenticatedSession } from '@/lib/auth';
 import { hasPermission } from '@/lib/permissions';
 import { SESSION_COOKIE_NAME } from '@/lib/session';
-import { createAuditEvent } from '@/lib/audit';
+import { removeFromSite } from '@/lib/assignment-lifecycle-service';
 
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
 
 // docs/titanor-time/04_ADMIN_FIRST_API_CONTRACTS.md §6 — exact contract for this endpoint.
+// R15-D7: the actual work (close the payroll window, set clockInDisabledAt so the worker drops out
+// of the Check-In options immediately, drop future draft planned shifts, write the
+// AssignmentTransition + AuditEvent) is done by lib/assignment-lifecycle-service.ts's
+// removeFromSite() — the single writer (§2.4). This route keeps only HTTP/auth/validation.
+// POST /api/admin/assignments/:id/remove is the same operation under its D7 name.
 const REQUIRED_CSRF_HEADER_VALUE = 'titanor-time';
 const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
 const MAX_REASON_LENGTH = 2000;
@@ -27,18 +30,6 @@ function errorBody(body: ApiErrorBody, requestId: string): { error: ApiErrorBody
 
 function formatDate(date: Date): string {
   return date.toISOString().slice(0, 10);
-}
-
-// fn_site_assignment_dependents_guard (05_RAW_SQL_REGISTER.md, TRG-11) raises this — as a plain
-// P0001, not a typed Prisma code — when a validTo shrink would leave a WorkSegment /
-// TimesheetPlannedShift / TimesheetDraftSegment / TimesheetDraftPlannedShift row for this
-// assignment stranded outside its own window. Match the stable identifier text only.
-function isAssignmentDependentsConflict(error: unknown): boolean {
-  return (
-    error instanceof Prisma.PrismaClientUnknownRequestError &&
-    error.message.includes('P0001') &&
-    error.message.includes('ASSIGNMENT_DEPENDENTS_CONFLICT')
-  );
 }
 
 type RouteParams = { params: Promise<{ assignmentId: string }> };
@@ -130,78 +121,31 @@ export async function POST(request: NextRequest, { params }: RouteParams): Promi
     );
   }
 
-  // Real recorded / submitted time on a day after the new end date can't be dropped here — those
-  // block the end with an actionable 409 (the admin adjusts the timesheet, or ends later). But an
-  // assignment's own *draft planned shifts* after the end date are just "the schedule expects
-  // work here" — auto-materialised across the whole open period at assignment.create time. When
-  // the worker is being removed they carry no information, so they are deleted below so that
-  // "end today" actually works instead of being pushed to the end of the period.
-  const [recordedSegments, submittedShifts, recordedDraftSegments, recordedFragments] = await Promise.all([
-    prisma.workSegment.count({ where: { sourceAssignmentId: existing.id, date: { gt: newValidTo } } }),
-    prisma.timesheetPlannedShift.count({ where: { sourceAssignmentId: existing.id, date: { gt: newValidTo } } }),
-    prisma.timesheetDraftSegment.count({ where: { sourceAssignmentId: existing.id, date: { gt: newValidTo } } }),
-    prisma.clockShiftFragment.count({ where: { sourceAssignmentId: existing.id, date: { gt: newValidTo } } })
-  ]);
-  if (recordedSegments > 0 || submittedShifts > 0 || recordedDraftSegments > 0 || recordedFragments > 0) {
-    const earliest = await earliestAssignmentEndDate(existing.id);
+  const outcome = await removeFromSite({
+    existing,
+    validTo: newValidTo,
+    reasonText: trimmedReason,
+    actorUserId: authenticated.user.id,
+    requestId
+  });
+
+  if ('code' in outcome) {
+    // Recorded / submitted (or guard-detected) hours on a day after the chosen end date — the admin
+    // adjusts the timesheet first, or ends on/after that day.
     return jsonError(
       409,
       {
         code: 'ASSIGNMENT_HAS_RECORDED_TIME',
-        message: 'The worker has recorded or submitted hours on this assignment after the chosen end date. End it on or after that day, or adjust the timesheet first.',
+        message:
+          'The worker has recorded or submitted hours on this assignment after the chosen end date. End it on or after that day, or adjust the timesheet first.',
         fieldErrors: { validTo: ['must not be earlier than the last recorded or submitted day'] },
-        ...(earliest ? { earliestValidTo: earliest } : {})
+        ...(outcome.earliestValidTo ? { earliestValidTo: outcome.earliestValidTo } : {})
       },
       requestId
     );
   }
 
-  let updated;
-  try {
-    updated = await prisma.$transaction(async (tx) => {
-      await tx.timesheetDraftPlannedShift.deleteMany({
-        where: { sourceAssignmentId: existing.id, date: { gt: newValidTo } }
-      });
-
-      const assignment = await tx.siteAssignment.update({
-        where: { id: existing.id },
-        data: {
-          validTo: newValidTo,
-          ...(trimmedReason !== null ? { endedReason: trimmedReason } : {}),
-          version: { increment: 1 }
-        }
-      });
-
-      await createAuditEvent(tx, {
-        actorUserId: authenticated.user.id,
-        eventType: 'ASSIGNMENT_ENDED',
-        entityType: 'SITE_ASSIGNMENT',
-        entityId: assignment.id,
-        requestId,
-        beforeValue: { validTo: existing.validTo ? formatDate(existing.validTo) : null },
-        afterValue: { validTo: formatDate(assignment.validTo!), reason: trimmedReason }
-      });
-
-      return assignment;
-    });
-  } catch (error) {
-    // Last-resort safety net — the prechecks above should have caught every real case.
-    if (isAssignmentDependentsConflict(error)) {
-      const earliest = await earliestAssignmentEndDate(existing.id);
-      return jsonError(
-        409,
-        {
-          code: 'ASSIGNMENT_HAS_RECORDED_TIME',
-          message: 'The worker has recorded or submitted hours on this assignment after the chosen end date.',
-          fieldErrors: { validTo: ['must not be earlier than the last recorded or submitted day'] },
-          ...(earliest ? { earliestValidTo: earliest } : {})
-        },
-        requestId
-      );
-    }
-    throw error;
-  }
-
+  const updated = outcome.assignment;
   return NextResponse.json(
     {
       id: updated.id,

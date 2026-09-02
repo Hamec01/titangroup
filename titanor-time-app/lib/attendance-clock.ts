@@ -857,6 +857,69 @@ async function checkInCore(tx: Prisma.TransactionClient, employeeId: string, act
     return { kind: 'CREATED', body: await buildEventResponse(tx, input.clientEventId) };
   }
 
+  // R15-D7 C8 (§3.10) — a deactivated worker (Employment.active = false, incl. the OFFBOARDING
+  // window whose session stays alive only for final-timesheet access) must not start a NEW shift.
+  // Following the DOUBLE_CHECK_IN precedent: the raw fact is still recorded (T7A_1 §9.1 — never
+  // silently dropped), as a NEEDS_REVIEW event with a STALE_ASSIGNMENT flag, but no shift opens.
+  // An open shift is never touched — Check Out stays available above.
+  const latestEmployment = await tx.employment.findFirst({
+    where: { employeeId },
+    orderBy: { createdAt: 'desc' },
+    select: { active: true }
+  });
+  if (latestEmployment && !latestEmployment.active) {
+    await tx.clockEvent.create({
+      data: {
+        id: input.clientEventId,
+        groupId,
+        employeeId,
+        operationType: 'CHECK_IN',
+        siteId: input.siteId,
+        workAreaId: input.workAreaId,
+        sourceAssignmentId: null,
+        clientCapturedAt: input.clientCapturedAt,
+        capturedOffline: false,
+        serverReceivedAt,
+        effectiveAt: timeResult.effectiveAt,
+        clockSkewMs: timeResult.clockSkewMs,
+        gpsAccuracyMeters: gpsResult.gpsAccuracyMeters,
+        geofenceVersionId: gpsResult.geofenceVersionId,
+        gpsVerification: gpsResult.gpsVerification,
+        gpsUnavailableReason: gpsResult.gpsUnavailableReason,
+        processingState: 'NEEDS_REVIEW',
+        channel: 'ONLINE',
+        payloadHash,
+        requestId
+      }
+    });
+    if (gpsResult.location) {
+      await tx.clockEventLocation.create({ data: { clockEventId: input.clientEventId, latitude: gpsResult.location.latitude, longitude: gpsResult.location.longitude } });
+    }
+    await tx.attendanceException.create({
+      data: {
+        type: 'STALE_ASSIGNMENT',
+        employeeId,
+        timesheetId,
+        payrollPeriodId,
+        occurredAt: timeResult.effectiveAt,
+        siteId: input.siteId,
+        clockEventId: input.clientEventId,
+        status: 'OPEN',
+        detail: { reason: 'EMPLOYMENT_INACTIVE' }
+      }
+    });
+    await createAuditEvent(tx, {
+      actorUserId,
+      eventType: 'CLOCK_CHECK_IN_REJECTED_INACTIVE',
+      entityType: 'CLOCK_EVENT',
+      entityId: input.clientEventId,
+      requestId,
+      beforeValue: null,
+      afterValue: { operationType: 'CHECK_IN', processingState: 'NEEDS_REVIEW', siteId: input.siteId, reason: 'EMPLOYMENT_INACTIVE' }
+    });
+    return { kind: 'CREATED', body: await buildEventResponse(tx, input.clientEventId) };
+  }
+
   const sourceAssignmentId = await resolveActiveSiteAssignment(tx, employeeId, input.siteId, input.workAreaId, timeResult.effectiveAt);
 
   await tx.clockEvent.create({
@@ -1149,6 +1212,47 @@ async function checkOutCore(tx: Prisma.TransactionClient, employeeId: string, ac
 
   // (h)
   await tx.employeeOpenShift.delete({ where: { employeeId } });
+
+  // R15-D7 §3.12 — the worker was removed from this assignment DURING the open shift
+  // (clockInDisabledAt already passed) and its payroll window (validTo) was set to the removal
+  // date. If the shift actually closed on a LATER calendar day (a night shift past midnight),
+  // extend validTo to the checkout's local date so the assignment still covers every day it has a
+  // fragment on, and drop any draft planned shifts past that day. Widening validTo cannot orphan a
+  // dependent row (TRG-11 is safe on extension); a pre-check guards the rare EX-02 case so Check
+  // Out is never blocked (§9.2).
+  if (authoritativeSourceAssignmentId) {
+    const sourceAssignment = await tx.siteAssignment.findUnique({
+      where: { id: authoritativeSourceAssignmentId },
+      select: { id: true, employeeId: true, siteId: true, workAreaId: true, validTo: true, clockInDisabledAt: true }
+    });
+    const checkoutLocalDate = helsinkiCalendarDateAsUtcMidnight(recordedEndAtForShift);
+    if (
+      sourceAssignment &&
+      sourceAssignment.clockInDisabledAt !== null &&
+      sourceAssignment.clockInDisabledAt <= serverReceivedAt &&
+      (sourceAssignment.validTo === null || sourceAssignment.validTo < checkoutLocalDate)
+    ) {
+      const blockingNext = await tx.siteAssignment.findFirst({
+        where: {
+          employeeId: sourceAssignment.employeeId,
+          siteId: sourceAssignment.siteId,
+          workAreaId: sourceAssignment.workAreaId,
+          id: { not: sourceAssignment.id },
+          validFrom: { lte: checkoutLocalDate, gt: sourceAssignment.validTo ?? new Date(0) }
+        },
+        select: { id: true }
+      });
+      if (!blockingNext) {
+        await tx.siteAssignment.update({
+          where: { id: sourceAssignment.id },
+          data: { validTo: checkoutLocalDate, version: { increment: 1 } }
+        });
+        await tx.timesheetDraftPlannedShift.deleteMany({
+          where: { sourceAssignmentId: sourceAssignment.id, date: { gt: checkoutLocalDate } }
+        });
+      }
+    }
+  }
 
   // §9.6 "Автоматическое разрешение при позднем реальном Check Out" — resolves every period-scoped
   // OPEN MISSING_CHECKOUT_AT_CUTOFF tied to this same opening ClockEvent, if any (T7A.10A). Never

@@ -1,25 +1,24 @@
 import { randomUUID } from 'node:crypto';
-import { Prisma } from '@prisma/client';
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { jsonError, successHeaders, type ApiErrorBody } from '@/lib/api-error';
 import { resolveAuthenticatedSession } from '@/lib/auth';
 import { hasPermission } from '@/lib/permissions';
 import { SESSION_COOKIE_NAME } from '@/lib/session';
-import { createAuditEvent } from '@/lib/audit';
-import { checkOverlap, createAssignmentInTx, isExclusionViolation } from '@/lib/assignments';
+import { checkOverlap } from '@/lib/assignments';
 import { helsinkiToday } from '@/lib/workers';
+import { changeWorkplace } from '@/lib/assignment-lifecycle-service';
 
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
 
 // docs/titanor-time/04_ADMIN_FIRST_API_CONTRACTS.md §6 — "Изменить объект / зону" on the worker
-// card. One transaction: close the current assignment the day before `effectiveFrom`, open a
-// fully-materialised replacement from `effectiveFrom` (same remaining validTo). Reuses the
-// createAssignment materialisation so the new site/zone gets its own planned shifts for the rest
-// of the open period. Backdating is forbidden. Nothing is physically deleted except the old
-// assignment's *own* future draft planned shifts (re-created for the new assignment); a submitted
-// timesheet or already-recorded time on/after the date blocks with a clear 409.
+// card. This route does HTTP/auth/validation; lib/assignment-lifecycle-service.ts's
+// changeWorkplace() (the single writer, §2.4) closes the current assignment the day before
+// `effectiveFrom`, opens a fully-materialised replacement, sets clockInDisabledAt on the old row
+// when the change is immediate, re-points the open shift when asked, and writes the
+// AssignmentTransition + AuditEvent — all in one transaction under a per-employee advisory lock.
+// Backdating is forbidden; a submitted timesheet or recorded time on/after the date blocks with 409.
 const REQUIRED_CSRF_HEADER_VALUE = 'titanor-time';
 const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -34,17 +33,6 @@ function errorBody(body: ApiErrorBody, requestId: string): { error: ApiErrorBody
 
 function formatDate(date: Date): string {
   return date.toISOString().slice(0, 10);
-}
-
-// fn_site_assignment_dependents_guard (05_RAW_SQL_REGISTER.md, TRG-11) raises this as a plain
-// P0001 when a validTo shrink would strand a dependent row. The pre-checks below should catch
-// every real case first — this is the last-resort safety net.
-function isAssignmentDependentsConflict(error: unknown): boolean {
-  return (
-    error instanceof Prisma.PrismaClientUnknownRequestError &&
-    error.message.includes('P0001') &&
-    error.message.includes('ASSIGNMENT_DEPENDENTS_CONFLICT')
-  );
 }
 
 type RouteParams = { params: Promise<{ assignmentId: string }> };
@@ -287,103 +275,51 @@ export async function POST(request: NextRequest, { params }: RouteParams): Promi
     );
   }
 
-  let result: { closedValidTo: Date; newAssignmentId: string; newAssignment: Awaited<ReturnType<typeof createAssignmentInTx>> };
-  try {
-    result = await prisma.$transaction(async (tx) => {
-      const closedValidTo = new Date(effectiveFromDate.getTime() - ONE_DAY_MS);
+  // R15-D7 — the single writer (§2.4): close the old assignment + open the replacement + re-point
+  // the open shift + write the AssignmentTransition + AuditEvent, one transaction, advisory lock.
+  const result = await changeWorkplace({
+    existing,
+    effectiveFrom: effectiveFromDate,
+    siteId: siteId as string,
+    workAreaId: normalizedWorkAreaId,
+    templateVersionId,
+    isPrimary: normalizedIsPrimary,
+    newValidTo,
+    movesOpenShift,
+    openShiftPresent: Boolean(openShift),
+    reasonText: trimmedReason,
+    actorUserId: authenticated.user.id,
+    requestId
+  });
 
-      // The old assignment's own future draft planned shifts are re-created for the new
-      // assignment by createAssignmentInTx below — remove them first so closing the old
-      // assignment doesn't trip the dependents guard.
-      await tx.timesheetDraftPlannedShift.deleteMany({
-        where: { sourceAssignmentId: existing.id, date: { gte: effectiveFromDate } }
-      });
-
-      await tx.siteAssignment.update({
-        where: { id: existing.id },
-        data: {
-          validTo: closedValidTo,
-          endedReason: trimmedReason ?? 'Изменение объекта / заказчика',
-          version: { increment: 1 }
-        }
-      });
-
-      const newAssignment = await createAssignmentInTx(tx, {
-        employeeId: existing.employeeId,
-        siteId: siteId as string,
-        workAreaId: normalizedWorkAreaId,
-        templateVersionId,
-        validFrom: effectiveFromDate,
-        validTo: newValidTo,
-        isPrimary: normalizedIsPrimary,
-        assignedByUserId: authenticated.user.id
-      });
-
-      if (movesOpenShift) {
-        await tx.employeeOpenShift.update({
-          where: { employeeId: existing.employeeId },
-          data: { siteId: siteId as string, workAreaId: normalizedWorkAreaId, sourceAssignmentId: newAssignment.id }
-        });
-      }
-
-      await createAuditEvent(tx, {
-        actorUserId: authenticated.user.id,
-        eventType: 'ASSIGNMENT_CHANGED',
-        entityType: 'SITE_ASSIGNMENT',
-        entityId: existing.id,
-        requestId,
-        beforeValue: {
-          id: existing.id,
-          siteId: existing.siteId,
-          workAreaId: existing.workAreaId,
-          templateVersionId: existing.templateVersionId,
-          isPrimary: existing.isPrimary,
-          validFrom: formatDate(existing.validFrom),
-          validTo: existing.validTo ? formatDate(existing.validTo) : null
-        },
-        afterValue: {
-          closedAssignmentId: existing.id,
-          closedValidTo: formatDate(closedValidTo),
-          effectiveFrom: formatDate(effectiveFromDate),
-          newAssignmentId: newAssignment.id,
-          newSiteId: newAssignment.siteId,
-          newWorkAreaId: newAssignment.workAreaId,
-          newTemplateVersionId: newAssignment.templateVersionId,
-          newIsPrimary: newAssignment.isPrimary,
-          openShiftHandling: openShift ? (movesOpenShift ? 'MOVE_TO_NEW' : 'KEEP_ON_OLD') : null
-        },
-        reason: trimmedReason
-      });
-
-      return { closedValidTo, newAssignmentId: newAssignment.id, newAssignment };
-    });
-  } catch (error) {
-    if (isExclusionViolation(error)) {
-      return jsonError(
-        409,
-        { code: 'ASSIGNMENT_OVERLAP', message: 'The worker already has another assignment on this site and customer covering that date range.' },
-        requestId
-      );
-    }
-    if (isAssignmentDependentsConflict(error)) {
+  if ('code' in result) {
+    if (result.code === 'ASSIGNMENT_OVERLAP') {
       return jsonError(
         409,
         {
-          code: 'ASSIGNMENT_HAS_RECORDED_TIME',
-          message: 'The worker has already recorded hours on this assignment on or after that date. Change from tomorrow, or fix the site on the day in the timesheet.'
+          code: 'ASSIGNMENT_OVERLAP',
+          message: 'The worker already has another assignment on this site and customer covering that date range.',
+          fieldErrors: { effectiveFrom: ['overlaps an existing assignment'] }
         },
         requestId
       );
     }
-    throw error;
+    return jsonError(
+      409,
+      {
+        code: 'ASSIGNMENT_HAS_RECORDED_TIME',
+        message: 'The worker has already recorded hours on this assignment on or after that date. Change from tomorrow, or fix the site on the day in the timesheet.'
+      },
+      requestId
+    );
   }
 
   return NextResponse.json(
     {
       closedAssignmentId: existing.id,
       closedValidTo: formatDate(result.closedValidTo),
-      effectiveFrom: formatDate(effectiveFromDate),
-      openShiftHandling: openShift ? (movesOpenShift ? 'MOVE_TO_NEW' : 'KEEP_ON_OLD') : null,
+      effectiveFrom: formatDate(result.effectiveFrom),
+      openShiftHandling: result.openShiftHandling,
       newAssignment: {
         id: result.newAssignment.id,
         employeeId: result.newAssignment.employeeId,

@@ -5,23 +5,17 @@ import { jsonError, successHeaders } from '@/lib/api-error';
 import { resolveAuthenticatedSession } from '@/lib/auth';
 import { hasPermission } from '@/lib/permissions';
 import { SESSION_COOKIE_NAME } from '@/lib/session';
-import { createAuditEvent } from '@/lib/audit';
-import { helsinkiToday } from '@/lib/workers';
+import { promoteToPrimary } from '@/lib/assignment-lifecycle-service';
 
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
 
 // docs/titanor-time/04_ADMIN_FIRST_API_CONTRACTS.md §6 — exact contract for this endpoint.
+// R15-D7: the "≤1 operationally-live primary" invariant (§3.6) is enforced by
+// lib/assignment-lifecycle-service.ts's promoteToPrimary() — one transaction under the shared
+// per-employee advisory lock, demoting every other live primary and writing an
+// AssignmentTransition + AuditEvent. This route keeps only HTTP/auth.
 const REQUIRED_CSRF_HEADER_VALUE = 'titanor-time';
-// Per-employee, not a single global key (unlike bootstrap-super-admin.ts's
-// ADVISORY_LOCK_KEY_NAME) — promoting one employee's assignment must not
-// block a concurrent promote for a different employee. hashtext() over a
-// composed name, same pattern as bootstrap-super-admin.ts, keeps the key
-// readable without picking a magic number; Prisma's tagged template
-// parameterizes the interpolated employeeId, so this isn't string-built SQL.
-function advisoryLockKeyName(employeeId: string): string {
-  return `titanor_time:assignment_promote:${employeeId}`;
-}
 // A malformed id must never reach Prisma (throws P2023, surfaces as a 500) and must be
 // indistinguishable from a genuinely nonexistent one (no oracle) — same pattern already used by
 // this route family's own POST /api/admin/assignments/validate-overlap and .../split.
@@ -55,57 +49,10 @@ export async function POST(request: NextRequest, { params }: RouteParams): Promi
     return jsonError(404, { code: 'ASSIGNMENT_NOT_FOUND', message: 'No assignment with this id.' }, requestId);
   }
 
-  const today = helsinkiToday();
-  const isCurrentlyActive = existing.validFrom <= today && (existing.validTo === null || existing.validTo >= today);
-  if (!isCurrentlyActive) {
+  const result = await promoteToPrimary({ existing, actorUserId: authenticated.user.id, requestId });
+  if ('code' in result) {
     return jsonError(409, { code: 'ASSIGNMENT_NOT_ACTIVE', message: 'This assignment is not currently active.' }, requestId);
   }
-
-  await prisma.$transaction(async (tx) => {
-    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${advisoryLockKeyName(existing.employeeId)})::bigint)`;
-
-    // Demote whichever other currently-active assignment(s) of this same
-    // employee currently hold isPrimary — 03_DATA_MODEL_ERD.md's invariant
-    // ("не более одного среди пересекающихся"). Scoped to "active today",
-    // not the full historical set, since promote is about making this
-    // assignment THE primary one right now.
-    const demoted = await tx.siteAssignment.findMany({
-      where: {
-        employeeId: existing.employeeId,
-        id: { not: existing.id },
-        isPrimary: true,
-        validFrom: { lte: today },
-        OR: [{ validTo: null }, { validTo: { gte: today } }]
-      },
-      select: { id: true }
-    });
-
-    if (demoted.length > 0) {
-      await tx.siteAssignment.updateMany({
-        where: { id: { in: demoted.map((assignment) => assignment.id) } },
-        data: { isPrimary: false, version: { increment: 1 } }
-      });
-    }
-
-    await tx.siteAssignment.update({
-      where: { id: existing.id },
-      data: { isPrimary: true, version: { increment: 1 } }
-    });
-
-    await createAuditEvent(tx, {
-      actorUserId: authenticated.user.id,
-      eventType: 'ASSIGNMENT_PROMOTED',
-      entityType: 'SITE_ASSIGNMENT',
-      entityId: existing.id,
-      requestId,
-      beforeValue: null,
-      afterValue: {
-        assignmentId: existing.id,
-        employeeId: existing.employeeId,
-        demotedAssignmentIds: demoted.map((assignment) => assignment.id)
-      }
-    });
-  });
 
   return NextResponse.json(
     { assignmentId: existing.id, isPrimary: true },
