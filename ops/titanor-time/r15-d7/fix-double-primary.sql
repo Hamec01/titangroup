@@ -31,30 +31,25 @@
 
 BEGIN;
 
--- 0a. actor must actually have been supplied.
-DO $$
-BEGIN
-  IF :'actor' = 'MISSING' OR :'actor' !~ '^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$' THEN
-    RAISE EXCEPTION 'R15-D7 Deploy D: -v actor=<uuid> is required (an active SUPER_ADMIN User id, no SQL quotes) — got %', :'actor';
-  END IF;
-END $$;
+-- 0a. actor must be a syntactically valid UUID (this also catches the omitted-variable case,
+--     which \set makes 'MISSING'). psql interpolates :'actor' in top-level SQL (not inside DO $$).
+SELECT :'actor'::uuid AS _actor_must_be_a_uuid;
 
--- 0b. actor must be an ACTIVE SUPER_ADMIN — checked before anything is touched.
-DO $$
-DECLARE ok int;
-BEGIN
-  SELECT count(*) INTO ok
-    FROM "User" u
+-- 0b. actor must be an ACTIVE SUPER_ADMIN — captured into a psql variable, checked BEFORE any work.
+SELECT EXISTS (
+  SELECT 1 FROM "User" u
     JOIN "UserRole" ur ON ur."userId" = u.id
     JOIN "Role" r ON r.id = ur."roleId"
    WHERE u.id = :'actor'::uuid
      AND u.status = 'ACTIVE'
      AND ur."validTo" IS NULL
-     AND r.name = 'SUPER_ADMIN';
-  IF ok < 1 THEN
-    RAISE EXCEPTION 'actor % is not an ACTIVE SUPER_ADMIN — ABORT', :'actor';
-  END IF;
-END $$;
+     AND r.name = 'SUPER_ADMIN'
+) AS actor_is_active_super_admin
+\gset
+\if :actor_is_active_super_admin
+\else
+  DO $$ BEGIN RAISE EXCEPTION 'R15-D7 Deploy D: -v actor is not an ACTIVE SUPER_ADMIN — ABORT'; END $$;
+\endif
 
 -- serialise with any concurrent /change /end /promote on these two workers (same key the
 -- service uses: 'titanor_time:assignment_lifecycle:<employeeId>'). Lock order = employeeId asc.
