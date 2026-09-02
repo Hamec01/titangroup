@@ -11,27 +11,35 @@
 -- re-pointed, or re-dated. No hours move (cbf688b7 keeps its 10 WorkSegment / 5 ClockShift rows
 -- bound to it; 3d95975f has no recorded hours). History is untouched. One atomic transaction:
 -- 2 UPDATE + 2 AssignmentTransition + 2 AuditEvent, under the per-employee advisory locks the
--- lifecycle service also takes (§3.13), with a preflight guard that aborts if the live state has
--- drifted since the preflight.
+-- lifecycle service also takes (§3.13), with preflight + post guards that abort on any drift.
 --
 -- Run FIRST, then Migration 2 (20260902180000_add_one_live_primary_index).
 --
--- REQUIRED: -v actor="'<uuid>'" — the UUID of an ACTIVE SUPER_ADMIN User. There is NO default;
--- the transaction validates the id (ACTIVE + active SUPER_ADMIN UserRole) BEFORE any UPDATE.
---   psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -v actor="'cba8d0ff-0fd2-45bc-b83c-1d19ceee2bee'" \
+-- REQUIRED: -v actor=<uuid> — the UUID of an ACTIVE SUPER_ADMIN User, WITHOUT SQL quotes. There is
+-- no default; the transaction validates the id (ACTIVE + active SUPER_ADMIN UserRole) BEFORE any
+-- UPDATE and aborts otherwise.
+--   psql "$DATABASE_URL" -v ON_ERROR_STOP=1 \
+--        -v actor=cba8d0ff-0fd2-45bc-b83c-1d19ceee2bee \
 --        -f ops/titanor-time/r15-d7/fix-double-primary.sql
 
 \set ON_ERROR_STOP on
 
 \if :{?actor}
 \else
-  \echo '*** ERROR: -v actor="''<active-SUPER_ADMIN-user-uuid>''" is required. No default actor. ***'
-  \quit 1
+  \set actor MISSING
 \endif
 
 BEGIN;
 
--- 0. actor must be an ACTIVE SUPER_ADMIN — checked before anything is touched.
+-- 0a. actor must actually have been supplied.
+DO $$
+BEGIN
+  IF :'actor' = 'MISSING' OR :'actor' !~ '^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$' THEN
+    RAISE EXCEPTION 'R15-D7 Deploy D: -v actor=<uuid> is required (an active SUPER_ADMIN User id, no SQL quotes) — got %', :'actor';
+  END IF;
+END $$;
+
+-- 0b. actor must be an ACTIVE SUPER_ADMIN — checked before anything is touched.
 DO $$
 DECLARE ok int;
 BEGIN
@@ -39,7 +47,7 @@ BEGIN
     FROM "User" u
     JOIN "UserRole" ur ON ur."userId" = u.id
     JOIN "Role" r ON r.id = ur."roleId"
-   WHERE u.id = :actor::uuid
+   WHERE u.id = :'actor'::uuid
      AND u.status = 'ACTIVE'
      AND ur."validTo" IS NULL
      AND r.name = 'SUPER_ADMIN';
@@ -108,22 +116,22 @@ INSERT INTO "AssignmentTransition"
 VALUES
   ('1f8b5243-cec5-4c06-8ea3-a5e664865ad8','CHANGE',
    '3d95975f-b4c4-491a-8e10-38f3e88edcd8','c6825d98-f7e2-47ae-bdd3-c721bf3ce242',
-   now(), (now() AT TIME ZONE 'Europe/Helsinki')::date, 'NONE', :actor::uuid, 'OTHER',
+   now(), (now() AT TIME ZONE 'Europe/Helsinki')::date, 'NONE', :'actor'::uuid, 'OTHER',
    'R15-D7 Deploy D — resolve double primary (owner decision 2026-09-02): keep c6825d98 (Meyer — Aros Marine), demote 3d95975f'),
   ('8bb03525-8fe6-4b53-92e7-dc94c38f6a99','CHANGE',
    'cbf688b7-fe67-46b2-aad3-967c37103c07','bc174aef-2766-4877-ac43-415ef12433d5',
-   now(), (now() AT TIME ZONE 'Europe/Helsinki')::date, 'NONE', :actor::uuid, 'OTHER',
+   now(), (now() AT TIME ZONE 'Europe/Helsinki')::date, 'NONE', :'actor'::uuid, 'OTHER',
    'R15-D7 Deploy D — resolve double primary (owner decision 2026-09-02): keep bc174aef (Meyer — Aros Marine), demote cbf688b7');
 
 -- 6. audit (createAuditEvent equivalent — ASSIGNMENT_PROMOTED, one row per kept primary).
 INSERT INTO "AuditEvent"
   ("actorUserId","eventType","entityType","entityId","requestId","beforeValue","afterValue","reason")
 VALUES
-  (:actor::uuid,'ASSIGNMENT_PROMOTED','SITE_ASSIGNMENT','c6825d98-f7e2-47ae-bdd3-c721bf3ce242',
+  (:'actor'::uuid,'ASSIGNMENT_PROMOTED','SITE_ASSIGNMENT','c6825d98-f7e2-47ae-bdd3-c721bf3ce242',
    gen_random_uuid(), NULL,
    '{"assignmentId":"c6825d98-f7e2-47ae-bdd3-c721bf3ce242","employeeId":"1f8b5243-cec5-4c06-8ea3-a5e664865ad8","demotedAssignmentIds":["3d95975f-b4c4-491a-8e10-38f3e88edcd8"],"context":"R15-D7 Deploy D manual double-primary fix"}'::jsonb,
    'owner decision 2026-09-02'),
-  (:actor::uuid,'ASSIGNMENT_PROMOTED','SITE_ASSIGNMENT','bc174aef-2766-4877-ac43-415ef12433d5',
+  (:'actor'::uuid,'ASSIGNMENT_PROMOTED','SITE_ASSIGNMENT','bc174aef-2766-4877-ac43-415ef12433d5',
    gen_random_uuid(), NULL,
    '{"assignmentId":"bc174aef-2766-4877-ac43-415ef12433d5","employeeId":"8bb03525-8fe6-4b53-92e7-dc94c38f6a99","demotedAssignmentIds":["cbf688b7-fe67-46b2-aad3-967c37103c07"],"context":"R15-D7 Deploy D manual double-primary fix"}'::jsonb,
    'owner decision 2026-09-02');
