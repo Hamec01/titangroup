@@ -1,7 +1,8 @@
 # R15-D7 — Deploy D («Одно основное назначение»): отчёт (v4 — исправленная модель primary)
 
-**Статус:** подготовлено, проверено на disposable-копии production. **Production не изменялся.**
-Ждёт **отдельного** разрешения владельца — сначала D1, затем отдельно D2.
+**Статус:** ✅ **D1 РАЗВЁРНУТ НА PRODUCTION 2026-09-02 22:14 UTC** (простой ≈ 3.9 c). **D2 не начат —
+ждёт отдельного разрешения владельца.** Схема production не менялась (99), Migration 2 не
+применялась, `fix-double-primary.sql` в production не запускался. Итог D1 — §9.
 
 История STOP-GATE'ов:
 - **v1** (`bdf8608`) — аудит нашёл 7 сценарных проблем.
@@ -276,3 +277,36 @@ SUPER_ADMIN) — если владелец не назовёт другого.
 **Ops:** `ops/titanor-time/r15-d7/{fix-double-primary.sql,verify-migration-on-restore.sh,verify-rollout-on-restore.sh}`.
 **Доки:** `04_ADMIN_FIRST_API_CONTRACTS.md`, `05_RAW_SQL_REGISTER.md` (EX-08),
 `R15_ASSIGNMENT_LIFECYCLE_DESIGN_RU.md` (§3.6), этот отчёт, `R15_D7_DEPLOY_D_ROLLBACK_RUNBOOK_RU.md`.
+
+---
+
+## 9. D1 — выполнено на production (2026-09-02 22:14 UTC, разрешение владельца)
+
+| | |
+|---|---|
+| **Простой** | **≈ 3.9 c** (один web-only swap; `docker stop` завершился < 1 c, новый контейнер `/api/ready` 200 на 2-й секунде) |
+| **Новый production image** | `titanor-time-app:d7d1-b9cb5e7` (контейнер `titanor-time-prod-app`, `127.0.0.1:3199→3000`, healthy) |
+| **Схема БД** | **99, без изменений** — последняя миграция `20260902160000_add_assignment_lifecycle`. Migration 2 **не** применялась. `ex_site_assignment_one_primary_per_period` **отсутствует** (`pg_constraint` = 0). `fix-double-primary.sql` в production **не** запускался. |
+| **scheduler / Caddy / DNS / пароли** | не трогались. `titanor-time-prod-scheduler` (`r14-release-1416503`) — Up 2 дня, тики `runnerOutcome:"ok"`, `failed:0`. |
+| **Backup** | `production-20260902T221341Z-pre-deploy` (99 миграций, 2131 строк) — SHA256SUMS проверены on-box **и** off-box. |
+
+**Smoke (read-only, сессии admin/worker выпущены и удалены после проверки):**
+- `/api/ready` = 200 `schema:current 99/99` — локально **и** через Caddy (`https://app.titanorgroup.fi`).
+- 7 страниц админки + `/worker` → 200 (`/admin`, `/admin/workers`, `/admin/sites`, `/admin/assignments`, `/admin/reports`, `/admin/periods`, `/worker`).
+- `GET /api/admin/assignments` → 200 (список рендерится).
+- Карточки обоих двойных-primary работников — **Nazar #1002** и **Mykhailo #1004** — `GET /api/admin/workers/:id` → 200.
+- `GET /api/worker/context` (сессия Mykhailo) → 200.
+- **Оба двойных-primary работника резолвятся в ОДНО живое основное по датам:** Nazar → `c6825d98` (Aros Marine), Mykhailo → `bc174aef` (Aros Marine) — `currentAssignments` карточки = ровно 1 запись, ни один работник не показывает >1 текущего назначения. (`cbf688b7` Mykhailo уже получил `clockInDisabledAt` через UI на prod ранее; `3d95975f` Nazar закрыт `validTo=2026-09-02`.)
+- Логи `titanor-time-prod-app` с момента старта: **0** строк `error/exception/unhandled/23P01`.
+
+**Write-path smoke на живой prod НЕ выполнялся** (правило после инцидента 2026-09-02: проверка write-эндпоинтов на prod — только read-only). Путь `create` / `change` / `promote` / будущий перевод **без HTTP 500** доказан на восстановленной копии production (§5.2 B — тот же образ `d7d1-b9cb5e7`, та же схема 99, реальные prod-данные). Если нужен write-smoke на живом prod — по отдельному запросу (оставит тестового работника + append-only Transition-строки).
+
+### Точная команда rollback D1 (Migration 2 не применялась → откат на Deploy A безопасен)
+```
+docker stop -t 30 titanor-time-prod-app
+docker rename titanor-time-prod-app titanor-time-prod-app-d1-failed
+docker rename titanor-time-prod-app-pre-b9cb5e7 titanor-time-prod-app
+docker start titanor-time-prod-app
+curl -s http://127.0.0.1:3199/api/ready        # ожидается d7a: schema:current 99/99
+```
+Схему трогать не нужно. `titanor-time-prod-app-pre-b9cb5e7` (образ `d7a-37dddb1`, Exited) — готовый rollback-контейнер, сохраняется до конца R15.
