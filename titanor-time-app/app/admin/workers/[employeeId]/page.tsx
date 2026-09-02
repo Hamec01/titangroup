@@ -4,6 +4,7 @@ import { resolveServerSession } from '@/lib/server-session';
 import { getWorkerDetail, helsinkiToday, assignmentEndDateDefaults } from '@/lib/workers';
 import { NewAssignmentForm } from '@/app/admin/assignments/new/NewAssignmentForm';
 import { EndAssignmentAction } from '@/app/admin/assignments/EndAssignmentAction';
+import { ChangeAssignmentAction } from '@/app/admin/assignments/ChangeAssignmentAction';
 import { WorkerActions } from './WorkerActions';
 import { RecoveryCodeIssuer } from '@/components/account/RecoveryCodeIssuer';
 import { WorkerSubmissionScheduleForm } from './WorkerSubmissionScheduleForm';
@@ -132,20 +133,53 @@ export default async function WorkerDetailPage({ params }: { params: Promise<{ e
         ) : (
           <ul className="setup-list">
             {worker.currentAssignments.map((assignment) => (
-              <li key={assignment.assignmentId} className="setup-item">
+              <li key={assignment.assignmentId} className="setup-item setup-item-column">
                 <span className="setup-label">
                   {assignment.siteName}
                   {assignment.workAreaName ? ` — ${assignment.workAreaName}` : ''}
                   {assignment.isPrimary ? ` (${s.common.primary})` : ''}
                 </span>
-                <EndAssignmentAction
-                  assignment={{ id: assignment.assignmentId }}
-                  defaultValidTo={endDateDefaults.get(assignment.assignmentId) ?? helsinkiToday().toISOString().slice(0, 10)}
-                />
+                <div className="assignment-actions">
+                  <ChangeAssignmentAction
+                    assignment={{
+                      id: assignment.assignmentId,
+                      siteId: assignment.siteId,
+                      siteName: assignment.siteName,
+                      workAreaId: assignment.workAreaId,
+                      templateId: assignment.templateId
+                    }}
+                    today={helsinkiToday().toISOString().slice(0, 10)}
+                  />
+                  <EndAssignmentAction
+                    assignment={{ id: assignment.assignmentId }}
+                    defaultValidTo={endDateDefaults.get(assignment.assignmentId) ?? helsinkiToday().toISOString().slice(0, 10)}
+                  />
+                </div>
               </li>
             ))}
           </ul>
         )}
+
+        {worker.pastAssignments.length > 0 ? (
+          <details className="worker-past-assignments">
+            <summary>
+              {ru ? 'Прошлые назначения' : 'Past assignments'} ({worker.pastAssignments.length})
+            </summary>
+            <ul className="setup-list">
+              {worker.pastAssignments.map((assignment) => (
+                <li key={assignment.assignmentId} className="setup-item">
+                  <span className="setup-label">
+                    {assignment.siteName}
+                    {assignment.workAreaName ? ` — ${assignment.workAreaName}` : ''}
+                  </span>
+                  <span className="setup-subtitle">
+                    {assignment.validFrom} → {assignment.validTo}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          </details>
+        ) : null}
 
         <section className="worker-work-setup">
           <h2>{s.workers.addWork}</h2>

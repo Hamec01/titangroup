@@ -81,6 +81,146 @@ export interface CreateAssignmentResult {
 }
 
 /**
+ * Creates one SiteAssignment row and backfills PayrollPeriodParticipant /
+ * Timesheet(DRAFT) / TimesheetDraft / TimesheetDraftDay / TimesheetDraftPlannedShift for every
+ * OPEN period intersecting [validFrom, validTo] — the materialisation half of createAssignment(),
+ * factored out so POST /api/admin/assignments/:id/change can reuse it inside its own transaction
+ * (close the old assignment + open the replacement atomically). All references must already be
+ * validated by the caller. Does NOT write the AuditEvent — the caller owns that
+ * (ASSIGNMENT_CREATED vs ASSIGNMENT_CHANGED).
+ */
+export async function createAssignmentInTx(
+  tx: Prisma.TransactionClient,
+  params: {
+    employeeId: string;
+    siteId: string;
+    workAreaId: string | null;
+    templateVersionId: string | null;
+    validFrom: Date;
+    validTo: Date | null;
+    isPrimary: boolean;
+    assignedByUserId: string;
+  }
+) {
+  const assignment = await tx.siteAssignment.create({
+    data: {
+      employeeId: params.employeeId,
+      siteId: params.siteId,
+      workAreaId: params.workAreaId,
+      templateVersionId: params.templateVersionId,
+      isPrimary: params.isPrimary,
+      validFrom: params.validFrom,
+      validTo: params.validTo,
+      assignedByUserId: params.assignedByUserId
+    }
+  });
+
+  const openPeriodCandidates = await tx.payrollPeriod.findMany({
+    where: {
+      status: 'OPEN',
+      endDate: { gte: params.validFrom },
+      ...(params.validTo ? { startDate: { lte: params.validTo } } : {})
+    },
+    select: { id: true, startDate: true, endDate: true, submissionScheduleId: true }
+  });
+  const employeeScheduleWindows = await tx.employeeTimesheetSchedule.findMany({
+    where: {
+      employeeId: params.employeeId,
+      effectiveFrom: { lte: params.validTo ?? new Date('9999-12-31T00:00:00.000Z') },
+      OR: [{ effectiveTo: null }, { effectiveTo: { gte: params.validFrom } }]
+    },
+    select: { scheduleId: true, effectiveFrom: true, effectiveTo: true }
+  });
+  // Legacy/manual periods retain the old assignment-driven behavior. Generated periods belong
+  // only to workers whose effective schedule matches that period; without this filter, adding a
+  // site to one new worker would try to enroll them in every weekly/biweekly cohort currently
+  // open for other employees and trip the worker-overlap invariant.
+  const intersectingOpenPeriods = openPeriodCandidates.filter((period) =>
+    period.submissionScheduleId === null || employeeScheduleWindows.some((window) =>
+      window.scheduleId === period.submissionScheduleId && window.effectiveFrom <= period.endDate && (!window.effectiveTo || window.effectiveTo >= period.startDate)
+    )
+  );
+
+  const templateDays = params.templateVersionId
+    ? await tx.workScheduleTemplateVersionDay.findMany({ where: { templateVersionId: params.templateVersionId } })
+    : [];
+  const templateDayByWeekday = new Map(templateDays.map((d) => [d.weekday, d]));
+
+  const absences = await tx.absence.findMany({
+    where: {
+      employeeId: params.employeeId,
+      status: 'APPROVED',
+      endDate: { gte: params.validFrom },
+      ...(params.validTo ? { startDate: { lte: params.validTo } } : {})
+    },
+    select: { id: true, startDate: true, endDate: true, type: true }
+  });
+
+  for (const period of intersectingOpenPeriods) {
+    await tx.payrollPeriodParticipant.upsert({
+      where: { periodId_employeeId: { periodId: period.id, employeeId: params.employeeId } },
+      create: { periodId: period.id, employeeId: params.employeeId, expected: true },
+      update: {}
+    });
+
+    const timesheet = await tx.timesheet.upsert({
+      where: { employeeId_periodId: { employeeId: params.employeeId, periodId: period.id } },
+      create: { employeeId: params.employeeId, periodId: period.id, status: 'DRAFT' },
+      update: {}
+    });
+
+    const draft = await tx.timesheetDraft.upsert({
+      where: { timesheetId: timesheet.id },
+      create: { timesheetId: timesheet.id, employeeId: params.employeeId },
+      update: {}
+    });
+
+    const intersectFrom = period.startDate > params.validFrom ? period.startDate : params.validFrom;
+    const intersectTo = params.validTo && params.validTo < period.endDate ? params.validTo : period.endDate;
+    const dates = enumerateDates(intersectFrom, intersectTo);
+
+    const existingDays = await tx.timesheetDraftDay.findMany({
+      where: { draftId: draft.id, date: { in: dates } },
+      select: { date: true }
+    });
+    const existingDayTimes = new Set(existingDays.map((d) => d.date.getTime()));
+    const missingDates = dates.filter((d) => !existingDayTimes.has(d.getTime()));
+
+    if (missingDates.length > 0) {
+      await tx.timesheetDraftDay.createMany({
+        data: missingDates.map((date) => {
+          const overlay = absences.find((a) => a.startDate <= date && a.endDate >= date);
+          return {
+            draftId: draft.id,
+            date,
+            dayType: overlay ? overlay.type : 'WORK',
+            confirmedZero: false,
+            sourceAbsenceId: overlay ? overlay.id : null
+          };
+        })
+      });
+    }
+
+    const plannedShiftRows: Prisma.TimesheetDraftPlannedShiftCreateManyInput[] = dates.map((date) => {
+      const templateDay = params.templateVersionId ? templateDayByWeekday.get(toTemplateWeekday(date)) : undefined;
+      return {
+        draftId: draft.id,
+        employeeId: params.employeeId,
+        date,
+        siteId: params.siteId,
+        sourceAssignmentId: assignment.id,
+        ...computePlannedShiftForAssignmentDate(templateDay, date)
+      };
+    });
+    if (plannedShiftRows.length > 0) {
+      await tx.timesheetDraftPlannedShift.createMany({ data: plannedShiftRows });
+    }
+  }
+
+  return assignment;
+}
+
+/**
  * Resolves and validates all references, then creates the SiteAssignment +
  * upserts PayrollPeriodParticipant/Timesheet(DRAFT)/TimesheetDraft container
  * rows for every OPEN period intersecting [validFrom, validTo] — the exact
@@ -148,120 +288,16 @@ export async function createAssignment(
   }
 
   const created = await prisma.$transaction(async (tx) => {
-    const assignment = await tx.siteAssignment.create({
-      data: {
-        employeeId: input.employeeId,
-        siteId: input.siteId,
-        workAreaId: input.workAreaId,
-        templateVersionId,
-        isPrimary: input.isPrimary,
-        validFrom: input.validFrom,
-        validTo: input.validTo,
-        assignedByUserId: input.assignedByUserId
-      }
+    const assignment = await createAssignmentInTx(tx, {
+      employeeId: input.employeeId,
+      siteId: input.siteId,
+      workAreaId: input.workAreaId,
+      templateVersionId,
+      isPrimary: input.isPrimary,
+      validFrom: input.validFrom,
+      validTo: input.validTo,
+      assignedByUserId: input.assignedByUserId
     });
-
-    const openPeriodCandidates = await tx.payrollPeriod.findMany({
-      where: {
-        status: 'OPEN',
-        endDate: { gte: input.validFrom },
-        ...(input.validTo ? { startDate: { lte: input.validTo } } : {})
-      },
-      select: { id: true, startDate: true, endDate: true, submissionScheduleId: true }
-    });
-    const employeeScheduleWindows = await tx.employeeTimesheetSchedule.findMany({
-      where: {
-        employeeId: input.employeeId,
-        effectiveFrom: { lte: input.validTo ?? new Date('9999-12-31T00:00:00.000Z') },
-        OR: [{ effectiveTo: null }, { effectiveTo: { gte: input.validFrom } }]
-      },
-      select: { scheduleId: true, effectiveFrom: true, effectiveTo: true }
-    });
-    // Legacy/manual periods retain the old assignment-driven behavior. Generated periods belong
-    // only to workers whose effective schedule matches that period; without this filter, adding a
-    // site to one new worker would try to enroll them in every weekly/biweekly cohort currently
-    // open for other employees and trip the worker-overlap invariant.
-    const intersectingOpenPeriods = openPeriodCandidates.filter((period) =>
-      period.submissionScheduleId === null || employeeScheduleWindows.some((window) =>
-        window.scheduleId === period.submissionScheduleId && window.effectiveFrom <= period.endDate && (!window.effectiveTo || window.effectiveTo >= period.startDate)
-      )
-    );
-
-    const templateDays = templateVersionId
-      ? await tx.workScheduleTemplateVersionDay.findMany({ where: { templateVersionId } })
-      : [];
-    const templateDayByWeekday = new Map(templateDays.map((d) => [d.weekday, d]));
-
-    const absences = await tx.absence.findMany({
-      where: {
-        employeeId: input.employeeId,
-        status: 'APPROVED',
-        endDate: { gte: input.validFrom },
-        ...(input.validTo ? { startDate: { lte: input.validTo } } : {})
-      },
-      select: { id: true, startDate: true, endDate: true, type: true }
-    });
-
-    for (const period of intersectingOpenPeriods) {
-      await tx.payrollPeriodParticipant.upsert({
-        where: { periodId_employeeId: { periodId: period.id, employeeId: input.employeeId } },
-        create: { periodId: period.id, employeeId: input.employeeId, expected: true },
-        update: {}
-      });
-
-      const timesheet = await tx.timesheet.upsert({
-        where: { employeeId_periodId: { employeeId: input.employeeId, periodId: period.id } },
-        create: { employeeId: input.employeeId, periodId: period.id, status: 'DRAFT' },
-        update: {}
-      });
-
-      const draft = await tx.timesheetDraft.upsert({
-        where: { timesheetId: timesheet.id },
-        create: { timesheetId: timesheet.id, employeeId: input.employeeId },
-        update: {}
-      });
-
-      const intersectFrom = period.startDate > input.validFrom ? period.startDate : input.validFrom;
-      const intersectTo = input.validTo && input.validTo < period.endDate ? input.validTo : period.endDate;
-      const dates = enumerateDates(intersectFrom, intersectTo);
-
-      const existingDays = await tx.timesheetDraftDay.findMany({
-        where: { draftId: draft.id, date: { in: dates } },
-        select: { date: true }
-      });
-      const existingDayTimes = new Set(existingDays.map((d) => d.date.getTime()));
-      const missingDates = dates.filter((d) => !existingDayTimes.has(d.getTime()));
-
-      if (missingDates.length > 0) {
-        await tx.timesheetDraftDay.createMany({
-          data: missingDates.map((date) => {
-            const overlay = absences.find((a) => a.startDate <= date && a.endDate >= date);
-            return {
-              draftId: draft.id,
-              date,
-              dayType: overlay ? overlay.type : 'WORK',
-              confirmedZero: false,
-              sourceAbsenceId: overlay ? overlay.id : null
-            };
-          })
-        });
-      }
-
-      const plannedShiftRows: Prisma.TimesheetDraftPlannedShiftCreateManyInput[] = dates.map((date) => {
-        const templateDay = templateVersionId ? templateDayByWeekday.get(toTemplateWeekday(date)) : undefined;
-        return {
-          draftId: draft.id,
-          employeeId: input.employeeId,
-          date,
-          siteId: input.siteId,
-          sourceAssignmentId: assignment.id,
-          ...computePlannedShiftForAssignmentDate(templateDay, date)
-        };
-      });
-      if (plannedShiftRows.length > 0) {
-        await tx.timesheetDraftPlannedShift.createMany({ data: plannedShiftRows });
-      }
-    }
 
     // Same transaction as the create + period upserts above — lib/audit.ts's
     // invariant ("Действие + AuditEvent — одна транзакция") requires this.

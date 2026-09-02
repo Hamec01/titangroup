@@ -370,6 +370,77 @@ async function main() {
   const w1Row = await prisma.siteAssignment.findUniqueOrThrow({ where: { id: asgW1.body.id } });
   check('WA8: a rejected End leaves the assignment untouched (validTo still null)', w1Row.validTo === null && w1Row.endedReason === null, w1Row);
 
+  // CH0-CH10 — "Изменить объект / зону" (POST /api/admin/assignments/:id/change). Fully isolated:
+  // a dedicated worker + fresh sites, so nothing here can collide with the shared fixture that
+  // Group C below depends on. Closes the old assignment the day before the effective date and
+  // opens a fully-materialised replacement; backdating is forbidden; an open shift forces a choice.
+  const dPlus = (iso: string, days: number) => {
+    const d = new Date(`${iso}T00:00:00.000Z`);
+    d.setUTCDate(d.getUTCDate() + days);
+    return d.toISOString().slice(0, 10);
+  };
+  const mkSite = (label: string) =>
+    jsonFetch(`${BASE}/api/admin/sites`, { method: 'POST', headers: authHeaders(fx.admin.cookie, { 'Idempotency-Key': randomUUID() }), body: JSON.stringify({ name: `CH ${label} ${fx.run}` }) });
+  const chW = await jsonFetch(`${BASE}/api/admin/workers`, { method: 'POST', headers: authHeaders(fx.admin.cookie, { 'Idempotency-Key': randomUUID() }), body: JSON.stringify({ firstName: 'Chg', lastName: `Worker${fx.run}` }) });
+  const chWId: string = chW.body?.employee?.id;
+  const [chMain, chOther, chKeepSite, chMoveSite, chDest] = await Promise.all([mkSite('Main'), mkSite('Other'), mkSite('Keep'), mkSite('Move'), mkSite('Dest')]);
+  const chZone = await jsonFetch(`${BASE}/api/admin/sites/${chMain.body.id}/work-areas`, { method: 'POST', headers: authHeaders(fx.admin.cookie), body: JSON.stringify({ name: `CH Zone ${fx.run}` }) });
+  check('CH0: dedicated CH worker + 5 sites + a work area created', chW.status === 201 && typeof chWId === 'string' && [chMain, chOther, chKeepSite, chMoveSite, chDest].every((s) => s.status === 201) && chZone.status === 201, { w: chW.status, sites: [chMain.status, chOther.status, chKeepSite.status, chMoveSite.status, chDest.status], zone: chZone.status });
+
+  const chA1 = await jsonFetch(`${BASE}/api/admin/assignments`, { method: 'POST', headers: authHeaders(fx.admin.cookie, { 'Idempotency-Key': randomUUID() }), body: JSON.stringify({ employeeId: chWId, siteId: chMain.body.id, validFrom: '2020-01-01', templateId: fx.templateId, isPrimary: true }) });
+  check('CH0b: CH worker assigned to CH Main (201)', chA1.status === 201, chA1.body);
+
+  const chFrom = dPlus(todayIsoWA, 5);
+  const chFromDate = new Date(`${chFrom}T00:00:00.000Z`);
+  const ch1 = await jsonFetch(`${BASE}/api/admin/assignments/${chA1.body.id}/change`, { method: 'POST', headers: authHeaders(fx.admin.cookie), body: JSON.stringify({ effectiveFrom: chFrom, siteId: chMain.body.id, workAreaId: chZone.body.id, templateId: fx.templateId }) });
+  check('CH1: change (add a work area on the same site) succeeds (200), closes old + returns new', ch1.status === 200 && ch1.body?.closedAssignmentId === chA1.body.id && ch1.body?.newAssignment?.validFrom === chFrom && ch1.body?.effectiveFrom === chFrom, { status: ch1.status, body: ch1.body });
+  const chNewId: string = ch1.body?.newAssignment?.id;
+  const chA1Row = await prisma.siteAssignment.findUniqueOrThrow({ where: { id: chA1.body.id } });
+  check('CH2: old assignment kept (not deleted), closed the day before the effective date', chA1Row.validTo?.toISOString().slice(0, 10) === dPlus(todayIsoWA, 4) && (chA1Row.endedReason ?? '').length > 0, { validTo: chA1Row.validTo, reason: chA1Row.endedReason });
+  const chNewRow = await prisma.siteAssignment.findUniqueOrThrow({ where: { id: chNewId } });
+  check('CH3: new assignment has the work area, same site, indefinite, template carried', chNewRow.siteId === chMain.body.id && chNewRow.workAreaId === chZone.body.id && chNewRow.validTo === null && chNewRow.templateVersionId !== null, chNewRow);
+  const oldAfter = await prisma.timesheetDraftPlannedShift.count({ where: { sourceAssignmentId: chA1.body.id, date: { gte: chFromDate } } });
+  const oldBefore = await prisma.timesheetDraftPlannedShift.count({ where: { sourceAssignmentId: chA1.body.id, date: { lt: chFromDate } } });
+  const newAfter = await prisma.timesheetDraftPlannedShift.count({ where: { sourceAssignmentId: chNewId, date: { gte: chFromDate } } });
+  check('CH4: planned shifts moved from old to new at the effective date', oldAfter === 0 && oldBefore > 0 && newAfter > 0, { oldAfter, oldBefore, newAfter });
+
+  const chBackdate = await jsonFetch(`${BASE}/api/admin/assignments/${chNewId}/change`, { method: 'POST', headers: authHeaders(fx.admin.cookie), body: JSON.stringify({ effectiveFrom: '2020-06-01', siteId: chOther.body.id }) });
+  check('CH5: backdating is rejected (400 VALIDATION_ERROR)', chBackdate.status === 400 && chBackdate.body?.error?.code === 'VALIDATION_ERROR', chBackdate.body);
+
+  const chNoop = await jsonFetch(`${BASE}/api/admin/assignments/${chNewId}/change`, { method: 'POST', headers: authHeaders(fx.admin.cookie), body: JSON.stringify({ effectiveFrom: dPlus(todayIsoWA, 9), siteId: chMain.body.id, workAreaId: chZone.body.id, templateId: fx.templateId }) });
+  check('CH6: a no-op change is rejected (400 NOTHING_TO_CHANGE)', chNoop.status === 400 && chNoop.body?.error?.code === 'NOTHING_TO_CHANGE', chNoop.body);
+
+  // Open-shift choice + KEEP_ON_OLD. Hand-craft a CHECK_IN ClockEvent + EmployeeOpenShift (no
+  // triggers on either INSERT path) pointing at a deep-past assignment on its own site.
+  const chAKeep = await jsonFetch(`${BASE}/api/admin/assignments`, { method: 'POST', headers: authHeaders(fx.admin.cookie, { 'Idempotency-Key': randomUUID() }), body: JSON.stringify({ employeeId: chWId, siteId: chKeepSite.body.id, validFrom: '2020-01-01', isPrimary: false }) });
+  const ceK = randomUUID();
+  await prisma.clockEvent.create({ data: { id: ceK, employeeId: chWId, operationType: 'CHECK_IN', siteId: chKeepSite.body.id, clientCapturedAt: new Date(), capturedOffline: false, effectiveAt: new Date(), gpsVerification: 'NOT_VERIFIED', processingState: 'ACCEPTED', channel: 'ONLINE', payloadHash: 'k'.repeat(64), requestId: randomUUID() } });
+  await prisma.employeeOpenShift.create({ data: { employeeId: chWId, openedByClockEventId: ceK, siteId: chKeepSite.body.id, sourceAssignmentId: chAKeep.body.id, openedAt: new Date() } });
+  const chNoChoice = await jsonFetch(`${BASE}/api/admin/assignments/${chAKeep.body.id}/change`, { method: 'POST', headers: authHeaders(fx.admin.cookie), body: JSON.stringify({ effectiveFrom: todayIsoWA, siteId: chOther.body.id }) });
+  check('CH7: an open shift forces a choice (409 OPEN_SHIFT_CHOICE_REQUIRED)', chNoChoice.status === 409 && chNoChoice.body?.error?.code === 'OPEN_SHIFT_CHOICE_REQUIRED', chNoChoice.body);
+  const chKeep = await jsonFetch(`${BASE}/api/admin/assignments/${chAKeep.body.id}/change`, { method: 'POST', headers: authHeaders(fx.admin.cookie), body: JSON.stringify({ effectiveFrom: todayIsoWA, siteId: chOther.body.id, todayShiftHandling: 'KEEP_ON_OLD' }) });
+  const osKeep = await prisma.employeeOpenShift.findUniqueOrThrow({ where: { employeeId: chWId } });
+  check('CH8: KEEP_ON_OLD moves the effective date to tomorrow and leaves the open shift on the old site', chKeep.status === 200 && chKeep.body?.effectiveFrom === dPlus(todayIsoWA, 1) && osKeep.sourceAssignmentId === chAKeep.body.id && osKeep.siteId === chKeepSite.body.id, { status: chKeep.status, effectiveFrom: chKeep.body?.effectiveFrom, os: osKeep });
+  await prisma.employeeOpenShift.delete({ where: { employeeId: chWId } });
+
+  // Open-shift MOVE_TO_NEW — its own deep-past assignment, moving to a site chW is not on yet.
+  const chAMove = await jsonFetch(`${BASE}/api/admin/assignments`, { method: 'POST', headers: authHeaders(fx.admin.cookie, { 'Idempotency-Key': randomUUID() }), body: JSON.stringify({ employeeId: chWId, siteId: chMoveSite.body.id, validFrom: '2020-01-01', isPrimary: false }) });
+  const ceM = randomUUID();
+  await prisma.clockEvent.create({ data: { id: ceM, employeeId: chWId, operationType: 'CHECK_IN', siteId: chMoveSite.body.id, clientCapturedAt: new Date(), capturedOffline: false, effectiveAt: new Date(), gpsVerification: 'NOT_VERIFIED', processingState: 'ACCEPTED', channel: 'ONLINE', payloadHash: 'm'.repeat(64), requestId: randomUUID() } });
+  await prisma.employeeOpenShift.create({ data: { employeeId: chWId, openedByClockEventId: ceM, siteId: chMoveSite.body.id, sourceAssignmentId: chAMove.body.id, openedAt: new Date() } });
+  const chMove = await jsonFetch(`${BASE}/api/admin/assignments/${chAMove.body.id}/change`, { method: 'POST', headers: authHeaders(fx.admin.cookie), body: JSON.stringify({ effectiveFrom: todayIsoWA, siteId: chDest.body.id, workAreaId: null, todayShiftHandling: 'MOVE_TO_NEW' }) });
+  const osMove = await prisma.employeeOpenShift.findUniqueOrThrow({ where: { employeeId: chWId } });
+  check('CH9: MOVE_TO_NEW keeps today and re-points the open shift to the new site + assignment', chMove.status === 200 && chMove.body?.effectiveFrom === todayIsoWA && osMove.siteId === chDest.body.id && osMove.sourceAssignmentId === chMove.body?.newAssignment?.id, { status: chMove.status, body: chMove.body, os: osMove });
+  await prisma.employeeOpenShift.delete({ where: { employeeId: chWId } }).catch(() => {});
+
+  // CH10: the card shows the "Change site / work area" action and its mode picker.
+  await page.goto(`${BASE}/admin/workers/${chWId}`, { waitUntil: 'networkidle' });
+  const changeBtn = page.locator('.setup-item button', { hasText: 'Change site / work area' });
+  check('CH10: worker card offers "Change site / work area" per current assignment', (await changeBtn.count()) >= 1, await changeBtn.count());
+  await changeBtn.first().click();
+  const pickerText = await page.locator('.assignment-end-form', { hasText: 'Change the work area only' }).innerText().catch(() => '');
+  check('CH10b: the mode picker offers the quick and the full change', pickerText.includes('Change the work area only') && pickerText.includes('Move to another site'), pickerText.slice(0, 300));
+
   await browser.close();
 
   // ---- Group C: same-class create-second/edit/lifecycle/duplicate-submit/audit audit for the

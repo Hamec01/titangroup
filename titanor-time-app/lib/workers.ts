@@ -9,12 +9,15 @@ import { generateWorkerUsernameBase, reserveWorkerUsername } from '@/lib/worker-
 
 export interface CurrentAssignment {
   /** SiteAssignment.id — the real React key (a worker can have two current assignments on the
-   *  same site, one per work area) and the id passed to POST .../assignments/:id/end. */
+   *  same site, one per work area) and the id passed to POST .../assignments/:id/end|change. */
   assignmentId: string;
   siteId: string;
   siteName: string;
   workAreaId: string | null;
   workAreaName: string | null;
+  /** Template *id* (not the version id) — pre-selects the "Change site/zone" form's dropdown. */
+  templateId: string | null;
+  templateName: string | null;
   isPrimary: boolean;
   validFrom: string;
   validTo: string | null;
@@ -64,6 +67,9 @@ export interface WorkerDetail {
     deactivationReason: string | null;
   } | null;
   currentAssignments: CurrentAssignment[];
+  /** Assignments whose validTo is already in the past — shown in a collapsed "Past assignments"
+   *  block so the card stays focused on where the worker is now. Newest end first, capped. */
+  pastAssignments: CurrentAssignment[];
   activationStatus: ActivationStatus;
   /** Login username — independent of employeeNumber (lib/worker-usernames.ts). */
   username: string;
@@ -104,6 +110,7 @@ function mapAssignment(assignment: {
   validTo: Date | null;
   site: { id: string; name: string };
   workArea: { id: string; name: string } | null;
+  templateVersion: { template: { id: string; name: string } } | null;
 }): CurrentAssignment {
   return {
     assignmentId: assignment.id,
@@ -111,6 +118,8 @@ function mapAssignment(assignment: {
     siteName: assignment.site.name,
     workAreaId: assignment.workArea?.id ?? null,
     workAreaName: assignment.workArea?.name ?? null,
+    templateId: assignment.templateVersion?.template.id ?? null,
+    templateName: assignment.templateVersion?.template.name ?? null,
     isPrimary: assignment.isPrimary,
     validFrom: assignment.validFrom.toISOString().slice(0, 10),
     validTo: assignment.validTo ? assignment.validTo.toISOString().slice(0, 10) : null
@@ -123,7 +132,8 @@ const CURRENT_ASSIGNMENT_SELECT = {
   validFrom: true,
   validTo: true,
   site: { select: { id: true, name: true } },
-  workArea: { select: { id: true, name: true } }
+  workArea: { select: { id: true, name: true } },
+  templateVersion: { select: { template: { select: { id: true, name: true } } } }
 } as const;
 
 /**
@@ -243,7 +253,15 @@ export async function getWorkerDetail(employeeId: string): Promise<WorkerDetail 
     return null;
   }
 
+  const pastAssignmentRows = await prisma.siteAssignment.findMany({
+    where: { employeeId, validTo: { lt: today } },
+    orderBy: { validTo: 'desc' },
+    take: 20,
+    select: CURRENT_ASSIGNMENT_SELECT
+  });
+
   const currentAssignments = employee.siteAssignments.map(mapAssignment);
+  const pastAssignments = pastAssignmentRows.map(mapAssignment);
   const employment = employee.employments[0] ?? null;
 
   const activationStatus = await computeActivationStatus(
@@ -269,6 +287,7 @@ export async function getWorkerDetail(employeeId: string): Promise<WorkerDetail 
         }
       : null,
     currentAssignments,
+    pastAssignments,
     activationStatus,
     username: employee.user?.username ?? '',
     recommendedUsernameBase: generateWorkerUsernameBase(employee.firstName, employee.lastName)

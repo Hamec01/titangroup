@@ -1307,13 +1307,48 @@ button:disabled {
   color: var(--text-soft);
 }
 
-.assignment-end-form input {
+.assignment-end-form input,
+.assignment-end-form select {
   height: 32px;
   border: 1px solid rgba(255, 255, 255, 0.14);
   border-radius: 4px;
   background: rgba(7, 11, 17, 0.88);
   color: var(--text);
   padding: 0 8px;
+}
+
+/* WORKER_WORKAREA — "Change site / work area" reuses .assignment-end-form; its full form has
+   several stacked fields, and "Past assignments" is a low-emphasis collapsible history block. */
+.assignment-end-form .worker-setup-callout {
+  flex-basis: 100%;
+}
+
+.assignment-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 8px;
+  width: 100%;
+}
+
+.assignment-actions > .assignment-end-form {
+  flex-basis: 100%;
+  align-items: flex-start;
+}
+
+.worker-past-assignments {
+  margin: 10px 0 4px;
+  font-size: 0.9rem;
+}
+
+.worker-past-assignments summary {
+  cursor: pointer;
+  color: var(--text-soft);
+  padding: 4px 0;
+}
+
+.worker-past-assignments .setup-item {
+  opacity: 0.72;
 }
 
 /* docs/titanor-time/01_SCREEN_MAP.md §3 — worker screens are mobile-first,
