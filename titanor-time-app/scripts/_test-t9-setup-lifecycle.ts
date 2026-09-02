@@ -279,6 +279,27 @@ async function main() {
   const repeatDeactivate = await jsonFetch(`${BASE}/api/admin/workers/${fx.workerA.employeeId}/deactivate`, { method: 'POST', headers: authHeaders(fx.admin.cookie), body: JSON.stringify({ reason: 'repeat' }) });
   check('20: repeated deactivation returns documented 409 ALREADY_DEACTIVATED', repeatDeactivate.status === 409 && repeatDeactivate.body?.error?.code === 'ALREADY_DEACTIVATED', repeatDeactivate);
 
+  // 20b/c/d/e: reactivate (inverse of deactivate) — button appears while inactive, restores the
+  // working state, keeps the SiteAssignment, writes its own audit event, and is idempotent-safe.
+  await page.goto(`${BASE}/admin/workers/${fx.workerA.employeeId}`, { waitUntil: 'networkidle' });
+  const reactivateBtn = page.locator('button', { hasText: 'Reactivate worker' });
+  check('20b: "Reactivate worker" button is shown on an inactive worker', (await reactivateBtn.count()) === 1);
+  await reactivateBtn.click();
+  await page.waitForTimeout(700);
+  const employmentAAfterReactivate = await prisma.employment.findFirst({ where: { employeeId: fx.workerA.employeeId }, orderBy: { createdAt: 'desc' } });
+  check('20c: reactivate sets employment.active=true and clears endDate/reason', employmentAAfterReactivate?.active === true && employmentAAfterReactivate?.endDate === null && employmentAAfterReactivate?.deactivationReason === null, employmentAAfterReactivate);
+  const userAAfterReactivate = await prisma.user.findFirstOrThrow({ where: { employeeId: fx.workerA.employeeId } });
+  check('20d: reactivate sets User.status=ACTIVE', userAAfterReactivate.status === 'ACTIVE', userAAfterReactivate.status);
+  const assignmentAfterReactivate = await prisma.siteAssignment.findFirst({ where: { employeeId: fx.workerA.employeeId } });
+  check('20e: reactivate does not touch the SiteAssignment', assignmentAfterReactivate !== null && assignmentAfterReactivate.validTo === null);
+  const auditForReactivate = await prisma.auditEvent.findFirst({ where: { entityId: fx.workerA.employeeId, eventType: 'WORKER_REACTIVATED' }, orderBy: { createdAt: 'desc' } });
+  check('20f: WORKER_REACTIVATED AuditEvent exists', auditForReactivate !== null);
+  const repeatReactivate = await jsonFetch(`${BASE}/api/admin/workers/${fx.workerA.employeeId}/reactivate`, { method: 'POST', headers: authHeaders(fx.admin.cookie), body: '' });
+  check('20g: repeated reactivation returns 409 ALREADY_ACTIVE', repeatReactivate.status === 409 && repeatReactivate.body?.error?.code === 'ALREADY_ACTIVE', repeatReactivate);
+
+  // restore the prior state for the downstream steps: Worker A deactivated again.
+  await jsonFetch(`${BASE}/api/admin/workers/${fx.workerA.employeeId}/deactivate`, { method: 'POST', headers: authHeaders(fx.admin.cookie), body: JSON.stringify({ reason: 'T9 lifecycle regression test' }) });
+
   // 21: malformed/foreign id does not oracle or 500.
   const malformedIdRes = await jsonFetch(`${BASE}/api/admin/workers/not-a-uuid`, { headers: authHeaders(fx.admin.cookie) });
   const foreignIdRes = await jsonFetch(`${BASE}/api/admin/workers/${randomUUID()}`, { headers: authHeaders(fx.admin.cookie) });

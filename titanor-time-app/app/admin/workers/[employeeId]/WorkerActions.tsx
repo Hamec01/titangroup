@@ -26,6 +26,9 @@ export function WorkerActions({ worker }: { worker: WorkerDetail }) {
   const [deactivateLoading, setDeactivateLoading] = useState(false);
   const [deactivateError, setDeactivateError] = useState<string | null>(null);
 
+  const [reactivateLoading, setReactivateLoading] = useState(false);
+  const [reactivateError, setReactivateError] = useState<string | null>(null);
+
   const [showRegenerateConfirm, setShowRegenerateConfirm] = useState(false);
   const [regenerateLoading, setRegenerateLoading] = useState(false);
   const [regenerateError, setRegenerateError] = useState<string | null>(null);
@@ -232,6 +235,47 @@ export function WorkerActions({ worker }: { worker: WorkerDetail }) {
     }
   }
 
+  async function handleReactivate(): Promise<void> {
+    if (reactivateLoading) {
+      return;
+    }
+    setReactivateError(null);
+    setReactivateLoading(true);
+
+    try {
+      const response = await fetch(`/api/admin/workers/${worker.id}/reactivate`, {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json', 'X-Requested-With': CSRF_HEADER_VALUE }
+      });
+
+      if (!response.ok) {
+        const code = await parseErrorCode(response);
+        switch (code) {
+          case 'ALREADY_ACTIVE':
+            setReactivateError(localeText(locale, 'This worker is already active.', 'Работник уже активен.'));
+            break;
+          case 'WORKER_NOT_FOUND':
+            setReactivateError(localeText(locale, 'This worker no longer exists.', 'Этого работника больше нет.'));
+            break;
+          case 'FORBIDDEN':
+            setReactivateError(localeText(locale, 'You no longer have permission to change workers.', 'У вас больше нет права изменять работников.'));
+            break;
+          default:
+            setReactivateError(localeText(locale, 'Something went wrong. Please try again.', 'Произошла ошибка. Попробуйте ещё раз.'));
+        }
+        setReactivateLoading(false);
+        return;
+      }
+
+      router.refresh();
+      setReactivateLoading(false);
+    } catch {
+      setReactivateError(localeText(locale, 'Network error. Please try again.', 'Ошибка сети. Попробуйте ещё раз.'));
+      setReactivateLoading(false);
+    }
+  }
+
   async function handleDeactivate(event: FormEvent<HTMLFormElement>): Promise<void> {
     event.preventDefault();
     if (deactivateLoading) {
@@ -412,7 +456,7 @@ export function WorkerActions({ worker }: { worker: WorkerDetail }) {
         </section>
       ) : worker.activationStatus === 'SETUP_INCOMPLETE' ? (
         <div className="worker-setup-callout">
-          <p>{localeText(locale, 'This account cannot be activated because its employment is not active. Reactivate the worker first.', 'Учётную запись нельзя активировать, потому что трудоустройство неактивно. Сначала восстановите работника.')}</p>
+          <p>{localeText(locale, 'This account cannot be activated because its employment is not active. Use “Reactivate worker” below first.', 'Учётную запись нельзя активировать, потому что трудоустройство неактивно. Сначала нажмите «Восстановить работника» ниже.')}</p>
         </div>
       ) : (
         <p>{localeText(locale, 'This worker has already activated their account.', 'Работник уже активировал учётную запись.')}</p>
@@ -459,7 +503,33 @@ export function WorkerActions({ worker }: { worker: WorkerDetail }) {
             </form>
           )}
         </>
-      ) : null}
+      ) : (
+        <>
+          <h2>{localeText(locale, 'Reactivate', 'Восстановление')}</h2>
+          <p className="setup-subtitle">
+            {localeText(
+              locale,
+              'Bring this worker back to an active state — undoes the deactivation. Their site assignments and timesheets are kept.',
+              'Вернуть работника в активное состояние — отменяет деактивацию. Назначения на объекты и табели сохраняются.'
+            )}
+          </p>
+          {reactivateError ? (
+            <p className="login-error" role="alert">
+              {reactivateError}
+            </p>
+          ) : null}
+          <button
+            type="button"
+            className="login-submit"
+            disabled={reactivateLoading}
+            onClick={handleReactivate}
+          >
+            {reactivateLoading
+              ? localeText(locale, 'Reactivating…', 'Восстановление…')
+              : localeText(locale, 'Reactivate worker', 'Восстановить работника')}
+          </button>
+        </>
+      )}
     </>
   );
 }
