@@ -74,6 +74,25 @@
 `docker rm -f titanor-time-prod-app && docker rename titanor-time-prod-app-pre-7b3cb94
 titanor-time-prod-app && docker start titanor-time-prod-app`. DB restore не нужен (миграции нет).
 
+## Follow-up: `end-gt-today-f2c5e57` (2026-09-02 12:27 UTC)
+
+Владелец завершил назначение Nazar Druz **3 раза** датой «сегодня» — оно завершалось, но карточка
+считала «заканчивается сегодня» = «ещё действует» (`validTo >= today`) и продолжала показывать
+(ушло бы только завтра).
+
+**Фикс:** `lib/workers.ts` `currentAssignmentWhere` теперь сравнивает `validTo` с `> today`
+(не `>=`). Назначение, завершённое сегодняшним числом, **сразу** уходит из «Текущих назначений»
+в блок «Прошлые назначения». Путь отметок работника (`lib/worker-context.ts`,
+`lib/attendance-clock.ts`) сохраняет свой инклюзивный (`>=`) фильтр — работник дорабатывает
+сегодняшнюю смену.
+
+- Browser lane 105/26/33/84. Backup `production-20260902T122629Z-pre-deploy`. Swap ~4 c.
+  Rollback: `titanor-time-prod-app-pre-f2c5e57`. Scheduler не тронут.
+- Live (read-only): Nazar Druz — «Meyer Turku Shipyard» ушёл в «Прошлые назначения (1)», в текущих
+  осталась только зона Aros Marine.
+- Ruslan Druz — его «Meyer Turku Shipyard» был завершён датой **13.09** (до утреннего фикса), висит
+  до 13-го. Владельцу: нажать «Завершить» ещё раз (дата подставится сегодня) → уйдёт сразу.
+
 ## Осталось (Деплой 2b + D3)
 
 - **Деплой 2b:** групповой перевод работников; пометка в табеле «Объект изменён DD.MM в HH:MM: A → B».
