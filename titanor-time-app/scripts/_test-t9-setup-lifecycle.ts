@@ -362,6 +362,13 @@ async function main() {
   const w1Row = await prisma.siteAssignment.findUniqueOrThrow({ where: { id: asgW1.body.id } });
   const w1FuturePlanned = await prisma.timesheetDraftPlannedShift.count({ where: { sourceAssignmentId: asgW1.body.id, date: { gt: new Date(`${todayIsoWA}T00:00:00.000Z`) } } });
   check('WA6: ended assignment kept (validTo + endedReason), and its future draft planned shifts dropped', w1Row.validTo !== null && (w1Row.endedReason ?? '').includes('project ended') && w1FuturePlanned === 0, { row: w1Row, futurePlanned: w1FuturePlanned });
+  // WA6b: ending as of today removes it from the admin's "current" view immediately (validTo is
+  // compared with `gt` today, not `gte`), even though the worker can still finish today's shift.
+  const wbListAfterEnd = await jsonFetch(`${BASE}/api/admin/workers?pageSize=100`, { headers: authHeaders(fx.admin.cookie) });
+  const wbCurrent = ((wbListAfterEnd.body.items as { id: string; currentAssignments: { assignmentId: string }[] }[]).find((x) => x.id === fx.workerB.employeeId)?.currentAssignments ?? []).map((a) => a.assignmentId);
+  check('WA6b: the assignment ended today is gone from the admin "current" list; the other stays', !wbCurrent.includes(asgW1.body.id) && wbCurrent.includes(asgW2.body.id), { wbCurrent, ended: asgW1.body.id, kept: asgW2.body.id });
+  const wbCardHtml = await (await fetch(`${BASE}/admin/workers/${fx.workerB.employeeId}`, { headers: authHeaders(fx.admin.cookie) })).text();
+  check('WA6c: the worker card now shows a "Past assignments" block', wbCardHtml.includes('Past assignments'));
 
   // WA7: an assignment WITH real recorded time after the chosen date is a clean, actionable 409
   // (not a 500, not a silent drop). Hand-craft a committed TimesheetDraftSegment on a far-future

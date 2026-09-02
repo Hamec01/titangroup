@@ -95,11 +95,18 @@ export function helsinkiToday(): Date {
   return new Date(`${isoDate}T00:00:00.000Z`);
 }
 
-/** SiteAssignment rows whose [validFrom, validTo] window covers `today` — "current" per 03_DATA_MODEL_ERD.md §4.4. */
+/**
+ * SiteAssignment rows the *admin worker views* (`/admin/workers` list + the worker card) treat as
+ * "current". validTo is compared with `gt`, not `gte`: once an admin ends an assignment as of
+ * today, it should immediately drop out of the active list and into "Past assignments" — from the
+ * admin's point of view the worker has been removed from that site. The worker's own clock-in /
+ * GPS path keeps its inclusive (`gte`) copy of this filter (lib/worker-context.ts,
+ * lib/attendance-clock.ts) so a worker whose assignment ends today can still finish today's shift.
+ */
 function currentAssignmentWhere(today: Date) {
   return {
     validFrom: { lte: today },
-    OR: [{ validTo: null }, { validTo: { gte: today } }]
+    OR: [{ validTo: null }, { validTo: { gt: today } }]
   };
 }
 
@@ -254,7 +261,7 @@ export async function getWorkerDetail(employeeId: string): Promise<WorkerDetail 
   }
 
   const pastAssignmentRows = await prisma.siteAssignment.findMany({
-    where: { employeeId, validTo: { lt: today } },
+    where: { employeeId, validTo: { not: null, lte: today } },
     orderBy: { validTo: 'desc' },
     take: 20,
     select: CURRENT_ASSIGNMENT_SELECT
