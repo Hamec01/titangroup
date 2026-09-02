@@ -173,7 +173,7 @@ export function NewAssignmentForm({
       if (overlapResponse.ok) {
         const overlapBody = (await overlapResponse.json()) as { hasOverlap: boolean };
         if (overlapBody.hasOverlap) {
-          setErrorMessage(localeText(locale, 'This worker already has an overlapping assignment for this site and work area.', 'У работника уже есть пересекающееся назначение на этот объект и рабочую зону.'));
+          setErrorMessage(localeText(locale, 'This worker already has an overlapping assignment for this site and customer.', 'У работника уже есть пересекающееся назначение на этот объект и заказчика.'));
           setLoading(false);
           return;
         }
@@ -212,7 +212,7 @@ export function NewAssignmentForm({
             setErrorMessage(localeText(locale, 'Selected site no longer exists.', 'Выбранного объекта больше нет.'));
             break;
           case 'WORK_AREA_NOT_FOUND':
-            setErrorMessage(localeText(locale, 'Selected work area no longer exists on this site.', 'Выбранной рабочей зоны больше нет на этом объекте.'));
+            setErrorMessage(localeText(locale, 'Selected customer no longer exists on this site.', 'Выбранного заказчика больше нет на этом объекте.'));
             break;
           case 'TEMPLATE_NOT_FOUND':
             setErrorMessage(localeText(locale, 'Selected work schedule template no longer exists.', 'Выбранного шаблона графика больше нет.'));
@@ -221,7 +221,7 @@ export function NewAssignmentForm({
             setErrorMessage(localeText(locale, 'This worker is not active — reactivate them first.', 'Работник неактивен — сначала восстановите его.'));
             break;
           case 'ASSIGNMENT_OVERLAP':
-            setErrorMessage(localeText(locale, 'This worker already has an overlapping assignment for this site and work area.', 'У работника уже есть пересекающееся назначение на этот объект и рабочую зону.'));
+            setErrorMessage(localeText(locale, 'This worker already has an overlapping assignment for this site and customer.', 'У работника уже есть пересекающееся назначение на этот объект и заказчика.'));
             break;
           case 'NOT_AUTHENTICATED':
             setErrorMessage(localeText(locale, 'Your session expired — please sign in again.', 'Сессия завершилась — войдите снова.'));
@@ -287,14 +287,14 @@ export function NewAssignmentForm({
       </div>
 
       <div className="login-field">
-        <label htmlFor="assignment-work-area">{localeText(locale, 'Work area (optional)', 'Рабочая зона (необязательно)')}</label>
+        <label htmlFor="assignment-work-area">{localeText(locale, 'Customer (optional)', 'Заказчик (необязательно)')}</label>
         <select
           id="assignment-work-area"
           disabled={loading || !siteId}
           value={workAreaId}
           onChange={(event) => setWorkAreaId(event.target.value)}
         >
-          <option value="">{localeText(locale, 'No specific work area', 'Без конкретной рабочей зоны')}</option>
+          <option value="">{localeText(locale, 'No specific customer', 'Без конкретного заказчика')}</option>
           {workAreas.map((area) => (
             <option key={area.id} value={area.id}>
               {area.name}

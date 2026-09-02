@@ -21,7 +21,7 @@ const EN = {
     currentAssignments: 'Current assignments',
     noAssignment: 'No site has been assigned yet. The worker can already activate and install the app; it will explain that the employer has not assigned a site.',
     addWork: 'Add a site and work schedule',
-    addWorkHelp: "Choose the worker's site, optional work area, schedule template and start date here. You do not need to leave this page.",
+    addWorkHelp: "Choose the worker's site, optional customer, schedule template and start date here. You do not need to leave this page.",
     submission: 'Timesheet submission',
     submissionHelp: 'Choose whether this worker submits every week or every two weeks. Periods are prepared automatically.',
     activation: {
@@ -45,8 +45,8 @@ const EN = {
   },
   assignments: {
     title: 'Assignments', singular: 'assignment', plural: 'assignments', empty: 'No assignments yet.',
-    newTitle: 'New assignment', newHelp: 'Assign a site, optional work area and schedule to the worker.',
-    worker: 'Worker', site: 'Site', workArea: 'Work area', template: 'Template',
+    newTitle: 'New assignment', newHelp: 'Assign a site, optional customer and schedule to the worker.',
+    worker: 'Worker', site: 'Site', workArea: 'Customer', template: 'Template',
     validFrom: 'Valid from', validTo: 'Valid to'
   },
   periods: {
@@ -85,7 +85,7 @@ const RU = {
     currentAssignments: 'Текущие назначения',
     noAssignment: 'Объект ещё не назначен. Работник уже может активировать и установить приложение — оно сообщит, что начальник пока не назначил объект.',
     addWork: 'Добавить объект и рабочий график',
-    addWorkHelp: 'Выберите для работника объект, при необходимости рабочую зону, шаблон графика и дату начала. Уходить с этой страницы не нужно.',
+    addWorkHelp: 'Выберите для работника объект, при необходимости заказчика, шаблон графика и дату начала. Уходить с этой страницы не нужно.',
     submission: 'Отправка табеля',
     submissionHelp: 'Выберите, как часто этот работник отправляет табель: каждую неделю или раз в две недели. Периоды создаются автоматически.',
     activation: {
@@ -109,8 +109,8 @@ const RU = {
   },
   assignments: {
     title: 'Назначения', singular: 'назначение', plural: 'назначений', empty: 'Назначений пока нет.',
-    newTitle: 'Новое назначение', newHelp: 'Назначьте работнику объект, при необходимости рабочую зону и график.',
-    worker: 'Работник', site: 'Объект', workArea: 'Рабочая зона', template: 'Шаблон',
+    newTitle: 'Новое назначение', newHelp: 'Назначьте работнику объект, при необходимости заказчика и график.',
+    worker: 'Работник', site: 'Объект', workArea: 'Заказчик', template: 'Шаблон',
     validFrom: 'Действует с', validTo: 'Действует до'
   },
   periods: {

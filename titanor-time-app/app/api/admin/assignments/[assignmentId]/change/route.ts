@@ -205,7 +205,7 @@ export async function POST(request: NextRequest, { params }: RouteParams): Promi
   const sameTemplate = templateVersionId === existing.templateVersionId;
   const samePrimary = normalizedIsPrimary === existing.isPrimary;
   if (sameSite && sameArea && sameTemplate && samePrimary) {
-    return jsonError(400, { code: 'NOTHING_TO_CHANGE', message: 'The new site, work area, template and primary flag all match the current assignment.' }, requestId);
+    return jsonError(400, { code: 'NOTHING_TO_CHANGE', message: 'The new site, customer, template and primary flag all match the current assignment.' }, requestId);
   }
 
   // An open shift on/before `effectiveFrom` needs an explicit decision from the admin.
@@ -252,7 +252,7 @@ export async function POST(request: NextRequest, { params }: RouteParams): Promi
       409,
       {
         code: 'ASSIGNMENT_OVERLAP',
-        message: 'The worker already has another assignment on this site and work area covering that date range.',
+        message: 'The worker already has another assignment on this site and customer covering that date range.',
         fieldErrors: { effectiveFrom: ['overlaps an existing assignment'] }
       },
       requestId
@@ -303,7 +303,7 @@ export async function POST(request: NextRequest, { params }: RouteParams): Promi
         where: { id: existing.id },
         data: {
           validTo: closedValidTo,
-          endedReason: trimmedReason ?? 'Изменение объекта / рабочей зоны',
+          endedReason: trimmedReason ?? 'Изменение объекта / заказчика',
           version: { increment: 1 }
         }
       });
@@ -361,7 +361,7 @@ export async function POST(request: NextRequest, { params }: RouteParams): Promi
     if (isExclusionViolation(error)) {
       return jsonError(
         409,
-        { code: 'ASSIGNMENT_OVERLAP', message: 'The worker already has another assignment on this site and work area covering that date range.' },
+        { code: 'ASSIGNMENT_OVERLAP', message: 'The worker already has another assignment on this site and customer covering that date range.' },
         requestId
       );
     }

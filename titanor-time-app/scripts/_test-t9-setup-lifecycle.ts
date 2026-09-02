@@ -445,13 +445,13 @@ async function main() {
   check('CH9: MOVE_TO_NEW keeps today and re-points the open shift to the new site + assignment', chMove.status === 200 && chMove.body?.effectiveFrom === todayIsoWA && osMove.siteId === chDest.body.id && osMove.sourceAssignmentId === chMove.body?.newAssignment?.id, { status: chMove.status, body: chMove.body, os: osMove });
   await prisma.employeeOpenShift.delete({ where: { employeeId: chWId } }).catch(() => {});
 
-  // CH10: the card shows the "Change site / work area" action and its mode picker.
+  // CH10: the card shows the "Change site / customer" action and its mode picker.
   await page.goto(`${BASE}/admin/workers/${chWId}`, { waitUntil: 'networkidle' });
-  const changeBtn = page.locator('.setup-item button', { hasText: 'Change site / work area' });
-  check('CH10: worker card offers "Change site / work area" per current assignment', (await changeBtn.count()) >= 1, await changeBtn.count());
+  const changeBtn = page.locator('.setup-item button', { hasText: 'Change site / customer' });
+  check('CH10: worker card offers "Change site / customer" per current assignment', (await changeBtn.count()) >= 1, await changeBtn.count());
   await changeBtn.first().click();
-  const pickerText = await page.locator('.assignment-end-form', { hasText: 'Change the work area only' }).innerText().catch(() => '');
-  check('CH10b: the mode picker offers the quick and the full change', pickerText.includes('Change the work area only') && pickerText.includes('Move to another site'), pickerText.slice(0, 300));
+  const pickerText = await page.locator('.assignment-end-form', { hasText: 'Change the customer only' }).innerText().catch(() => '');
+  check('CH10b: the mode picker offers the quick and the full change', pickerText.includes('Change the customer only') && pickerText.includes('Move to another site'), pickerText.slice(0, 300));
 
   await browser.close();
 

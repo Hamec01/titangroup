@@ -160,10 +160,10 @@ export function ChangeAssignmentAction({ assignment, today }: ChangeAssignmentAc
       setLoading(false);
       switch (code) {
         case 'NOTHING_TO_CHANGE':
-          setErrorMessage(localeText(locale, 'Nothing changed — pick a different site, work area or schedule.', 'Ничего не изменилось — выберите другой объект, зону или график.'));
+          setErrorMessage(localeText(locale, 'Nothing changed — pick a different site, customer or schedule.', 'Ничего не изменилось — выберите другой объект, заказчика или график.'));
           break;
         case 'ASSIGNMENT_OVERLAP':
-          setErrorMessage(localeText(locale, 'The worker already has an assignment on this site and work area for those dates.', 'У работника уже есть назначение на этот объект и зону в эти даты.'));
+          setErrorMessage(localeText(locale, 'The worker already has an assignment on this site and customer for those dates.', 'У работника уже есть назначение на этот объект и заказчика в эти даты.'));
           break;
         case 'ASSIGNMENT_HAS_SUBMITTED_TIME':
           setErrorMessage(localeText(locale, 'There are hours in a submitted timesheet on or after that date. Choose a date after the current period.', 'На эти даты уже есть часы в сданном табеле. Выберите дату после текущего периода.'));
@@ -183,7 +183,7 @@ export function ChangeAssignmentAction({ assignment, today }: ChangeAssignmentAc
         case 'SITE_NOT_FOUND':
         case 'WORK_AREA_NOT_FOUND':
         case 'TEMPLATE_NOT_FOUND':
-          setErrorMessage(localeText(locale, 'The selected site, work area or schedule no longer exists.', 'Выбранного объекта, зоны или графика больше нет.'));
+          setErrorMessage(localeText(locale, 'The selected site, customer or schedule no longer exists.', 'Выбранного объекта, заказчика или графика больше нет.'));
           break;
         case 'FORBIDDEN':
           setErrorMessage(localeText(locale, 'You no longer have permission to change assignments.', 'У вас больше нет права менять назначения.'));
@@ -206,7 +206,7 @@ export function ChangeAssignmentAction({ assignment, today }: ChangeAssignmentAc
   if (phase === 'collapsed') {
     return (
       <button type="button" className="setup-action" onClick={() => setPhase('pick')}>
-        {localeText(locale, 'Change site / work area', 'Изменить объект / зону')}
+        {localeText(locale, 'Change site / customer', 'Изменить объект / заказчика')}
       </button>
     );
   }
@@ -216,10 +216,10 @@ export function ChangeAssignmentAction({ assignment, today }: ChangeAssignmentAc
       <div className="assignment-end-form">
         <p className="setup-subtitle">{localeText(locale, 'How do you want to change this assignment?', 'Как изменить это назначение?')}</p>
         <button type="button" className="setup-action" onClick={() => setPhase('zone')}>
-          {localeText(locale, 'Change the work area only (same site, from today)', 'Сменить только рабочую зону (объект тот же, с сегодня)')}
+          {localeText(locale, 'Change the customer only (same site, from today)', 'Сменить только заказчика (объект тот же, с сегодня)')}
         </button>
         <button type="button" className="setup-action" onClick={() => setPhase('full')}>
-          {localeText(locale, 'Move to another site / work area (choose the date)', 'Перевести на другой объект / зону (с выбором даты)')}
+          {localeText(locale, 'Move to another site / customer (choose the date)', 'Перевести на другой объект / заказчика (с выбором даты)')}
         </button>
         <button type="button" className="setup-action" onClick={reset}>
           {localeText(locale, 'Cancel', 'Отмена')}
@@ -270,9 +270,9 @@ export function ChangeAssignmentAction({ assignment, today }: ChangeAssignmentAc
         </p>
       )}
 
-      <label htmlFor={`change-area-${assignment.id}`}>{localeText(locale, 'Work area', 'Рабочая зона')}</label>
+      <label htmlFor={`change-area-${assignment.id}`}>{localeText(locale, 'Customer', 'Заказчик')}</label>
       <select id={`change-area-${assignment.id}`} disabled={loading} value={workAreaId} onChange={(e) => setWorkAreaId(e.target.value)}>
-        <option value="">{localeText(locale, '— no work area —', '— без рабочей зоны —')}</option>
+        <option value="">{localeText(locale, '— no customer —', '— без заказчика —')}</option>
         {workAreas.map((area) => (
           <option key={area.id} value={area.id}>
             {area.name}

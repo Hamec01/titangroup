@@ -134,7 +134,7 @@ async function main() {
   await admin.goto(`${BASE}/admin/sites/${siteId}`, { waitUntil: 'networkidle' });
   const workAreaName = `Zone ${run}`;
   await admin.locator('#work-area-name').fill(workAreaName);
-  await admin.locator('button', { hasText: 'Add work area' }).click();
+  await admin.locator('button', { hasText: 'Add customer' }).click();
   await admin.getByText(workAreaName, { exact: true }).waitFor({ state: 'visible', timeout: 10000 });
   check('A3: work area created via real UI form', await admin.locator('body').innerText().then((t) => t.includes(workAreaName)));
 

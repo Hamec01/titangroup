@@ -101,8 +101,8 @@ export const GUIDE_CONTENT: Record<AppLocale, GuideContent> = {
         text: 'Если объектов много и они в разных городах, можно сначала завести список городов в «Настройка → Города» — тогда объекты можно будет группировать по городу. Если объект один или все в одном городе, этот шаг можно пропустить.'
       },
       {
-        title: '3. Рабочая зона (необязательно)',
-        text: 'Если внутри объекта удобно делить работников по участкам (например, по этажам или цехам), рабочие зоны добавляются прямо на странице конкретного объекта. Если весь объект — это одна зона, шаг можно пропустить.'
+        title: '3. Заказчик (необязательно)',
+        text: 'Если на одном объекте работают на несколько заказчиков (например, два контракта на одной верфи), заказчики добавляются прямо на странице конкретного объекта. Если на объекте один заказчик — шаг можно пропустить. GPS-геозона при этом одна на весь объект: заказчики внутри объекта по координатам не разграничиваются.'
       },
       {
         title: '4. Шаблон рабочего графика',
@@ -144,8 +144,8 @@ export const GUIDE_CONTENT: Record<AppLocale, GuideContent> = {
         items: [
           { title: 'Чек-лист настройки', text: 'Показывает, какие из обязательных шагов (объект, шаблон, работник, назначение, цикл отправки) уже выполнены, а какие ещё нет, с прямыми ссылками на нужный раздел.' },
           { title: 'Города', text: 'Необязательный справочник городов для группировки объектов по местоположению. Город с привязанными объектами удалить нельзя.' },
-          { title: 'Объекты', text: 'Список и создание объектов: название, город (если используется), адрес, геозона, статус «активен/закрыт». На странице конкретного объекта также добавляются его рабочие зоны и назначается прораб по умолчанию.' },
-          { title: 'Рабочие зоны', text: 'Общий список всех рабочих зон по всем объектам. Саму зону нужно создавать не здесь, а на странице соответствующего объекта. Зону нельзя удалить полностью — только отключить, чтобы сохранить историю по уже отработанному в ней времени.' },
+          { title: 'Объекты', text: 'Список и создание объектов: название, город (если используется), адрес, геозона, статус «активен/завершён». На странице конкретного объекта также добавляются его заказчики и назначается прораб по умолчанию.' },
+          { title: 'Заказчики', text: 'Общий список всех заказчиков по всем объектам (на одном объекте может работать несколько заказчиков). Самого заказчика нужно создавать не здесь, а на странице соответствующего объекта. Заказчика нельзя удалить полностью — только отключить, чтобы сохранить историю по уже отработанному времени.' },
           { title: 'Шаблоны графика', text: 'Типовые рабочие графики (рабочие дни недели и ожидаемые часы), на которые ссылаются назначения работников. Шаблон, который используется, можно только деактивировать, а не удалить.' },
           { title: 'Циклы отправки табеля', text: 'Для каждого активного работника — как часто он отправляет табель: раз в неделю или раз в две недели. Здесь же виден текущий расчётный период по каждому работнику; настроить его можно прямо со страницы работника.' }
         ]
@@ -155,7 +155,7 @@ export const GUIDE_CONTENT: Record<AppLocale, GuideContent> = {
         items: [
           { title: 'Работники', text: 'Полный список сотрудников с их статусом трудоустройства, текущим назначением и статусом активации мобильного приложения. Отсюда же можно выдать или перевыдать код/QR-код активации, а на карточке — заполнить досье работника.' },
           { title: 'Работники — матрица', text: 'Общая таблица по всем работникам: профессии, текущий объект, занятость (активен / неактивен), допуски и сертификаты со сроком и статусом (действует / истекает скоро / истёк / срок не указан). Фильтры по категории профессии, профессии, конкретному допуску и его статусу, объекту, подтверждению; сортировка. Всю отфильтрованную выборку можно выгрузить в PDF или CSV. Сами профессии и допуски заводятся на карточке работника. (Старый адрес «Допуски и сертификаты» ведёт сюда же.)' },
-          { title: 'Назначения', text: 'Связь «работник + объект (+ рабочая зона) + шаблон графика» на период времени. У работника может быть одно основное назначение и несколько дополнительных; завершённое назначение не удаляется, а остаётся в истории.' },
+          { title: 'Назначения', text: 'Связь «работник + объект (+ заказчик) + шаблон графика» на период времени. У работника может быть одно основное назначение и несколько дополнительных; завершённое назначение не удаляется, а остаётся в истории.' },
           { title: 'Пользователи', text: 'Учётные записи для входа в систему помимо мобильного приложения работника — в первую очередь прорабы, а также дополнительные администраторы. Отсюда же выдаются коды активации для новых учётных записей.' }
         ]
       },
@@ -204,7 +204,7 @@ export const GUIDE_CONTENT: Record<AppLocale, GuideContent> = {
       'Табель на проверке можно поправить тремя способами: вернуть работнику с причиной (он переделает сам), «Изменить часы» (быстрая правка администратором без причины, работник не уведомляется) или «Исправить часы» с причиной, которую работник увидит. Отдельный процесс «Исправление» нужен только для уже окончательно одобренного табеля.',
       'Больничный, отпуск или неоплачиваемый день можно проставить прямо в редакторе табеля при проверке — отдельный одобренный запрос на отсутствие для этого больше не обязателен.',
       'Допуски и сертификаты с истекающим сроком система показывает в колокольчике заранее — не дожидаясь, пока они станут недействительны.',
-      'Рабочую зону и шаблон графика, которые уже используются, нельзя удалить — только отключить: так сохраняется история по уже отработанному времени, но их больше нельзя выбрать для новых назначений.',
+      'Заказчика и шаблон графика, которые уже используются, нельзя удалить — только отключить: так сохраняется история по уже отработанному времени, но их больше нельзя выбрать для новых назначений.',
       'Изменение цикла отправки табеля задним числом ограничено, если по текущему периоду уже есть данные — такие изменения обычно применяются с ближайшей будущей границы периода.'
     ],
     changelogTitle: 'Что нового',
@@ -227,8 +227,8 @@ export const GUIDE_CONTENT: Record<AppLocale, GuideContent> = {
         items: [
           'Панель начальника и приложение работника переведены на русский и английский. Язык можно переключить в шапке, а отчёты для заказчика и бухгалтерии остаются на английском.',
           'Первоначальная настройка собрана в понятную цепочку: создать объект и график, добавить работника, назначить ему место и выбрать, как часто он сдаёт табель. Текущие периоды создаются сами — вручную открывать их обычно не нужно.',
-          'На странице работника можно сразу назначить объект, рабочую зону, график и недельный или двухнедельный цикл сдачи табеля. Там же выдаётся ссылка и QR-код для установки приложения.',
-          'Адрес объекта можно найти на бесплатной карте. Точка ставится по адресу, её можно проверить и поправить, а затем выбрать радиус рабочей зоны.',
+          'На странице работника можно сразу назначить объект, заказчика, график и недельный или двухнедельный цикл сдачи табеля. Там же выдаётся ссылка и QR-код для установки приложения.',
+          'Адрес объекта можно найти на бесплатной карте. Точка ставится по адресу, её можно проверить и поправить, а затем выбрать радиус геозоны объекта.',
           'Главный экран работника переделан для телефона: крупная кнопка «Приход / Уход», имя, дата, выбранный объект, часы за сегодня, последние дни и меню с быстрым возвратом на главную.',
           'Отметки прихода и ухода сразу появляются в часах работника и у руководителя. Время приводится к понятным получасовым шагам по правилам компании.',
           'Работник может пользоваться сохранёнными страницами и делать отметки без интернета. Когда связь появляется, приложение отправляет накопленное само и не показывает данные другого пользователя телефона.',
@@ -239,7 +239,7 @@ export const GUIDE_CONTENT: Record<AppLocale, GuideContent> = {
       {
         date: 'Приложение работника, 29 августа 2026',
         items: [
-          'Приход больше нельзя «сломать». Раньше, если GPS показывал работника вне рабочей зоны, приход просто отклонялся — часы не шли, а ошибка приходила с опозданием. Теперь приход всегда фиксируется и часы идут; если работник вне зоны — на экране появляется окно с выбором «Отметить приход» или «Ещё не отмечать» (окно нельзя смахнуть, нужно выбрать). Руководитель видит пометку «приход вне геозоны» для проверки.',
+          'Приход больше нельзя «сломать». Раньше, если GPS показывал работника вне территории объекта, приход просто отклонялся — часы не шли, а ошибка приходила с опозданием. Теперь приход всегда фиксируется и часы идут; если работник вне объекта — на экране появляется окно с выбором «Отметить приход» или «Ещё не отмечать» (окно нельзя смахнуть, нужно выбрать). Руководитель видит пометку «приход вне геозоны» для проверки.',
           'Профессии — теперь и в приложении работника. Работник сам может добавить свои специальности на странице «Профиль» (из каталога или своим текстом, сколько нужно). В списке профессий последний пункт — «✎ Другая — вписать свою». Старое поле «Специальность» убрано (администратор по-прежнему правит профессии со своей стороны).',
           'Уведомления у работника. Рядом с меню (☰) появился колокольчик. В нём: «сколько дней осталось сдать табель» (за 3 дня до срока, потом — «уйдёт автоматически»), и каждая отметка, которую сервер не принял — с причиной и кнопкой «Убрать». С главного экрана «Действие требует внимания» убрано полностью.',
           'Обновление приложения «потянуть вниз». На любой странице приложения потяните её вниз от самого верха и подержите пару секунд — приложение обновится до последней версии, не нужно закрывать и открывать заново.'
@@ -339,8 +339,8 @@ export const GUIDE_CONTENT: Record<AppLocale, GuideContent> = {
         text: 'If you have many sites across different cities, you can first build a city list under Setup → Cities so sites can be grouped by location. If you have one site, or all sites are in the same city, skip this step.'
       },
       {
-        title: '3. Work area (optional)',
-        text: 'If it\'s useful to split workers within a site by section (e.g. by floor or workshop), work areas are added directly from a specific site\'s own page. If the whole site is a single area, skip this step.'
+        title: '3. Customer (optional)',
+        text: 'If one site serves several customers (e.g. two contracts on the same shipyard), customers are added directly from that site\'s own page. If the site has a single customer, skip this step. The GPS geofence is one per site — customers within a site are not separated by location.'
       },
       {
         title: '4. Schedule template',
@@ -382,8 +382,8 @@ export const GUIDE_CONTENT: Record<AppLocale, GuideContent> = {
         items: [
           { title: 'Setup checklist', text: 'Shows which required steps (site, template, worker, assignment, submission cycle) are already done and which aren\'t yet, with direct links to the relevant section.' },
           { title: 'Cities', text: 'An optional city directory for grouping sites by location. A city with sites linked to it cannot be deleted.' },
-          { title: 'Sites', text: 'List and creation of sites: name, city (if used), address, geofence, active/closed status. A site\'s own page is also where its work areas are added and its default foreman is assigned.' },
-          { title: 'Work areas', text: 'A combined list of every work area across every site. The area itself is created from its site\'s own page, not here. A work area can\'t be fully deleted — only deactivated, to keep the history of time already logged in it.' },
+          { title: 'Sites', text: 'List and creation of sites: name, city (if used), address, geofence, active/finished status. A site\'s own page is also where its customers are added and its default foreman is assigned.' },
+          { title: 'Customers', text: 'A combined list of every customer across every site (one site can serve several customers). The customer itself is created from its site\'s own page, not here. A customer can\'t be fully deleted — only deactivated, to keep the history of time already logged.' },
           { title: 'Schedule templates', text: 'Standard work schedules (working days of the week and expected hours) that worker assignments reference. A template that\'s in use can only be deactivated, not deleted.' },
           { title: 'Submission cycles', text: 'For each active worker — how often they submit a timesheet: weekly or every two weeks. The current payroll period for each worker is also shown here; it can be configured directly from the worker\'s own page.' }
         ]
@@ -393,7 +393,7 @@ export const GUIDE_CONTENT: Record<AppLocale, GuideContent> = {
         items: [
           { title: 'Workers', text: 'The full employee list with employment status, current assignment, and mobile-app activation status. Activation codes/QR codes can be issued or reissued from here, and the worker\'s card is where the dossier is filled in.' },
           { title: 'Workforce matrix', text: 'A whole-team table: professions, current site, employment (active / inactive), and qualifications/certificates with expiry and status (valid / expiring soon / expired / expiry not set). Filter by profession category, profession, a specific qualification and its status, site, verification; sort. The whole filtered selection exports to PDF or CSV. Professions and qualifications themselves are added on the worker\'s card. (The old "Qualifications" URL leads here.)' },
-          { title: 'Assignments', text: 'The link between "worker + site (+ work area) + schedule template" for a date range. A worker can have one primary assignment and several secondary ones; a finished assignment isn\'t deleted, it stays in history.' },
+          { title: 'Assignments', text: 'The link between "worker + site (+ customer) + schedule template" for a date range. A worker can have one primary assignment and several secondary ones; a finished assignment isn\'t deleted, it stays in history.' },
           { title: 'Users', text: 'System accounts for signing in besides the worker mobile app — mainly foremen, plus additional administrators. Activation codes for new accounts are also issued from here.' }
         ]
       },
@@ -442,7 +442,7 @@ export const GUIDE_CONTENT: Record<AppLocale, GuideContent> = {
       'A timesheet under review can be changed three ways: return it to the worker with a reason (they redo it themselves), "Edit hours" (a quick admin edit with no reason, the worker isn\'t notified), or "Edit hours" with a reason the worker will see. The separate "Correction" process is only needed for an already finally-approved timesheet.',
       'Sick leave, vacation, or an unpaid day can be set right in the timesheet editor during review — a separate approved absence request is no longer required for that.',
       'The system shows expiring qualifications and certificates in the bell ahead of time — before they actually become invalid.',
-      'A work area or schedule template that\'s already in use can\'t be deleted — only deactivated: this keeps the history of time already logged, while removing it from future assignment choices.',
+      'A customer or schedule template that\'s already in use can\'t be deleted — only deactivated: this keeps the history of time already logged, while removing it from future assignment choices.',
       'Changing a submission cycle retroactively is limited if the current period already has data — such changes are usually applied from the nearest future period boundary.'
     ],
     changelogTitle: 'What\'s new',
@@ -465,8 +465,8 @@ export const GUIDE_CONTENT: Record<AppLocale, GuideContent> = {
         items: [
           'The manager panel and worker app are available in Russian and English. The language switch is in the header, while customer and payroll reports stay in English.',
           'Initial setup now follows a clear path: create a site and schedule, add a worker, assign their workplace, and choose how often they submit a timesheet. Current periods are created automatically, so they normally do not need to be opened by hand.',
-          'A worker\'s page lets the manager assign the site, work area, schedule, and weekly or two-week submission cycle in one place. The install link and QR code are issued there too.',
-          'A site address can be found on a free map. The location is placed from the address, can be checked or adjusted, and then given a work-zone radius.',
+          'A worker\'s page lets the manager assign the site, customer, schedule, and weekly or two-week submission cycle in one place. The install link and QR code are issued there too.',
+          'A site address can be found on a free map. The location is placed from the address, can be checked or adjusted, and then given a geofence radius.',
           'The worker home screen was redesigned for phones: one large Check In / Check Out button, the worker\'s name, date, selected site, today\'s hours, recent days, and a menu with a direct Home link.',
           'Check-in and check-out appear in the worker\'s hours and the manager\'s view straight away. Time follows the company\'s clear half-hour rounding rules.',
           'Workers can use saved pages and clock in or out without internet. When the connection returns, the app sends the saved actions itself and never shows another account\'s stored information.',
@@ -477,7 +477,7 @@ export const GUIDE_CONTENT: Record<AppLocale, GuideContent> = {
       {
         date: 'Worker app, 29 August 2026',
         items: [
-          'Check In can no longer be "broken". Before, if GPS put the worker outside the work zone, the check-in was simply rejected — the clock didn\'t start and the error arrived late. Now the check-in always registers and the hours run; if the worker is outside the zone a dialog appears with "Check in" or "Not yet" (it cannot be swiped away, one must be chosen). The manager sees a "checked in outside geofence" note for review.',
+          'Check In can no longer be "broken". Before, if GPS put the worker outside the site, the check-in was simply rejected — the clock didn\'t start and the error arrived late. Now the check-in always registers and the hours run; if the worker is off site a dialog appears with "Check in" or "Not yet" (it cannot be swiped away, one must be chosen). The manager sees a "checked in outside geofence" note for review.',
           'Professions — now in the worker app too. A worker adds their own trade specialities on the "Profile" page (from the catalog or as free text, as many as needed). The last item in the profession list is "✎ Other — type your own". The old "Specialty" field was removed (the admin still manages professions from their side).',
           'Worker notifications. A bell next to the menu (☰): "days left to submit your timesheet" (3 days before the deadline, then "will be submitted automatically"), and every check-in the server did not accept — with its reason and a "Dismiss" button. The "Action needs attention" block is gone from the main screen entirely.',
           'Pull-to-refresh. On any page of the app, drag it down from the very top and hold for a couple of seconds — the app updates to the latest version without closing and reopening it.'

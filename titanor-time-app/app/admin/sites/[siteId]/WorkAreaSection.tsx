@@ -22,11 +22,11 @@ function errorMessageFor(locale: AppLocale, code: string | undefined): string {
     case 'VALIDATION_ERROR':
       return localeText(locale, 'Please check the name.', 'Проверьте название.');
     case 'DUPLICATE_WORK_AREA_NAME':
-      return localeText(locale, 'A work area with this name already exists on this site.', 'Рабочая зона с таким названием уже есть на объекте.');
+      return localeText(locale, 'A customer with this name already exists on this site.', 'Заказчик с таким названием уже есть на объекте.');
     case 'VERSION_CONFLICT':
-      return localeText(locale, 'This work area was changed elsewhere — reloading.', 'Рабочая зона изменена в другом окне — обновляем страницу.');
+      return localeText(locale, 'This customer was changed elsewhere — reloading.', 'Заказчик изменён в другом окне — обновляем страницу.');
     case 'FORBIDDEN':
-      return localeText(locale, 'You no longer have permission to manage work areas.', 'У вас больше нет права управлять рабочими зонами.');
+      return localeText(locale, 'You no longer have permission to manage customers.', 'У вас больше нет права управлять заказчиками.');
     default:
       return localeText(locale, 'Something went wrong. Please try again.', 'Произошла ошибка. Попробуйте ещё раз.');
   }
@@ -41,7 +41,7 @@ function ToggleActiveButton({ siteId, area, disabled }: { siteId: string; area: 
     if (loading || disabled) {
       return;
     }
-    if (area.active && !window.confirm(localeText(locale, `Deactivate work area “${area.name}”? Existing assignments and time history will be kept.`, `Отключить рабочую зону «${area.name}»? Существующие назначения и история времени сохранятся.`))) {
+    if (area.active && !window.confirm(localeText(locale, `Deactivate customer “${area.name}”? Existing assignments and time history will be kept.`, `Отключить заказчика «${area.name}»? Существующие назначения и история времени сохранятся.`))) {
       return;
     }
     setLoading(true);
@@ -116,7 +116,14 @@ export function WorkAreaSection({ siteId, workAreas }: { siteId: string; workAre
 
   return (
     <>
-      <h2>{localeText(locale, 'Work areas', 'Рабочие зоны')}</h2>
+      <h2>{localeText(locale, 'Customers', 'Заказчики')}</h2>
+      <p className="setup-subtitle">
+        {localeText(
+          locale,
+          'Different customers on the same site (e.g. two shipyard contracts). Optional when assigning a worker.',
+          'Разные заказчики на одном объекте (например, два контракта на верфи). При назначении работника — необязательно.'
+        )}
+      </p>
       {workAreas.length === 0 ? (
         <p>{localeText(locale, 'None yet.', 'Пока нет.')}</p>
       ) : (
@@ -125,7 +132,7 @@ export function WorkAreaSection({ siteId, workAreas }: { siteId: string; workAre
             <li key={area.id} className="setup-item">
               <span className="setup-label">
                 {area.name}
-                {!area.active ? localeText(locale, ' (inactive)', ' (неактивна)') : ''}
+                {!area.active ? localeText(locale, ' (inactive)', ' (неактивен)') : ''}
               </span>
               <ToggleActiveButton siteId={siteId} area={area} disabled={loading} />
             </li>
@@ -135,7 +142,7 @@ export function WorkAreaSection({ siteId, workAreas }: { siteId: string; workAre
 
       <form onSubmit={handleCreate} aria-busy={loading}>
         <div className="login-field">
-          <label htmlFor="work-area-name">{localeText(locale, 'New work area name', 'Название новой рабочей зоны')}</label>
+          <label htmlFor="work-area-name">{localeText(locale, 'New customer name', 'Название нового заказчика')}</label>
           <input
             id="work-area-name"
             type="text"
@@ -151,7 +158,7 @@ export function WorkAreaSection({ siteId, workAreas }: { siteId: string; workAre
           </p>
         ) : null}
         <button className="login-submit" type="submit" disabled={loading}>
-          {loading ? localeText(locale, 'Adding…', 'Добавление…') : localeText(locale, 'Add work area', 'Добавить рабочую зону')}
+          {loading ? localeText(locale, 'Adding…', 'Добавление…') : localeText(locale, 'Add customer', 'Добавить заказчика')}
         </button>
       </form>
     </>

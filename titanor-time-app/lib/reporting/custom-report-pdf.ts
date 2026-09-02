@@ -203,7 +203,7 @@ export async function buildCustomReportDetailedPdf(report: CustomTimeReport, met
     { header: t(locale, 'Number', 'Таб. №'), width: 55 },
     { header: t(locale, 'Employee', 'Работник'), width: 108 },
     { header: t(locale, 'Site', 'Объект'), width: 95 },
-    { header: t(locale, 'Work area', 'Раб. зона'), width: 85 },
+    { header: t(locale, 'Customer', 'Заказчик'), width: 85 },
     { header: t(locale, 'Start', 'Начало'), width: 42, align: 'right' },
     { header: t(locale, 'End', 'Конец'), width: 42, align: 'right' },
     { header: t(locale, 'Paid brk', 'Опл.пер.'), width: 58, align: 'right' },

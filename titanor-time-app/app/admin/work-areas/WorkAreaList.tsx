@@ -22,7 +22,7 @@ export function WorkAreaList({ workAreas, canManage }: { workAreas: WorkAreaItem
 
   async function toggleActive(area: WorkAreaItem): Promise<void> {
     if (updatingId) return;
-    if (area.active && !window.confirm(localeText(locale, `Deactivate work area “${area.name}”? Existing assignments and time history will be kept.`, `Отключить рабочую зону «${area.name}»? Существующие назначения и история времени сохранятся.`))) {
+    if (area.active && !window.confirm(localeText(locale, `Deactivate customer “${area.name}”? Existing assignments and time history will be kept.`, `Отключить заказчика «${area.name}»? Существующие назначения и история времени сохранятся.`))) {
       return;
     }
 
@@ -41,8 +41,8 @@ export function WorkAreaList({ workAreas, canManage }: { workAreas: WorkAreaItem
       }
       const body = (await response.json().catch(() => null)) as { error?: { code?: string } } | null;
       setErrorMessage(body?.error?.code === 'VERSION_CONFLICT'
-        ? localeText(locale, 'This work area changed elsewhere — reload and try again.', 'Рабочая зона изменена в другом окне — обновите страницу и повторите.')
-        : localeText(locale, 'The work area could not be updated. Please try again.', 'Не удалось изменить рабочую зону. Повторите попытку.'));
+        ? localeText(locale, 'This customer changed elsewhere — reload and try again.', 'Заказчик изменён в другом окне — обновите страницу и повторите.')
+        : localeText(locale, 'The customer could not be updated. Please try again.', 'Не удалось изменить заказчика. Повторите попытку.'));
       if (body?.error?.code === 'VERSION_CONFLICT') router.refresh();
     } catch {
       setErrorMessage(localeText(locale, 'Network error. Please try again.', 'Ошибка сети. Повторите попытку.'));
@@ -52,7 +52,7 @@ export function WorkAreaList({ workAreas, canManage }: { workAreas: WorkAreaItem
   }
 
   if (workAreas.length === 0) {
-    return <p>{localeText(locale, 'No work areas yet. Add one from a site page.', 'Рабочих зон пока нет. Добавьте зону на странице объекта.')}</p>;
+    return <p>{localeText(locale, 'No customers yet. Add one from a site page.', 'Заказчиков пока нет. Добавьте на странице объекта.')}</p>;
   }
 
   return (
@@ -62,7 +62,7 @@ export function WorkAreaList({ workAreas, canManage }: { workAreas: WorkAreaItem
         <table className="worker-table">
           <thead>
             <tr>
-              <th>{localeText(locale, 'Work area', 'Рабочая зона')}</th>
+              <th>{localeText(locale, 'Customer', 'Заказчик')}</th>
               <th>{localeText(locale, 'Site', 'Объект')}</th>
               <th>{localeText(locale, 'Status', 'Статус')}</th>
               <th aria-label={localeText(locale, 'Actions', 'Действия')} />

@@ -252,7 +252,7 @@ function ClockShiftSection({ title, shift, locale }: { title: string; shift: Clo
           <dd>{shift.site.name}</dd>
         </div>
         <div>
-          <dt>{ru ? 'Рабочая зона' : 'Work area'}</dt>
+          <dt>{ru ? 'Заказчик' : 'Customer'}</dt>
           <dd>{shift.workArea ? shift.workArea.name : '—'}</dd>
         </div>
         <div>

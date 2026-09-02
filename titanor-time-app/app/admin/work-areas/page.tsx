@@ -25,8 +25,8 @@ export default async function AdminWorkAreasPage() {
   return (
     <main className="setup-page">
       <div className="setup-card worker-card">
-        <h1>{localeText(locale, 'Work areas', 'Рабочие зоны')}</h1>
-        <p className="setup-subtitle">{workAreas.length} {localeText(locale, workAreas.length === 1 ? 'work area' : 'work areas', workAreas.length === 1 ? 'рабочая зона' : 'рабочих зон')} · <Link href="/admin/sites">{localeText(locale, 'Manage sites', 'Управлять объектами')}</Link></p>
+        <h1>{localeText(locale, 'Customers', 'Заказчики')}</h1>
+        <p className="setup-subtitle">{workAreas.length} {localeText(locale, workAreas.length === 1 ? 'customer' : 'customers', workAreas.length === 1 ? 'заказчик' : 'заказчиков')} · <Link href="/admin/sites">{localeText(locale, 'Manage sites', 'Управлять объектами')}</Link></p>
         <WorkAreaList workAreas={workAreas} canManage={canManage} />
       </div>
     </main>

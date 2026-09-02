@@ -42,12 +42,12 @@ const CHECKLIST: ChecklistItem[] = [
   },
   {
     key: 'hasWorkArea',
-    label: 'Work area',
-    description: 'Optional subdivision inside a site. Skip it when the whole site is one work area.',
+    label: 'Customer',
+    description: 'Different customers on the same site. Skip it when the site has a single customer.',
     optional: true,
     createHref: '/admin/work-areas',
     doneHref: '/admin/work-areas',
-    createActionLabel: 'Manage work areas'
+    createActionLabel: 'Manage customers'
   },
   {
     key: 'hasTemplate',
@@ -108,13 +108,13 @@ export default async function AdminSetupPage() {
             const translated = ru ? ({
               hasCity: ['Город', 'Необязательная справочная запись для группировки объектов. Не блокирует настройку.'],
               hasSite: ['Объект', 'Фактическое место работы, куда назначается работник и где он отмечает приход.'],
-              hasWorkArea: ['Рабочая зона', 'Необязательная часть объекта. Пропустите, если весь объект является одной рабочей зоной.'],
+              hasWorkArea: ['Заказчик', 'Разные заказчики на одном объекте. Пропустите, если на объекте один заказчик.'],
               hasTemplate: ['Шаблон рабочего графика', 'Определяет обычную рабочую неделю работника.'],
               hasWorker: ['Работник', 'Учётная запись сотрудника для отметки прихода/ухода и внесения часов.'],
               hasAssignment: ['Назначение', 'Связывает работника с объектом и графиком на выбранный срок.'],
               hasSubmissionScheduleConfigured: ['Цикл отправки табеля', 'Выберите для каждого активного работника: еженедельно или раз в две недели. Периоды будут создаваться автоматически.']
             } as Partial<Record<keyof SetupStatus, [string, string]>>)[item.key] : null;
-            const actionLabel = done ? (ru ? (item.doneActionLabel === 'Add another' ? 'Добавить ещё' : 'Управлять') : (item.doneActionLabel ?? 'Manage')) : (ru ? (item.createActionLabel === 'Manage work areas' ? 'Управлять зонами' : item.createActionLabel === 'Configure cycles' ? 'Настроить циклы' : 'Создать') : (item.createActionLabel ?? 'Create'));
+            const actionLabel = done ? (ru ? (item.doneActionLabel === 'Add another' ? 'Добавить ещё' : 'Управлять') : (item.doneActionLabel ?? 'Manage')) : (ru ? (item.createActionLabel === 'Manage customers' ? 'Управлять заказчиками' : item.createActionLabel === 'Configure cycles' ? 'Настроить циклы' : 'Создать') : (item.createActionLabel ?? 'Create'));
             return (
               <li key={item.key} className="setup-item">
                 <span

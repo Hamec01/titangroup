@@ -85,8 +85,8 @@ export function buildCustomReportSummaryCsv(report: CustomTimeReport, locale: Ap
 
 export function buildCustomReportDetailedCsv(report: CustomTimeReport, locale: AppLocale): Buffer {
   const header = locale === 'RU'
-    ? ['Дата', 'Табельный номер', 'ФИО работника', 'Объект', 'Рабочая зона', 'Начало', 'Окончание', 'Оплач. перерыв', 'Неоплач. перерыв', 'Отработано', 'Статус табеля']
-    : ['Date', 'Employee number', 'Employee name', 'Site', 'Work area', 'Start', 'End', 'Paid break', 'Unpaid break', 'Worked time', 'Timesheet status'];
+    ? ['Дата', 'Табельный номер', 'ФИО работника', 'Объект', 'Заказчик', 'Начало', 'Окончание', 'Оплач. перерыв', 'Неоплач. перерыв', 'Отработано', 'Статус табеля']
+    : ['Date', 'Employee number', 'Employee name', 'Site', 'Customer', 'Start', 'End', 'Paid break', 'Unpaid break', 'Worked time', 'Timesheet status'];
 
   const rows: string[] = [buildCsvRow(header, new Set())];
   for (const row of report.detailRows) {

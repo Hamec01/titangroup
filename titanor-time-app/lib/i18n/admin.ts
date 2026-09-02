@@ -93,7 +93,7 @@ export const ADMIN_NAV: Record<AppLocale, AdminNavStrings> = {
           { href: '/admin/setup', label: 'Setup checklist' },
           { href: '/admin/cities', label: 'Cities' },
           { href: '/admin/sites', label: 'Sites' },
-          { href: '/admin/work-areas', label: 'Work areas' },
+          { href: '/admin/work-areas', label: 'Customers' },
           { href: '/admin/templates', label: 'Schedule templates' },
           { href: '/admin/submission-cycles', label: 'Submission cycles' }
         ]
@@ -147,7 +147,7 @@ export const ADMIN_NAV: Record<AppLocale, AdminNavStrings> = {
           { href: '/admin/setup', label: 'Чек-лист настройки' },
           { href: '/admin/cities', label: 'Города' },
           { href: '/admin/sites', label: 'Объекты' },
-          { href: '/admin/work-areas', label: 'Рабочие зоны' },
+          { href: '/admin/work-areas', label: 'Заказчики' },
           { href: '/admin/templates', label: 'Шаблоны графика' },
           { href: '/admin/submission-cycles', label: 'Циклы отправки табеля' }
         ]

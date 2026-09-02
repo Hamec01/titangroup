@@ -60,7 +60,7 @@ const ERROR_MESSAGES: Record<string, { en: string; ru: string }> = {
   OVERLAP_STILL_PRESENT: { en: 'This change does not fully resolve the overlap between the two shifts. Adjust the times and try again.', ru: 'Это изменение не устраняет пересечение полностью между двумя сменами. Скорректируйте время и попробуйте снова.' },
   BREAK_OUTSIDE_SEGMENT: { en: 'An existing break would fall outside the new time range.', ru: 'Существующий перерыв выйдет за пределы нового диапазона времени.' },
   WORK_SEGMENT_OVERLAP: { en: 'This change would overlap another interval on the same day.', ru: 'Это изменение пересечётся с другим интервалом в тот же день.' },
-  SITE_NOT_ASSIGNED: { en: 'This employee has no active assignment for that site/work area on this date.', ru: 'У этого работника нет активного назначения на этот объект/зону на эту дату.' }
+  SITE_NOT_ASSIGNED: { en: 'This employee has no active assignment for that site/customer on this date.', ru: 'У этого работника нет активного назначения на этот объект/заказчика на эту дату.' }
 };
 
 function describeErrorCode(code: string | undefined, fallback: string | undefined, locale: AppLocale): string {
@@ -702,7 +702,7 @@ function ReasonEditFragmentForm({ apiBasePath, exceptionId, fragment, requiresEn
         <input id={`edit-end-${fragment.id}`} type="datetime-local" value={endLocal} onChange={(e) => { setEndLocal(e.target.value); setArmed(false); }} disabled={pending} />
       </div>
       <div className="exc-filter-field">
-        <label htmlFor={`edit-site-${fragment.id}`}>{ru ? 'Объект / рабочая зона' : 'Site / work area'}</label>
+        <label htmlFor={`edit-site-${fragment.id}`}>{ru ? 'Объект / заказчик' : 'Site / customer'}</label>
         <select id={`edit-site-${fragment.id}`} value={assignmentKey} onChange={(e) => { setAssignmentKey(e.target.value); setArmed(false); }} disabled={pending}>
           {options.map((o) => {
             const key = fragmentAssignmentKey(o.siteId, o.workAreaId);

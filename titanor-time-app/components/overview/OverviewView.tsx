@@ -215,7 +215,7 @@ function OwnerSearchForm({ basePath, rawQuery, periodOptions, siteOptions }: { b
       <div className="owner-search-primary">
         <div className="ov-filter-field owner-search-query">
           <label htmlFor="owner-search-q">{ru ? 'Работник или объект' : 'Worker or site'}</label>
-          <input id="owner-search-q" name="q" type="search" maxLength={100} defaultValue={rawQuery.q ?? ''} placeholder={ru ? 'Имя, номер, объект или рабочая зона' : 'Name, employee number, site or work area'} />
+          <input id="owner-search-q" name="q" type="search" maxLength={100} defaultValue={rawQuery.q ?? ''} placeholder={ru ? 'Имя, номер, объект или заказчик' : 'Name, employee number, site or customer'} />
         </div>
         <div className="ov-filter-field">
           <label htmlFor="owner-search-site">{ru ? 'Объект' : 'Site'}</label>
@@ -426,7 +426,7 @@ function FilterForm({
       {rawQuery.employeeId && <input type="hidden" name="employeeId" value={rawQuery.employeeId} />}
       <div className="ov-filter-field">
         <label htmlFor="ov-filter-q">{ru ? 'Работник или объект' : 'Worker or site'}</label>
-        <input id="ov-filter-q" name="q" type="search" maxLength={100} defaultValue={rawQuery.q ?? ''} placeholder={ru ? 'Имя, номер, объект или рабочая зона' : 'Name, number, site or work area'} />
+        <input id="ov-filter-q" name="q" type="search" maxLength={100} defaultValue={rawQuery.q ?? ''} placeholder={ru ? 'Имя, номер, объект или заказчик' : 'Name, number, site or customer'} />
       </div>
       <div className="ov-filter-field">
         <label htmlFor="ov-filter-period">{ru ? 'Период' : 'Period'}</label>
