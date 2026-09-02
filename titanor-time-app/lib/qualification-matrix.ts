@@ -1,5 +1,6 @@
 import type { ProfessionCategory } from '@prisma/client';
 import { prisma } from '@/lib/prisma';
+import { liveAssignmentWhere } from '@/lib/assignment-lifecycle';
 import { helsinkiCalendarDateAsUtcMidnight } from '@/lib/attendance-clock';
 import { computeQualificationExpiryStatus, type QualificationExpiryStatus, type QualificationStatusColor } from '@/lib/qualification-expiry';
 
@@ -98,7 +99,8 @@ function formatDate(date: Date): string {
 }
 
 function currentAssignmentWhere(today: Date) {
-  return { validFrom: { lte: today }, OR: [{ validTo: null }, { validTo: { gte: today } }] };
+  // R15-D7 — shared operationally-live filter (clockInDisabledAt-aware).
+  return liveAssignmentWhere(new Date(), today);
 }
 
 // "Active" per docs/titanor-time/T13 §8 and the predicate lib/timesheet-submission-schedules.ts

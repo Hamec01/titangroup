@@ -1,5 +1,6 @@
 import { prisma } from '@/lib/prisma';
 import { helsinkiToday } from '@/lib/workers';
+import { isAssignmentLiveNow } from '@/lib/assignment-lifecycle';
 
 // docs/titanor-time/04_ADMIN_FIRST_API_CONTRACTS.md §3 (work-areas nested
 // under a site) — shared by the API routes. Unlike lib/sites.ts's
@@ -93,6 +94,7 @@ export async function getWorkAreaDetail(workAreaId: string): Promise<WorkAreaDet
       isPrimary: true,
       validFrom: true,
       validTo: true,
+      clockInDisabledAt: true,
       employee: { select: { id: true, employeeNumber: true, firstName: true, lastName: true } },
       templateVersion: { select: { template: { select: { name: true } } } }
     }
@@ -107,7 +109,8 @@ export async function getWorkAreaDetail(workAreaId: string): Promise<WorkAreaDet
     validFrom: a.validFrom.toISOString().slice(0, 10),
     validTo: a.validTo ? a.validTo.toISOString().slice(0, 10) : null
   });
-  const isCurrent = (a: (typeof assignments)[number]) => a.validFrom <= today && (a.validTo === null || a.validTo > today);
+  const now = new Date();
+  const isCurrent = (a: (typeof assignments)[number]) => isAssignmentLiveNow(a, now, today);
 
   const past = assignments.filter((a) => !isCurrent(a));
   past.sort((x, y) => (y.validTo?.getTime() ?? 0) - (x.validTo?.getTime() ?? 0));

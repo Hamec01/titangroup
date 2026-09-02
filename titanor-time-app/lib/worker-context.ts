@@ -5,6 +5,7 @@ import { computeDayWorkedMs, msToMinutes } from '@/lib/reporting/worked-time';
 import { effectiveUnpaidBreakMinutes, DEFAULT_AUTO_UNPAID_BREAK_MINUTES } from '@/lib/reporting/auto-break';
 import { DEFAULT_AUTO_UNPAID_BREAK_THRESHOLD_MINUTES } from '@/lib/reporting/canonical-daily-buckets';
 import { computeTimesheetEditCutoff } from '@/lib/timesheet-edit-window';
+import { liveAssignmentWhere } from '@/lib/assignment-lifecycle';
 
 // docs/titanor-time/04_ADMIN_FIRST_API_CONTRACTS.md §9 (Рабочий кабинет), read-only context
 // endpoints — first sub-task's own `worker.read.own`/`assignment.read.own`/`period.read.own`
@@ -55,14 +56,11 @@ export interface WorkerCurrentAssignment {
   validTo: string | null;
 }
 
-/** SiteAssignment rows whose [validFrom, validTo] window covers `today` — same "current" definition as lib/workers.ts's currentAssignmentWhere. */
+/** Operationally-live SiteAssignments for this worker — what the app offers as Check-In options.
+ *  R15-D7: `liveAssignmentWhere` (clockInDisabledAt-aware), shared with every other consumer. */
 export async function listWorkerCurrentAssignments(employeeId: string, today: Date): Promise<WorkerCurrentAssignment[]> {
   const assignments = await prisma.siteAssignment.findMany({
-    where: {
-      employeeId,
-      validFrom: { lte: today },
-      OR: [{ validTo: null }, { validTo: { gte: today } }]
-    },
+    where: { employeeId, ...liveAssignmentWhere(new Date(), today) },
     orderBy: [{ isPrimary: 'desc' }, { validFrom: 'asc' }],
     select: {
       id: true,

@@ -6,6 +6,7 @@ import { overlapCandidates, overlapExists, resolveOverlapTransition } from '@/li
 import { materializeClockShiftCore } from '@/lib/attendance-materializer';
 import { resolveMissingCheckoutAtCutoffOnLateCheckOut } from '@/lib/attendance-auto-submit';
 import { annotateAutoClosedShiftWithLateCheckOut } from '@/lib/attendance-abandoned-shift-annotate';
+import { liveAssignmentWhere } from '@/lib/assignment-lifecycle';
 
 // docs/titanor-time/T7A_1_ATTENDANCE_CLOCK_DESIGN.md §9.1/§9.2/§9.3/§9.1a — Online clock core
 // (T7A online clock core slice). Route files do HTTP/auth/CSRF/idempotency/validation mapping;
@@ -196,8 +197,10 @@ export async function resolveTimesheetForInstant(tx: Prisma.TransactionClient, e
 
 export async function resolveActiveSiteAssignment(tx: Prisma.TransactionClient, employeeId: string, siteId: string, workAreaId: string | null, instant: Date): Promise<string | null> {
   const date = helsinkiCalendarDateAsUtcMidnight(instant);
+  // R15-D7 — resolve against the assignment state AT the event time (`instant`), so an offline
+  // event synced later still attributes correctly. clockInDisabledAt > instant ⟹ still live then.
   const assignment = await tx.siteAssignment.findFirst({
-    where: { employeeId, siteId, workAreaId, validFrom: { lte: date }, OR: [{ validTo: null }, { validTo: { gte: date } }] },
+    where: { employeeId, siteId, workAreaId, ...liveAssignmentWhere(instant, date) },
     select: { id: true }
   });
   return assignment?.id ?? null;

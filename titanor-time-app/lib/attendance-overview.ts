@@ -1,5 +1,6 @@
 import { Prisma } from '@prisma/client';
 import { prisma } from '@/lib/prisma';
+import { liveAssignmentWhere } from '@/lib/assignment-lifecycle';
 import { UUID_PATTERN } from '@/lib/attendance-exceptions';
 import { getForemanOverview, getForemanSiteIds, type ForemanOverview } from '@/lib/foreman-review';
 import { computeSegmentMs, sumWorkedTimeMs, msToMinutes } from '@/lib/reporting/worked-time';
@@ -291,7 +292,8 @@ function todayRange(today: Date): { start: Date; end: Date } {
 }
 
 function currentAssignmentWhere(today: Date) {
-  return { validFrom: { lte: today }, OR: [{ validTo: null }, { validTo: { gte: today } }] };
+  // R15-D7 — shared operationally-live filter (clockInDisabledAt-aware).
+  return liveAssignmentWhere(new Date(), today);
 }
 
 /** Effective site restriction: an explicit siteId narrows an already-restricted (foreman) scope

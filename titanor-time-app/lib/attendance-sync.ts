@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import { Prisma } from '@prisma/client';
 import { prisma } from '@/lib/prisma';
+import { liveAssignmentWhere } from '@/lib/assignment-lifecycle';
 import { createAuditEvent } from '@/lib/audit';
 import { overlapCandidates, overlapExists, resolveOverlapTransition } from '@/lib/attendance-reported-projection';
 import { materializeClockShiftCore } from '@/lib/attendance-materializer';
@@ -1409,7 +1410,8 @@ export interface AttendanceContextView {
 /** Only the site's CURRENT geofence snapshot — never historical versions (§2 task requirement). */
 export async function buildAttendanceContext(employeeId: string, today: Date, deviceInstallationId: string, lastProcessedSequence: bigint, userId: string): Promise<AttendanceContextView> {
   const assignments = await prisma.siteAssignment.findMany({
-    where: { employeeId, validFrom: { lte: today }, OR: [{ validTo: null }, { validTo: { gte: today } }] },
+    // R15-D7 — operationally-live only (clockInDisabledAt-aware), same gate as every consumer.
+    where: { employeeId, ...liveAssignmentWhere(new Date(), today) },
     orderBy: [{ isPrimary: 'desc' }, { validFrom: 'asc' }],
     select: {
       id: true,

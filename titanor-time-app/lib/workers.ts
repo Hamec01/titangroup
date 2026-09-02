@@ -2,6 +2,7 @@ import { Prisma } from '@prisma/client';
 import { prisma } from '@/lib/prisma';
 import { createAuditEvent } from '@/lib/audit';
 import { generateWorkerUsernameBase, reserveWorkerUsername } from '@/lib/worker-usernames';
+import { liveAssignmentWhere } from '@/lib/assignment-lifecycle';
 
 // docs/titanor-time/04_ADMIN_FIRST_API_CONTRACTS.md §5 (worker endpoints) —
 // shared by the API routes and the /admin/workers* Server Component pages,
@@ -95,19 +96,11 @@ export function helsinkiToday(): Date {
   return new Date(`${isoDate}T00:00:00.000Z`);
 }
 
-/**
- * SiteAssignment rows the *admin worker views* (`/admin/workers` list + the worker card) treat as
- * "current". validTo is compared with `gt`, not `gte`: once an admin ends an assignment as of
- * today, it should immediately drop out of the active list and into "Past assignments" — from the
- * admin's point of view the worker has been removed from that site. The worker's own clock-in /
- * GPS path keeps its inclusive (`gte`) copy of this filter (lib/worker-context.ts,
- * lib/attendance-clock.ts) so a worker whose assignment ends today can still finish today's shift.
- */
+/** R15-D7 — one definition of "operationally live" for every consumer, see
+ *  lib/assignment-lifecycle.ts. Was a local `validTo > today` copy (D5); now the shared
+ *  `clockInDisabledAt`-aware filter. */
 function currentAssignmentWhere(today: Date) {
-  return {
-    validFrom: { lte: today },
-    OR: [{ validTo: null }, { validTo: { gt: today } }]
-  };
+  return liveAssignmentWhere(new Date(), today);
 }
 
 function mapAssignment(assignment: {
@@ -261,8 +254,14 @@ export async function getWorkerDetail(employeeId: string): Promise<WorkerDetail 
   }
 
   const pastAssignmentRows = await prisma.siteAssignment.findMany({
-    where: { employeeId, validTo: { not: null, lte: today } },
-    orderBy: { validTo: 'desc' },
+    // R15-D7 — "past" = started, and either the calendar window closed (validTo < today) or an
+    // admin operationally removed the worker (clockInDisabledAt already passed).
+    where: {
+      employeeId,
+      validFrom: { lte: today },
+      OR: [{ validTo: { lt: today } }, { clockInDisabledAt: { lte: new Date() } }]
+    },
+    orderBy: [{ clockInDisabledAt: 'desc' }, { validTo: 'desc' }],
     take: 20,
     select: CURRENT_ASSIGNMENT_SELECT
   });

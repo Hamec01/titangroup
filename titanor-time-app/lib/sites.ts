@@ -1,4 +1,5 @@
 import { prisma } from '@/lib/prisma';
+import { liveAssignmentWhere } from '@/lib/assignment-lifecycle';
 import { helsinkiToday } from '@/lib/workers';
 
 // docs/titanor-time/04_ADMIN_FIRST_API_CONTRACTS.md §3 (Объекты) — shared by
@@ -74,7 +75,7 @@ export async function listSites(page: number, pageSize: number, filters: ListSit
         active: true,
         version: true,
         siteAssignments: {
-          where: { validFrom: { lte: today }, OR: [{ validTo: null }, { validTo: { gte: today } }] },
+          where: liveAssignmentWhere(new Date(), today),
           select: { id: true }
         }
       }
@@ -173,7 +174,7 @@ export async function getSiteDetail(siteId: string): Promise<SiteDetail | null> 
         select: { id: true, name: true, active: true, version: true }
       },
       siteAssignments: {
-        where: { validFrom: { lte: today }, OR: [{ validTo: null }, { validTo: { gte: today } }] },
+        where: liveAssignmentWhere(new Date(), today),
         select: {
           isPrimary: true,
           employee: { select: { id: true, firstName: true, lastName: true } },
