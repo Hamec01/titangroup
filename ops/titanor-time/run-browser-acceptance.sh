@@ -53,7 +53,7 @@ cleanup() {
   docker ps -aq --filter "name=tt-bacc-app-" | xargs -r docker rm -f >/dev/null 2>&1
   docker rm -f "$DBC" >/dev/null 2>&1
   docker network rm "$NET" >/dev/null 2>&1
-  rm -rf "$WORK"
+  if [ -n "${TT_KEEP_WORK:-}" ]; then echo "   (per-test logs kept in $WORK)"; else rm -rf "$WORK"; fi
 }
 trap cleanup EXIT
 

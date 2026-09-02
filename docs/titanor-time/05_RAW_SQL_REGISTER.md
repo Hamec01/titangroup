@@ -377,6 +377,7 @@ CK-08 и CK-13 ниже. Бизнес-предикаты этих CHECK не и�
 | EX-05 | `ex_timesheet_draft_break_segment_time_overlap` | `TimesheetDraftBreakSegment` | current |
 | EX-06 | `ex_break_segment_time_overlap` | `BreakSegment` | current |
 | EX-07 | `ex_employee_timesheet_schedule_date_overlap` | `EmployeeTimesheetSchedule` | current |
+| EX-08 | `ex_site_assignment_one_primary_per_period` | `SiteAssignment` | future — R15-D7 Deploy D2 (`20260902180000_add_primary_period_exclusion`) |
 
 ### EX-01 `ex_absence_active_date_overlap`
 
@@ -415,6 +416,26 @@ CK-08 и CK-13 ниже. Бизнес-предикаты этих CHECK не и�
 - Source: `03_DATA_MODEL_ERD.md` §4.4, строки 465-471.
 - Documentation synchronization: SYNCED.
 - Minimum negative test: два `SiteAssignment` одного `employeeId`+`siteId`+`workAreaId` с пересекающимися `[validFrom, validTo]` — второй `INSERT` отклонён, SQLSTATE `23P01`; тот же тест с разным `siteId` — оба `INSERT` проходят.
+
+### EX-08 `ex_site_assignment_one_primary_per_period` — future (R15-D7 Deploy D2)
+
+- Table: `SiteAssignment`
+- Key:
+  ```sql
+  "employeeId" WITH =,
+  daterange("validFrom", COALESCE("validTo" + 1, 'infinity'::date), '[)') WITH &&
+  ```
+- Partial predicate:
+  ```sql
+  WHERE ("isPrimary" = true AND "clockInDisabledAt" IS NULL)
+  ```
+- Инвариант: **≤1 «живого» primary-назначения на один и тот же ПЕРИОД** одного работника (owner correction 2026-09-02). НЕ «≤1 среди всех текущих и будущих» — текущее primary A на `[.., transferDate−1]` и запланированное будущее primary B на `[transferDate, ..]` сосуществуют, потому что периоды не пересекаются. Снятое / переведённое primary (`clockInDisabledAt` задан) — вне предиката и никогда не блокирует новое.
+- SQLSTATE: `23P01` (`exclusion_violation`). Prisma → untyped `PrismaClientUnknownRequestError`; ловится по SQLSTATE + имени в `lib/assignment-lock.ts` `isPrimaryPeriodConflict()` → `409 PRIMARY_PERIOD_CONFLICT`.
+- Service identity: точное имя `ex_site_assignment_one_primary_per_period`.
+- Зеркалит EX-02 (тот же `[)`-date-range приём: `validTo + 1` / `infinity`), но по одному ключу `employeeId` и по предикату «живое primary». `btree_gist` (EXT-01) уже установлен.
+- PRECONDITION к миграции: `ops/titanor-time/r15-d7/fix-double-primary.sql` (Nazar #1002 + Mykhailo #1004 — их два primary СЕЙЧАС пересекаются по датам).
+- Application-level половина инварианта: `overlappingPrimaryWhere()` (`lib/assignment-lock.ts`) — сервис под per-employee advisory-lock демоутит пересекающиеся primary в той же транзакции (`createAssignmentInTx` / `changeWorkplace` / `promoteToPrimary`).
+- Minimum negative test: два `SiteAssignment` одного `employeeId`, оба `isPrimary=true` + `clockInDisabledAt IS NULL`, с пересекающимися `[validFrom, validTo]` — второй `INSERT` отклонён, SQLSTATE `23P01`. Positive: те же два с непересекающимися (смежными) периодами — оба проходят; один из них с `clockInDisabledAt` задан — проходят при любом пересечении. (Проверяется через реальный API: `_test-t9-assignment-lifecycle.ts` P1/P3, L10a.)
 
 ### EX-03 `ex_payroll_period_date_overlap`
 
@@ -497,7 +518,7 @@ CK-08 и CK-13 ниже. Бизнес-предикаты этих CHECK не и�
 |---|---|---|---|
 | EXT-01 | `btree_gist` | `CREATE EXTENSION IF NOT EXISTS btree_gist;` | 1 |
 
-Reason: scalar equality operators (`employeeId`, `siteId`, `workAreaId`, `draftId`, `draftSegmentId`, `workSegmentId` — все `uuid`) внутри GiST-backed `EXCLUDE`-ограничений (EX-01…EX-06) требуют операторного класса, который предоставляет `btree_gist`. Это запись спецификации — `CREATE EXTENSION` в рамках этой задачи не выполняется.
+Reason: scalar equality operators (`employeeId`, `siteId`, `workAreaId`, `draftId`, `draftSegmentId`, `workSegmentId` — все `uuid`) внутри GiST-backed `EXCLUDE`-ограничений (EX-01…EX-08) требуют операторного класса, который предоставляет `btree_gist`. Установлен миграцией `20260728012114`.
 
 ---
 

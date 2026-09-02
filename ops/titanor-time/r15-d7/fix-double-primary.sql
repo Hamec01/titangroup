@@ -13,7 +13,10 @@
 -- 2 UPDATE + 2 AssignmentTransition + 2 AuditEvent, under the per-employee advisory locks the
 -- lifecycle service also takes (§3.13), with preflight + post guards that abort on any drift.
 --
--- Run FIRST, then Migration 2 (20260902180000_add_one_live_primary_index).
+-- Run FIRST, then Migration 2 (20260902180000_add_primary_period_exclusion, which adds the
+-- ex_site_assignment_one_primary_per_period EXCLUDE constraint). Nazar's and Mykhailo's two
+-- primary assignments currently have OVERLAPPING date ranges, so the constraint cannot validate
+-- until one of each pair is demoted here.
 --
 -- REQUIRED: -v actor=<uuid> — the UUID of an ACTIVE SUPER_ADMIN User, WITHOUT SQL quotes. There is
 -- no default; the transaction validates the id (ACTIVE + active SUPER_ADMIN UserRole) BEFORE any
@@ -90,17 +93,22 @@ UPDATE "SiteAssignment"
    AND "employeeId" = '8bb03525-8fe6-4b53-92e7-dc94c38f6a99'
    AND "isPrimary" = true;
 
--- 4. post-guard — the index predicate must now be ≤1 per employee for the whole table.
+-- 4. post-guard — no employee may have two NON-REMOVED primaries whose date ranges OVERLAP
+--    (this is exactly what Migration 2's ex_site_assignment_one_primary_per_period will enforce).
 DO $$
 DECLARE bad int;
 BEGIN
-  SELECT count(*) INTO bad FROM (
-    SELECT "employeeId" FROM "SiteAssignment"
-     WHERE "isPrimary" = true AND "clockInDisabledAt" IS NULL
-     GROUP BY "employeeId" HAVING count(*) > 1
-  ) x;
+  SELECT count(*) INTO bad
+    FROM "SiteAssignment" a
+    JOIN "SiteAssignment" b
+      ON b."employeeId" = a."employeeId"
+     AND b.id <> a.id
+     AND b."isPrimary" = true AND b."clockInDisabledAt" IS NULL
+     AND daterange(b."validFrom", COALESCE(b."validTo" + 1, 'infinity'::date), '[)')
+      && daterange(a."validFrom", COALESCE(a."validTo" + 1, 'infinity'::date), '[)')
+   WHERE a."isPrimary" = true AND a."clockInDisabledAt" IS NULL;
   IF bad <> 0 THEN
-    RAISE EXCEPTION 'post-guard: % employee(s) still have >1 live primary — ABORT', bad;
+    RAISE EXCEPTION 'post-guard: % overlapping non-removed primary pair(s) remain — ABORT', bad;
   END IF;
 END $$;
 

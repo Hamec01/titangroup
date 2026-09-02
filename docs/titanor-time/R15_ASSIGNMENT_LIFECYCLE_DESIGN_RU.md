@@ -239,16 +239,38 @@ Meyer Turku Shipyard — без заказчика
   `REASON_EDIT`). UI показывает «в этом периоде табель уже сдан — правка через коррекцию» + ссылку.
 
 ### 3.6 Основное назначение (F)
-Инвариант: **≤1 назначение с `isPrimary=true` среди live (`clockInDisabledAt IS NULL`)** на
-работника в любой момент.
-- enforcement: (1) сервис под advisory-lock демоутит прежнее live-primary в той же транзакции;
-  (2) backstop — partial unique index
-  `ux_site_assignment_one_live_primary ON "SiteAssignment"("employeeId") WHERE "isPrimary" AND "clockInDisabledAt" IS NULL`
-  (добавляется **отдельной миграцией** после ручного исправления Nazar — см. §5);
-- будущий primary-перевод: новое `isPrimary=true, clockInDisabledAt=NULL`; старое primary →
-  `clockInDisabledAt = effectiveInstant` (перестаёт считаться live для индекса, конфликта нет);
-  на период «зазора» проверка «кто основной для Check In» = «единственное live-primary» → новое;
-- конкурентные запросы: advisory-lock + `version` → 409 `VERSION_CONFLICT` + refresh карточки.
+Инвариант (owner correction 2026-09-02): **≤1 «живого» (`clockInDisabledAt IS NULL`) назначения с
+`isPrimary=true` на один и тот же ПЕРИОД** — НЕ «≤1 среди всех текущих и будущих». Текущее primary
+A на `[.., transferDate−1]` и запланированное будущее primary B на `[transferDate, ..]` — оба
+`isPrimary=true` одновременно, потому что их периоды **не пересекаются**. «Кто основной сейчас» =
+единственное живое primary, чей диапазон дат покрывает `today` (`resolvePrimarySiteId` и приложение
+работника резолвят по датам, не по глобальному флагу) — в `transferDate` управление переходит к B
+автоматически, без cron и без действий начальника.
+
+- enforcement: (1) сервис под advisory-lock демоутит прежние primary, **период которых
+  пересекается** с новым (`isPrimary AND clockInDisabledAt IS NULL AND daterange && daterange`), в
+  той же транзакции — по одному `AssignmentTransition` на снятое; непересекающийся будущий/прошлый
+  primary не трогается; (2) backstop — GiST EXCLUDE constraint
+  `ex_site_assignment_one_primary_per_period` (зеркалит EX-02), добавляется **отдельной миграцией**
+  после ручного исправления Nazar/Mykhailo — см. §5. SQLSTATE `23P01` → `409 PRIMARY_PERIOD_CONFLICT`.
+- **будущий** primary-перевод (`changeWorkplace`, `effectiveFrom > today`): старое A → `validTo =
+  effectiveFrom − 1`, **сохраняет `isPrimary=true`**, `clockInDisabledAt` НЕ ставится; новое B →
+  `validFrom = effectiveFrom`, `isPrimary=true`. Периоды `[.., effectiveFrom−1]` и `[effectiveFrom,
+  ..]` не пересекаются — оба primary, оба валидны. До даты `resolvePrimarySiteId → A`, с даты `→ B`.
+- **немедленный** primary-перевод (`effectiveFrom <= today`): старое A → `isPrimary=false` +
+  `clockInDisabledAt = now` сразу (демоут + выход из Check-In и из предиката constraint); `validTo
+  = today`, если на этот день уже есть отработанные/запланированные часы на A (§P5), иначе `today −
+  1`; новое B → `validFrom = effectiveFrom`, `isPrimary=true`.
+- **P4 — запланированный перевод нельзя молча отменить:** если новое `isPrimary=true` (create /
+  promote / PATCH / немедленный change) пересекается с уже запланированным будущим primary
+  (`validFrom > today`) → `409 SCHEDULED_PRIMARY_CONFLICT` (тело: `scheduledAssignmentId`,
+  `scheduledValidFrom`). Начальник повторяет с `primaryConflictResolution`: `KEEP_SCHEDULED`
+  (новое действие делается не-primary, план сохраняется) или `REPLACE_SCHEDULED` (план остаётся
+  назначением, но теряет primary; замена фиксируется отдельным `AssignmentTransition` +
+  `AuditEvent.afterValue.demotedScheduledPrimaryAssignmentIds`).
+- конкурентные запросы: advisory-lock + `version` → 409 `VERSION_CONFLICT` + refresh карточки;
+  гонка мимо lock ловится EXCLUDE-constraint → `409 PRIMARY_PERIOD_CONFLICT`.
+- обязательные тесты P1–P6 — `titanor-time-app/scripts/_test-t9-assignment-lifecycle.ts` (browser lane).
 
 **«Снять основное, когда есть другое действующее» [owner доп.]:** при снятии/переводе основного
 назначения, если у работника есть **другое live** назначение — начальнику **предложить выбрать
@@ -433,23 +455,34 @@ CREATE TABLE "AssignmentTransition" ( ...поля §4... );
 -- FK, индексы, immutability-триггер fn_assignment_transition_immutable() (BEFORE UPDATE OR DELETE)
 ```
 - **Не** трогает `validFrom`/`validTo` существующих строк.
-- **Не** добавляет partial unique index на primary (ждёт исправления Nazar).
+- **Не** добавляет primary-constraint (ждёт ручного исправления Nazar/Mykhailo).
 - `migrate deploy` дважды → второй проход no-op (стандартная проверка).
 
-### Ручной шаг между Deploy A и D (owner-approved, read-only preflight + одна транзакция)
-Владелец выбирает основное назначение Nazar Druz. Затем:
-```sql
-UPDATE "SiteAssignment" SET "isPrimary" = false, "version" = "version" + 1
-WHERE id = '<не выбранное>' AND "employeeId" = '1f8b5243-...';
-INSERT INTO "AssignmentTransition" (...kind=CHANGE, reasonCode=OTHER, reasonText='fix double primary'...);
-```
+### Ручной шаг между Deploy A и D2 (owner-approved, read-only preflight + одна транзакция)
+`ops/titanor-time/r15-d7/fix-double-primary.sql`. Владелец выбрал основные назначения:
+- **Nazar Druz #1002** — оставить `c6825d98` (Meyer — Aros Marine), снять `isPrimary` с `3d95975f`.
+- **Mykhailo Sadovnikov #1004** — оставить `bc174aef` (Meyer — Aros Marine), снять с `cbf688b7`.
 
-### Миграция 2 — `add_one_live_primary_index` (Deploy D, после ручного шага)
+Одна атомарная транзакция под per-employee advisory-lock: явный `-v actor=<uuid>` активного
+SUPER_ADMIN (проверяется ДО `UPDATE`), preflight-guard → 2× `UPDATE ... SET "isPrimary"=false,
+"version"="version"+1` → post-guard (0 пересекающихся primary-пар глобально) → 2×
+`AssignmentTransition` + 2× `AuditEvent(ASSIGNMENT_PROMOTED)`. Ничего не удаляется, часы не
+двигаются, `validFrom`/`validTo` не трогаются. У Nazar и Mykhailo периоды двух primary СЕЙЧАС
+пересекаются, поэтому EXCLUDE-constraint не провалидируется без этого шага.
+
+### Миграция 2 — `add_primary_period_exclusion` (Deploy D2, после ручного шага)
 ```sql
-CREATE UNIQUE INDEX "ux_site_assignment_one_live_primary"
-  ON "SiteAssignment" ("employeeId")
-  WHERE "isPrimary" = true AND "clockInDisabledAt" IS NULL;
+ALTER TABLE "SiteAssignment"
+  ADD CONSTRAINT "ex_site_assignment_one_primary_per_period"
+  EXCLUDE USING gist (
+    "employeeId" WITH =,
+    daterange("validFrom", COALESCE("validTo" + 1, 'infinity'::date), '[)') WITH &&
+  )
+  WHERE ("isPrimary" = true AND "clockInDisabledAt" IS NULL);
 ```
+Зеркалит EX-02 (`ex_site_assignment_scope_date_overlap`), но по предикату «живое primary». Два
+непересекающихся primary (текущее + запланированное) — разрешены; пересекающиеся — `23P01`.
+`btree_gist` уже установлен (миграция `20260728012114`).
 
 ---
 
@@ -464,7 +497,7 @@ CREATE UNIQUE INDEX "ux_site_assignment_one_live_primary"
 - `app/api/admin/sites/[siteId]/finish/route.ts` + `.../finish-preview` — завершение объекта.
 - `app/api/admin/sites/[siteId]/work-areas/[workAreaId]/disable-preview` — preflight заказчика.
 - `app/api/admin/assignments/group-change/route.ts` — M.
-- `prisma/migrations/*_add_assignment_lifecycle/` и `*_add_one_live_primary_index/`.
+- `prisma/migrations/*_add_assignment_lifecycle/` и `*_add_primary_period_exclusion/`.
 - Компоненты карточки работника: `WorkplaceNowSection.tsx`, `ChangeWorkplaceForm.tsx` (замена
   `ChangeAssignmentAction`), `RemoveFromSiteAction.tsx` (замена `EndAssignmentAction` на карточке),
   `ScheduledChangesSection.tsx`, `PastAssignmentsSection.tsx`.
@@ -550,12 +583,15 @@ CREATE UNIQUE INDEX "ux_site_assignment_one_live_primary"
 - каждый этап тестируется отдельно и имеет rollback-образ;
 - **перед каждым production deploy — отдельное подтверждение владельца** (перед миграцией
   отдельно);
-- **D отдельно:** сначала исправить двойное основное Nazar (backup + read-only preflight +
-  отдельное prod-разрешение), **затем** добавить защитный индекс;
-- индекс `ux_site_assignment_one_live_primary` — **partial** (`WHERE isPrimary AND
-  clockInDisabledAt IS NULL`): не удаляет историю, не запрещает прошлые (`clockInDisabledAt`
-  задан) и будущие (создаются с `isPrimary=false` либо демоут прежнего в той же транзакции)
-  назначения.
+- **D двухфазно (STOP-GATE #2/#3):** **D1** — только кодовые фиксы lifecycle (схема 99, без
+  Миграции 2, inventory 99), web-only swap, rollback D1 → Deploy A безопасен; **D2** — свежий
+  backup → `fix-double-primary.sql` (Nazar #1002 + Mykhailo #1004, явный SUPER_ADMIN) → Миграция 2
+  (EXCLUDE-constraint), пока D1-контейнер продолжает обслуживать как `schema:ahead`; rollback
+  финального образа → **сохранённый D1-контейнер**, НЕ Deploy A;
+- constraint `ex_site_assignment_one_primary_per_period` — **GiST EXCLUDE** по предикату
+  `isPrimary AND clockInDisabledAt IS NULL`, запрещает только **пересекающиеся** primary-периоды
+  одного работника: не удаляет историю, не запрещает прошлые (`clockInDisabledAt` задан), и
+  **разрешает** текущее + запланированное будущее primary одновременно (периоды не пересекаются).
 
 Каждый деплой: disposable PG16 → migrate deploy ×2 (второй no-op) → restore production backup в
 disposable DB → полный browser lane → кандидат на отдельном порту → **verified on-box + off-box

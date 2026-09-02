@@ -443,12 +443,21 @@ relevant query + canonical body)`.
 
 #### `POST /api/admin/assignments`
 - Permission: `assignment.create`
-- Request: `{ "employeeId", "siteId", "workAreaId"?, "templateId"?, "validFrom", "validTo"?, "isPrimary"? }`
+- Request: `{ "employeeId", "siteId", "workAreaId"?, "templateId"?, "validFrom", "validTo"?,
+  "isPrimary"?, "primaryConflictResolution"?: "KEEP_SCHEDULED" | "REPLACE_SCHEDULED" }`
 - Response `201`: полный `SiteAssignment`
 - Ошибки: `400 VALIDATION_ERROR`, `404 .../SITE_NOT_FOUND/.../TEMPLATE_NOT_FOUND`, `409
   EMPLOYEE_NOT_ACTIVE`, `409 ASSIGNMENT_OVERLAP`
+- **R15-D7 Deploy D** (`isPrimary=true`): под advisory lock демоутит прежние primary **с
+  пересекающимся периодом** (`AssignmentTransition` на каждое). Непересекающийся будущий/прошлый
+  primary остаётся. Если пересекающийся primary — запланированный будущий перевод: `409
+  SCHEDULED_PRIMARY_CONFLICT` (тело: `scheduledAssignmentId`, `scheduledValidFrom`) — повторить с
+  `primaryConflictResolution`: `"KEEP_SCHEDULED"` (это назначение создаётся не-primary) или
+  `"REPLACE_SCHEDULED"` (план остаётся назначением, теряет primary; фиксируется в
+  `AssignmentTransition` + audit). Гонка мимо lock → `409 PRIMARY_PERIOD_CONFLICT` (`23P01`).
 - Idempotency: обязателен
-- Audit: `ASSIGNMENT_CREATED`
+- Audit: `ASSIGNMENT_CREATED` (`afterValue` содержит `demotedPrimaryAssignmentIds` /
+  `demotedScheduledPrimaryAssignmentIds`)
 - Transaction: апсертит `PayrollPeriodParticipant`+`Timesheet(DRAFT)`+`TimesheetDraft` для каждого
   пересекающегося `OPEN`-периода
 
@@ -459,28 +468,39 @@ relevant query + canonical body)`.
 - Ошибки: `404`, `409 VERSION_CONFLICT`, `400 ASSIGNMENT_ALREADY_STARTED` (используйте
   `POST /api/admin/assignments/:id/change`)
 - **R15-D7 Deploy D:** `isPrimary=true` в теле выполняется через lifecycle-сервис
-  (`promoteToPrimary`) — advisory lock + демоушен прежнего live-primary + `AssignmentTransition` +
-  audit в одной транзакции; проверяется `version` (иначе `409 VERSION_CONFLICT`), недоступно на
-  снятом/завершённом назначении (`409 ASSIGNMENT_NOT_ACTIVE`), нельзя вместе с `endedReason`.
-  `isPrimary=false` / `endedReason` — прежний optimistic-locked путь (индекс-безопасно).
-  Возможен `409 LIVE_PRIMARY_CONFLICT`.
+  (`promoteToPrimary`) — advisory lock + демоушен прежних primary **с пересекающимся периодом** +
+  `AssignmentTransition` + audit в одной транзакции; проверяется `version` (иначе
+  `409 VERSION_CONFLICT`), недоступно на снятом/завершённом назначении
+  (`409 ASSIGNMENT_NOT_ACTIVE`), нельзя вместе с `endedReason`. `isPrimary=false` / `endedReason`
+  — прежний optimistic-locked путь (constraint-безопасно: строка только выходит из предиката).
+  Если пересекающийся primary — это **запланированный будущий перевод** (`validFrom > today`):
+  `409 SCHEDULED_PRIMARY_CONFLICT` (тело: `scheduledAssignmentId`, `scheduledValidFrom`) — повторить
+  с `primaryConflictResolution: "REPLACE_SCHEDULED"`, чтобы явно заменить план (он остаётся
+  назначением, но теряет статус primary; фиксируется `AssignmentTransition` + audit). Гонка мимо
+  advisory lock → `409 PRIMARY_PERIOD_CONFLICT` (backstop от EXCLUDE-constraint, SQLSTATE `23P01`).
 - Audit: `ASSIGNMENT_UPDATED` (для `isPrimary=false` / `endedReason`) либо `ASSIGNMENT_PROMOTED` +
   `AssignmentTransition` (для `isPrimary=true`)
 
 #### `POST /api/admin/assignments/:assignmentId/split` — **УДАЛЁН (410 Gone), R15-D7 Deploy D**
 - Возвращает `410 { code: "ENDPOINT_GONE" }`. Делал `siteAssignment.create` вне lifecycle-сервиса
-  (без advisory lock, без демоушена primary) → при split основного назначения два ряда попадали
-  под `ux_site_assignment_one_live_primary` и `create` падал 23505/500. UI-вызовов не было.
+  (без advisory lock, без демоушена primary) → при split основного назначения два ряда с
+  пересекающимся периодом попадали под `ex_site_assignment_one_primary_per_period` и `create`
+  падал `23P01`/500. UI-вызовов не было.
 - Замена: **`POST /api/admin/assignments/:assignmentId/change`** (закрытие старого +
   материализованная замена через lifecycle-сервис).
 
 #### `POST /api/admin/assignments/:assignmentId/promote`
 - Permission: `assignment.update`
+- Request (тело опционально): `{ "primaryConflictResolution"?: "KEEP_SCHEDULED" | "REPLACE_SCHEDULED" }`
 - Response `200`: `{ "assignmentId", "isPrimary": true }`
-- Ошибки: `404`, `409 ASSIGNMENT_NOT_ACTIVE`, `409 LIVE_PRIMARY_CONFLICT` / `409 VERSION_CONFLICT`
-- Transaction: advisory lock на `employeeId`, демоушен всех прежних **live** primary
-  (`isPrimary AND (clockInDisabledAt IS NULL OR > now)`), `AssignmentTransition` (по одной на
-  снятое) + audit `ASSIGNMENT_PROMOTED` — одна транзакция
+- Ошибки: `404`, `409 ASSIGNMENT_NOT_ACTIVE`, `409 SCHEDULED_PRIMARY_CONFLICT` (тело:
+  `scheduledAssignmentId`, `scheduledValidFrom` — повторить с
+  `primaryConflictResolution: "REPLACE_SCHEDULED"`), `409 PRIMARY_PERIOD_CONFLICT`,
+  `409 VERSION_CONFLICT`
+- Transaction: advisory lock на `employeeId`, демоушен всех прежних primary, **период которых
+  пересекается** с периодом этого назначения (`isPrimary AND clockInDisabledAt IS NULL AND
+  daterange && daterange`); непересекающийся будущий/прошлый primary НЕ трогается.
+  `AssignmentTransition` (по одной на снятое) + audit `ASSIGNMENT_PROMOTED` — одна транзакция
 
 #### `POST /api/admin/assignments/:assignmentId/end`
 - Permission: `assignment.end`

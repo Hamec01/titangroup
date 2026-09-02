@@ -332,8 +332,9 @@ Design §3.6 / owner Q1 знал только про **Nazar Druz**. Скан р
 
 ### Осталось (не Deploy A)
 - **Deploy D теперь = 2 ручных исправления** двойного основного назначения — Nazar Druz #1002
-  (owner Q1 решил: основное `c6825d98`) **и** Mykhailo Sadovnikov #1004 (**нужен выбор владельца**),
-  затем Миграция 2 (partial unique index `ux_site_assignment_one_live_primary`).
+  (owner Q1: основное `c6825d98`) **и** Mykhailo Sadovnikov #1004 (owner: основное `bc174aef`),
+  затем Миграция 2 (GiST EXCLUDE `ex_site_assignment_one_primary_per_period` — «≤1 live primary на
+  пересекающийся период»). Двухфазный rollout D1/D2 — см. `R15_D7_DEPLOY_D_REPORT_RU.md`.
 - Deploy B (карточка работника + пресеты причин + пометка перехода в табеле), C (завершение
   объекта/заказчика + серверные запреты L), E (групповой перевод), F (отчёт «Часы заказчику»).
 - Косметика: сегодня Nazar покажет в карточке 2 текущих назначения (новый гейт `validTo >= today`);
