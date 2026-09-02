@@ -47,6 +47,15 @@
 
 ---
 
+## Артефакты для владельца
+
+- **Скриншоты всех экранов** (57 PNG, `pilot-owner` SUPER_ADMIN): `/home/deploy/screenshots/titanor-time-prod-2026-09-01/` + `_index.md`.
+  WORKER-экраны не сняты (нужен вход рабочего аккаунта).
+- **Иллюстрированное руководство** (10 разделов, 32 экрана): артефакт
+  `https://claude.ai/code/artifact/019e3f38-fd3b-421a-b0f8-01496758b8c1` ·
+  автономная копия `/home/deploy/screenshots/titanor-time-guide.html` ·
+  исходник + build-скрипт рядом. Дополняет встроенную `/guide`.
+
 ## Лог R15
 
 | дата (UTC) | событие |
@@ -55,5 +64,8 @@
 | 2026-08-31 20:49 / 21:52 | post-R14 UI-деплои (`customer-scope-c6f9cb4`, `customer-worker-scope-e9e7c62`) — `*-pre-deploy` backup каждый |
 | 2026-09-01 06:57 | первый ручной `production-...-scheduled` backup + off-box + restore-test 14/14 + gps-archive exit 0 |
 | 2026-09-01 09:02 | `@production` backup+gps таймеры enabled (04:10 / 05:10 UTC daily); `@pilot` disabled; env в `/etc/titanor-time/` |
+| 2026-09-01 09:15 | пилотная deploy-history подчищена (~9 GB, диск 86→79%) |
+| 2026-09-01 ~09:14 (EEST) | скриншоты всех экранов сняты |
+| 2026-09-02 ~09:40 (EEST) | иллюстрированное руководство собрано |
 | 2026-09-02 04:10 | ⏳ первый автоматический production backup — проверить |
 | 2026-09-03 15:48 | ⏳ 72 ч; собрать report → owner sign-off |
