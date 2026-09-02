@@ -13,7 +13,9 @@ const PAGE_SIZE = 20;
 // (PROJECT_ROADMAP.md T6.2: "Список работников. Сначала read-only."). Page 1
 // only, no pager UI — out of scope for this task, same as the API route's
 // missing search/sort/filter params.
-export default async function AdminWorkersPage() {
+export default async function AdminWorkersPage(props: {
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
+}) {
   const session = await resolveServerSession();
   if (!session) {
     redirect('/login');
@@ -31,7 +33,9 @@ export default async function AdminWorkersPage() {
     );
   }
 
-  const { items, totalItems } = await listWorkers(1, PAGE_SIZE);
+  const searchParams = await props.searchParams;
+  const showArchived = searchParams.archived === '1';
+  const { items, totalItems, archivedCount } = await listWorkers(1, PAGE_SIZE, { includeArchived: showArchived });
 
   return (
     <main className="setup-page">
@@ -39,6 +43,19 @@ export default async function AdminWorkersPage() {
         <h1>{s.workers.title}</h1>
         <p className="setup-subtitle">
           {totalItems} {totalItems === 1 ? s.workers.singular : s.workers.plural} · <Link href="/admin/workers/new">{s.common.createNew}</Link>
+          {showArchived ? (
+            <>
+              {' · '}
+              <Link href="/admin/workers">{s.workers.hideArchived}</Link>
+            </>
+          ) : archivedCount > 0 ? (
+            <>
+              {' · '}
+              <Link href="/admin/workers?archived=1">
+                {s.workers.showArchived} ({archivedCount})
+              </Link>
+            </>
+          ) : null}
         </p>
         {items.length === 0 ? (
           <p>{s.workers.empty}</p>

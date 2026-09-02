@@ -300,6 +300,21 @@ async function main() {
   // restore the prior state for the downstream steps: Worker A deactivated again.
   await jsonFetch(`${BASE}/api/admin/workers/${fx.workerA.employeeId}/deactivate`, { method: 'POST', headers: authHeaders(fx.admin.cookie), body: JSON.stringify({ reason: 'T9 lifecycle regression test' }) });
 
+  // 20h/i/j/k: archive behaviour — a deactivated worker is hidden from the default worker list
+  // (and the assignment picker's ?pageSize=100 fetch), and only appears with ?archived=1.
+  const listDefault = await jsonFetch(`${BASE}/api/admin/workers?pageSize=100`, { headers: authHeaders(fx.admin.cookie) });
+  const defaultIds = (listDefault.body?.items ?? []).map((w: { id: string }) => w.id);
+  check('20h: default worker list excludes the deactivated Worker A', !defaultIds.includes(fx.workerA.employeeId) && defaultIds.includes(fx.workerB.employeeId), { defaultIds, a: fx.workerA.employeeId });
+  check('20i: default list reports archivedCount >= 1', typeof listDefault.body?.archivedCount === 'number' && listDefault.body.archivedCount >= 1, listDefault.body?.archivedCount);
+  const listArchived = await jsonFetch(`${BASE}/api/admin/workers?pageSize=100&archived=1`, { headers: authHeaders(fx.admin.cookie) });
+  const archivedIds = (listArchived.body?.items ?? []).map((w: { id: string }) => w.id);
+  check('20j: ?archived=1 worker list includes the deactivated Worker A', archivedIds.includes(fx.workerA.employeeId) && archivedIds.includes(fx.workerB.employeeId), archivedIds);
+  await page.goto(`${BASE}/admin/workers`, { waitUntil: 'networkidle' });
+  const listPageText = await page.locator('body').innerText();
+  check('20k: /admin/workers page hides Worker A by default and offers "Show archived"', !listPageText.includes(fx.workerA.username) && listPageText.includes('Show archived'), listPageText.slice(0, 400));
+  await page.goto(`${BASE}/admin/workers?archived=1`, { waitUntil: 'networkidle' });
+  check('20l: /admin/workers?archived=1 shows Worker A', (await page.locator('body').innerText()).includes(fx.workerA.username));
+
   // 21: malformed/foreign id does not oracle or 500.
   const malformedIdRes = await jsonFetch(`${BASE}/api/admin/workers/not-a-uuid`, { headers: authHeaders(fx.admin.cookie) });
   const foreignIdRes = await jsonFetch(`${BASE}/api/admin/workers/${randomUUID()}`, { headers: authHeaders(fx.admin.cookie) });

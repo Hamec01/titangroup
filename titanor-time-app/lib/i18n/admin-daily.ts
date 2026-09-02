@@ -10,6 +10,7 @@ const EN = {
   },
   workers: {
     title: 'Workers', singular: 'worker', plural: 'workers', empty: 'No workers yet.',
+    showArchived: 'Show archived', hideArchived: 'Hide archived',
     employeeNumber: 'Employee number', login: 'Login username', assignment: 'Current assignment',
     newTitle: 'New worker',
     newHelp: 'Create the worker first. You can assign a site and schedule on the next screen, then send the activation link or QR code.',
@@ -73,6 +74,7 @@ const RU = {
   },
   workers: {
     title: 'Работники', singular: 'работник', plural: 'работников', empty: 'Работников пока нет.',
+    showArchived: 'Показать архив', hideArchived: 'Скрыть архив',
     employeeNumber: 'Табельный номер', login: 'Логин', assignment: 'Текущее назначение',
     newTitle: 'Новый работник',
     newHelp: 'Сначала создайте работника. На следующем экране можно назначить объект и график, затем отправить ссылку активации или QR-код.',

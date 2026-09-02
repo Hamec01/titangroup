@@ -1,3 +1,4 @@
+import { Prisma } from '@prisma/client';
 import { prisma } from '@/lib/prisma';
 import { createAuditEvent } from '@/lib/audit';
 import { generateWorkerUsernameBase, reserveWorkerUsername } from '@/lib/worker-usernames';
@@ -29,6 +30,13 @@ export interface WorkerListResult {
   pageSize: number;
   totalItems: number;
   totalPages: number;
+  /**
+   * Employees with no active Employment row ("archived" = deactivated). Hidden from the default
+   * list; ?archived=1 shows everyone. There is no physical delete for Employee (Timesheet /
+   * ClockEvent / AuditEvent history references it — T9_INTERNAL_TEST_PLAN.md §1); deactivate plus
+   * this filter IS the archive, and POST .../reactivate brings a worker back.
+   */
+  archivedCount: number;
 }
 
 export type ActivationStatus = 'ALREADY_ACTIVE' | 'READY_FOR_ACTIVATION' | 'SETUP_INCOMPLETE';
@@ -96,12 +104,24 @@ function mapAssignment(assignment: { isPrimary: boolean; site: { id: string; nam
  * работников. Сначала read-only."). Sort order is fixed (lastName, firstName
  * ascending) rather than exposed as a param.
  */
-export async function listWorkers(page: number, pageSize: number): Promise<WorkerListResult> {
+export async function listWorkers(
+  page: number,
+  pageSize: number,
+  options: { includeArchived?: boolean } = {}
+): Promise<WorkerListResult> {
   const today = helsinkiToday();
 
-  const [totalItems, employees] = await Promise.all([
-    prisma.employee.count(),
+  // Default: only workers with an active Employment. ?archived=1 drops the filter and shows
+  // deactivated ("archived") workers too. Archived workers keep every row they ever had.
+  const where: Prisma.EmployeeWhereInput = options.includeArchived
+    ? {}
+    : { employments: { some: { active: true } } };
+
+  const [totalItems, archivedCount, employees] = await Promise.all([
+    prisma.employee.count({ where }),
+    prisma.employee.count({ where: { employments: { none: { active: true } } } }),
     prisma.employee.findMany({
+      where,
       orderBy: [{ lastName: 'asc' }, { firstName: 'asc' }],
       skip: (page - 1) * pageSize,
       take: pageSize,
@@ -135,7 +155,8 @@ export async function listWorkers(page: number, pageSize: number): Promise<Worke
     page,
     pageSize,
     totalItems,
-    totalPages: Math.ceil(totalItems / pageSize)
+    totalPages: Math.ceil(totalItems / pageSize),
+    archivedCount
   };
 }
 

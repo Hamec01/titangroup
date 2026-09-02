@@ -465,6 +465,13 @@ export function WorkerActions({ worker }: { worker: WorkerDetail }) {
       {worker.employment?.active ? (
         <>
           <h2>{localeText(locale, 'Deactivate', 'Деактивация')}</h2>
+          <p className="setup-subtitle">
+            {localeText(
+              locale,
+              'Ends the employment and moves the worker to the archive. Nothing is deleted — their timesheets, history and assignments stay, and “Reactivate worker” brings them back. The worker list hides archived workers by default.',
+              'Завершает трудоустройство и убирает работника в архив. Ничего не удаляется — табели, история и назначения сохраняются, а «Восстановить работника» возвращает его. В списке работников архивные по умолчанию скрыты.'
+            )}
+          </p>
           {!showDeactivate ? (
             <button type="button" className="login-submit" onClick={() => setShowDeactivate(true)}>
               {localeText(locale, 'Deactivate worker', 'Деактивировать работника')}

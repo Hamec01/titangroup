@@ -58,7 +58,10 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       ? pageSizeParam
       : DEFAULT_PAGE_SIZE;
 
-  const result = await listWorkers(page, pageSize);
+  // Default: active workers only. ?archived=1 includes deactivated ("archived") workers. The
+  // assignment picker relies on the default — an archived worker cannot be assigned anyway.
+  const includeArchived = searchParams.get('archived') === '1';
+  const result = await listWorkers(page, pageSize, { includeArchived });
 
   return NextResponse.json(result, { status: 200, headers: successHeaders(requestId) });
 }
