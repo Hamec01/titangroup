@@ -299,6 +299,31 @@ enum AdminNotificationSeverity {
   CRITICAL
 }
 
+// R15-D7 — structured history of workplace-lifecycle actions (docs/titanor-time/
+// R15_ASSIGNMENT_LIFECYCLE_DESIGN_RU.md §4). One AssignmentTransition per admin action; AuditEvent
+// is still written alongside. Append-only (immutability trigger). The timesheet "место работы
+// изменено в HH:MM" marker reads these, not AuditEvent JSON.
+enum AssignmentTransitionKind {
+  CHANGE
+  REMOVE
+  SITE_FINISH
+  CUSTOMER_DISABLE
+  GROUP_CHANGE
+}
+
+enum AssignmentTransitionOpenShift {
+  AFTER_CHECK_OUT
+  MOVED_TO_NEW
+  NONE
+}
+
+enum AssignmentTransitionReason {
+  PROJECT_DONE
+  TRANSFER
+  ASSIGNED_BY_MISTAKE
+  OTHER
+}
+
 // T15.3 (2026-08-29) — Worker Notification Center. Same shape as AdminNotification (flat enum, a
 // dismissal table normalised out so it is per-user), but for the worker's own PWA. First type:
 // the timesheet-submission deadline is coming up (or already passed). New types (schedule change,
@@ -417,6 +442,7 @@ model User {
   createdEmployeeProfessions     EmployeeProfession[]          @relation("EmployeeProfessionCreatedBy")
   adminNotificationDismissals    AdminNotificationDismissal[]
   workerNotificationDismissals   WorkerNotificationDismissal[]
+  assignmentTransitions          AssignmentTransition[]        @relation("AssignmentTransitionActor")
 }
 
 model Role {
@@ -576,6 +602,7 @@ model Employee {
   workerNotifications   WorkerNotification[]
   shiftPresenceSamples  ShiftPresenceSample[]
   professions           EmployeeProfession[]
+  assignmentTransitions AssignmentTransition[]
 }
 
 // Worker Profile feature (2026-08-24 plan) — optional, self-service worker info plus an
@@ -874,6 +901,11 @@ model WorkSite {
   // A geofence-verification failure with a real coordinate (worker was measurably elsewhere) is
   // NOT auto-resolved by this flag.
   gpsOftenUnavailable      Boolean                      @default(false)
+  // R15-D7 — the moment a "finish this site" action operationally closed it. Distinct from
+  // `active` (which still drives list/picker visibility): a site with `finishedAt` set but an
+  // open shift still running shows as "Завершается" until Check Out, then "Завершён". NULL = not
+  // finished. Nothing is deleted; geofence + history stay.
+  finishedAt               DateTime?                    @db.Timestamptz(6)
   defaultForemanUserId     String?                      @db.Uuid
   version                  Int                          @default(1)
   currentGeofenceVersionId String?                      @db.Uuid
@@ -986,6 +1018,12 @@ model SiteAssignment {
   isPrimary               Boolean
   validFrom               DateTime                     @db.Date
   validTo                 DateTime?                    @db.Date
+  // R15-D7 — the exact instant after which NO new shift may start on this assignment (worker was
+  // removed / transferred). `validFrom`/`validTo` (dates) stay the payroll boundary; this is the
+  // single operational Check-In gate, read by every "current assignment" consumer (see
+  // lib/assignment-lifecycle.ts isAssignmentLiveNow). NULL = operationally live. A future value =
+  // a scheduled removal/transfer that has not taken effect yet.
+  clockInDisabledAt       DateTime?                    @db.Timestamptz(6)
   assignedByUserId        String                       @db.Uuid
   endedReason             String?                      @db.Text
   version                 Int                          @default(1)
@@ -1006,12 +1044,54 @@ model SiteAssignment {
   clockShifts             ClockShift[]
   clockShiftFragments     ClockShiftFragment[]
   clockShiftAdjustments   ClockShiftAdjustment[]
+  transitionsFrom         AssignmentTransition[]       @relation("AssignmentTransitionFrom")
+  transitionsTo           AssignmentTransition[]       @relation("AssignmentTransitionTo")
 
   @@unique([id, employeeId, siteId])
   @@index([employeeId, validFrom, validTo])
   @@index([siteId, validFrom, validTo])
   @@index([templateVersionId])
   @@index([assignedByUserId])
+  @@index([employeeId, clockInDisabledAt])
+}
+
+// R15-D7 — see the AssignmentTransitionKind enum comment. Immutable/append-only; the migration
+// adds trg_assignment_transition_immutable (BEFORE UPDATE OR DELETE).
+model AssignmentTransition {
+  id                String                         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  employeeId        String                         @db.Uuid
+  kind              AssignmentTransitionKind
+  fromAssignmentId  String?                        @db.Uuid
+  toAssignmentId    String?                        @db.Uuid
+  /**
+   * The exact instant the admin performed the action (Europe/Helsinki wall clock shown in the UI).
+   */
+  actedAt           DateTime                       @db.Timestamptz(6)
+  /**
+   * The calendar date the new arrangement takes effect.
+   */
+  effectiveFrom     DateTime                       @db.Date
+  openShiftHandling AssignmentTransitionOpenShift?
+  actorUserId       String                         @db.Uuid
+  /**
+   * Set for a group transfer (§M) so a batch shows as one operation; NULL for a single action.
+   */
+  groupId           String?                        @db.Uuid
+  reasonCode        AssignmentTransitionReason
+  /**
+   * Only when reasonCode = OTHER.
+   */
+  reasonText        String?                        @db.Text
+  createdAt         DateTime                       @default(now()) @db.Timestamptz(6)
+  employee          Employee                       @relation(fields: [employeeId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  fromAssignment    SiteAssignment?                @relation("AssignmentTransitionFrom", fields: [fromAssignmentId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  toAssignment      SiteAssignment?                @relation("AssignmentTransitionTo", fields: [toAssignmentId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  actor             User                           @relation("AssignmentTransitionActor", fields: [actorUserId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+
+  @@index([employeeId, actedAt(sort: Desc)])
+  @@index([groupId])
+  @@index([fromAssignmentId])
+  @@index([toAssignmentId])
 }
 
 model ForemanAssignment {
