@@ -114,6 +114,7 @@
     { "file": "_test-offline-views.ts", "lane": "browser", "note": "Offline worker views — Chromium." },
     { "file": "_test-pwa-install.ts", "lane": "browser", "note": "PWA install flow — Chromium." },
     { "file": "_test-qualifications-browser-qa.ts", "lane": "browser", "note": "Qualifications admin UI — Chromium." },
+    { "file": "_test-t9-assignment-lifecycle.ts", "lane": "browser", "note": "R15-D7 Deploy A — unified clockInDisabledAt gate + lifecycle service (removeFromSite / changeWorkplace / promoteToPrimary) + AssignmentTransition + C8 (deactivated worker can't start a shift) + §3.12 Check Out step. HTTP + DB, no Chromium." },
     { "file": "_test-t9-full-flow.ts", "lane": "browser", "note": "T9 full attendance→timesheet→approval flow — Chromium." },
     { "file": "_test-t9-restart-persistence.ts", "lane": "browser", "note": "T9 restart persistence — Chromium." },
     { "file": "_test-t9-role-matrix.ts", "lane": "browser", "note": "T9 role/permission matrix (UI + HTTP) — Chromium. R02 made the denial checks language-independent." },
