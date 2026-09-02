@@ -21,7 +21,7 @@
 |---|---|
 | clock / GPS / offline sync / обработка табеля на проде | ⏳ нужна проверка реальным worker |
 | uploads / отчёты (экран + PDF + CSV) / audit events | ⏳ |
-| **дождаться и проверить автоматический backup** | ✅ Env-файлы установлены в `/etc/titanor-time/` (root:root 0600), таймер **`titanor-time-backup@production.timer` enabled+active** 2026-09-01 09:02 (04:10 UTC ежедневно); `@pilot` таймеры disabled. Ручной прогон как `deploy`: `production-20260901T065748Z-scheduled` (503 744 б, 1789 rows, 98 миграций, on+off-box `SHA256SUMS` OK). Первый автоматический — 2026-09-02 04:10 UTC, проверить. |
+| **дождаться и проверить автоматический backup** | ✅ Env-файлы в `/etc/titanor-time/` (root:root 0600), таймер **`titanor-time-backup@production.timer` enabled+active**; `@pilot` таймеры disabled. **Первый автоматический прогон состоялся:** `production-20260902T042421Z-scheduled` (reason=scheduled, 505 385 б, 724 TOC, 98 миграций, on-box + off-box `SHA256SUMS` OK). `titanor-time-gps-archive@production.timer` тоже отработал (`LAST 2026-09-02 07:11`). |
 | restore-проверка из production backup | ✅ `restore-test` этого бэкапа: **14/14** (74 таблицы, fingerprint, uploads 3, `/api/ready` 200) |
 | GPS archive / retention на проде | ✅ `titanor-time-gps-archive@production.timer` enabled+active (05:10 UTC); ручной прогон `gps-archive` exit 0 (`sealableDays:0` — раньше 90 дней нечего запечатывать) |
 | место на storage | ✅ диск / 85%; build cache 71 GB (prune отложен до sign-off) |
@@ -32,6 +32,8 @@
 |---|---|---|---|
 | D1a | **Нет UI «восстановить работника».** Деактивация — в одну сторону; приложение писало «сначала восстановите работника», указывая на несуществующую кнопку. | P2 | ✅ **ИСПРАВЛЕНО и задеплоено 2026-09-02** — `c229a44` / `worker-reactivate-c229a44`, отчёт `WORKER_REACTIVATE_DEPLOY_RU.md`. `POST …/reactivate` + кнопка «Восстановить работника». `druzr` (Ruslan Druz #1003, тестовая деактивация `oleksandr` «plohoi») был восстановлен ещё до фикса напрямую в БД. |
 | D1b | **Нет «удалить работника в архив».** | P2 | ✅ **ИСПРАВЛЕНО и задеплоено 2026-09-02** (Вариант B, владелец) — `08acb30` / `worker-archive-08acb30`, отчёт `WORKER_ARCHIVE_DEPLOY_RU.md`. «Деактивировать» = «в архив» (данные целы); `/admin/workers` по умолчанию скрывает архивных, переключатель «Показать архив (N)». Без миграции. Физического DELETE по-прежнему нет by design. |
+| D2 | **Раб.зона не видна в админке; кажется, что 2-е назначение на одном объекте «не создаётся»; нет кнопки «убрать объект/раб.зону» на карточке работника.** Плюс: `POST /api/admin/assignments/:id/end` отдавал сырой **HTTP 500** при дате окончания раньше уже созданных плановых смен (а это почти любое «завершить сегодня»). | P2 | ✅ **ИСПРАВЛЕНО и задеплоено 2026-09-02** — `ae92b9a` (вкл. `944ba82`) / `worker-workarea-ae92b9a`, отчёт `WORKER_WORKAREA_DEPLOY_RU.md`. Раб.зона в карточке и списке (`Объект — Раб.зона`); список назначений ключуется по `assignmentId` (React больше не схлопывает 2 назначения на одном объекте); кнопка «Завершить» у каждого назначения (запись сохраняется, `validTo`+`endedReason`+audit); `/end` → понятный **409 `ASSIGNMENT_HAS_DEPENDENTS`** с `earliestValidTo` вместо 500, форма подставляет безопасную дату (конец периода). Без миграции. Привязки GPS не тронуты (geofence на объекте, не на назначении). Browser lane 85/26/33/84. Live-проверка под `pilot-owner` на реальных данных (Meyer Turku Shipyard + раб.зона Aros Marine). |
+| D3 | **Расчётный лист только по объекту, не по раб.зоне** (сообщение владельца 25: «раб.зона не ниже по важности чем объект»). | P2 | ⏳ **BACKLOG** — не начата. Следующая задача после D2. Трогает `lib/site-time-report.ts`, `/admin/reports/sites`, `/admin/reports/customer`, возможно CSV. |
 
 ## Фаза 3 — 72 ч + период стабильности (не начата)
 
@@ -76,5 +78,6 @@
 | 2026-09-02 ~09:40 (EEST) | иллюстрированное руководство собрано |
 | 2026-09-02 07:06 | deploy `worker-reactivate-c229a44` (кнопка «Восстановить работника»); web-swap ~4 c, PASS |
 | 2026-09-02 07:23 | deploy `worker-archive-08acb30` (архив: список скрывает деактивированных + «Показать архив»); web-swap ~4 c, PASS. Browser lane 77/33/26/84. |
-| 2026-09-02 04:10 | ⏳ первый автоматический production backup — проверить |
+| 2026-09-02 04:24 UTC | ✅ первый автоматический production backup `production-20260902T042421Z-scheduled` — on+off-box `SHA256SUMS` OK, 98 миграций |
+| 2026-09-02 08:29 UTC | deploy `worker-workarea-ae92b9a` (раб.зона в карточке/списке; «Завершить» назначение на карточке; `/end` 500→409); web-swap ~3 c, PASS. Browser lane 85/26/33/84. Live-проверка под `pilot-owner`. Rollback: `titanor-time-prod-app-pre-ae92b9a`. |
 | 2026-09-03 15:48 | ⏳ 72 ч; собрать report → owner sign-off |
