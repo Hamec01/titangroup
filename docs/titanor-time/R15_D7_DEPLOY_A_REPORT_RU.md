@@ -1,8 +1,7 @@
 # R15-D7 — Deploy A («Фундамент»): отчёт перед production
 
-**Статус:** реализация + disposable-тесты + verification на восстановленном production-backup
-завершены (шаг 1 плана). **Production не изменялся.** Ждёт отдельного подтверждения владельца на
-(2) production-деплой. Итог шага 1 — §11.
+**Статус:** ✅ **РАЗВЁРНУТО НА PRODUCTION 2026-09-02 ~17:29 UTC** (`titanor-time-app:d7a-37dddb1`,
+миграция 99, простой ~9 c). Владелец подтвердил «делай по запланированному плану». Итог — §12.
 
 Ветка `feature/titanor-time-foundation`, коммиты:
 `c41938d` (design) → `27631d9` (§9) → `99ed01b` (A1 миграция) → `aacd5fe` (A2 единый гейт) →
@@ -310,3 +309,32 @@ Design §3.6 / owner Q1 знал только про **Nazar Druz**. Скан р
 - scheduler не трогается. Caddy/DNS не трогаются.
 - **Итого видимой недоступности: ~10–15 секунд** (один swap); миграция недоступности почти не
   добавляет.
+
+---
+
+## 12. Production-деплой — ВЫПОЛНЕН 2026-09-02 (~17:26–17:29 UTC)
+
+Владелец: «давай делай по запланированному плану, даю разрешение». Выполнено ровно по §10.
+**Caddy/DNS/scheduler не трогались. Пароли/аккаунты не трогались. В логи/чат секреты не выводились.**
+
+| шаг | факт |
+|---|---|
+| A. backup | `production-20260902T172647Z-pre-deploy` — 2128 строк, 98 миграций, dump 532 KB. on-box **и** off-box SHA256SUMS проверены (`sha256sum -c` OK). Плюс более ранний `production-20260902T162950Z-pre-migration`. |
+| B. baseline | prod `/api/ready` 200 schema 98/98; DB: 98 миграций (0 bad), 74 таблицы, 40 триггеров, 178 FK, 14 SiteAssignment. Публичный сайт 200. |
+| C. `migrate deploy` | throwaway-контейнер из `d7a-37dddb1` на `titanor-time-prod-net` → применена `20260902160000_add_assignment_lifecycle`. Старый образ продолжал обслуживать (`/api/ready` 200, `schema: ahead, aheadBy 1`). |
+| D. verify migration | 99 миграций (0 bad), 75 таблиц, 41 триггер (`trg_assignment_transition_immutable`), 182 FK. **backfill: `clockInDisabledAt` — 0 строк, `finishedAt` — 0 строк** (нет исторических данных — как и предсказано). `AssignmentTransition` пуста. pass 2 = `No pending migrations`. Scheduler running+healthy, не тронут. |
+| E. web-only swap | `docker stop -t 30` (T0 17:29:05.6) → `rename` → `titanor-time-prod-app-pre-37dddb1` → `docker run` новый `d7a-37dddb1` (T2 17:29:06.3, идентичная конфигурация: net `titanor-time-prod-net`, `-p 127.0.0.1:3199:3000`, uploads-bind, `--env-file`, тот же healthcheck, `--restart unless-stopped`). |
+| F. verify | `/api/ready` = **200 `schema: current 99/99 aheadBy 0`** в 17:29:14.4 (**простой ≈ 8.8 с**). Локально и **через Caddy `https://app.titanorgroup.fi/api/ready` → 200**. `/login` 200, `/` 307, `/api/admin/workers` 401 (без авторизации — верно). Логи старта чисты (0 error-строк). Scheduler + публичный сайт не затронуты. |
+
+**Rollback (если понадобится):** `docker stop titanor-time-prod-app && docker rename titanor-time-prod-app titanor-time-prod-app-d7-failed && docker rename titanor-time-prod-app-pre-37dddb1 titanor-time-prod-app && docker start titanor-time-prod-app` (~4 c). **Схему НЕ откатывать** — старый образ `customer-page-5381b9f` корректно работает с миграцией 99 (`schema: ahead`, проверено вживую до swap). Хранятся: контейнер `titanor-time-prod-app-pre-37dddb1`, образ `customer-page-5381b9f` (`sha256:798f31eb…`), backup'ы `pre-deploy` + `pre-migration` (on+off-box).
+
+**Ветка:** HEAD `68b355c` (+ этот коммит). Развёрнутый код = `37dddb1` (A1+A2+A3+A4); `7424ee2`/`9bc8d7f`/`68b355c` — только тесты и документация, в образе не нужны.
+
+### Осталось (не Deploy A)
+- **Deploy D теперь = 2 ручных исправления** двойного основного назначения — Nazar Druz #1002
+  (owner Q1 решил: основное `c6825d98`) **и** Mykhailo Sadovnikov #1004 (**нужен выбор владельца**),
+  затем Миграция 2 (partial unique index `ux_site_assignment_one_live_primary`).
+- Deploy B (карточка работника + пресеты причин + пометка перехода в табеле), C (завершение
+  объекта/заказчика + серверные запреты L), E (групповой перевод), F (отчёт «Часы заказчику»).
+- Косметика: сегодня Nazar покажет в карточке 2 текущих назначения (новый гейт `validTo >= today`);
+  само исчезнет завтра.
