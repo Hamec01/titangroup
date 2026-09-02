@@ -359,6 +359,30 @@ async function main() {
   const siteAlphaAfterSecondWorkArea = await jsonFetch(`${BASE}/api/admin/sites/${fx.sites.alpha}`, { headers: authHeaders(fx.admin.cookie) });
   check('WorkAreas: both work areas visible on the site', (siteAlphaAfterSecondWorkArea.body.workAreas as any[]).length >= 2);
 
+  // Two current assignments on the SAME site, one per work area (owner's "2 customers = 2 work
+  // areas, one site" case). Both must be created AND both must be shown on the worker card,
+  // distinguished by work area (the old UI keyed the list by siteId → the second one was
+  // invisible → looked like "не создалось"). Then End one and confirm it drops from "current"
+  // while the row is kept.
+  const alphaAreas = (siteAlphaAfterSecondWorkArea.body.workAreas as { id: string; name: string }[]);
+  const area1 = alphaAreas[0], area2 = alphaAreas[1];
+  const asgW1 = await jsonFetch(`${BASE}/api/admin/assignments`, { method: 'POST', headers: authHeaders(fx.admin.cookie, { 'Idempotency-Key': randomUUID() }), body: JSON.stringify({ employeeId: fx.workerB.employeeId, siteId: fx.sites.alpha, workAreaId: area1.id, validFrom: '2020-01-01', isPrimary: false }) });
+  const asgW2 = await jsonFetch(`${BASE}/api/admin/assignments`, { method: 'POST', headers: authHeaders(fx.admin.cookie, { 'Idempotency-Key': randomUUID() }), body: JSON.stringify({ employeeId: fx.workerB.employeeId, siteId: fx.sites.alpha, workAreaId: area2.id, validFrom: '2020-01-01', isPrimary: false }) });
+  check('WA1: two assignments on one site with different work areas both create (201)', asgW1.status === 201 && asgW2.status === 201, { a: asgW1.status, b: asgW2.status, ab: asgW2.body });
+  await page.goto(`${BASE}/admin/workers/${fx.workerB.employeeId}`, { waitUntil: 'networkidle' });
+  const wbAssignText = await page.locator('body').innerText();
+  check('WA2: both work-area names are shown on the worker card', wbAssignText.includes(area1.name) && wbAssignText.includes(area2.name), wbAssignText.slice(0, 500));
+  const endButtons = await page.locator('.setup-list button', { hasText: /^End$/ }).count();
+  check('WA3: worker card shows an "End" action per current assignment', endButtons >= 2, endButtons);
+  // End the first one, effective in the past, with a reason.
+  const endW1 = await jsonFetch(`${BASE}/api/admin/assignments/${asgW1.body.id}/end`, { method: 'POST', headers: authHeaders(fx.admin.cookie), body: JSON.stringify({ validTo: '2020-06-01', reason: 'T9: owner-requested removal from the worker card' }) });
+  check('WA4: End assignment succeeds (200)', endW1.status === 200, endW1.body);
+  const w1Row = await prisma.siteAssignment.findUniqueOrThrow({ where: { id: asgW1.body.id } });
+  check('WA5: ended assignment is kept (not deleted), validTo + endedReason set', w1Row.validTo !== null && w1Row.endedReason?.includes('owner-requested') === true, w1Row);
+  await page.goto(`${BASE}/admin/workers/${fx.workerB.employeeId}`, { waitUntil: 'networkidle' });
+  const wbAfterEnd = await page.locator('body').innerText();
+  check('WA6: the ended work area is no longer under "current assignments"; the other one still is', !wbAfterEnd.includes(area1.name) && wbAfterEnd.includes(area2.name), { a1: area1.name, a2: area2.name });
+
   // Templates: create second, edit (PATCH) creates a new version rather than mutating in place.
   const templateX = await jsonFetch(`${BASE}/api/admin/templates`, { method: 'POST', headers: authHeaders(fx.admin.cookie, { 'Idempotency-Key': randomUUID() }), body: JSON.stringify({ name: `TemplateX ${fx.run}`, days: [0, 1, 2, 3, 4, 5, 6].map((weekday) => ({ weekday, isWorkingDay: weekday < 5, plannedStartTime: weekday < 5 ? '08:00' : undefined, plannedEndTime: weekday < 5 ? '16:00' : undefined, plannedBreakMinutes: weekday < 5 ? 30 : 0 })) }) });
   check('Templates: create-second independent of the fixture template', templateX.status === 201);

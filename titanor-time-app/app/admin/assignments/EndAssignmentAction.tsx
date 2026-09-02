@@ -2,7 +2,6 @@
 
 import { useState, type FormEvent } from 'react';
 import { useRouter } from 'next/navigation';
-import type { AssignmentListItem } from '@/lib/assignments';
 import { useAppLocale } from '@/components/i18n/AppLocaleProvider';
 import { localeText } from '@/lib/i18n/locale';
 
@@ -11,12 +10,19 @@ const CSRF_HEADER_VALUE = 'titanor-time';
 // docs/titanor-time/T9_INTERNAL_TEST_PLAN.md §4 (defect D3) — POST
 // /api/admin/assignments/:assignmentId/end was already fully implemented (validation, audit,
 // reason-required-if-early) but had no UI anywhere calling it. This is the minimal UI for the
-// existing contract — no new backend behavior.
-export function EndAssignmentAction({ assignment }: { assignment: AssignmentListItem }) {
+// existing contract — no new backend behavior. Used from /admin/assignments and from the worker
+// card's "Текущие назначения" list (only `id` is needed — hence the minimal prop shape).
+export function EndAssignmentAction({
+  assignment,
+  defaultValidTo = ''
+}: {
+  assignment: { id: string };
+  defaultValidTo?: string;
+}) {
   const router = useRouter();
   const locale = useAppLocale();
   const [open, setOpen] = useState(false);
-  const [validTo, setValidTo] = useState('');
+  const [validTo, setValidTo] = useState(defaultValidTo);
   const [reason, setReason] = useState('');
   const [loading, setLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);

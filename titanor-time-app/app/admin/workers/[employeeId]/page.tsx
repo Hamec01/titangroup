@@ -3,6 +3,7 @@ import Link from 'next/link';
 import { resolveServerSession } from '@/lib/server-session';
 import { getWorkerDetail, helsinkiToday } from '@/lib/workers';
 import { NewAssignmentForm } from '@/app/admin/assignments/new/NewAssignmentForm';
+import { EndAssignmentAction } from '@/app/admin/assignments/EndAssignmentAction';
 import { WorkerActions } from './WorkerActions';
 import { RecoveryCodeIssuer } from '@/components/account/RecoveryCodeIssuer';
 import { WorkerSubmissionScheduleForm } from './WorkerSubmissionScheduleForm';
@@ -130,11 +131,16 @@ export default async function WorkerDetailPage({ params }: { params: Promise<{ e
         ) : (
           <ul className="setup-list">
             {worker.currentAssignments.map((assignment) => (
-              <li key={assignment.siteId} className="setup-item">
+              <li key={assignment.assignmentId} className="setup-item">
                 <span className="setup-label">
                   {assignment.siteName}
+                  {assignment.workAreaName ? ` — ${assignment.workAreaName}` : ''}
                   {assignment.isPrimary ? ` (${s.common.primary})` : ''}
                 </span>
+                <EndAssignmentAction
+                  assignment={{ id: assignment.assignmentId }}
+                  defaultValidTo={helsinkiToday().toISOString().slice(0, 10)}
+                />
               </li>
             ))}
           </ul>

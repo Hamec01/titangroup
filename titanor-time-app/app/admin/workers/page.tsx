@@ -86,7 +86,12 @@ export default async function AdminWorkersPage(props: {
                     {worker.currentAssignments.length === 0
                       ? '—'
                       : worker.currentAssignments
-                          .map((assignment) => assignment.siteName + (assignment.isPrimary ? ` (${s.common.primary})` : ''))
+                          .map(
+                            (assignment) =>
+                              assignment.siteName +
+                              (assignment.workAreaName ? ` — ${assignment.workAreaName}` : '') +
+                              (assignment.isPrimary ? ` (${s.common.primary})` : '')
+                          )
                           .join(', ')}
                   </td>
                 </tr>

@@ -8,9 +8,16 @@ import { generateWorkerUsernameBase, reserveWorkerUsername } from '@/lib/worker-
 // same pattern as lib/setup-status.ts.
 
 export interface CurrentAssignment {
+  /** SiteAssignment.id — the real React key (a worker can have two current assignments on the
+   *  same site, one per work area) and the id passed to POST .../assignments/:id/end. */
+  assignmentId: string;
   siteId: string;
   siteName: string;
+  workAreaId: string | null;
+  workAreaName: string | null;
   isPrimary: boolean;
+  validFrom: string;
+  validTo: string | null;
 }
 
 export interface WorkerListItem {
@@ -90,13 +97,34 @@ function currentAssignmentWhere(today: Date) {
   };
 }
 
-function mapAssignment(assignment: { isPrimary: boolean; site: { id: string; name: string } }): CurrentAssignment {
+function mapAssignment(assignment: {
+  id: string;
+  isPrimary: boolean;
+  validFrom: Date;
+  validTo: Date | null;
+  site: { id: string; name: string };
+  workArea: { id: string; name: string } | null;
+}): CurrentAssignment {
   return {
+    assignmentId: assignment.id,
     siteId: assignment.site.id,
     siteName: assignment.site.name,
-    isPrimary: assignment.isPrimary
+    workAreaId: assignment.workArea?.id ?? null,
+    workAreaName: assignment.workArea?.name ?? null,
+    isPrimary: assignment.isPrimary,
+    validFrom: assignment.validFrom.toISOString().slice(0, 10),
+    validTo: assignment.validTo ? assignment.validTo.toISOString().slice(0, 10) : null
   };
 }
+
+const CURRENT_ASSIGNMENT_SELECT = {
+  id: true,
+  isPrimary: true,
+  validFrom: true,
+  validTo: true,
+  site: { select: { id: true, name: true } },
+  workArea: { select: { id: true, name: true } }
+} as const;
 
 /**
  * page/pageSize only — search/sort/filter from §0's general pagination
@@ -134,7 +162,7 @@ export async function listWorkers(
         employments: { where: { active: true }, select: { id: true }, take: 1 },
         siteAssignments: {
           where: currentAssignmentWhere(today),
-          select: { isPrimary: true, site: { select: { id: true, name: true } } }
+          select: CURRENT_ASSIGNMENT_SELECT
         }
       }
     })
@@ -206,7 +234,7 @@ export async function getWorkerDetail(employeeId: string): Promise<WorkerDetail 
       },
       siteAssignments: {
         where: currentAssignmentWhere(today),
-        select: { isPrimary: true, site: { select: { id: true, name: true } } }
+        select: CURRENT_ASSIGNMENT_SELECT
       }
     }
   });
