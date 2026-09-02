@@ -269,6 +269,54 @@ async function main() {
     check('L8g: validTo still today (checkout landed the same calendar day)', rowAfter.validTo !== null && isoDate(rowAfter.validTo) === todayIso, rowAfter.validTo);
   }
 
+  // ── L9 — Deploy D: creating a 2nd primary via POST /api/admin/assignments demotes the first ─
+  {
+    const w = await mkWorker('L9');
+    const first = await assign(w, siteA, true);
+    const second = await jsonFetch(`${BASE}/api/admin/assignments`, {
+      method: 'POST',
+      headers: authHeaders(admin, { 'Idempotency-Key': randomUUID() }),
+      body: JSON.stringify({ employeeId: w, siteId: siteB, templateId: fx.templateId, validFrom: '2020-01-01', isPrimary: true })
+    });
+    check('L9a: 2nd assignment created (201) — no 500 / no unique violation', second.status === 201, second.body);
+    const [f, s] = await Promise.all([
+      prisma.siteAssignment.findUniqueOrThrow({ where: { id: first } }),
+      prisma.siteAssignment.findUniqueOrThrow({ where: { id: second.body.id } })
+    ]);
+    check('L9b: the earlier assignment was auto-demoted, the new one is primary', f.isPrimary === false && s.isPrimary === true, { f: f.isPrimary, s: s.isPrimary });
+    const livePrimaries = await prisma.siteAssignment.count({ where: { employeeId: w, isPrimary: true, clockInDisabledAt: null } });
+    check('L9c: exactly one row in the ux_site_assignment_one_live_primary predicate', livePrimaries === 1, livePrimaries);
+  }
+
+  // ── L10 — Deploy D: the partial unique index physically forbids a 2nd live primary ──────────
+  {
+    const w = await mkWorker('L10');
+    const p = await assign(w, siteA, true);
+    const { assignedByUserId } = await prisma.siteAssignment.findUniqueOrThrow({ where: { id: p }, select: { assignedByUserId: true } });
+    let raised = false;
+    try {
+      await prisma.siteAssignment.create({
+        data: { employeeId: w, siteId: siteB, isPrimary: true, validFrom: new Date('2020-01-01T00:00:00.000Z'), assignedByUserId }
+      });
+    } catch (e) {
+      raised =
+        String((e as Error).message).includes('ux_site_assignment_one_live_primary') ||
+        String((e as Error).message).includes('Unique constraint');
+    }
+    check('L10a: a raw INSERT of a 2nd live primary is rejected by the index', raised);
+    // changeWorkplace of a primary assignment must not trip the index (old row is demoted)
+    const w2 = await mkWorker('L10b');
+    const a2 = await assign(w2, siteA, true);
+    const chg = await jsonFetch(`${BASE}/api/admin/assignments/${a2}/change`, {
+      method: 'POST',
+      headers: authHeaders(admin),
+      body: JSON.stringify({ effectiveFrom: tomorrowIso, siteId: siteB, reason: 'L10 future move of a primary' })
+    });
+    check('L10b: changeWorkplace of a primary → 200 (no LIVE_PRIMARY_CONFLICT)', chg.status === 200, chg.body);
+    const primaries2 = await prisma.siteAssignment.count({ where: { employeeId: w2, isPrimary: true, clockInDisabledAt: null } });
+    check('L10c: still exactly one row in the index predicate after the change', primaries2 === 1, primaries2);
+  }
+
   console.log(JSON.stringify({ pass, fail }));
   console.log(`${pass} passed, ${fail} failed (T9 assignment lifecycle)`);
   await prisma.$disconnect();

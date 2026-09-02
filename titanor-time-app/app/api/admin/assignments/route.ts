@@ -226,6 +226,14 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
             requestId
           )
         );
+      case 'LIVE_PRIMARY_CONFLICT':
+        return respond(
+          409,
+          errorBody(
+            { code: 'LIVE_PRIMARY_CONFLICT', message: 'This worker already has a primary assignment. Try again — the previous primary is being demoted.' },
+            requestId
+          )
+        );
     }
   }
 

@@ -4,7 +4,8 @@ import { prisma } from '@/lib/prisma';
 import { createAuditEvent } from '@/lib/audit';
 import { createAssignmentInTx, isExclusionViolation } from '@/lib/assignments';
 import { recordAssignmentTransition, reasonFromFreeText } from '@/lib/assignment-transitions';
-import { isAssignmentLiveNow, liveAssignmentWhere } from '@/lib/assignment-lifecycle';
+import { isAssignmentLiveNow } from '@/lib/assignment-lifecycle';
+import { acquireEmployeeLifecycleLock, LIVE_PRIMARY_INDEX_PREDICATE, isLivePrimaryConflict } from '@/lib/assignment-lock';
 import { helsinkiToday, earliestAssignmentEndDate } from '@/lib/workers';
 
 // docs/titanor-time/R15_ASSIGNMENT_LIFECYCLE_DESIGN_RU.md §2.4 / §3 — the ONE writer of
@@ -17,16 +18,10 @@ import { helsinkiToday, earliestAssignmentEndDate } from '@/lib/workers';
 
 const ONE_DAY_MS = 24 * 60 * 60 * 1000;
 
-/** One shared advisory-lock name for every per-employee lifecycle operation (remove / change /
- *  promote / …) so two admins acting on the same worker serialise. Prisma's tagged template
- *  parameterises the interpolated id — not string-built SQL. */
-export function assignmentLifecycleLockKey(employeeId: string): string {
-  return `titanor_time:assignment_lifecycle:${employeeId}`;
-}
-
-export async function acquireEmployeeLifecycleLock(tx: Prisma.TransactionClient, employeeId: string): Promise<void> {
-  await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${assignmentLifecycleLockKey(employeeId)})::bigint)`;
-}
+// The per-employee advisory lock + the ux_site_assignment_one_live_primary predicate/conflict
+// helpers live in lib/assignment-lock.ts (standalone, no import cycle) — re-exported here so
+// callers of this service keep one import.
+export { acquireEmployeeLifecycleLock, assignmentLifecycleLockKey } from '@/lib/assignment-lock';
 
 function formatDate(date: Date): string {
   return date.toISOString().slice(0, 10);
@@ -206,7 +201,8 @@ export interface ChangeWorkplaceInput {
 
 export type ChangeWorkplaceError =
   | { code: 'ASSIGNMENT_OVERLAP' }
-  | { code: 'ASSIGNMENT_HAS_RECORDED_TIME' };
+  | { code: 'ASSIGNMENT_HAS_RECORDED_TIME' }
+  | { code: 'LIVE_PRIMARY_CONFLICT' };
 
 export interface ChangeWorkplaceResult {
   closedAssignmentId: string;
@@ -335,6 +331,9 @@ export async function changeWorkplace(input: ChangeWorkplaceInput): Promise<Chan
     if (isAssignmentDependentsConflict(error)) {
       return { code: 'ASSIGNMENT_HAS_RECORDED_TIME' };
     }
+    if (isLivePrimaryConflict(error)) {
+      return { code: 'LIVE_PRIMARY_CONFLICT' };
+    }
     throw error;
   }
 }
@@ -349,7 +348,7 @@ export interface PromoteToPrimaryInput {
   requestId: string;
 }
 
-export type PromoteToPrimaryError = { code: 'ASSIGNMENT_NOT_ACTIVE' };
+export type PromoteToPrimaryError = { code: 'ASSIGNMENT_NOT_ACTIVE' } | { code: 'LIVE_PRIMARY_CONFLICT' };
 
 export interface PromoteToPrimaryResult {
   demotedAssignmentIds: string[];
@@ -378,58 +377,67 @@ export async function promoteToPrimary(
     return { code: 'ASSIGNMENT_NOT_ACTIVE' };
   }
 
-  return prisma.$transaction(async (tx) => {
-    await acquireEmployeeLifecycleLock(tx, existing.employeeId);
+  try {
+    return await prisma.$transaction(async (tx) => {
+      await acquireEmployeeLifecycleLock(tx, existing.employeeId);
 
-    const demoted = await tx.siteAssignment.findMany({
-      where: {
-        employeeId: existing.employeeId,
-        id: { not: existing.id },
-        isPrimary: true,
-        ...liveAssignmentWhere(now, today)
-      },
-      select: { id: true }
-    });
-
-    if (demoted.length > 0) {
-      await tx.siteAssignment.updateMany({
-        where: { id: { in: demoted.map((a) => a.id) } },
-        data: { isPrimary: false, version: { increment: 1 } }
+      // Demote every OTHER row in the ux_site_assignment_one_live_primary predicate (Deploy D) —
+      // "primary AND clockInDisabledAt IS NULL", date-agnostic, so a future-dated primary is
+      // caught too and the index never rejects this promote.
+      const demoted = await tx.siteAssignment.findMany({
+        where: {
+          employeeId: existing.employeeId,
+          id: { not: existing.id },
+          ...LIVE_PRIMARY_INDEX_PREDICATE
+        },
+        select: { id: true }
       });
-    }
 
-    await tx.siteAssignment.update({
-      where: { id: existing.id },
-      data: { isPrimary: true, version: { increment: 1 } }
-    });
-
-    await recordAssignmentTransition(tx, {
-      employeeId: existing.employeeId,
-      kind: 'CHANGE',
-      fromAssignmentId: demoted[0]?.id ?? null,
-      toAssignmentId: existing.id,
-      actedAt: now,
-      effectiveFrom: today,
-      openShiftHandling: 'NONE',
-      actorUserId,
-      reasonCode: 'OTHER',
-      reasonText: 'promoted to primary'
-    });
-
-    await createAuditEvent(tx, {
-      actorUserId,
-      eventType: 'ASSIGNMENT_PROMOTED',
-      entityType: 'SITE_ASSIGNMENT',
-      entityId: existing.id,
-      requestId,
-      beforeValue: null,
-      afterValue: {
-        assignmentId: existing.id,
-        employeeId: existing.employeeId,
-        demotedAssignmentIds: demoted.map((a) => a.id)
+      if (demoted.length > 0) {
+        await tx.siteAssignment.updateMany({
+          where: { id: { in: demoted.map((a) => a.id) } },
+          data: { isPrimary: false, version: { increment: 1 } }
+        });
       }
-    });
 
-    return { demotedAssignmentIds: demoted.map((a) => a.id) };
-  });
+      await tx.siteAssignment.update({
+        where: { id: existing.id },
+        data: { isPrimary: true, version: { increment: 1 } }
+      });
+
+      await recordAssignmentTransition(tx, {
+        employeeId: existing.employeeId,
+        kind: 'CHANGE',
+        fromAssignmentId: demoted[0]?.id ?? null,
+        toAssignmentId: existing.id,
+        actedAt: now,
+        effectiveFrom: today,
+        openShiftHandling: 'NONE',
+        actorUserId,
+        reasonCode: 'OTHER',
+        reasonText: 'promoted to primary'
+      });
+
+      await createAuditEvent(tx, {
+        actorUserId,
+        eventType: 'ASSIGNMENT_PROMOTED',
+        entityType: 'SITE_ASSIGNMENT',
+        entityId: existing.id,
+        requestId,
+        beforeValue: null,
+        afterValue: {
+          assignmentId: existing.id,
+          employeeId: existing.employeeId,
+          demotedAssignmentIds: demoted.map((a) => a.id)
+        }
+      });
+
+      return { demotedAssignmentIds: demoted.map((a) => a.id) };
+    });
+  } catch (error) {
+    if (isLivePrimaryConflict(error)) {
+      return { code: 'LIVE_PRIMARY_CONFLICT' };
+    }
+    throw error;
+  }
 }

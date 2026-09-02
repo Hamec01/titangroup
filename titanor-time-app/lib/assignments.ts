@@ -3,6 +3,7 @@ import { prisma } from '@/lib/prisma';
 import { createAuditEvent } from '@/lib/audit';
 import { enumerateDates, toTemplateWeekday, computePlannedShiftForAssignmentDate } from '@/lib/periods';
 import { assignWorkerSubmissionSchedule, submissionPeriodForDate } from '@/lib/timesheet-submission-schedules';
+import { acquireEmployeeLifecycleLock, LIVE_PRIMARY_INDEX_PREDICATE, isLivePrimaryConflict } from '@/lib/assignment-lock';
 
 // docs/titanor-time/04_ADMIN_FIRST_API_CONTRACTS.md §6 (Назначения) — shared
 // by POST /api/admin/assignments/validate-overlap and POST /api/admin/assignments.
@@ -63,7 +64,8 @@ export type CreateAssignmentError =
   | { code: 'WORK_AREA_NOT_FOUND' }
   | { code: 'TEMPLATE_NOT_FOUND' }
   | { code: 'EMPLOYEE_NOT_ACTIVE' }
-  | { code: 'ASSIGNMENT_OVERLAP'; conflictingAssignmentId: string };
+  | { code: 'ASSIGNMENT_OVERLAP'; conflictingAssignmentId: string }
+  | { code: 'LIVE_PRIMARY_CONFLICT' };
 
 export interface CreateAssignmentResult {
   id: string;
@@ -102,6 +104,18 @@ export async function createAssignmentInTx(
     assignedByUserId: string;
   }
 ) {
+  // R15-D7 Deploy D (§3.6) — before making a new assignment primary, demote every OTHER row in the
+  // ux_site_assignment_one_live_primary predicate ("primary AND clockInDisabledAt IS NULL") for
+  // this employee, in this same transaction. This is the app-level half of the "≤1 live primary"
+  // invariant; the partial unique index is the DB backstop. Callers hold the per-employee advisory
+  // lock (changeWorkplace) or take it (createAssignment) so this is race-safe.
+  if (params.isPrimary) {
+    await tx.siteAssignment.updateMany({
+      where: { employeeId: params.employeeId, ...LIVE_PRIMARY_INDEX_PREDICATE },
+      data: { isPrimary: false, version: { increment: 1 } }
+    });
+  }
+
   const assignment = await tx.siteAssignment.create({
     data: {
       employeeId: params.employeeId,
@@ -287,41 +301,56 @@ export async function createAssignment(
     return { code: 'ASSIGNMENT_OVERLAP', conflictingAssignmentId: overlap.conflictingAssignmentId! };
   }
 
-  const created = await prisma.$transaction(async (tx) => {
-    const assignment = await createAssignmentInTx(tx, {
-      employeeId: input.employeeId,
-      siteId: input.siteId,
-      workAreaId: input.workAreaId,
-      templateVersionId,
-      isPrimary: input.isPrimary,
-      validFrom: input.validFrom,
-      validTo: input.validTo,
-      assignedByUserId: input.assignedByUserId
-    });
+  let created;
+  try {
+    created = await prisma.$transaction(async (tx) => {
+      // R15-D7 §3.13 — serialise every writer of this worker's assignments (also held by
+      // changeWorkplace / removeFromSite / promoteToPrimary), so the demote-then-create below
+      // and the ux_site_assignment_one_live_primary index stay consistent under concurrency.
+      await acquireEmployeeLifecycleLock(tx, input.employeeId);
 
-    // Same transaction as the create + period upserts above — lib/audit.ts's
-    // invariant ("Действие + AuditEvent — одна транзакция") requires this.
-    await createAuditEvent(tx, {
-      actorUserId: input.assignedByUserId,
-      eventType: 'ASSIGNMENT_CREATED',
-      entityType: 'SITE_ASSIGNMENT',
-      entityId: assignment.id,
-      requestId: input.requestId,
-      beforeValue: null,
-      afterValue: {
-        id: assignment.id,
-        employeeId: assignment.employeeId,
-        siteId: assignment.siteId,
-        workAreaId: assignment.workAreaId,
-        templateVersionId: assignment.templateVersionId,
-        isPrimary: assignment.isPrimary,
-        validFrom: assignment.validFrom.toISOString().slice(0, 10),
-        validTo: assignment.validTo ? assignment.validTo.toISOString().slice(0, 10) : null
-      }
-    });
+      const assignment = await createAssignmentInTx(tx, {
+        employeeId: input.employeeId,
+        siteId: input.siteId,
+        workAreaId: input.workAreaId,
+        templateVersionId,
+        isPrimary: input.isPrimary,
+        validFrom: input.validFrom,
+        validTo: input.validTo,
+        assignedByUserId: input.assignedByUserId
+      });
 
-    return assignment;
-  });
+      // Same transaction as the create + period upserts above — lib/audit.ts's
+      // invariant ("Действие + AuditEvent — одна транзакция") requires this.
+      await createAuditEvent(tx, {
+        actorUserId: input.assignedByUserId,
+        eventType: 'ASSIGNMENT_CREATED',
+        entityType: 'SITE_ASSIGNMENT',
+        entityId: assignment.id,
+        requestId: input.requestId,
+        beforeValue: null,
+        afterValue: {
+          id: assignment.id,
+          employeeId: assignment.employeeId,
+          siteId: assignment.siteId,
+          workAreaId: assignment.workAreaId,
+          templateVersionId: assignment.templateVersionId,
+          isPrimary: assignment.isPrimary,
+          validFrom: assignment.validFrom.toISOString().slice(0, 10),
+          validTo: assignment.validTo ? assignment.validTo.toISOString().slice(0, 10) : null
+        }
+      });
+
+      return assignment;
+    });
+  } catch (error) {
+    // Last-resort: a concurrent create raced past the advisory lock somehow, or a direct API
+    // caller set isPrimary on a worker who already has a live primary that the demote missed.
+    if (isLivePrimaryConflict(error)) {
+      return { code: 'LIVE_PRIMARY_CONFLICT' };
+    }
+    throw error;
+  }
 
   // A worker with a SiteAssignment but no EmployeeTimesheetSchedule ever gets a Timesheet: neither
   // this function's own OPEN-period upsert above (scoped to periods whose submissionScheduleId

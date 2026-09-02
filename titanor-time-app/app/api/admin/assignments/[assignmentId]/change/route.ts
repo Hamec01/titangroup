@@ -304,6 +304,13 @@ export async function POST(request: NextRequest, { params }: RouteParams): Promi
         requestId
       );
     }
+    if (result.code === 'LIVE_PRIMARY_CONFLICT') {
+      return jsonError(
+        409,
+        { code: 'LIVE_PRIMARY_CONFLICT', message: 'The worker already has a primary assignment — refresh the card and try again.' },
+        requestId
+      );
+    }
     return jsonError(
       409,
       {
