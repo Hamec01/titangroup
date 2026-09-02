@@ -1,14 +1,13 @@
-# R15-D7 — Deploy D («Одно основное назначение»): отчёт перед production
+# R15-D7 — Deploy D («Одно основное назначение»): отчёт (v2, после STOP-GATE)
 
 **Статус:** подготовлено и проверено в disposable-среде. **Production не изменялся.** Ждёт
-отдельного разрешения владельца (владелец: «после отчёта отдельно дам разрешение на Deploy D»).
+отдельного разрешения владельца.
 
-Порядок обязателен: **сначала ручной fix данных, затем Миграция 2**. Порядок A→B→C→D соблюдён
-(Deploy A уже на проде, B и C — нет; но Deploy D по решению владельца делается ДО новой карточки
-работника, чтобы устранить конфликт основных назначений).
+История: v1 (`bdf8608`) прошёл typecheck/lint/build, но независимый аудит владельца нашёл
+сценарные проблемы (STOP-GATE). Исправлены все 7 пунктов (`ba82158` → `092511b` → `74ac011`).
+Кандидат-образ **`titanor-time-app:d7d3-092511b`** (схема ожидает **100**).
 
-Ветка `feature/titanor-time-foundation`, коммит `bdf8608`. Кандидат-образ
-`titanor-time-app:d7d-bdf8608` (схема ожидает **100**).
+Порядок обязателен: **сначала ручной fix данных, затем Миграция 2**.
 
 ---
 
@@ -16,113 +15,107 @@
 
 | Работник | № | Основное (оставить) | Снять `isPrimary` (только флаг) |
 |---|---|---|---|
-| Nazar Druz | 1002 | `c6825d98-f7e2-47ae-bdd3-c721bf3ce242` — Meyer Turku — **Aros Marine** | `3d95975f-b4c4-491a-8e10-38f3e88edcd8` — Meyer Turku — (без заказчика) |
-| Mykhailo Sadovnikov | 1004 | `bc174aef-2766-4877-ac43-415ef12433d5` — Meyer Turku — **Aros Marine** | `cbf688b7-fe67-46b2-aad3-967c37103c07` — Meyer Turku — (без заказчика) |
+| Nazar Druz | 1002 | `c6825d98-…` — Meyer Turku — **Aros Marine** | `3d95975f-…` — Meyer Turku — (без заказчика) |
+| Mykhailo Sadovnikov | 1004 | `bc174aef-…` — Meyer Turku — **Aros Marine** | `cbf688b7-…` — Meyer Turku — (без заказчика) |
 
-**У `3d95975f` и `cbf688b7`: только `isPrimary=false` (+ `version+1`).** Не удалять, не завершать,
-не переносить часы, не менять историю.
-
----
-
-## 2. Read-only preflight на production (2026-09-02 ~17:54 UTC)
-
-Helsinki-дата `2026-09-02`. Точные текущие значения 4 назначений:
-
-| id | работник | Объект — Заказчик | isPrimary | validFrom | validTo | clockInDisabledAt | version |
-|---|---|---|---|---|---|---|---|
-| `c6825d98` | Nazar Druz #1002 | Meyer — Aros Marine | **t** | 2026-09-02 | — | — | 1 |
-| `3d95975f` | Nazar Druz #1002 | Meyer — (без заказчика) | t | 2026-08-26 | 2026-09-02 | — | 5 |
-| `bc174aef` | Mykhailo Sadovnikov #1004 | Meyer — Aros Marine | **t** | 2026-09-02 | — | — | 1 |
-| `cbf688b7` | Mykhailo Sadovnikov #1004 | Meyer — (без заказчика) | t | 2026-08-26 | — | — | 1 |
-
-- employeeId Nazar = `1f8b5243-cec5-4c06-8ea3-a5e664865ad8`, Mykhailo = `8bb03525-8fe6-4b53-92e7-dc94c38f6a99`.
-- **Индекс-предикат** (`isPrimary AND clockInDisabledAt IS NULL`), сгруппированный по работнику,
-  >1 → **ровно эти двое** (`{3d95975f, c6825d98}` и `{cbf688b7, bc174aef}`). Все остальные 9
-  работников — ровно 1 основное. Ruslan Druz #1003: 2 назначения, 1 основное — норма.
-- **Часы, привязанные к снимаемым:**
-  - `3d95975f`: 0 `WorkSegment` / 0 `ClockShift` / 0 `ClockShiftFragment` / 0 `TimesheetDraftSegment`;
-    только авто-плановые `TimesheetPlannedShift`=5, `TimesheetDraftPlannedShift`=3 (не часы).
-  - **`cbf688b7`: 10 `WorkSegment`, 5 `ClockShift`, 5 `ClockShiftFragment`, 9 `ClockEvent`,
-    1 `TimesheetDraftSegment`** — реальные отработанные часы. Именно поэтому снимаем **только**
-    `isPrimary`, часы остаются на нём; назначение остаётся открытым (`validTo` NULL).
-- `AssignmentTransition` — 0 строк. Открытых смен у обоих работников — нет.
-- Активные админы: `oleksandr` (SUPER_ADMIN, создал все 4 назначения), `pilot-owner` (SUPER_ADMIN),
-  `yurii` (ADMIN). **Actor для `AssignmentTransition`/audit = `pilot-owner`
-  (`cba8d0ff-0fd2-45bc-b83c-1d19ceee2bee`)** — можно переопределить `-v actor=...`.
+У `3d95975f` и `cbf688b7`: **только `isPrimary=false` (+ `version+1`)**. Не удалять, не завершать,
+не переносить часы, не менять историю. (`cbf688b7` имеет 10 `WorkSegment` / 5 `ClockShift` —
+остаются на нём.)
 
 ---
 
-## 3. Одна атомарная транзакция — `ops/titanor-time/r15-d7/fix-double-primary.sql`
+## 2. STOP-GATE — 7 обязательных исправлений
 
-`BEGIN` → 2 `pg_advisory_xact_lock` (тот же ключ, что у lifecycle-сервиса,
-`titanor_time:assignment_lifecycle:<employeeId>`, порядок по employeeId asc) →
-**preflight-guard** (abort, если не ровно 2 primary-снимаемых и не ровно 2 live-основных
-оставляемых) → 2× `UPDATE … SET "isPrimary"=false, "version"="version"+1, "updatedAt"=now()`
-(с `AND "isPrimary"=true` — идемпотентно) → **post-guard** (abort, если у кого-то осталось >1 в
-индекс-предикате) → 2× `INSERT AssignmentTransition` (`kind=CHANGE`, from=снятое, to=оставленное,
-`openShiftHandling=NONE`, `reasonCode=OTHER`, поясняющий `reasonText`) → 2× `INSERT AuditEvent`
-(`ASSIGNMENT_PROMOTED`, `afterValue` с `demotedAssignmentIds`) → `SELECT` результата → `COMMIT`.
+### 1. `PATCH /api/admin/assignments/:id { isPrimary:true }` больше не обходит сервис
+Раньше — прямой `updateMany` без advisory-lock и без демоушена → после индекса `23505/500`.
+Кнопка `AssignmentPrimaryToggle` шлёт именно этот PATCH.
+Теперь: при `isPrimary:true` роут вызывает `promoteToPrimary` (advisory-lock + демоушен всех
+прежних live-primary + `AssignmentTransition` + audit, одна транзакция), с проверкой `version`
+(`409 VERSION_CONFLICT`), недоступно на снятом/завершённом (`409 ASSIGNMENT_NOT_ACTIVE`), нельзя
+вместе с `endedReason` (`400`). `isPrimary:false` / `endedReason` — прежний optimistic-путь
+(индекс-безопасно: строка только уходит из предиката). Компонент кнопки обрабатывает
+`LIVE_PRIMARY_CONFLICT` / `ASSIGNMENT_NOT_ACTIVE`.
 
-Immutability-триггеры `AssignmentTransition` / `AuditEvent` разрешают `INSERT` — конфликта нет.
+### 2. `POST /api/admin/assignments/:id/split` → `410 Gone`
+Делал `siteAssignment.create` вне сервиса (без lock, без демоушена) → split основного = 2 ряда
+под индексом → `23505/500`. UI-вызовов нет, был untested/incomplete. Замена — `/change`.
+Контракты обновлены (`04_ADMIN_FIRST_API_CONTRACTS.md`).
+
+### 3. Демоушен покрывает будущий `clockInDisabledAt`
+Предикат демоушена расширен с `isPrimary AND clockInDisabledAt IS NULL` до
+**`isPrimary AND (clockInDisabledAt IS NULL OR clockInDisabledAt > now())`** (`livePrimaryDemoteWhere`).
+Назначение, снятие/перевод которого запланированы на будущий момент, **прямо сейчас ещё
+operationally live** — теперь тоже демоутится. После любой операции среди реально live
+назначений ≤1 primary (не только ≤1 в индекс-предикате). Применено в `createAssignmentInTx` и
+`promoteToPrimary`.
+
+### 4. `resolvePrimarySiteId` (worker-timesheets.ts) — clockInDisabledAt-aware + детерминизм
+Было: `findFirst` без `clockInDisabledAt` и без `orderBy`. Стало:
+`{ isPrimary: true, …liveAssignmentWhere(now, today) }` + `orderBy: [{ validFrom: 'desc' }, { id: 'asc' }]`.
+Немедленный перевод в тот же день → `contextSiteId` табеля указывает на **новое** действующее
+основное; снятое/отключённое основное с «висящим» флагом исключается.
+
+### 5. Автодемоушен пишет ID в `AssignmentTransition` + `AuditEvent`
+`createAssignmentInTx` возвращает `demotedPrimaryIds`. `createAssignment` и `changeWorkplace`
+пишут по одному `AssignmentTransition` на каждое авто-снятое прежнее основное и кладут `id`
+в audit создания/изменения. Никаких скрытых изменений истории.
+
+### 6. `fix-double-primary.sql` — без скрытого actor
+Убран дефолт. Требуется `-v actor=<uuid>` (голый UUID). Транзакция до любого `UPDATE`:
+(0a) `SELECT :'actor'::uuid` — падает на `MISSING`/мусоре; (0b) `\gset` + `\if` — проверка
+`ACTIVE` + активная `SUPER_ADMIN`-роль, иначе `RAISE EXCEPTION`. Плюс preflight/post guard'ы.
+
+### 7. Полный ре-скан писателей `SiteAssignment`
+`create` / `changeWorkplace` / `removeFromSite` / `promoteToPrimary` / PATCH / §3.12-шаг Check Out
+— все через **один** advisory-lock (`lib/assignment-lock.ts`) + сервис. §3.12-шаг теперь берёт
+lock (только на редком пути «сняли во время смены») и перечитывает под ним. `/split` удалён.
+`attendance-clock.ts:1246` (продление `validTo`) — не трогает `isPrimary` и не создаёт replacement,
+под lock. Прочие места — только чтение.
 
 ---
 
-## 4. Миграция 2 — `20260902180000_add_one_live_primary_index`
-
+## 3. Миграция 2 — `20260902180000_add_one_live_primary_index`
 ```sql
 CREATE UNIQUE INDEX "ux_site_assignment_one_live_primary"
   ON "SiteAssignment" ("employeeId")
   WHERE "isPrimary" = true AND "clockInDisabledAt" IS NULL;
 ```
-Partial: **снятое** (`isPrimary=false`), **завершённое/снятое с объекта**
-(`clockInDisabledAt` задан — removeFromSite, немедленный changeWorkplace, backfill Миграции 1),
-**прошлое** и **не-основное будущее** — вне предиката. Индекс запрещает только **второе
-одновременное основное, на которое ещё можно сделать Check In**. Таблица ~14 строк — обычный
-`CREATE INDEX`, миллисекунды.
+DB-backstop за сервисом. Снятое / removeFromSite'нутое / прошлое / не-основное-будущее — вне
+предиката. PRECONDITION: сначала ручной fix.
 
 ---
 
-## 5. Код (сверх 5 шагов владельца — нужен, иначе индекс ломает штатные операции)
-
-Без этого индекс дал бы 500 на легитимных действиях (добавление второго основного, будущий
-перевод основного). Design §8 Deploy D: «`/change` и `assignSite` больше не могут создать второе
-live-primary».
-
-- **`lib/assignment-lock.ts` (новый)** — общий per-employee advisory-lock + предикат индекса +
-  `isLivePrimaryConflict()`. Standalone (без циклов импорта).
-- **`createAssignmentInTx`** — если новая строка `isPrimary`, в той же транзакции демоутит все
-  другие строки предиката для этого работника (`isPrimary=false`, `version+1`). Это и есть
-  «сервис демоутит прежнее live-primary» (§3.6). Покрывает и `POST /api/admin/assignments`, и
-  `/change`.
-- **`createAssignment`** — берёт advisory-lock; на (теперь недостижимом) 23505 возвращает
-  `LIVE_PRIMARY_CONFLICT` вместо 500.
-- **`promoteToPrimary`** — демоут по предикату индекса (без фильтра по датам), ловит 23505.
-- **`changeWorkplace`** + 3 роута (`/api/admin/assignments`, `/change`, `/promote`) —
-  `LIVE_PRIMARY_CONFLICT` → чистый 409.
-
-**Косметика будущего перевода основного:** при `changeWorkplace` с датой в будущем старое
-назначение демоутится сразу (уходит из предиката) — сегодня у работника «нет звезды основного»
-до наступления даты. Приемлемо; новая карточка (Deploy B) покажет «Запланированное изменение» явно.
+## 4. `ops/titanor-time/r15-d7/fix-double-primary.sql`
+Одна атомарная транзакция: uuid+SUPER_ADMIN guard → 2 `pg_advisory_xact_lock` (ключ сервиса,
+порядок по employeeId) → preflight-guard → 2× `UPDATE isPrimary=false, version+1` (с `AND
+isPrimary=true`, идемпотентно) → post-guard (≤1 в индекс-предикате на работника) → 2×
+`AssignmentTransition` (`kind=CHANGE`, from=снятое, to=оставленное) → 2× `AuditEvent`
+(`ASSIGNMENT_PROMOTED`, `demotedAssignmentIds`) → показ 4 строк → `COMMIT`.
 
 ---
 
-## 6. Disposable-проверка на восстановленном production-backup
+## 5. Disposable-проверка (образ `d7d3-092511b`)
 
-Backup `production-20260902T175548Z-manual` (схема 99, 2129 строк). Образ `d7d-bdf8608`.
+### 5.1 Полный browser lane (`run-browser-acceptance.sh`, шаблон = все 100 миграций, индекс есть)
+| Тест | Результат |
+|---|---|
+| `_test-t9-assignment-lifecycle` (L1–L16) | **68 / 68** |
+| `_test-t9-setup-lifecycle` (вкл. CH11 «Сделать основным») | **113 / 113** |
+| `_test-t9-full-flow` | **84 / 84** |
+| `_test-t9-setup-ui` | **26 / 26** |
+| `_test-t9-role-matrix` | **33 / 33** |
 
-### PHASE 1 — `migrate deploy` БЕЗ ручного fix → **ожидаемый провал**
-```
-Applying migration `20260902180000_add_one_live_primary_index`
-Error: P3018 … Database error code: 23505
-could not create unique index "ux_site_assignment_one_live_primary"
-DETAIL: Key ("employeeId")=(1f8b5243-…) is duplicated.
-```
-Миграция помечается unfinished, индекс не создан. **Подтверждает: fix обязателен ПЕРЕД Миграцией 2.**
+### 5.2 restore свежего production backup + `migrate deploy` ×2
+Backup `production-20260902T184804Z-manual` (схема 99, 2129 строк). `d7d-verify.sh`:
 
-### PHASE 2 — fix-double-primary.sql, затем `migrate deploy` ×2 → **успех**
-- fix: `BEGIN` → locks → guard → `UPDATE 1` `UPDATE 1` → guard → `INSERT 0 2` (transition) →
-  `INSERT 0 2` (audit) → `COMMIT`, exit 0.
-- После fix (реальные данные):
+**PHASE 1 — `migrate deploy` БЕЗ fix → ожидаемый провал**
+`P3018 / 23505 could not create unique index … Key ("employeeId")=(1f8b5243-…) is duplicated`;
+миграция unfinished, индекс не создан. Подтверждает порядок «fix → миграция».
+
+**PHASE 2 — fix-double-primary.sql, затем `migrate deploy` ×2 → успех**
+- `-v actor` **не передан** → `ERROR: invalid input syntax for type uuid: "MISSING"`, rc 3.
+- actor = **ADMIN** (не SUPER_ADMIN) → `ERROR: … is not an ACTIVE SUPER_ADMIN — ABORT`, rc 3.
+- actor = **реальный ACTIVE SUPER_ADMIN** (`cba8d0ff` pilot-owner) → `COMMIT`, rc 0.
 
   | id | isPrimary | version |
   |---|---|---|
@@ -131,39 +124,50 @@ DETAIL: Key ("employeeId")=(1f8b5243-…) is duplicated.
   | `bc174aef` | **t** | 1 (не тронут) |
   | `cbf688b7` | **f** | 2 (было 1) |
 
-  - `AssignmentTransition` = 2 · `AuditEvent ASSIGNMENT_PROMOTED` = 2
+  - `AssignmentTransition` = **2** · `AuditEvent ASSIGNMENT_PROMOTED` = **2**
   - работников с >1 в индекс-предикате = **0**
   - **`cbf688b7`: `WorkSegment`=10, `ClockShift`=5 — не изменились**
   - `3d95975f`: `validTo`=2026-09-02, `endedReason`='1111' — **не изменились**
-- `migrate deploy` pass 1 → применена; pass 2 → `No pending migrations` (no-op).
-- Итог: **100 миграций, 0 bad**, индекс существует:
-  `CREATE UNIQUE INDEX … ("employeeId") WHERE (("isPrimary" = true) AND ("clockInDisabledAt" IS NULL))`,
-  0 нарушений предиката.
+- `migrate deploy` pass 1 → индекс создан; pass 2 → `No pending migrations`.
+- Итог: **100 миграций, 0 bad**; индекс:
+  `… ("employeeId") WHERE (("isPrimary" = true) AND ("clockInDisabledAt" IS NULL))`; 0 нарушений.
 
-### Полный browser-lane (образ `d7d-bdf8608`, `run-browser-acceptance.sh` — шаблон со всеми 100 миграциями, индекс присутствует)
-_(результаты — §7)_
+### 5.3 unit lane
+17 / 17.
 
----
-
-## 7. Тесты
-<!-- filled after the browser-lane run -->
+### 5.4 restart-persistence
+prepare 5/5 · `docker restart` · verify 18/18 — `clockInDisabledAt`, `AssignmentTransition`,
+`isPrimary`-флаги и FINAL_APPROVED табель переживают рестарт.
 
 ---
 
-## 8. План production Deploy D (после разрешения владельца)
+## 6. Тесты (disposable-код)
+
+`_test-t9-assignment-lifecycle.ts` L1–L16 (было L1–L8):
+- L9 create-2nd-primary демоутит первое · L10 индекс отклоняет raw 2-е live-primary; `/change`
+  primary не падает · **L11** PATCH `isPrimary:true` через сервис + `version` (409) + `+endedReason`
+  (400) · **L12** `/split` → 410 · **L13** два админа `/promote` одновременно → 1 live primary ·
+  **L14** будущий `clockInDisabledAt` тоже демоутится · **L15** `resolvePrimarySiteId` берёт новое
+  основное после перевода в тот же день + submit табеля · **L16** §3.12 продление `validTo` на
+  ночной смене.
+- `_test-t9-setup-lifecycle.ts` **CH11** — реальная кнопка «Сделать основным» на `/admin/assignments`:
+  клик → старое демоутится, новое primary, 1 live primary, `AssignmentTransition` + `ASSIGNMENT_PROMOTED`.
+
+---
+
+## 7. План production Deploy D (после разрешения владельца)
 
 1. `backup-titanor-time.sh pre-migration` (verified on+off-box).
-2. **`psql … -f ops/titanor-time/r15-d7/fix-double-primary.sql`** прямо в prod DB (одна
-   транзакция, guard'ы внутри; при drift — abort без изменений). Проверить вывод: 4 строки,
-   isPrimary как в §6.
-3. `docker exec`-throwaway из `d7d-<sha>` → **`prisma migrate deploy`** (применит Миграцию 2 —
-   `CREATE INDEX`, миллисекунды; старый образ `d7a-37dddb1` продолжает обслуживать: `schema:ahead`).
-4. Verify: 100 миграций 0 bad, индекс есть, 0 нарушений предиката, `/api/ready` старого образа 200.
-5. Web-only swap `d7a-37dddb1` → `d7d-<sha>` (~10–15 c 503, как Deploy A). scheduler не трогать.
-6. Verify `/api/ready` 200 `schema:current 100/100` локально и через Caddy; карточки Nazar и
-   Mykhailo (read-only) — по одному основному.
+2. **`psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -v actor=<ACTIVE-SUPER_ADMIN-uuid> -f ops/titanor-time/r15-d7/fix-double-primary.sql`**
+   прямо в prod DB. Проверить вывод: 4 строки, isPrimary как в §5.2.
+3. `docker exec`-throwaway из `d7d3-<sha>` → `prisma migrate deploy` (Миграция 2, `CREATE INDEX`,
+   миллисекунды; старый образ `d7a-37dddb1` обслуживает: `schema:ahead`).
+4. Verify: 100 миграций 0 bad, индекс есть, 0 нарушений предиката, `/api/ready` старого 200.
+5. Web-only swap `d7a-37dddb1` → `d7d3-<sha>` (~10–15 c 503). scheduler не трогать.
+6. Verify `/api/ready` 200 `schema:current 100/100` локально и через Caddy; карточки Nazar +
+   Mykhailo (read-only) — по одному основному; `/admin/assignments` «Сделать основным» — read-only смоук.
 7. Rollback: откат образа на `titanor-time-prod-app-pre-<sha>` (`d7a-37dddb1`). Схему **не**
-   откатывать — `d7a` работает при `schema:ahead`; индекс сам по себе безвреден для старого кода.
-   Данные fix'а (демоут) откату не подлежат и не требуют — это и есть целевое состояние.
+   откатывать (`d7a` работает при `schema:ahead`; индекс безвреден для старого кода). Данные fix'а —
+   целевое состояние, откату не подлежат.
 
 Caddy/DNS/scheduler/публичный сайт — без изменений. Пароли/аккаунты — без изменений.
