@@ -116,7 +116,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     return NextResponse.json(body, { status: statusCode, headers: successHeaders(requestId) });
   };
 
-  const { employeeId, siteId, workAreaId, templateId, validFrom, validTo, isPrimary } = bodyObject as {
+  const { employeeId, siteId, workAreaId, templateId, validFrom, validTo, isPrimary, primaryConflictResolution } = bodyObject as {
     employeeId?: unknown;
     siteId?: unknown;
     workAreaId?: unknown;
@@ -124,6 +124,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     validFrom?: unknown;
     validTo?: unknown;
     isPrimary?: unknown;
+    primaryConflictResolution?: unknown;
   };
 
   const fieldErrors: Record<string, string[]> = {};
@@ -168,6 +169,14 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       normalizedIsPrimary = isPrimary;
     }
   }
+  let normalizedPrimaryResolution: 'KEEP_SCHEDULED' | 'REPLACE_SCHEDULED' | undefined;
+  if (primaryConflictResolution !== undefined && primaryConflictResolution !== null) {
+    if (primaryConflictResolution !== 'KEEP_SCHEDULED' && primaryConflictResolution !== 'REPLACE_SCHEDULED') {
+      fieldErrors.primaryConflictResolution = ['invalid'];
+    } else {
+      normalizedPrimaryResolution = primaryConflictResolution;
+    }
+  }
 
   if (
     typeof validFrom === 'string' &&
@@ -193,7 +202,8 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       validTo: normalizedValidTo,
       isPrimary: normalizedIsPrimary,
       assignedByUserId: authenticated.user.id,
-      requestId
+      requestId,
+      primaryConflictResolution: normalizedPrimaryResolution
     });
   } catch (error) {
     if (isExclusionViolation(error)) {
@@ -226,11 +236,24 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
             requestId
           )
         );
-      case 'LIVE_PRIMARY_CONFLICT':
+      case 'PRIMARY_PERIOD_CONFLICT':
         return respond(
           409,
           errorBody(
-            { code: 'LIVE_PRIMARY_CONFLICT', message: 'This worker already has a primary assignment. Try again — the previous primary is being demoted.' },
+            { code: 'PRIMARY_PERIOD_CONFLICT', message: 'This worker already has a primary assignment covering that period. Refresh and try again.' },
+            requestId
+          )
+        );
+      case 'SCHEDULED_PRIMARY_CONFLICT':
+        return respond(
+          409,
+          errorBody(
+            {
+              code: 'SCHEDULED_PRIMARY_CONFLICT',
+              message: `This worker has a primary transfer scheduled to start on ${result.scheduledValidFrom}. Re-send with primaryConflictResolution: "KEEP_SCHEDULED" (this assignment is created non-primary) or "REPLACE_SCHEDULED" (the scheduled transfer keeps its assignment but loses primary status).`,
+              scheduledAssignmentId: result.scheduledAssignmentId,
+              scheduledValidFrom: result.scheduledValidFrom
+            },
             requestId
           )
         );

@@ -3,7 +3,12 @@ import { prisma } from '@/lib/prisma';
 import { createAuditEvent } from '@/lib/audit';
 import { enumerateDates, toTemplateWeekday, computePlannedShiftForAssignmentDate } from '@/lib/periods';
 import { assignWorkerSubmissionSchedule, submissionPeriodForDate } from '@/lib/timesheet-submission-schedules';
-import { acquireEmployeeLifecycleLock, livePrimaryDemoteWhere, isLivePrimaryConflict } from '@/lib/assignment-lock';
+import {
+  acquireEmployeeLifecycleLock,
+  overlappingPrimaryWhere,
+  isPrimaryPeriodConflict,
+  ScheduledPrimaryConflictError
+} from '@/lib/assignment-lock';
 import { recordAssignmentTransition } from '@/lib/assignment-transitions';
 import { helsinkiToday } from '@/lib/workers';
 
@@ -58,6 +63,9 @@ export interface CreateAssignmentInput {
   isPrimary: boolean;
   assignedByUserId: string;
   requestId: string;
+  /** §P4 — 'REPLACE_SCHEDULED' demotes an overlapping scheduled future primary (its assignment
+   *  kept, recorded); absent → a scheduled-primary overlap returns SCHEDULED_PRIMARY_CONFLICT. */
+  primaryConflictResolution?: 'KEEP_SCHEDULED' | 'REPLACE_SCHEDULED';
 }
 
 export type CreateAssignmentError =
@@ -67,7 +75,8 @@ export type CreateAssignmentError =
   | { code: 'TEMPLATE_NOT_FOUND' }
   | { code: 'EMPLOYEE_NOT_ACTIVE' }
   | { code: 'ASSIGNMENT_OVERLAP'; conflictingAssignmentId: string }
-  | { code: 'LIVE_PRIMARY_CONFLICT' };
+  | { code: 'PRIMARY_PERIOD_CONFLICT' }
+  | { code: 'SCHEDULED_PRIMARY_CONFLICT'; scheduledAssignmentId: string; scheduledValidFrom: string };
 
 export interface CreateAssignmentResult {
   id: string;
@@ -93,6 +102,8 @@ export interface CreateAssignmentResult {
  * validated by the caller. Does NOT write the AuditEvent or the AssignmentTransition — the caller
  * owns those (ASSIGNMENT_CREATED vs ASSIGNMENT_CHANGED). Returns `demotedPrimaryIds` so the caller
  * can record which prior primary assignments this create auto-demoted (§3.6, never a hidden change).
+ * Throws ScheduledPrimaryConflictError when making this primary would overlap a SCHEDULED FUTURE
+ * primary and `replaceScheduledPrimary` was not set (§P4).
  */
 export async function createAssignmentInTx(
   tx: Prisma.TransactionClient,
@@ -105,21 +116,39 @@ export async function createAssignmentInTx(
     validTo: Date | null;
     isPrimary: boolean;
     assignedByUserId: string;
+    /** §P4 — when true, a scheduled future primary that overlaps the new one is demoted (its
+     *  assignment kept) instead of raising ScheduledPrimaryConflictError. */
+    replaceScheduledPrimary?: boolean;
   }
-): Promise<{ assignment: Prisma.SiteAssignmentGetPayload<object>; demotedPrimaryIds: string[] }> {
-  // R15-D7 Deploy D (§3.6) — before making a new assignment primary, demote every OTHER assignment
-  // of this employee that is a primary AND still operationally live (clockInDisabledAt IS NULL, or
-  // set to a FUTURE instant that has not passed). Broader than the ux_site_assignment_one_live_primary
-  // index predicate on purpose: guarantees ≤1 primary among genuinely-live rows, not just ≤1 in the
-  // index. Same transaction; callers hold the per-employee advisory lock (changeWorkplace) or take
-  // it (createAssignment) so this is race-safe.
+): Promise<{
+  assignment: Prisma.SiteAssignmentGetPayload<object>;
+  /** OTHER primary assignments this create auto-demoted because their period overlapped the new
+   *  primary's (§3.6). Callers record one AssignmentTransition per id — never a hidden change. */
+  demotedPrimaryIds: string[];
+  /** The subset of demotedPrimaryIds that were a SCHEDULED FUTURE primary (validFrom > today),
+   *  demoted only because `replaceScheduledPrimary` was set — its assignment is NOT cancelled. */
+  demotedScheduledPrimaryIds: string[];
+}> {
+  // R15-D7 Deploy D2 (§3.6) — "≤1 primary per OVERLAPPING period". Before making the new row
+  // primary, demote every OTHER non-removed primary of this employee whose date range OVERLAPS the
+  // new one's. A CURRENT primary and a disjoint SCHEDULED FUTURE primary stay both primary — only
+  // overlapping primary periods are forbidden (ex_site_assignment_one_primary_per_period). Same
+  // transaction; callers hold the per-employee advisory lock so this is race-safe.
   let demotedPrimaryIds: string[] = [];
+  let demotedScheduledPrimaryIds: string[] = [];
   if (params.isPrimary) {
-    const toDemote = await tx.siteAssignment.findMany({
-      where: { employeeId: params.employeeId, ...livePrimaryDemoteWhere(new Date()) },
-      select: { id: true }
+    const today = helsinkiToday();
+    const overlapping = await tx.siteAssignment.findMany({
+      where: { employeeId: params.employeeId, ...overlappingPrimaryWhere({ validFrom: params.validFrom, validTo: params.validTo }) },
+      select: { id: true, validFrom: true }
     });
-    demotedPrimaryIds = toDemote.map((a) => a.id);
+    const scheduled = overlapping.filter((a) => a.validFrom > today);
+    if (scheduled.length > 0 && !params.replaceScheduledPrimary) {
+      // §P4 — do not silently cancel a planned transfer; let the route ask the admin.
+      throw new ScheduledPrimaryConflictError(scheduled[0].id, scheduled[0].validFrom);
+    }
+    demotedPrimaryIds = overlapping.map((a) => a.id);
+    demotedScheduledPrimaryIds = scheduled.map((a) => a.id);
     if (demotedPrimaryIds.length > 0) {
       await tx.siteAssignment.updateMany({
         where: { id: { in: demotedPrimaryIds } },
@@ -243,7 +272,7 @@ export async function createAssignmentInTx(
     }
   }
 
-  return { assignment, demotedPrimaryIds };
+  return { assignment, demotedPrimaryIds, demotedScheduledPrimaryIds };
 }
 
 /**
@@ -313,28 +342,36 @@ export async function createAssignment(
     return { code: 'ASSIGNMENT_OVERLAP', conflictingAssignmentId: overlap.conflictingAssignmentId! };
   }
 
+  // §P4 — 'KEEP_SCHEDULED' is the admin's answer to a prior SCHEDULED_PRIMARY_CONFLICT: keep the
+  // planned transfer and make THIS assignment a non-primary one.
+  const wantsPrimary = input.isPrimary && input.primaryConflictResolution !== 'KEEP_SCHEDULED';
+
   let created;
   try {
     created = await prisma.$transaction(async (tx) => {
       // R15-D7 §3.13 — serialise every writer of this worker's assignments (also held by
       // changeWorkplace / removeFromSite / promoteToPrimary), so the demote-then-create below
-      // and the ux_site_assignment_one_live_primary index stay consistent under concurrency.
+      // and the ex_site_assignment_one_primary_per_period constraint stay consistent under concurrency.
       await acquireEmployeeLifecycleLock(tx, input.employeeId);
 
-      const { assignment, demotedPrimaryIds } = await createAssignmentInTx(tx, {
+      const { assignment, demotedPrimaryIds, demotedScheduledPrimaryIds } = await createAssignmentInTx(tx, {
         employeeId: input.employeeId,
         siteId: input.siteId,
         workAreaId: input.workAreaId,
         templateVersionId,
-        isPrimary: input.isPrimary,
+        isPrimary: wantsPrimary,
         validFrom: input.validFrom,
         validTo: input.validTo,
-        assignedByUserId: input.assignedByUserId
+        assignedByUserId: input.assignedByUserId,
+        replaceScheduledPrimary: input.primaryConflictResolution === 'REPLACE_SCHEDULED'
       });
 
       // §3.6 — an auto-demoted prior primary is a real lifecycle change, never hidden: one
-      // AssignmentTransition per demoted assignment, and the ids on the create's own audit.
+      // AssignmentTransition per demoted assignment (a scheduled future primary is flagged
+      // distinctly — its assignment stays, only its primary status is superseded), and the ids on
+      // the create's own audit.
       const today = helsinkiToday();
+      const scheduled = new Set(demotedScheduledPrimaryIds);
       for (const demotedId of demotedPrimaryIds) {
         await recordAssignmentTransition(tx, {
           employeeId: input.employeeId,
@@ -346,7 +383,9 @@ export async function createAssignment(
           openShiftHandling: 'NONE',
           actorUserId: input.assignedByUserId,
           reasonCode: 'OTHER',
-          reasonText: 'auto-demoted: a new primary assignment was created'
+          reasonText: scheduled.has(demotedId)
+            ? 'primary superseded — this assignment was scheduled to become the worker’s primary; the assignment itself is unchanged'
+            : 'auto-demoted: a new primary assignment was created'
         });
       }
 
@@ -368,17 +407,26 @@ export async function createAssignment(
           isPrimary: assignment.isPrimary,
           validFrom: assignment.validFrom.toISOString().slice(0, 10),
           validTo: assignment.validTo ? assignment.validTo.toISOString().slice(0, 10) : null,
-          demotedPrimaryAssignmentIds: demotedPrimaryIds
+          demotedPrimaryAssignmentIds: demotedPrimaryIds,
+          demotedScheduledPrimaryAssignmentIds: demotedScheduledPrimaryIds
         }
       });
 
       return assignment;
     });
   } catch (error) {
-    // Last-resort: a concurrent create raced past the advisory lock somehow, or a direct API
-    // caller set isPrimary on a worker who already has a live primary that the demote missed.
-    if (isLivePrimaryConflict(error)) {
-      return { code: 'LIVE_PRIMARY_CONFLICT' };
+    // §P4 — making this primary would overlap a scheduled future primary; the route asks the admin.
+    if (error instanceof ScheduledPrimaryConflictError) {
+      return {
+        code: 'SCHEDULED_PRIMARY_CONFLICT',
+        scheduledAssignmentId: error.scheduledAssignmentId,
+        scheduledValidFrom: error.scheduledValidFrom.toISOString().slice(0, 10)
+      };
+    }
+    // Last-resort: a concurrent create raced past the advisory lock and the EXCLUDE constraint
+    // rejected an overlapping primary period.
+    if (isPrimaryPeriodConflict(error)) {
+      return { code: 'PRIMARY_PERIOD_CONFLICT' };
     }
     throw error;
   }

@@ -91,10 +91,11 @@ export async function PATCH(request: NextRequest, { params }: RouteParams): Prom
     return jsonError(400, { code: 'VALIDATION_ERROR', message: 'Request body must be valid JSON.' }, requestId);
   }
   const bodyObject = rawBody && typeof rawBody === 'object' ? (rawBody as Record<string, unknown>) : {};
-  const { version, isPrimary, endedReason } = bodyObject as {
+  const { version, isPrimary, endedReason, primaryConflictResolution } = bodyObject as {
     version?: unknown;
     isPrimary?: unknown;
     endedReason?: unknown;
+    primaryConflictResolution?: unknown;
   };
 
   const fieldErrors: Record<string, string[]> = {};
@@ -143,11 +144,11 @@ export async function PATCH(request: NextRequest, { params }: RouteParams): Prom
     }
   }
 
-  // R15-D7 Deploy D — setting isPrimary=true must go through the lifecycle service so the prior
-  // live primary is demoted in the SAME transaction under the per-employee advisory lock; a raw
-  // updateMany here would hit the ux_site_assignment_one_live_primary index and 500. Unsetting
-  // primary (isPrimary=false) or editing endedReason only removes a row from / never adds a row
-  // to the index predicate, so the plain optimistic-locked path below is still safe for those.
+  // R15-D7 Deploy D — setting isPrimary=true must go through the lifecycle service so any
+  // overlapping prior primary is demoted in the SAME transaction under the per-employee advisory
+  // lock; a raw updateMany here would hit the ex_site_assignment_one_primary_per_period EXCLUDE
+  // constraint and 500. Unsetting primary (isPrimary=false) or editing endedReason only ever
+  // removes a row from the constraint's predicate, so the plain optimistic-locked path is safe.
   if (data.isPrimary === true) {
     if (data.endedReason !== undefined) {
       return NextResponse.json(
@@ -158,6 +159,10 @@ export async function PATCH(request: NextRequest, { params }: RouteParams): Prom
         { status: 400, headers: successHeaders(requestId) }
       );
     }
+    let normalizedPrimaryResolution: 'KEEP_SCHEDULED' | 'REPLACE_SCHEDULED' | undefined;
+    if (primaryConflictResolution === 'KEEP_SCHEDULED' || primaryConflictResolution === 'REPLACE_SCHEDULED') {
+      normalizedPrimaryResolution = primaryConflictResolution;
+    }
     const existing = await prisma.siteAssignment.findUnique({ where: { id: assignmentId } });
     if (!existing) {
       return jsonError(404, { code: 'ASSIGNMENT_NOT_FOUND', message: 'No assignment with this id.' }, requestId);
@@ -166,11 +171,24 @@ export async function PATCH(request: NextRequest, { params }: RouteParams): Prom
       existing,
       expectedVersion: version as number,
       actorUserId: authenticated.user.id,
-      requestId
+      requestId,
+      primaryConflictResolution: normalizedPrimaryResolution
     });
     if ('code' in result) {
       if (result.code === 'ASSIGNMENT_NOT_ACTIVE') {
         return jsonError(409, { code: 'ASSIGNMENT_NOT_ACTIVE', message: 'This assignment is not currently active — it cannot be made primary.' }, requestId);
+      }
+      if (result.code === 'SCHEDULED_PRIMARY_CONFLICT') {
+        return jsonError(
+          409,
+          {
+            code: 'SCHEDULED_PRIMARY_CONFLICT',
+            message: `This worker has a primary transfer scheduled to start on ${result.scheduledValidFrom}. To make this assignment primary now, re-send with primaryConflictResolution: "REPLACE_SCHEDULED".`,
+            scheduledAssignmentId: result.scheduledAssignmentId,
+            scheduledValidFrom: result.scheduledValidFrom
+          },
+          requestId
+        );
       }
       return jsonError(409, { code: result.code, message: 'The assignment changed under you — reload and try again.' }, requestId);
     }

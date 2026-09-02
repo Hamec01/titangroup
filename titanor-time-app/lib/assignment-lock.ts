@@ -4,8 +4,8 @@ import type { Prisma } from '@prisma/client';
 // lock key shared by every writer of a worker's assignments (removeFromSite / changeWorkplace /
 // promoteToPrimary in lib/assignment-lifecycle-service.ts, createAssignment in lib/assignments.ts,
 // the Deploy-D manual double-primary fix). Two admins acting on the same worker serialise on it,
-// which — together with SiteAssignment.version and the ux_site_assignment_one_live_primary index —
-// keeps "≤1 operationally-live primary" true under concurrency.
+// which — together with SiteAssignment.version and the ex_site_assignment_one_primary_per_period
+// EXCLUDE constraint — keeps "≤1 primary per overlapping period" true under concurrency.
 //
 // Standalone (zero imports beyond the Prisma type) so both lib/assignments.ts and
 // lib/assignment-lifecycle-service.ts can use it without an import cycle.
@@ -19,30 +19,54 @@ export async function acquireEmployeeLifecycleLock(tx: Prisma.TransactionClient,
   await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${assignmentLifecycleLockKey(employeeId)})::bigint)`;
 }
 
-/** Where-fragment for the ux_site_assignment_one_live_primary partial-unique-index predicate
- *  EXACTLY (primary AND clockInDisabledAt IS NULL). Use only for asserting/checking the index
- *  constraint itself — NOT for the demote query (see livePrimaryDemoteWhere). */
-export const LIVE_PRIMARY_INDEX_PREDICATE = { isPrimary: true, clockInDisabledAt: null } as const;
-
-/** Where-fragment for "this row is a primary that is STILL operationally live" — i.e. primary AND
- *  (clockInDisabledAt IS NULL OR clockInDisabledAt > now). Broader than the index predicate: it
- *  also catches a primary whose removal/transfer is scheduled for a FUTURE instant (clockInDisabledAt
- *  set but not yet passed), which is still check-in-able right now. The demote-before-new-primary
- *  step uses THIS so that after any primary change there is ≤1 primary among genuinely-live rows,
- *  not just ≤1 in the index predicate. */
-export function livePrimaryDemoteWhere(now: Date = new Date()) {
-  return { isPrimary: true as const, OR: [{ clockInDisabledAt: null }, { clockInDisabledAt: { gt: now } }] };
+export interface AssignmentPeriod {
+  validFrom: Date;
+  /** null = open-ended. */
+  validTo: Date | null;
 }
 
-/** SiteAssignment_employeeId's ux_site_assignment_one_live_primary — SQLSTATE 23505, but Prisma's
- *  P2002 message carries only a generic hint, so match the index name in the raw message text. */
-export function isLivePrimaryConflict(error: unknown): boolean {
-  const e = error as { code?: string; message?: string; meta?: { target?: unknown } };
+/**
+ * Where-fragment for "another NON-REMOVED primary of this employee whose date range OVERLAPS
+ * `period`". This is the ex_site_assignment_one_primary_per_period predicate expressed as plain
+ * interval comparisons (Prisma has no daterange operator):
+ *   isPrimary AND clockInDisabledAt IS NULL
+ *   AND thisRow.validFrom <= period.validTo   (period open-ended -> no upper bound)
+ *   AND (thisRow.validTo IS NULL OR thisRow.validTo >= period.validFrom)
+ * A current primary and a scheduled FUTURE primary with disjoint periods do NOT match — both stay
+ * primary; the EXCLUDE constraint and this fragment only forbid overlapping primary periods.
+ */
+export function overlappingPrimaryWhere(period: AssignmentPeriod): Prisma.SiteAssignmentWhereInput {
+  return {
+    isPrimary: true,
+    clockInDisabledAt: null,
+    ...(period.validTo ? { validFrom: { lte: period.validTo } } : {}),
+    OR: [{ validTo: null }, { validTo: { gte: period.validFrom } }]
+  };
+}
+
+/**
+ * Thrown from createAssignmentInTx / promoteToPrimary when making an assignment primary would
+ * OVERLAP a SCHEDULED FUTURE primary (validFrom > today) and the caller did not pass an explicit
+ * resolution. The route turns it into 409 SCHEDULED_PRIMARY_CONFLICT so the admin chooses
+ * "keep the scheduled transfer" or "replace it" — never a silent cancel (§P4).
+ */
+export class ScheduledPrimaryConflictError extends Error {
+  constructor(
+    public scheduledAssignmentId: string,
+    public scheduledValidFrom: Date
+  ) {
+    super('SCHEDULED_PRIMARY_CONFLICT');
+    this.name = 'ScheduledPrimaryConflictError';
+  }
+}
+
+/** ex_site_assignment_one_primary_per_period is a Postgres EXCLUDE constraint (SQLSTATE 23P01);
+ *  Prisma has no typed code for it — match SQLSTATE + the constraint name in the raw message. */
+export function isPrimaryPeriodConflict(error: unknown): boolean {
+  const e = error as { code?: string; message?: string; meta?: { constraint?: unknown } };
   const msg = typeof e?.message === 'string' ? e.message : '';
-  const target = e?.meta?.target;
   return (
-    (e?.code === 'P2002' || msg.includes('23505')) &&
-    (msg.includes('ux_site_assignment_one_live_primary') ||
-      (Array.isArray(target) ? target.includes('ux_site_assignment_one_live_primary') : target === 'ux_site_assignment_one_live_primary'))
+    (msg.includes('23P01') || e?.code === 'P2002' || e?.meta?.constraint === 'ex_site_assignment_one_primary_per_period') &&
+    msg.includes('ex_site_assignment_one_primary_per_period')
   );
 }

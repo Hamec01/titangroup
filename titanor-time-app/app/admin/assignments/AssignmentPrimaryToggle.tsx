@@ -36,15 +36,21 @@ export function AssignmentPrimaryToggle({ assignment }: { assignment: Assignment
         } catch {
           // Non-JSON error body — fall through to the generic message.
         }
-        const reloadCodes = new Set(['VERSION_CONFLICT', 'LIVE_PRIMARY_CONFLICT']);
+        const reloadCodes = new Set(['VERSION_CONFLICT', 'PRIMARY_PERIOD_CONFLICT']);
         window.alert(
           reloadCodes.has(code ?? '')
             ? localeText(locale, 'This assignment was changed elsewhere — reloading.', 'Назначение изменено в другом окне — обновляем страницу.')
-            : code === 'ASSIGNMENT_NOT_ACTIVE'
-              ? localeText(locale, 'This assignment is not active — it cannot be made primary.', 'Назначение не действует — его нельзя сделать основным.')
-              : code === 'FORBIDDEN'
-                ? localeText(locale, 'You no longer have permission to edit assignments.', 'У вас больше нет права изменять назначения.')
-                : localeText(locale, 'Something went wrong. Please try again.', 'Произошла ошибка. Попробуйте ещё раз.')
+            : code === 'SCHEDULED_PRIMARY_CONFLICT'
+              ? localeText(
+                  locale,
+                  'This worker has a primary transfer scheduled for a future date. Open the worker card to keep or replace it.',
+                  'У работника запланирован перевод основного места на будущую дату. Откройте карточку работника, чтобы оставить или заменить его.'
+                )
+              : code === 'ASSIGNMENT_NOT_ACTIVE'
+                ? localeText(locale, 'This assignment is not active — it cannot be made primary.', 'Назначение не действует — его нельзя сделать основным.')
+                : code === 'FORBIDDEN'
+                  ? localeText(locale, 'You no longer have permission to edit assignments.', 'У вас больше нет права изменять назначения.')
+                  : localeText(locale, 'Something went wrong. Please try again.', 'Произошла ошибка. Попробуйте ещё раз.')
         );
         if (reloadCodes.has(code ?? '')) {
           router.refresh();

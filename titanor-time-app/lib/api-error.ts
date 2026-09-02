@@ -24,6 +24,11 @@ export interface ApiErrorBody {
   // that already has a planned/recorded shift bound to this assignment, so the UI can offer that
   // date without a second round-trip.
   earliestValidTo?: string;
+  // R15-D7 §P4 — 409 SCHEDULED_PRIMARY_CONFLICT (POST /api/admin/assignments, .../change,
+  // .../promote, PATCH): the scheduled future primary assignment the requested primary change would
+  // collide with, so the UI can render "keep / replace the scheduled transfer" without a round-trip.
+  scheduledAssignmentId?: string;
+  scheduledValidFrom?: string;
 }
 
 // requestId is optional so existing callers keep working unchanged, but every

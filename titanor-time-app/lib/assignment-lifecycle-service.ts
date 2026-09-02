@@ -5,7 +5,12 @@ import { createAuditEvent } from '@/lib/audit';
 import { createAssignmentInTx, isExclusionViolation } from '@/lib/assignments';
 import { recordAssignmentTransition, reasonFromFreeText } from '@/lib/assignment-transitions';
 import { isAssignmentLiveNow } from '@/lib/assignment-lifecycle';
-import { acquireEmployeeLifecycleLock, livePrimaryDemoteWhere, isLivePrimaryConflict } from '@/lib/assignment-lock';
+import {
+  acquireEmployeeLifecycleLock,
+  overlappingPrimaryWhere,
+  isPrimaryPeriodConflict,
+  ScheduledPrimaryConflictError
+} from '@/lib/assignment-lock';
 import { helsinkiToday, earliestAssignmentEndDate } from '@/lib/workers';
 
 // docs/titanor-time/R15_ASSIGNMENT_LIFECYCLE_DESIGN_RU.md §2.4 / §3 — the ONE writer of
@@ -18,7 +23,7 @@ import { helsinkiToday, earliestAssignmentEndDate } from '@/lib/workers';
 
 const ONE_DAY_MS = 24 * 60 * 60 * 1000;
 
-// The per-employee advisory lock + the ux_site_assignment_one_live_primary predicate/conflict
+// The per-employee advisory lock + the ex_site_assignment_one_primary_per_period predicate/conflict
 // helpers live in lib/assignment-lock.ts (standalone, no import cycle) — re-exported here so
 // callers of this service keep one import.
 export { acquireEmployeeLifecycleLock, assignmentLifecycleLockKey } from '@/lib/assignment-lock';
@@ -197,12 +202,16 @@ export interface ChangeWorkplaceInput {
   reasonText: string | null;
   actorUserId: string;
   requestId: string;
+  /** §P4 — 'REPLACE_SCHEDULED' demotes an overlapping scheduled future primary; absent → such an
+   *  overlap returns SCHEDULED_PRIMARY_CONFLICT so the admin decides. */
+  primaryConflictResolution?: 'KEEP_SCHEDULED' | 'REPLACE_SCHEDULED';
 }
 
 export type ChangeWorkplaceError =
   | { code: 'ASSIGNMENT_OVERLAP' }
   | { code: 'ASSIGNMENT_HAS_RECORDED_TIME' }
-  | { code: 'LIVE_PRIMARY_CONFLICT' };
+  | { code: 'PRIMARY_PERIOD_CONFLICT' }
+  | { code: 'SCHEDULED_PRIMARY_CONFLICT'; scheduledAssignmentId: string; scheduledValidFrom: string };
 
 export interface ChangeWorkplaceResult {
   closedAssignmentId: string;
@@ -214,12 +223,24 @@ export interface ChangeWorkplaceResult {
 }
 
 /**
- * §3.5 — close the current assignment the day before `effectiveFrom` and open a fully-materialised
- * replacement for the rest of the open window. The old row also gets `clockInDisabledAt` when the
- * change is immediate (effectiveFrom <= today) so it drops out of the Check-In options at once;
- * for a future change the calendar boundary (validTo = effectiveFrom − 1) already hands over
- * cleanly, so clockInDisabledAt is left for the effective day. Writes an AssignmentTransition
- * (kind = CHANGE) + AuditEvent in the same transaction, under the per-employee advisory lock.
+ * §3.5 / §P1–P2 / §P5–P6 — close the current assignment and open a fully-materialised replacement
+ * from `effectiveFrom`, one transaction, per-employee advisory lock, AssignmentTransition
+ * (kind = CHANGE) + AuditEvent.
+ *
+ * FUTURE change (`effectiveFrom > today`): old row → validTo = effectiveFrom − 1, KEEPS isPrimary.
+ * The two primary periods are disjoint ([.., effectiveFrom−1] and [effectiveFrom, ..]) so both
+ * rows stay primary and the handover is purely by date — before `effectiveFrom` the worker /
+ * timesheet / Check-In resolve the old assignment as "the primary now" (its range covers today),
+ * from `effectiveFrom` the new one, with no cron and no manual step (§P1/§P2).
+ *
+ * IMMEDIATE change (`effectiveFrom <= today`): old row → clockInDisabledAt = now + isPrimary =
+ * false (demoted now, out of Check-In and out of the one-primary-per-period constraint). validTo =
+ * effectiveFrom − 1 normally, but = `today` when the worker already has recorded / submitted /
+ * planned time on the old assignment dated `today` (§P5) — that day's completed interval stays
+ * attributed to the old site, the transfer still succeeds, and the next Check In goes to the new
+ * one. Open shift: KEEP_ON_OLD bumps `effectiveFrom` to tomorrow (route) so the shift finishes on
+ * the old assignment; MOVE_TO_NEW re-points the open shift so the whole shift lands on the new one
+ * (§P6). Check Out is never blocked by either.
  */
 export async function changeWorkplace(input: ChangeWorkplaceInput): Promise<ChangeWorkplaceResult | ChangeWorkplaceError> {
   const { existing, effectiveFrom, actorUserId, requestId } = input;
@@ -237,39 +258,66 @@ export async function changeWorkplace(input: ChangeWorkplaceInput): Promise<Chan
     return await prisma.$transaction(async (tx) => {
       await acquireEmployeeLifecycleLock(tx, existing.employeeId);
 
-      const closedValidTo = new Date(effectiveFrom.getTime() - ONE_DAY_MS);
+      // §P5 — an immediate transfer normally closes the old assignment the day BEFORE the switch
+      // so the two periods stay disjoint. But if the worker already has recorded / submitted /
+      // planned time on the OLD assignment dated the transfer day itself, that day MUST stay on the
+      // old assignment (validTo = today) — otherwise TRG-11 (fn_site_assignment_dependents_guard)
+      // strands it and the whole transfer 409s. The old row still gets clockInDisabledAt = now +
+      // isPrimary = false below, so it leaves Check-In and the one-primary-per-period constraint
+      // even though its now-shortened period shares `today` with the replacement.
+      let closedValidTo = new Date(effectiveFrom.getTime() - ONE_DAY_MS);
+      if (isImmediate) {
+        const [dseg, frag, wseg, pshift] = await Promise.all([
+          tx.timesheetDraftSegment.count({ where: { sourceAssignmentId: existing.id, date: effectiveFrom } }),
+          tx.clockShiftFragment.count({ where: { sourceAssignmentId: existing.id, date: effectiveFrom } }),
+          tx.workSegment.count({ where: { sourceAssignmentId: existing.id, date: effectiveFrom } }),
+          tx.timesheetPlannedShift.count({ where: { sourceAssignmentId: existing.id, date: effectiveFrom } })
+        ]);
+        if (dseg + frag + wseg + pshift > 0) {
+          closedValidTo = new Date(effectiveFrom.getTime());
+        }
+      }
 
+      // Keep the transfer day's draft planned shift on the old assignment when that day stays with
+      // it (a TimesheetDraftSegment for that day FK-references it with onDelete: Restrict anyway).
       await tx.timesheetDraftPlannedShift.deleteMany({
-        where: { sourceAssignmentId: existing.id, date: { gte: effectiveFrom } }
+        where: { sourceAssignmentId: existing.id, date: { gt: closedValidTo } }
       });
 
       await tx.siteAssignment.update({
         where: { id: existing.id },
         data: {
           validTo: closedValidTo,
-          ...(isImmediate ? { clockInDisabledAt: now } : {}),
-          // The old assignment is closed and replaced — it is never "the primary" afterwards. The
-          // from→to AssignmentTransition below is its record. (createAssignmentInTx's demote step
-          // then only has to deal with OTHER live primaries.)
-          ...(existing.isPrimary ? { isPrimary: false } : {}),
+          // Immediate change (§3.3): the old row is demoted now and operationally removed — it
+          // leaves the Check-In options and drops out of the one-primary-per-period constraint
+          // predicate. A FUTURE change leaves it primary over its now-shortened past period, which
+          // is disjoint from the replacement's period (both stay primary; the handover is by date).
+          ...(isImmediate ? { clockInDisabledAt: now, isPrimary: false } : {}),
           endedReason: reasonText ?? 'Изменение объекта / заказчика',
           version: { increment: 1 }
         }
       });
 
-      const { assignment: newAssignment, demotedPrimaryIds } = await createAssignmentInTx(tx, {
+      // §P4 — 'KEEP_SCHEDULED' means the admin already saw a SCHEDULED_PRIMARY_CONFLICT and wants
+      // to keep the planned transfer; make the replacement non-primary in that case.
+      const newIsPrimary = input.isPrimary && input.primaryConflictResolution !== 'KEEP_SCHEDULED';
+
+      const { assignment: newAssignment, demotedPrimaryIds, demotedScheduledPrimaryIds } = await createAssignmentInTx(tx, {
         employeeId: existing.employeeId,
         siteId: input.siteId,
         workAreaId: input.workAreaId,
         templateVersionId: input.templateVersionId,
         validFrom: effectiveFrom,
         validTo: input.newValidTo,
-        isPrimary: input.isPrimary,
-        assignedByUserId: actorUserId
+        isPrimary: newIsPrimary,
+        assignedByUserId: actorUserId,
+        replaceScheduledPrimary: input.primaryConflictResolution === 'REPLACE_SCHEDULED'
       });
 
       // §3.6 — a demoted prior primary OTHER than the one being replaced here gets its own
-      // transition (the replaced one is already recorded by the from→to transition below).
+      // transition (the replaced one is already recorded by the from→to transition below). A
+      // scheduled future primary is flagged distinctly — its assignment is not cancelled.
+      const scheduledSet = new Set(demotedScheduledPrimaryIds);
       for (const demotedId of demotedPrimaryIds.filter((id) => id !== existing.id)) {
         await recordAssignmentTransition(tx, {
           employeeId: existing.employeeId,
@@ -281,7 +329,9 @@ export async function changeWorkplace(input: ChangeWorkplaceInput): Promise<Chan
           openShiftHandling: 'NONE',
           actorUserId,
           reasonCode: 'OTHER',
-          reasonText: 'auto-demoted: another assignment became the primary'
+          reasonText: scheduledSet.has(demotedId)
+            ? 'primary superseded — this assignment was scheduled to become the worker’s primary; the assignment itself is unchanged'
+            : 'auto-demoted: another assignment became the primary'
         });
       }
 
@@ -331,6 +381,7 @@ export async function changeWorkplace(input: ChangeWorkplaceInput): Promise<Chan
           newTemplateVersionId: newAssignment.templateVersionId,
           newIsPrimary: newAssignment.isPrimary,
           demotedPrimaryAssignmentIds: demotedPrimaryIds,
+          demotedScheduledPrimaryAssignmentIds: demotedScheduledPrimaryIds,
           openShiftHandling,
           transitionId: transition.id
         },
@@ -347,21 +398,28 @@ export async function changeWorkplace(input: ChangeWorkplaceInput): Promise<Chan
       };
     });
   } catch (error) {
+    if (error instanceof ScheduledPrimaryConflictError) {
+      return {
+        code: 'SCHEDULED_PRIMARY_CONFLICT',
+        scheduledAssignmentId: error.scheduledAssignmentId,
+        scheduledValidFrom: error.scheduledValidFrom.toISOString().slice(0, 10)
+      };
+    }
     if (isExclusionViolation(error)) {
       return { code: 'ASSIGNMENT_OVERLAP' };
     }
     if (isAssignmentDependentsConflict(error)) {
       return { code: 'ASSIGNMENT_HAS_RECORDED_TIME' };
     }
-    if (isLivePrimaryConflict(error)) {
-      return { code: 'LIVE_PRIMARY_CONFLICT' };
+    if (isPrimaryPeriodConflict(error)) {
+      return { code: 'PRIMARY_PERIOD_CONFLICT' };
     }
     throw error;
   }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────────────────────
-// promoteToPrimary — "сделать основным" (§3.6 — ≤1 live primary per worker)
+// promoteToPrimary — "сделать основным" (§3.6 — ≤1 primary per overlapping period)
 // ─────────────────────────────────────────────────────────────────────────────────────────────
 
 export interface PromoteToPrimaryInput {
@@ -371,23 +429,29 @@ export interface PromoteToPrimaryInput {
   /** When set, the promote is rejected with VERSION_CONFLICT unless the row is still at this
    *  version (the PATCH toggle carries the version the admin saw). */
   expectedVersion?: number;
+  /** §P4 — 'REPLACE_SCHEDULED' demotes an overlapping scheduled future primary; anything else
+   *  (incl. absent / 'KEEP_SCHEDULED') → SCHEDULED_PRIMARY_CONFLICT (the promote cannot keep both). */
+  primaryConflictResolution?: 'KEEP_SCHEDULED' | 'REPLACE_SCHEDULED';
 }
 
 export type PromoteToPrimaryError =
   | { code: 'ASSIGNMENT_NOT_ACTIVE' }
-  | { code: 'LIVE_PRIMARY_CONFLICT' }
-  | { code: 'VERSION_CONFLICT' };
+  | { code: 'PRIMARY_PERIOD_CONFLICT' }
+  | { code: 'VERSION_CONFLICT' }
+  | { code: 'SCHEDULED_PRIMARY_CONFLICT'; scheduledAssignmentId: string; scheduledValidFrom: string };
 
 export interface PromoteToPrimaryResult {
   demotedAssignmentIds: string[];
 }
 
 /**
- * §3.6 — make this the one primary assignment. Demotes every other primary of the same worker that
- * is STILL operationally live (clockInDisabledAt IS NULL or a not-yet-passed future instant) in the
- * same transaction, under the per-employee advisory lock — the app-level half of the "≤1 live
- * primary" invariant; the partial unique index is the DB backstop. A removed / already-disabled
- * assignment is neither promoted nor demoted.
+ * §3.6 / §P4 — make this THE primary for its own period. Demotes every other primary of the same
+ * worker whose date range OVERLAPS this one's, in the same transaction under the per-employee
+ * advisory lock — the app-level half of "≤1 primary per overlapping period"; the EXCLUDE
+ * constraint is the DB backstop. A non-overlapping scheduled future primary is left alone. If an
+ * OVERLAPPING primary is a scheduled future transfer, the promote returns SCHEDULED_PRIMARY_CONFLICT
+ * unless the caller passed 'REPLACE_SCHEDULED'. A removed / already-disabled assignment is neither
+ * promoted nor demoted.
  */
 export async function promoteToPrimary(
   input: PromoteToPrimaryInput
@@ -428,19 +492,28 @@ export async function promoteToPrimary(
         return { code: 'ASSIGNMENT_NOT_ACTIVE' as const };
       }
 
-      // Demote every OTHER primary of this worker that is still operationally live (§3.6) —
-      // clockInDisabledAt IS NULL OR > now, so a primary whose removal is scheduled for a future
-      // instant is caught too (it is still check-in-able right now).
+      // Demote every OTHER non-removed primary of this worker whose date range OVERLAPS this
+      // assignment's (§3.6). A disjoint scheduled future primary is left alone.
       const demoted = await tx.siteAssignment.findMany({
         where: {
           employeeId: existing.employeeId,
           id: { not: existing.id },
-          ...livePrimaryDemoteWhere(now)
+          ...overlappingPrimaryWhere({ validFrom: locked.validFrom, validTo: locked.validTo })
         },
-        select: { id: true }
+        select: { id: true, validFrom: true }
       });
+      const scheduled = demoted.filter((a) => a.validFrom > today);
+      if (scheduled.length > 0 && input.primaryConflictResolution !== 'REPLACE_SCHEDULED') {
+        // §P4 — cannot promote past a scheduled transfer without an explicit decision.
+        return {
+          code: 'SCHEDULED_PRIMARY_CONFLICT' as const,
+          scheduledAssignmentId: scheduled[0].id,
+          scheduledValidFrom: formatDate(scheduled[0].validFrom)
+        };
+      }
 
       const demotedIds = demoted.map((a) => a.id);
+      const scheduledSet = new Set(scheduled.map((a) => a.id));
       if (demotedIds.length > 0) {
         await tx.siteAssignment.updateMany({
           where: { id: { in: demotedIds } },
@@ -480,7 +553,9 @@ export async function promoteToPrimary(
           openShiftHandling: 'NONE',
           actorUserId,
           reasonCode: 'OTHER',
-          reasonText: 'promoted to primary — prior primary demoted'
+          reasonText: scheduledSet.has(demotedId)
+            ? 'scheduled primary transfer replaced by an explicit promote — the assignment itself is unchanged, only its primary status'
+            : 'promoted to primary — prior primary demoted'
         });
       }
 
@@ -494,15 +569,16 @@ export async function promoteToPrimary(
         afterValue: {
           assignmentId: existing.id,
           employeeId: existing.employeeId,
-          demotedAssignmentIds: demotedIds
+          demotedAssignmentIds: demotedIds,
+          demotedScheduledPrimaryAssignmentIds: [...scheduledSet]
         }
       });
 
       return { demotedAssignmentIds: demotedIds };
     });
   } catch (error) {
-    if (isLivePrimaryConflict(error)) {
-      return { code: 'LIVE_PRIMARY_CONFLICT' };
+    if (isPrimaryPeriodConflict(error)) {
+      return { code: 'PRIMARY_PERIOD_CONFLICT' };
     }
     throw error;
   }

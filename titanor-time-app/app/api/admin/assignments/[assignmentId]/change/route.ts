@@ -70,7 +70,7 @@ export async function POST(request: NextRequest, { params }: RouteParams): Promi
     return jsonError(400, { code: 'VALIDATION_ERROR', message: 'Request body must be valid JSON.' }, requestId);
   }
   const bodyObject = rawBody && typeof rawBody === 'object' ? (rawBody as Record<string, unknown>) : {};
-  const { effectiveFrom, siteId, workAreaId, templateId, isPrimary, todayShiftHandling, reason } = bodyObject as {
+  const { effectiveFrom, siteId, workAreaId, templateId, isPrimary, todayShiftHandling, reason, primaryConflictResolution } = bodyObject as {
     effectiveFrom?: unknown;
     siteId?: unknown;
     workAreaId?: unknown;
@@ -78,6 +78,7 @@ export async function POST(request: NextRequest, { params }: RouteParams): Promi
     isPrimary?: unknown;
     todayShiftHandling?: unknown;
     reason?: unknown;
+    primaryConflictResolution?: unknown;
   };
 
   const fieldErrors: Record<string, string[]> = {};
@@ -125,6 +126,14 @@ export async function POST(request: NextRequest, { params }: RouteParams): Promi
       fieldErrors.reason = ['invalid'];
     } else {
       trimmedReason = reason.trim();
+    }
+  }
+  let normalizedPrimaryResolution: 'KEEP_SCHEDULED' | 'REPLACE_SCHEDULED' | undefined;
+  if (primaryConflictResolution !== undefined && primaryConflictResolution !== null) {
+    if (primaryConflictResolution !== 'KEEP_SCHEDULED' && primaryConflictResolution !== 'REPLACE_SCHEDULED') {
+      fieldErrors.primaryConflictResolution = ['invalid'];
+    } else {
+      normalizedPrimaryResolution = primaryConflictResolution;
     }
   }
 
@@ -247,12 +256,18 @@ export async function POST(request: NextRequest, { params }: RouteParams): Promi
     );
   }
 
-  // Submitted / recorded time on or after the change date can't be restructured here.
+  // Submitted / recorded time STRICTLY AFTER the day the old assignment will end can't be
+  // restructured here. For a future change that day is effectiveFrom − 1 (so time on/after
+  // effectiveFrom blocks, as before). For an immediate change the old assignment keeps `today`
+  // whenever the worker already worked it (§P5), so only time dated after today blocks — today's
+  // own completed interval stays on the old site and the transfer proceeds.
+  const isImmediateChange = effectiveFromDate.getTime() <= today.getTime();
+  const oldAssignmentLastDay = isImmediateChange ? today : new Date(effectiveFromDate.getTime() - ONE_DAY_MS);
   const [submittedSegments, submittedShifts, recordedDraftSegments, recordedFragments] = await Promise.all([
-    prisma.workSegment.count({ where: { sourceAssignmentId: existing.id, date: { gte: effectiveFromDate } } }),
-    prisma.timesheetPlannedShift.count({ where: { sourceAssignmentId: existing.id, date: { gte: effectiveFromDate } } }),
-    prisma.timesheetDraftSegment.count({ where: { sourceAssignmentId: existing.id, date: { gte: effectiveFromDate } } }),
-    prisma.clockShiftFragment.count({ where: { sourceAssignmentId: existing.id, date: { gte: effectiveFromDate } } })
+    prisma.workSegment.count({ where: { sourceAssignmentId: existing.id, date: { gt: oldAssignmentLastDay } } }),
+    prisma.timesheetPlannedShift.count({ where: { sourceAssignmentId: existing.id, date: { gt: oldAssignmentLastDay } } }),
+    prisma.timesheetDraftSegment.count({ where: { sourceAssignmentId: existing.id, date: { gt: oldAssignmentLastDay } } }),
+    prisma.clockShiftFragment.count({ where: { sourceAssignmentId: existing.id, date: { gt: oldAssignmentLastDay } } })
   ]);
   if (submittedSegments > 0 || submittedShifts > 0) {
     return jsonError(
@@ -289,7 +304,8 @@ export async function POST(request: NextRequest, { params }: RouteParams): Promi
     openShiftPresent: Boolean(openShift),
     reasonText: trimmedReason,
     actorUserId: authenticated.user.id,
-    requestId
+    requestId,
+    primaryConflictResolution: normalizedPrimaryResolution
   });
 
   if ('code' in result) {
@@ -304,10 +320,22 @@ export async function POST(request: NextRequest, { params }: RouteParams): Promi
         requestId
       );
     }
-    if (result.code === 'LIVE_PRIMARY_CONFLICT') {
+    if (result.code === 'SCHEDULED_PRIMARY_CONFLICT') {
       return jsonError(
         409,
-        { code: 'LIVE_PRIMARY_CONFLICT', message: 'The worker already has a primary assignment — refresh the card and try again.' },
+        {
+          code: 'SCHEDULED_PRIMARY_CONFLICT',
+          message: `This worker already has a primary transfer scheduled to start on ${result.scheduledValidFrom}. Choose to keep that scheduled transfer (this move is made non-primary) or replace it (the scheduled transfer stays but loses its primary status). Re-send with primaryConflictResolution.`,
+          scheduledAssignmentId: result.scheduledAssignmentId,
+          scheduledValidFrom: result.scheduledValidFrom
+        },
+        requestId
+      );
+    }
+    if (result.code === 'PRIMARY_PERIOD_CONFLICT') {
+      return jsonError(
+        409,
+        { code: 'PRIMARY_PERIOD_CONFLICT', message: 'The worker already has a primary assignment covering that period — refresh the card and try again.' },
         requestId
       );
     }

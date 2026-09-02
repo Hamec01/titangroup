@@ -49,9 +49,32 @@ export async function POST(request: NextRequest, { params }: RouteParams): Promi
     return jsonError(404, { code: 'ASSIGNMENT_NOT_FOUND', message: 'No assignment with this id.' }, requestId);
   }
 
-  const result = await promoteToPrimary({ existing, actorUserId: authenticated.user.id, requestId });
+  // Body is optional; the only field is the §P4 resolution.
+  let primaryConflictResolution: 'KEEP_SCHEDULED' | 'REPLACE_SCHEDULED' | undefined;
+  try {
+    const raw = (await request.json()) as { primaryConflictResolution?: unknown };
+    if (raw?.primaryConflictResolution === 'KEEP_SCHEDULED' || raw?.primaryConflictResolution === 'REPLACE_SCHEDULED') {
+      primaryConflictResolution = raw.primaryConflictResolution;
+    }
+  } catch {
+    // no / empty body — fine
+  }
+
+  const result = await promoteToPrimary({ existing, actorUserId: authenticated.user.id, requestId, primaryConflictResolution });
   if ('code' in result) {
-    if (result.code === 'LIVE_PRIMARY_CONFLICT' || result.code === 'VERSION_CONFLICT') {
+    if (result.code === 'SCHEDULED_PRIMARY_CONFLICT') {
+      return jsonError(
+        409,
+        {
+          code: 'SCHEDULED_PRIMARY_CONFLICT',
+          message: `This worker has a primary transfer scheduled to start on ${result.scheduledValidFrom}. To make this assignment primary now you must replace that scheduled transfer — re-send with primaryConflictResolution: "REPLACE_SCHEDULED".`,
+          scheduledAssignmentId: result.scheduledAssignmentId,
+          scheduledValidFrom: result.scheduledValidFrom
+        },
+        requestId
+      );
+    }
+    if (result.code === 'PRIMARY_PERIOD_CONFLICT' || result.code === 'VERSION_CONFLICT') {
       return jsonError(409, { code: result.code, message: 'The assignment changed under you — refresh and try again.' }, requestId);
     }
     return jsonError(409, { code: 'ASSIGNMENT_NOT_ACTIVE', message: 'This assignment is not currently active.' }, requestId);
