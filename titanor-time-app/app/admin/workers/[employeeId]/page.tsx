@@ -135,8 +135,13 @@ export default async function WorkerDetailPage({ params }: { params: Promise<{ e
             {worker.currentAssignments.map((assignment) => (
               <li key={assignment.assignmentId} className="setup-item setup-item-column">
                 <span className="setup-label">
-                  {assignment.siteName}
-                  {assignment.workAreaName ? ` — ${assignment.workAreaName}` : ''}
+                  <Link href={`/admin/sites/${assignment.siteId}`}>{assignment.siteName}</Link>
+                  {assignment.workAreaId && assignment.workAreaName ? (
+                    <>
+                      {' — '}
+                      <Link href={`/admin/work-areas/${assignment.workAreaId}`}>{assignment.workAreaName}</Link>
+                    </>
+                  ) : null}
                   {assignment.isPrimary ? ` (${s.common.primary})` : ''}
                 </span>
                 <div className="assignment-actions">

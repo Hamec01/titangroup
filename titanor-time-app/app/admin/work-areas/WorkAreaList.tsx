@@ -71,7 +71,7 @@ export function WorkAreaList({ workAreas, canManage }: { workAreas: WorkAreaItem
           <tbody>
             {workAreas.map((area) => (
               <tr key={area.id}>
-                <td>{area.name}</td>
+                <td><Link href={`/admin/work-areas/${area.id}`}>{area.name}</Link></td>
                 <td><Link href={`/admin/sites/${area.site.id}`}>{area.site.name}</Link></td>
                 <td>{area.active ? localeText(locale, 'Active', 'Активна') : localeText(locale, 'Inactive', 'Неактивна')}</td>
                 <td>

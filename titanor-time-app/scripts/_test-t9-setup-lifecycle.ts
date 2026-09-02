@@ -382,6 +382,15 @@ async function main() {
   const w2Row = await prisma.siteAssignment.findUniqueOrThrow({ where: { id: asgW2.body.id } });
   check('WA8: the rejected end did not partially apply (validTo still null)', w2Row.validTo === null && w2Row.endedReason === null, w2Row);
 
+  // WA9/WA10 — "click a customer → who's on it". wArea2 still has workerB current (asgW2 not
+  // ended); wArea1's asgW1 was ended today so workerB shows under "Worked here before".
+  const custList = await (await fetch(`${BASE}/admin/work-areas`, { headers: authHeaders(fx.admin.cookie) })).text();
+  check('WA9: the customers list links each customer name to its own page', custList.includes(`/admin/work-areas/${wArea2.id}`), custList.slice(0, 200));
+  const cust2 = await (await fetch(`${BASE}/admin/work-areas/${wArea2.id}`, { headers: authHeaders(fx.admin.cookie) })).text();
+  check('WA10: the customer page lists its current workers (link to the worker card)', cust2.includes('Current workers') && cust2.includes(`/admin/workers/${fx.workerB.employeeId}`), cust2.slice(0, 300));
+  const cust1 = await (await fetch(`${BASE}/admin/work-areas/${wArea1.id}`, { headers: authHeaders(fx.admin.cookie) })).text();
+  check('WA11: a worker whose assignment ended today shows under "Worked here before", not current', cust1.includes('Worked here before') && cust1.includes(`/admin/workers/${fx.workerB.employeeId}`), cust1.slice(0, 300));
+
   // CH0-CH10 — "Изменить объект / зону" (POST /api/admin/assignments/:id/change). Fully isolated:
   // a dedicated worker + fresh sites, so nothing here can collide with the shared fixture that
   // Group C below depends on. Closes the old assignment the day before the effective date and

@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, type FormEvent } from 'react';
+import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import type { SiteWorkArea } from '@/lib/sites';
 import { useAppLocale } from '@/components/i18n/AppLocaleProvider';
@@ -131,7 +132,7 @@ export function WorkAreaSection({ siteId, workAreas }: { siteId: string; workAre
           {workAreas.map((area) => (
             <li key={area.id} className="setup-item">
               <span className="setup-label">
-                {area.name}
+                <Link href={`/admin/work-areas/${area.id}`}>{area.name}</Link>
                 {!area.active ? localeText(locale, ' (inactive)', ' (неактивен)') : ''}
               </span>
               <ToggleActiveButton siteId={siteId} area={area} disabled={loading} />
