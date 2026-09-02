@@ -275,6 +275,65 @@ export async function getWorkerDetail(employeeId: string): Promise<WorkerDetail 
   };
 }
 
+/**
+ * The latest calendar day already spoken for by a planned or recorded shift bound to each of
+ * these assignments — across WorkSegment / TimesheetPlannedShift / TimesheetDraftSegment /
+ * TimesheetDraftPlannedShift, the exact four tables fn_site_assignment_dependents_guard
+ * (05_RAW_SQL_REGISTER.md, TRG-11) checks. POST /api/admin/assignments/:id/end cannot move an
+ * assignment's validTo before this day without stranding those rows (a raw trigger 500), so the
+ * worker card pre-fills its "End" form with it and the endpoint reports it on the 409.
+ * Assignments with no such row are absent from the returned map.
+ */
+export async function latestBoundShiftDates(assignmentIds: string[]): Promise<Map<string, string>> {
+  const out = new Map<string, string>();
+  if (assignmentIds.length === 0) {
+    return out;
+  }
+  const where = { sourceAssignmentId: { in: assignmentIds } };
+  const grouped = await Promise.all([
+    prisma.workSegment.groupBy({ by: ['sourceAssignmentId'], where, _max: { date: true } }),
+    prisma.timesheetPlannedShift.groupBy({ by: ['sourceAssignmentId'], where, _max: { date: true } }),
+    prisma.timesheetDraftSegment.groupBy({ by: ['sourceAssignmentId'], where, _max: { date: true } }),
+    prisma.timesheetDraftPlannedShift.groupBy({ by: ['sourceAssignmentId'], where, _max: { date: true } })
+  ]);
+  const latest = new Map<string, Date>();
+  for (const row of grouped.flat()) {
+    const day = row._max.date;
+    if (!day) {
+      continue;
+    }
+    const prev = latest.get(row.sourceAssignmentId);
+    if (!prev || day > prev) {
+      latest.set(row.sourceAssignmentId, day);
+    }
+  }
+  for (const [id, day] of latest) {
+    out.set(id, day.toISOString().slice(0, 10));
+  }
+  return out;
+}
+
+/** Single-assignment form for POST /api/admin/assignments/:id/end's 409 body — see latestBoundShiftDates. */
+export async function earliestAssignmentEndDate(assignmentId: string): Promise<string | null> {
+  return (await latestBoundShiftDates([assignmentId])).get(assignmentId) ?? null;
+}
+
+/**
+ * For each id, the date the worker card's "End" form should default to: the assignment's last
+ * planned/recorded shift day when that is still in the future, otherwise today. Every input id is
+ * present in the result. Ending exactly here never trips the dependents guard.
+ */
+export async function assignmentEndDateDefaults(assignmentIds: string[]): Promise<Map<string, string>> {
+  const today = helsinkiToday().toISOString().slice(0, 10);
+  const bound = await latestBoundShiftDates(assignmentIds);
+  const out = new Map<string, string>();
+  for (const id of assignmentIds) {
+    const last = bound.get(id);
+    out.set(id, last && last > today ? last : today);
+  }
+  return out;
+}
+
 export type RegenerateWorkerUsernameResult =
   | { code: 'WORKER_NOT_FOUND' }
   | { employeeId: string; previousUsername: string; username: string; changed: boolean };

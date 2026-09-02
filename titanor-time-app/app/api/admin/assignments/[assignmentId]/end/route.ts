@@ -1,6 +1,8 @@
 import { randomUUID } from 'node:crypto';
+import { Prisma } from '@prisma/client';
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
+import { earliestAssignmentEndDate } from '@/lib/workers';
 import { jsonError, successHeaders, type ApiErrorBody } from '@/lib/api-error';
 import { resolveAuthenticatedSession } from '@/lib/auth';
 import { hasPermission } from '@/lib/permissions';
@@ -25,6 +27,18 @@ function errorBody(body: ApiErrorBody, requestId: string): { error: ApiErrorBody
 
 function formatDate(date: Date): string {
   return date.toISOString().slice(0, 10);
+}
+
+// fn_site_assignment_dependents_guard (05_RAW_SQL_REGISTER.md, TRG-11) raises this — as a plain
+// P0001, not a typed Prisma code — when a validTo shrink would leave a WorkSegment /
+// TimesheetPlannedShift / TimesheetDraftSegment / TimesheetDraftPlannedShift row for this
+// assignment stranded outside its own window. Match the stable identifier text only.
+function isAssignmentDependentsConflict(error: unknown): boolean {
+  return (
+    error instanceof Prisma.PrismaClientUnknownRequestError &&
+    error.message.includes('P0001') &&
+    error.message.includes('ASSIGNMENT_DEPENDENTS_CONFLICT')
+  );
 }
 
 type RouteParams = { params: Promise<{ assignmentId: string }> };
@@ -116,28 +130,50 @@ export async function POST(request: NextRequest, { params }: RouteParams): Promi
     );
   }
 
-  const updated = await prisma.$transaction(async (tx) => {
-    const assignment = await tx.siteAssignment.update({
-      where: { id: existing.id },
-      data: {
-        validTo: newValidTo,
-        ...(trimmedReason !== null ? { endedReason: trimmedReason } : {}),
-        version: { increment: 1 }
-      }
-    });
+  let updated;
+  try {
+    updated = await prisma.$transaction(async (tx) => {
+      const assignment = await tx.siteAssignment.update({
+        where: { id: existing.id },
+        data: {
+          validTo: newValidTo,
+          ...(trimmedReason !== null ? { endedReason: trimmedReason } : {}),
+          version: { increment: 1 }
+        }
+      });
 
-    await createAuditEvent(tx, {
-      actorUserId: authenticated.user.id,
-      eventType: 'ASSIGNMENT_ENDED',
-      entityType: 'SITE_ASSIGNMENT',
-      entityId: assignment.id,
-      requestId,
-      beforeValue: { validTo: existing.validTo ? formatDate(existing.validTo) : null },
-      afterValue: { validTo: formatDate(assignment.validTo!), reason: trimmedReason }
-    });
+      await createAuditEvent(tx, {
+        actorUserId: authenticated.user.id,
+        eventType: 'ASSIGNMENT_ENDED',
+        entityType: 'SITE_ASSIGNMENT',
+        entityId: assignment.id,
+        requestId,
+        beforeValue: { validTo: existing.validTo ? formatDate(existing.validTo) : null },
+        afterValue: { validTo: formatDate(assignment.validTo!), reason: trimmedReason }
+      });
 
-    return assignment;
-  });
+      return assignment;
+    });
+  } catch (error) {
+    // The chosen end date lands before a planned/recorded shift this assignment already owns.
+    // Surface it as an actionable 409 with the earliest date that would work, instead of the
+    // raw 500 an unhandled trigger exception would produce (the worker card's "End" action
+    // defaults validTo to exactly this date, so a straight click never hits this).
+    if (isAssignmentDependentsConflict(error)) {
+      const earliest = await earliestAssignmentEndDate(existing.id);
+      return jsonError(
+        409,
+        {
+          code: 'ASSIGNMENT_HAS_DEPENDENTS',
+          message: 'This assignment already has planned or recorded shifts after the chosen end date.',
+          fieldErrors: { validTo: ['must not be earlier than the assignment’s last planned or recorded shift'] },
+          ...(earliest ? { earliestValidTo: earliest } : {})
+        },
+        requestId
+      );
+    }
+    throw error;
+  }
 
   return NextResponse.json(
     {

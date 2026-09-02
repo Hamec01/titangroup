@@ -46,14 +46,39 @@ export function EndAssignmentAction({
       if (!response.ok) {
         let code: string | undefined;
         let fieldErrors: Record<string, string[]> | undefined;
+        let earliestValidTo: string | undefined;
         try {
-          const body = (await response.json()) as { error?: { code?: string; fieldErrors?: Record<string, string[]> } };
+          const body = (await response.json()) as {
+            error?: { code?: string; fieldErrors?: Record<string, string[]>; earliestValidTo?: string };
+          };
           code = body.error?.code;
           fieldErrors = body.error?.fieldErrors;
+          earliestValidTo = body.error?.earliestValidTo;
         } catch {
           // Non-JSON error body — fall through to the generic message.
         }
-        if (code === 'VALIDATION_ERROR' && fieldErrors?.reason) {
+        if (code === 'ASSIGNMENT_HAS_DEPENDENTS') {
+          // The assignment already has planned/recorded shifts past the chosen date. Move the
+          // form to the earliest date that will work so a second click just succeeds.
+          if (earliestValidTo) {
+            setValidTo(earliestValidTo);
+            setErrorMessage(
+              localeText(
+                locale,
+                `This assignment has planned or recorded shifts through ${earliestValidTo}. The end date has been moved there — confirm again to end it.`,
+                `У этого назначения есть плановые или отмеченные смены по ${earliestValidTo}. Дата окончания перенесена на неё — подтвердите ещё раз.`
+              )
+            );
+          } else {
+            setErrorMessage(
+              localeText(
+                locale,
+                'This assignment has planned or recorded shifts after that date. Choose a later end date.',
+                'У этого назначения есть плановые или отмеченные смены после этой даты. Выберите более позднюю дату окончания.'
+              )
+            );
+          }
+        } else if (code === 'VALIDATION_ERROR' && fieldErrors?.reason) {
           setErrorMessage(localeText(locale, 'A reason is required when ending earlier than planned.', 'При досрочном завершении необходимо указать причину.'));
         } else if (code === 'VALIDATION_ERROR') {
           setErrorMessage(localeText(locale, 'Please check the end date.', 'Проверьте дату окончания.'));

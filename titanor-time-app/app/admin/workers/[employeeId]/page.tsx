@@ -1,7 +1,7 @@
 import { redirect } from 'next/navigation';
 import Link from 'next/link';
 import { resolveServerSession } from '@/lib/server-session';
-import { getWorkerDetail, helsinkiToday } from '@/lib/workers';
+import { getWorkerDetail, helsinkiToday, assignmentEndDateDefaults } from '@/lib/workers';
 import { NewAssignmentForm } from '@/app/admin/assignments/new/NewAssignmentForm';
 import { EndAssignmentAction } from '@/app/admin/assignments/EndAssignmentAction';
 import { WorkerActions } from './WorkerActions';
@@ -56,9 +56,10 @@ export default async function WorkerDetailPage({ params }: { params: Promise<{ e
     );
   }
 
-  const [submissionSchedule, profile] = await Promise.all([
+  const [submissionSchedule, profile, endDateDefaults] = await Promise.all([
     getWorkerSubmissionScheduleView(employeeId),
-    getEmployeeProfileView(employeeId, false)
+    getEmployeeProfileView(employeeId, false),
+    assignmentEndDateDefaults(worker.currentAssignments.map((assignment) => assignment.assignmentId))
   ]);
   const safetyCard = profile?.qualifications.find((q) => q.definitionCode === 'OCCUPATIONAL_SAFETY_CARD') ?? null;
   const hotWorkCard = profile?.qualifications.find((q) => q.definitionCode === 'HOT_WORK_CARD') ?? null;
@@ -139,7 +140,7 @@ export default async function WorkerDetailPage({ params }: { params: Promise<{ e
                 </span>
                 <EndAssignmentAction
                   assignment={{ id: assignment.assignmentId }}
-                  defaultValidTo={helsinkiToday().toISOString().slice(0, 10)}
+                  defaultValidTo={endDateDefaults.get(assignment.assignmentId) ?? helsinkiToday().toISOString().slice(0, 10)}
                 />
               </li>
             ))}

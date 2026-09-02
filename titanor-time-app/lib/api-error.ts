@@ -19,6 +19,11 @@ export interface ApiErrorBody {
   // actions this endpoint doesn't implement yet (informational only, never a promise that POSTing
   // one of them will succeed).
   allowedActions?: string[];
+  // POST /api/admin/assignments/:id/end 409 ASSIGNMENT_HAS_DEPENDENTS — the earliest validTo that
+  // fn_site_assignment_dependents_guard (05_RAW_SQL_REGISTER.md) would accept, i.e. the last day
+  // that already has a planned/recorded shift bound to this assignment, so the UI can offer that
+  // date without a second round-trip.
+  earliestValidTo?: string;
 }
 
 // requestId is optional so existing callers keep working unchanged, but every
