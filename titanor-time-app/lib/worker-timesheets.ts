@@ -3,6 +3,7 @@ import { Prisma, AbsenceType, DayType, SubmissionSource, type TimesheetVersionSo
 import { prisma } from '@/lib/prisma';
 import { createAuditEvent } from '@/lib/audit';
 import { helsinkiToday } from '@/lib/workers';
+import { liveAssignmentWhere } from '@/lib/assignment-lifecycle';
 import { effectiveReportedRangesBatch, resolveOverlapsForAffectedShifts, provenanceValuesEqual, type ProvenanceValues } from '@/lib/attendance-reported-projection';
 import { computeChangeType, buildClockShiftAdjustmentData } from '@/lib/clock-shift-fragment-edit';
 import { reinitializeDraftFromVersion } from '@/lib/review-scopes';
@@ -959,10 +960,16 @@ function decideScopeCarryForward(
   return { status: 'PENDING', carriedFromScopeId: null };
 }
 
+// The site the timesheet's NON_SITE scope is attributed to ("contextSiteId"). R15-D7: the worker's
+// currently OPERATIONALLY-LIVE primary — clockInDisabledAt-aware (a removed / already-transferred
+// primary is excluded even if its isPrimary flag lingers) and deterministically ordered (most
+// recently started first, id as the tiebreak) so a same-day transfer resolves to the NEW primary,
+// not whichever row findFirst happened to return.
 async function resolvePrimarySiteId(tx: Prisma.TransactionClient, employeeId: string): Promise<string | null> {
   const today = helsinkiToday();
   const assignment = await tx.siteAssignment.findFirst({
-    where: { employeeId, isPrimary: true, validFrom: { lte: today }, OR: [{ validTo: null }, { validTo: { gte: today } }] },
+    where: { employeeId, isPrimary: true, ...liveAssignmentWhere(new Date(), today) },
+    orderBy: [{ validFrom: 'desc' }, { id: 'asc' }],
     select: { siteId: true }
   });
   return assignment?.siteId ?? null;

@@ -3,7 +3,9 @@ import { prisma } from '@/lib/prisma';
 import { createAuditEvent } from '@/lib/audit';
 import { enumerateDates, toTemplateWeekday, computePlannedShiftForAssignmentDate } from '@/lib/periods';
 import { assignWorkerSubmissionSchedule, submissionPeriodForDate } from '@/lib/timesheet-submission-schedules';
-import { acquireEmployeeLifecycleLock, LIVE_PRIMARY_INDEX_PREDICATE, isLivePrimaryConflict } from '@/lib/assignment-lock';
+import { acquireEmployeeLifecycleLock, livePrimaryDemoteWhere, isLivePrimaryConflict } from '@/lib/assignment-lock';
+import { recordAssignmentTransition } from '@/lib/assignment-transitions';
+import { helsinkiToday } from '@/lib/workers';
 
 // docs/titanor-time/04_ADMIN_FIRST_API_CONTRACTS.md §6 (Назначения) — shared
 // by POST /api/admin/assignments/validate-overlap and POST /api/admin/assignments.
@@ -88,8 +90,9 @@ export interface CreateAssignmentResult {
  * OPEN period intersecting [validFrom, validTo] — the materialisation half of createAssignment(),
  * factored out so POST /api/admin/assignments/:id/change can reuse it inside its own transaction
  * (close the old assignment + open the replacement atomically). All references must already be
- * validated by the caller. Does NOT write the AuditEvent — the caller owns that
- * (ASSIGNMENT_CREATED vs ASSIGNMENT_CHANGED).
+ * validated by the caller. Does NOT write the AuditEvent or the AssignmentTransition — the caller
+ * owns those (ASSIGNMENT_CREATED vs ASSIGNMENT_CHANGED). Returns `demotedPrimaryIds` so the caller
+ * can record which prior primary assignments this create auto-demoted (§3.6, never a hidden change).
  */
 export async function createAssignmentInTx(
   tx: Prisma.TransactionClient,
@@ -103,17 +106,26 @@ export async function createAssignmentInTx(
     isPrimary: boolean;
     assignedByUserId: string;
   }
-) {
-  // R15-D7 Deploy D (§3.6) — before making a new assignment primary, demote every OTHER row in the
-  // ux_site_assignment_one_live_primary predicate ("primary AND clockInDisabledAt IS NULL") for
-  // this employee, in this same transaction. This is the app-level half of the "≤1 live primary"
-  // invariant; the partial unique index is the DB backstop. Callers hold the per-employee advisory
-  // lock (changeWorkplace) or take it (createAssignment) so this is race-safe.
+): Promise<{ assignment: Prisma.SiteAssignmentGetPayload<object>; demotedPrimaryIds: string[] }> {
+  // R15-D7 Deploy D (§3.6) — before making a new assignment primary, demote every OTHER assignment
+  // of this employee that is a primary AND still operationally live (clockInDisabledAt IS NULL, or
+  // set to a FUTURE instant that has not passed). Broader than the ux_site_assignment_one_live_primary
+  // index predicate on purpose: guarantees ≤1 primary among genuinely-live rows, not just ≤1 in the
+  // index. Same transaction; callers hold the per-employee advisory lock (changeWorkplace) or take
+  // it (createAssignment) so this is race-safe.
+  let demotedPrimaryIds: string[] = [];
   if (params.isPrimary) {
-    await tx.siteAssignment.updateMany({
-      where: { employeeId: params.employeeId, ...LIVE_PRIMARY_INDEX_PREDICATE },
-      data: { isPrimary: false, version: { increment: 1 } }
+    const toDemote = await tx.siteAssignment.findMany({
+      where: { employeeId: params.employeeId, ...livePrimaryDemoteWhere(new Date()) },
+      select: { id: true }
     });
+    demotedPrimaryIds = toDemote.map((a) => a.id);
+    if (demotedPrimaryIds.length > 0) {
+      await tx.siteAssignment.updateMany({
+        where: { id: { in: demotedPrimaryIds } },
+        data: { isPrimary: false, version: { increment: 1 } }
+      });
+    }
   }
 
   const assignment = await tx.siteAssignment.create({
@@ -231,7 +243,7 @@ export async function createAssignmentInTx(
     }
   }
 
-  return assignment;
+  return { assignment, demotedPrimaryIds };
 }
 
 /**
@@ -309,7 +321,7 @@ export async function createAssignment(
       // and the ux_site_assignment_one_live_primary index stay consistent under concurrency.
       await acquireEmployeeLifecycleLock(tx, input.employeeId);
 
-      const assignment = await createAssignmentInTx(tx, {
+      const { assignment, demotedPrimaryIds } = await createAssignmentInTx(tx, {
         employeeId: input.employeeId,
         siteId: input.siteId,
         workAreaId: input.workAreaId,
@@ -319,6 +331,24 @@ export async function createAssignment(
         validTo: input.validTo,
         assignedByUserId: input.assignedByUserId
       });
+
+      // §3.6 — an auto-demoted prior primary is a real lifecycle change, never hidden: one
+      // AssignmentTransition per demoted assignment, and the ids on the create's own audit.
+      const today = helsinkiToday();
+      for (const demotedId of demotedPrimaryIds) {
+        await recordAssignmentTransition(tx, {
+          employeeId: input.employeeId,
+          kind: 'CHANGE',
+          fromAssignmentId: demotedId,
+          toAssignmentId: assignment.id,
+          actedAt: new Date(),
+          effectiveFrom: today,
+          openShiftHandling: 'NONE',
+          actorUserId: input.assignedByUserId,
+          reasonCode: 'OTHER',
+          reasonText: 'auto-demoted: a new primary assignment was created'
+        });
+      }
 
       // Same transaction as the create + period upserts above — lib/audit.ts's
       // invariant ("Действие + AuditEvent — одна транзакция") requires this.
@@ -337,7 +367,8 @@ export async function createAssignment(
           templateVersionId: assignment.templateVersionId,
           isPrimary: assignment.isPrimary,
           validFrom: assignment.validFrom.toISOString().slice(0, 10),
-          validTo: assignment.validTo ? assignment.validTo.toISOString().slice(0, 10) : null
+          validTo: assignment.validTo ? assignment.validTo.toISOString().slice(0, 10) : null,
+          demotedPrimaryAssignmentIds: demotedPrimaryIds
         }
       });
 

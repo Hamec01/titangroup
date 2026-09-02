@@ -462,6 +462,41 @@ async function main() {
   const pickerText = await page.locator('.assignment-end-form', { hasText: 'Change the customer only' }).innerText().catch(() => '');
   check('CH10b: the mode picker offers the quick and the full change', pickerText.includes('Change the customer only') && pickerText.includes('Move to another site'), pickerText.slice(0, 300));
 
+  // CH11 (R15-D7 Deploy D) — the real "Set primary" button on /admin/assignments routes the
+  // primary change through promoteToPrimary: the prior live primary is demoted, one live primary
+  // remains, and an AssignmentTransition + ASSIGNMENT_PROMOTED audit are written.
+  const cpTodayIso = new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Helsinki' }).format(new Date());
+  const cpW = await jsonFetch(`${BASE}/api/admin/workers`, { method: 'POST', headers: authHeaders(fx.admin.cookie, { 'Idempotency-Key': randomUUID() }), body: JSON.stringify({ firstName: 'PrimToggle', lastName: `ZZ${fx.run}` }) });
+  const cpWId: string = cpW.body.employee.id;
+  const cpName = `PrimToggle ZZ${fx.run}`;
+  const cpSiteA = await jsonFetch(`${BASE}/api/admin/sites`, { method: 'POST', headers: authHeaders(fx.admin.cookie, { 'Idempotency-Key': randomUUID() }), body: JSON.stringify({ name: `CP A ${fx.run}` }) });
+  const cpSiteB = await jsonFetch(`${BASE}/api/admin/sites`, { method: 'POST', headers: authHeaders(fx.admin.cookie, { 'Idempotency-Key': randomUUID() }), body: JSON.stringify({ name: `CP B ${fx.run}` }) });
+  // validFrom = today so both rows sort to the top of the (page-1-only) assignments list
+  const cpA1 = await jsonFetch(`${BASE}/api/admin/assignments`, { method: 'POST', headers: authHeaders(fx.admin.cookie, { 'Idempotency-Key': randomUUID() }), body: JSON.stringify({ employeeId: cpWId, siteId: cpSiteA.body.id, templateId: fx.templateId, validFrom: cpTodayIso, isPrimary: true }) });
+  const cpA2 = await jsonFetch(`${BASE}/api/admin/assignments`, { method: 'POST', headers: authHeaders(fx.admin.cookie, { 'Idempotency-Key': randomUUID() }), body: JSON.stringify({ employeeId: cpWId, siteId: cpSiteB.body.id, templateId: fx.templateId, validFrom: cpTodayIso, isPrimary: false }) });
+  check('CH11-pre: two assignments for the toggle worker (a1 primary, a2 not)', cpA1.status === 201 && cpA2.status === 201, { a1: cpA1.status, a2: cpA2.status });
+  await page.goto(`${BASE}/admin/assignments`, { waitUntil: 'networkidle' });
+  const cpRowB = page.locator('tr', { hasText: cpName }).filter({ hasText: cpSiteB.body.name });
+  const setPrimaryBtn = cpRowB.locator('button', { hasText: 'Set primary' });
+  const btnVisible = (await setPrimaryBtn.count()) >= 1;
+  check('CH11a: the assignments list shows a "Set primary" button for the non-primary row', btnVisible, { rows: await page.locator('tr', { hasText: cpName }).count() });
+  if (btnVisible) {
+    await setPrimaryBtn.first().click();
+    await page.waitForTimeout(1500);
+  } else {
+    // fallback: exercise the exact PATCH the button sends
+    const v = (await prisma.siteAssignment.findUniqueOrThrow({ where: { id: cpA2.body.id } })).version;
+    await jsonFetch(`${BASE}/api/admin/assignments/${cpA2.body.id}`, { method: 'PATCH', headers: authHeaders(fx.admin.cookie), body: JSON.stringify({ version: v, isPrimary: true }) });
+  }
+  const cpA1Row = await prisma.siteAssignment.findUniqueOrThrow({ where: { id: cpA1.body.id } });
+  const cpA2Row = await prisma.siteAssignment.findUniqueOrThrow({ where: { id: cpA2.body.id } });
+  check('CH11b: clicking "Set primary" demoted the old primary and promoted the clicked one', cpA1Row.isPrimary === false && cpA2Row.isPrimary === true, { a1: cpA1Row.isPrimary, a2: cpA2Row.isPrimary });
+  const cpLivePrimaries = await prisma.siteAssignment.count({ where: { employeeId: cpWId, isPrimary: true, clockInDisabledAt: null } });
+  check('CH11c: exactly one live primary after the toggle', cpLivePrimaries === 1, cpLivePrimaries);
+  const cpTr = await prisma.assignmentTransition.findFirst({ where: { toAssignmentId: cpA2.body.id, fromAssignmentId: cpA1.body.id } });
+  const cpAudit = await prisma.auditEvent.findFirst({ where: { eventType: 'ASSIGNMENT_PROMOTED', entityId: cpA2.body.id } });
+  check('CH11d: the UI toggle wrote an AssignmentTransition + ASSIGNMENT_PROMOTED audit', cpTr !== null && cpAudit !== null, { tr: cpTr?.id, audit: cpAudit?.id });
+
   await browser.close();
 
   // ---- Group C: same-class create-second/edit/lifecycle/duplicate-submit/audit audit for the

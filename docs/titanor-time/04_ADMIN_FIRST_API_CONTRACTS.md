@@ -315,7 +315,7 @@ relevant query + canonical body)`.
 - **Snapshot semantics** (§4.5): существующие `SiteAssignment.templateVersionId` не меняются этим
   эндпоинтом никогда; новая версия становится «текущей» только для *новых* назначений/периодов;
   перевод уже начавшегося назначения на новую версию — `POST
-  /api/admin/assignments/:assignmentId/split`, не эта операция
+  /api/admin/assignments/:assignmentId/change`, не эта операция
 - `active=false` исключает шаблон из новых назначений; существующие `SiteAssignment` продолжают
   ссылаться на записанную immutable версию. UI требует явного подтверждения перед деактивацией.
 - Audit: `TEMPLATE_UPDATED` (`beforeValue`/`afterValue` содержат `versionNumber`/`name`/
@@ -457,25 +457,30 @@ relevant query + canonical body)`.
 - Request: `{ "version", "isPrimary"?, "endedReason"? }` — не принимает `siteId`/`workAreaId`/
   `templateId` на начавшемся назначении
 - Ошибки: `404`, `409 VERSION_CONFLICT`, `400 ASSIGNMENT_ALREADY_STARTED` (используйте
-  `assignment.split`)
-- Audit: `ASSIGNMENT_UPDATED`
+  `POST /api/admin/assignments/:id/change`)
+- **R15-D7 Deploy D:** `isPrimary=true` в теле выполняется через lifecycle-сервис
+  (`promoteToPrimary`) — advisory lock + демоушен прежнего live-primary + `AssignmentTransition` +
+  audit в одной транзакции; проверяется `version` (иначе `409 VERSION_CONFLICT`), недоступно на
+  снятом/завершённом назначении (`409 ASSIGNMENT_NOT_ACTIVE`), нельзя вместе с `endedReason`.
+  `isPrimary=false` / `endedReason` — прежний optimistic-locked путь (индекс-безопасно).
+  Возможен `409 LIVE_PRIMARY_CONFLICT`.
+- Audit: `ASSIGNMENT_UPDATED` (для `isPrimary=false` / `endedReason`) либо `ASSIGNMENT_PROMOTED` +
+  `AssignmentTransition` (для `isPrimary=true`)
 
-#### `POST /api/admin/assignments/:assignmentId/split`
-- Permission: `assignment.split`
-- Атомарная замена site/workArea/template у уже начавшегося назначения
-- Request: `{ "effectiveFrom": "2026-08-01", "siteId", "workAreaId"?, "templateId"?, "isPrimary"? }`
-- Response `200`: `{ "closedAssignmentId", "closedValidTo": "2026-07-31", "newAssignment": {...} }`
-- Ошибки: `404`, `400 VALIDATION_ERROR` (`effectiveFrom <= assignment.validFrom`), `409
-  ASSIGNMENT_OVERLAP`
-- Audit: `ASSIGNMENT_SPLIT`
-- Transaction: `UPDATE` старой строки `validTo = effectiveFrom - 1 day` + `INSERT` новой строки —
-  одна транзакция
+#### `POST /api/admin/assignments/:assignmentId/split` — **УДАЛЁН (410 Gone), R15-D7 Deploy D**
+- Возвращает `410 { code: "ENDPOINT_GONE" }`. Делал `siteAssignment.create` вне lifecycle-сервиса
+  (без advisory lock, без демоушена primary) → при split основного назначения два ряда попадали
+  под `ux_site_assignment_one_live_primary` и `create` падал 23505/500. UI-вызовов не было.
+- Замена: **`POST /api/admin/assignments/:assignmentId/change`** (закрытие старого +
+  материализованная замена через lifecycle-сервис).
 
 #### `POST /api/admin/assignments/:assignmentId/promote`
 - Permission: `assignment.update`
 - Response `200`: `{ "assignmentId", "isPrimary": true }`
-- Ошибки: `404`, `409 ASSIGNMENT_NOT_ACTIVE`
-- Transaction: advisory lock на `employeeId`, демоушен прежнего primary, audit `ASSIGNMENT_PROMOTED`
+- Ошибки: `404`, `409 ASSIGNMENT_NOT_ACTIVE`, `409 LIVE_PRIMARY_CONFLICT` / `409 VERSION_CONFLICT`
+- Transaction: advisory lock на `employeeId`, демоушен всех прежних **live** primary
+  (`isPrimary AND (clockInDisabledAt IS NULL OR > now)`), `AssignmentTransition` (по одной на
+  снятое) + audit `ASSIGNMENT_PROMOTED` — одна транзакция
 
 #### `POST /api/admin/assignments/:assignmentId/end`
 - Permission: `assignment.end`

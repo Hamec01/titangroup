@@ -5,7 +5,7 @@ import { createAuditEvent } from '@/lib/audit';
 import { createAssignmentInTx, isExclusionViolation } from '@/lib/assignments';
 import { recordAssignmentTransition, reasonFromFreeText } from '@/lib/assignment-transitions';
 import { isAssignmentLiveNow } from '@/lib/assignment-lifecycle';
-import { acquireEmployeeLifecycleLock, LIVE_PRIMARY_INDEX_PREDICATE, isLivePrimaryConflict } from '@/lib/assignment-lock';
+import { acquireEmployeeLifecycleLock, livePrimaryDemoteWhere, isLivePrimaryConflict } from '@/lib/assignment-lock';
 import { helsinkiToday, earliestAssignmentEndDate } from '@/lib/workers';
 
 // docs/titanor-time/R15_ASSIGNMENT_LIFECYCLE_DESIGN_RU.md §2.4 / §3 — the ONE writer of
@@ -209,7 +209,7 @@ export interface ChangeWorkplaceResult {
   closedValidTo: Date;
   effectiveFrom: Date;
   openShiftHandling: 'MOVE_TO_NEW' | 'KEEP_ON_OLD' | null;
-  newAssignment: Awaited<ReturnType<typeof createAssignmentInTx>>;
+  newAssignment: Awaited<ReturnType<typeof createAssignmentInTx>>['assignment'];
   transitionId: string;
 }
 
@@ -253,7 +253,7 @@ export async function changeWorkplace(input: ChangeWorkplaceInput): Promise<Chan
         }
       });
 
-      const newAssignment = await createAssignmentInTx(tx, {
+      const { assignment: newAssignment, demotedPrimaryIds } = await createAssignmentInTx(tx, {
         employeeId: existing.employeeId,
         siteId: input.siteId,
         workAreaId: input.workAreaId,
@@ -263,6 +263,23 @@ export async function changeWorkplace(input: ChangeWorkplaceInput): Promise<Chan
         isPrimary: input.isPrimary,
         assignedByUserId: actorUserId
       });
+
+      // §3.6 — a demoted prior primary OTHER than the one being replaced here gets its own
+      // transition (the replaced one is already recorded by the from→to transition below).
+      for (const demotedId of demotedPrimaryIds.filter((id) => id !== existing.id)) {
+        await recordAssignmentTransition(tx, {
+          employeeId: existing.employeeId,
+          kind: 'CHANGE',
+          fromAssignmentId: demotedId,
+          toAssignmentId: newAssignment.id,
+          actedAt: now,
+          effectiveFrom,
+          openShiftHandling: 'NONE',
+          actorUserId,
+          reasonCode: 'OTHER',
+          reasonText: 'auto-demoted: another assignment became the primary'
+        });
+      }
 
       if (input.movesOpenShift) {
         await tx.employeeOpenShift.update({
@@ -309,6 +326,7 @@ export async function changeWorkplace(input: ChangeWorkplaceInput): Promise<Chan
           newWorkAreaId: newAssignment.workAreaId,
           newTemplateVersionId: newAssignment.templateVersionId,
           newIsPrimary: newAssignment.isPrimary,
+          demotedPrimaryAssignmentIds: demotedPrimaryIds,
           openShiftHandling,
           transitionId: transition.id
         },
@@ -346,19 +364,26 @@ export interface PromoteToPrimaryInput {
   existing: SiteAssignment;
   actorUserId: string;
   requestId: string;
+  /** When set, the promote is rejected with VERSION_CONFLICT unless the row is still at this
+   *  version (the PATCH toggle carries the version the admin saw). */
+  expectedVersion?: number;
 }
 
-export type PromoteToPrimaryError = { code: 'ASSIGNMENT_NOT_ACTIVE' } | { code: 'LIVE_PRIMARY_CONFLICT' };
+export type PromoteToPrimaryError =
+  | { code: 'ASSIGNMENT_NOT_ACTIVE' }
+  | { code: 'LIVE_PRIMARY_CONFLICT' }
+  | { code: 'VERSION_CONFLICT' };
 
 export interface PromoteToPrimaryResult {
   demotedAssignmentIds: string[];
 }
 
 /**
- * §3.6 — make this the one primary assignment. Demotes every other operationally-live primary of
- * the same worker in the same transaction (the app-level half of the "≤1 live primary" invariant;
- * Deploy D adds the partial unique index as the DB backstop). "Live" here is the unified gate —
- * a removed / future-disabled assignment is neither promoted nor demoted.
+ * §3.6 — make this the one primary assignment. Demotes every other primary of the same worker that
+ * is STILL operationally live (clockInDisabledAt IS NULL or a not-yet-passed future instant) in the
+ * same transaction, under the per-employee advisory lock — the app-level half of the "≤1 live
+ * primary" invariant; the partial unique index is the DB backstop. A removed / already-disabled
+ * assignment is neither promoted nor demoted.
  */
 export async function promoteToPrimary(
   input: PromoteToPrimaryInput
@@ -376,26 +401,45 @@ export async function promoteToPrimary(
   ) {
     return { code: 'ASSIGNMENT_NOT_ACTIVE' };
   }
+  if (input.expectedVersion !== undefined && existing.version !== input.expectedVersion) {
+    return { code: 'VERSION_CONFLICT' };
+  }
 
   try {
     return await prisma.$transaction(async (tx) => {
       await acquireEmployeeLifecycleLock(tx, existing.employeeId);
 
-      // Demote every OTHER row in the ux_site_assignment_one_live_primary predicate (Deploy D) —
-      // "primary AND clockInDisabledAt IS NULL", date-agnostic, so a future-dated primary is
-      // caught too and the index never rejects this promote.
+      // Re-read under the lock so a concurrent change since `existing` was loaded is caught.
+      const locked = await tx.siteAssignment.findUnique({
+        where: { id: existing.id },
+        select: { version: true, clockInDisabledAt: true, validFrom: true, validTo: true }
+      });
+      if (!locked) {
+        return { code: 'ASSIGNMENT_NOT_ACTIVE' as const };
+      }
+      if (input.expectedVersion !== undefined && locked.version !== input.expectedVersion) {
+        return { code: 'VERSION_CONFLICT' as const };
+      }
+      if (!isAssignmentLiveNow(locked, now, today)) {
+        return { code: 'ASSIGNMENT_NOT_ACTIVE' as const };
+      }
+
+      // Demote every OTHER primary of this worker that is still operationally live (§3.6) —
+      // clockInDisabledAt IS NULL OR > now, so a primary whose removal is scheduled for a future
+      // instant is caught too (it is still check-in-able right now).
       const demoted = await tx.siteAssignment.findMany({
         where: {
           employeeId: existing.employeeId,
           id: { not: existing.id },
-          ...LIVE_PRIMARY_INDEX_PREDICATE
+          ...livePrimaryDemoteWhere(now)
         },
         select: { id: true }
       });
 
-      if (demoted.length > 0) {
+      const demotedIds = demoted.map((a) => a.id);
+      if (demotedIds.length > 0) {
         await tx.siteAssignment.updateMany({
-          where: { id: { in: demoted.map((a) => a.id) } },
+          where: { id: { in: demotedIds } },
           data: { isPrimary: false, version: { increment: 1 } }
         });
       }
@@ -405,18 +449,36 @@ export async function promoteToPrimary(
         data: { isPrimary: true, version: { increment: 1 } }
       });
 
-      await recordAssignmentTransition(tx, {
-        employeeId: existing.employeeId,
-        kind: 'CHANGE',
-        fromAssignmentId: demoted[0]?.id ?? null,
-        toAssignmentId: existing.id,
-        actedAt: now,
-        effectiveFrom: today,
-        openShiftHandling: 'NONE',
-        actorUserId,
-        reasonCode: 'OTHER',
-        reasonText: 'promoted to primary'
-      });
+      // One transition per demoted prior primary (never a hidden change, §3.6) — plus a bare
+      // "promoted" marker when nothing had to be demoted.
+      if (demotedIds.length === 0) {
+        await recordAssignmentTransition(tx, {
+          employeeId: existing.employeeId,
+          kind: 'CHANGE',
+          fromAssignmentId: null,
+          toAssignmentId: existing.id,
+          actedAt: now,
+          effectiveFrom: today,
+          openShiftHandling: 'NONE',
+          actorUserId,
+          reasonCode: 'OTHER',
+          reasonText: 'promoted to primary'
+        });
+      }
+      for (const demotedId of demotedIds) {
+        await recordAssignmentTransition(tx, {
+          employeeId: existing.employeeId,
+          kind: 'CHANGE',
+          fromAssignmentId: demotedId,
+          toAssignmentId: existing.id,
+          actedAt: now,
+          effectiveFrom: today,
+          openShiftHandling: 'NONE',
+          actorUserId,
+          reasonCode: 'OTHER',
+          reasonText: 'promoted to primary — prior primary demoted'
+        });
+      }
 
       await createAuditEvent(tx, {
         actorUserId,
@@ -428,11 +490,11 @@ export async function promoteToPrimary(
         afterValue: {
           assignmentId: existing.id,
           employeeId: existing.employeeId,
-          demotedAssignmentIds: demoted.map((a) => a.id)
+          demotedAssignmentIds: demotedIds
         }
       });
 
-      return { demotedAssignmentIds: demoted.map((a) => a.id) };
+      return { demotedAssignmentIds: demotedIds };
     });
   } catch (error) {
     if (isLivePrimaryConflict(error)) {

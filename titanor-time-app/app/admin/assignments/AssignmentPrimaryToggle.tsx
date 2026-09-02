@@ -36,14 +36,17 @@ export function AssignmentPrimaryToggle({ assignment }: { assignment: Assignment
         } catch {
           // Non-JSON error body — fall through to the generic message.
         }
+        const reloadCodes = new Set(['VERSION_CONFLICT', 'LIVE_PRIMARY_CONFLICT']);
         window.alert(
-          code === 'VERSION_CONFLICT'
+          reloadCodes.has(code ?? '')
             ? localeText(locale, 'This assignment was changed elsewhere — reloading.', 'Назначение изменено в другом окне — обновляем страницу.')
-            : code === 'FORBIDDEN'
-              ? localeText(locale, 'You no longer have permission to edit assignments.', 'У вас больше нет права изменять назначения.')
-              : localeText(locale, 'Something went wrong. Please try again.', 'Произошла ошибка. Попробуйте ещё раз.')
+            : code === 'ASSIGNMENT_NOT_ACTIVE'
+              ? localeText(locale, 'This assignment is not active — it cannot be made primary.', 'Назначение не действует — его нельзя сделать основным.')
+              : code === 'FORBIDDEN'
+                ? localeText(locale, 'You no longer have permission to edit assignments.', 'У вас больше нет права изменять назначения.')
+                : localeText(locale, 'Something went wrong. Please try again.', 'Произошла ошибка. Попробуйте ещё раз.')
         );
-        if (code === 'VERSION_CONFLICT') {
+        if (reloadCodes.has(code ?? '')) {
           router.refresh();
         }
         setLoading(false);

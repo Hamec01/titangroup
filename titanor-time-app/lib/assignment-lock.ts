@@ -19,10 +19,20 @@ export async function acquireEmployeeLifecycleLock(tx: Prisma.TransactionClient,
   await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${assignmentLifecycleLockKey(employeeId)})::bigint)`;
 }
 
-/** Where-fragment for the ux_site_assignment_one_live_primary partial-unique-index predicate:
- *  the row that is BOTH the primary AND still operationally live (clockInDisabledAt not yet set).
- *  Callers demote every OTHER such row for an employee before making a new one primary. */
+/** Where-fragment for the ux_site_assignment_one_live_primary partial-unique-index predicate
+ *  EXACTLY (primary AND clockInDisabledAt IS NULL). Use only for asserting/checking the index
+ *  constraint itself — NOT for the demote query (see livePrimaryDemoteWhere). */
 export const LIVE_PRIMARY_INDEX_PREDICATE = { isPrimary: true, clockInDisabledAt: null } as const;
+
+/** Where-fragment for "this row is a primary that is STILL operationally live" — i.e. primary AND
+ *  (clockInDisabledAt IS NULL OR clockInDisabledAt > now). Broader than the index predicate: it
+ *  also catches a primary whose removal/transfer is scheduled for a FUTURE instant (clockInDisabledAt
+ *  set but not yet passed), which is still check-in-able right now. The demote-before-new-primary
+ *  step uses THIS so that after any primary change there is ≤1 primary among genuinely-live rows,
+ *  not just ≤1 in the index predicate. */
+export function livePrimaryDemoteWhere(now: Date = new Date()) {
+  return { isPrimary: true as const, OR: [{ clockInDisabledAt: null }, { clockInDisabledAt: { gt: now } }] };
+}
 
 /** SiteAssignment_employeeId's ux_site_assignment_one_live_primary — SQLSTATE 23505, but Prisma's
  *  P2002 message carries only a generic hint, so match the index name in the raw message text. */

@@ -51,8 +51,8 @@ export async function POST(request: NextRequest, { params }: RouteParams): Promi
 
   const result = await promoteToPrimary({ existing, actorUserId: authenticated.user.id, requestId });
   if ('code' in result) {
-    if (result.code === 'LIVE_PRIMARY_CONFLICT') {
-      return jsonError(409, { code: 'LIVE_PRIMARY_CONFLICT', message: 'Another primary assignment change is in flight — refresh and try again.' }, requestId);
+    if (result.code === 'LIVE_PRIMARY_CONFLICT' || result.code === 'VERSION_CONFLICT') {
+      return jsonError(409, { code: result.code, message: 'The assignment changed under you — refresh and try again.' }, requestId);
     }
     return jsonError(409, { code: 'ASSIGNMENT_NOT_ACTIVE', message: 'This assignment is not currently active.' }, requestId);
   }

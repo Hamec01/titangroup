@@ -7,6 +7,7 @@ import { materializeClockShiftCore } from '@/lib/attendance-materializer';
 import { resolveMissingCheckoutAtCutoffOnLateCheckOut } from '@/lib/attendance-auto-submit';
 import { annotateAutoClosedShiftWithLateCheckOut } from '@/lib/attendance-abandoned-shift-annotate';
 import { liveAssignmentWhere } from '@/lib/assignment-lifecycle';
+import { acquireEmployeeLifecycleLock } from '@/lib/assignment-lock';
 
 // docs/titanor-time/T7A_1_ATTENDANCE_CLOCK_DESIGN.md §9.1/§9.2/§9.3/§9.1a — Online clock core
 // (T7A online clock core slice). Route files do HTTP/auth/CSRF/idempotency/validation mapping;
@@ -1221,35 +1222,49 @@ async function checkOutCore(tx: Prisma.TransactionClient, employeeId: string, ac
   // dependent row (TRG-11 is safe on extension); a pre-check guards the rare EX-02 case so Check
   // Out is never blocked (§9.2).
   if (authoritativeSourceAssignmentId) {
-    const sourceAssignment = await tx.siteAssignment.findUnique({
-      where: { id: authoritativeSourceAssignmentId },
-      select: { id: true, employeeId: true, siteId: true, workAreaId: true, validTo: true, clockInDisabledAt: true }
-    });
     const checkoutLocalDate = helsinkiCalendarDateAsUtcMidnight(recordedEndAtForShift);
-    if (
-      sourceAssignment &&
-      sourceAssignment.clockInDisabledAt !== null &&
-      sourceAssignment.clockInDisabledAt <= serverReceivedAt &&
-      (sourceAssignment.validTo === null || sourceAssignment.validTo < checkoutLocalDate)
-    ) {
-      const blockingNext = await tx.siteAssignment.findFirst({
-        where: {
-          employeeId: sourceAssignment.employeeId,
-          siteId: sourceAssignment.siteId,
-          workAreaId: sourceAssignment.workAreaId,
-          id: { not: sourceAssignment.id },
-          validFrom: { lte: checkoutLocalDate, gt: sourceAssignment.validTo ?? new Date(0) }
-        },
-        select: { id: true }
+    const probe = await tx.siteAssignment.findUnique({
+      where: { id: authoritativeSourceAssignmentId },
+      select: { validTo: true, clockInDisabledAt: true }
+    });
+    const needsExtension =
+      probe !== null &&
+      probe.clockInDisabledAt !== null &&
+      probe.clockInDisabledAt <= serverReceivedAt &&
+      (probe.validTo === null || probe.validTo < checkoutLocalDate);
+    if (needsExtension) {
+      // Serialise with any concurrent /change /remove /promote on this worker (§3.13) before we
+      // touch a SiteAssignment row — then re-read under the lock and re-check.
+      await acquireEmployeeLifecycleLock(tx, employeeId);
+      const sourceAssignment = await tx.siteAssignment.findUnique({
+        where: { id: authoritativeSourceAssignmentId },
+        select: { id: true, employeeId: true, siteId: true, workAreaId: true, validTo: true, clockInDisabledAt: true }
       });
-      if (!blockingNext) {
-        await tx.siteAssignment.update({
-          where: { id: sourceAssignment.id },
-          data: { validTo: checkoutLocalDate, version: { increment: 1 } }
+      if (
+        sourceAssignment &&
+        sourceAssignment.clockInDisabledAt !== null &&
+        sourceAssignment.clockInDisabledAt <= serverReceivedAt &&
+        (sourceAssignment.validTo === null || sourceAssignment.validTo < checkoutLocalDate)
+      ) {
+        const blockingNext = await tx.siteAssignment.findFirst({
+          where: {
+            employeeId: sourceAssignment.employeeId,
+            siteId: sourceAssignment.siteId,
+            workAreaId: sourceAssignment.workAreaId,
+            id: { not: sourceAssignment.id },
+            validFrom: { lte: checkoutLocalDate, gt: sourceAssignment.validTo ?? new Date(0) }
+          },
+          select: { id: true }
         });
-        await tx.timesheetDraftPlannedShift.deleteMany({
-          where: { sourceAssignmentId: sourceAssignment.id, date: { gt: checkoutLocalDate } }
-        });
+        if (!blockingNext) {
+          await tx.siteAssignment.update({
+            where: { id: sourceAssignment.id },
+            data: { validTo: checkoutLocalDate, version: { increment: 1 } }
+          });
+          await tx.timesheetDraftPlannedShift.deleteMany({
+            where: { sourceAssignmentId: sourceAssignment.id, date: { gt: checkoutLocalDate } }
+          });
+        }
       }
     }
   }

@@ -7,6 +7,7 @@ import { hasPermission } from '@/lib/permissions';
 import { SESSION_COOKIE_NAME } from '@/lib/session';
 import { createAuditEvent } from '@/lib/audit';
 import { helsinkiToday } from '@/lib/workers';
+import { promoteToPrimary } from '@/lib/assignment-lifecycle-service';
 
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
@@ -17,18 +18,47 @@ const MAX_ENDED_REASON_LENGTH = 2000;
 // Fields the contract's own Request line for this endpoint never lists
 // ({ "version", "isPrimary"?, "endedReason"? } only) — 02_ROLE_PERMISSION_MATRIX.md's
 // assignment.update row explains why: changing them on an assignment that has
-// already started needs assignment.split's atomic close+recreate, not a plain
+// already started needs POST .../change's atomic close+recreate, not a plain
 // field edit. Detected here as an explicit reject rather than silently
 // ignored, so a client attempting it gets a clear, actionable error.
 const IMMUTABLE_AFTER_START_FIELDS = ['siteId', 'workAreaId', 'templateId', 'templateVersionId'] as const;
 // A malformed id must never reach Prisma (throws P2023, surfaces as a 500) and must be
 // indistinguishable from a genuinely nonexistent one (no oracle) — same pattern already used by
-// this route family's own POST /api/admin/assignments/validate-overlap and .../split (for its
-// siteId body field).
+// this route family's own POST /api/admin/assignments/validate-overlap.
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 function errorBody(body: ApiErrorBody, requestId: string): { error: ApiErrorBody & { requestId: string } } {
   return { error: { ...body, requestId } };
+}
+
+function assignmentResponse(a: {
+  id: string;
+  employeeId: string;
+  siteId: string;
+  workAreaId: string | null;
+  templateVersionId: string | null;
+  isPrimary: boolean;
+  validFrom: Date;
+  validTo: Date | null;
+  endedReason: string | null;
+  version: number;
+  createdAt: Date;
+  updatedAt: Date;
+}) {
+  return {
+    id: a.id,
+    employeeId: a.employeeId,
+    siteId: a.siteId,
+    workAreaId: a.workAreaId,
+    templateVersionId: a.templateVersionId,
+    isPrimary: a.isPrimary,
+    validFrom: a.validFrom.toISOString().slice(0, 10),
+    validTo: a.validTo ? a.validTo.toISOString().slice(0, 10) : null,
+    endedReason: a.endedReason,
+    version: a.version,
+    createdAt: a.createdAt.toISOString(),
+    updatedAt: a.updatedAt.toISOString()
+  };
 }
 
 type RouteParams = { params: Promise<{ assignmentId: string }> };
@@ -107,10 +137,45 @@ export async function PATCH(request: NextRequest, { params }: RouteParams): Prom
     if (existing.validFrom <= helsinkiToday()) {
       return jsonError(
         400,
-        { code: 'ASSIGNMENT_ALREADY_STARTED', message: 'This assignment has already started — use assignment.split to change its site/work area/template.' },
+        { code: 'ASSIGNMENT_ALREADY_STARTED', message: 'This assignment has already started — use POST /api/admin/assignments/:id/change to change its site/customer/template.' },
         requestId
       );
     }
+  }
+
+  // R15-D7 Deploy D — setting isPrimary=true must go through the lifecycle service so the prior
+  // live primary is demoted in the SAME transaction under the per-employee advisory lock; a raw
+  // updateMany here would hit the ux_site_assignment_one_live_primary index and 500. Unsetting
+  // primary (isPrimary=false) or editing endedReason only removes a row from / never adds a row
+  // to the index predicate, so the plain optimistic-locked path below is still safe for those.
+  if (data.isPrimary === true) {
+    if (data.endedReason !== undefined) {
+      return NextResponse.json(
+        errorBody(
+          { code: 'VALIDATION_ERROR', message: 'Invalid request body.', fieldErrors: { isPrimary: ['cannot be combined with endedReason'] } },
+          requestId
+        ),
+        { status: 400, headers: successHeaders(requestId) }
+      );
+    }
+    const existing = await prisma.siteAssignment.findUnique({ where: { id: assignmentId } });
+    if (!existing) {
+      return jsonError(404, { code: 'ASSIGNMENT_NOT_FOUND', message: 'No assignment with this id.' }, requestId);
+    }
+    const result = await promoteToPrimary({
+      existing,
+      expectedVersion: version as number,
+      actorUserId: authenticated.user.id,
+      requestId
+    });
+    if ('code' in result) {
+      if (result.code === 'ASSIGNMENT_NOT_ACTIVE') {
+        return jsonError(409, { code: 'ASSIGNMENT_NOT_ACTIVE', message: 'This assignment is not currently active — it cannot be made primary.' }, requestId);
+      }
+      return jsonError(409, { code: result.code, message: 'The assignment changed under you — reload and try again.' }, requestId);
+    }
+    const updated = await prisma.siteAssignment.findUniqueOrThrow({ where: { id: assignmentId } });
+    return NextResponse.json(assignmentResponse(updated), { status: 200, headers: successHeaders(requestId) });
   }
 
   const updated = await prisma.$transaction(async (tx) => {
@@ -155,21 +220,5 @@ export async function PATCH(request: NextRequest, { params }: RouteParams): Prom
     );
   }
 
-  return NextResponse.json(
-    {
-      id: updated.id,
-      employeeId: updated.employeeId,
-      siteId: updated.siteId,
-      workAreaId: updated.workAreaId,
-      templateVersionId: updated.templateVersionId,
-      isPrimary: updated.isPrimary,
-      validFrom: updated.validFrom.toISOString().slice(0, 10),
-      validTo: updated.validTo ? updated.validTo.toISOString().slice(0, 10) : null,
-      endedReason: updated.endedReason,
-      version: updated.version,
-      createdAt: updated.createdAt.toISOString(),
-      updatedAt: updated.updatedAt.toISOString()
-    },
-    { status: 200, headers: successHeaders(requestId) }
-  );
+  return NextResponse.json(assignmentResponse(updated), { status: 200, headers: successHeaders(requestId) });
 }

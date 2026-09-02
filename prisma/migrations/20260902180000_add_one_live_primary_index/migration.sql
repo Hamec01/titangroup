@@ -17,8 +17,9 @@
 --
 -- PRECONDITION: the manual double-primary data fix (Nazar Druz #1002 → keep c6825d98, demote
 -- 3d95975f; Mykhailo Sadovnikov #1004 → keep bc174aef, demote cbf688b7 — owner decision
--- 2026-09-02, ops/titanor-time/r15-d7/fix-double-primary.sql) MUST have been applied first, or this
--- index build fails with 23505.
+-- 2026-09-02, ops/titanor-time/r15-d7/fix-double-primary.sql, run with an explicit
+-- -v actor="'<SUPER_ADMIN uuid>'") MUST have been applied first, or this index build fails with
+-- 23505. On a disposable clone with no such data the migration applies straight away.
 
 CREATE UNIQUE INDEX "ux_site_assignment_one_live_primary"
   ON "SiteAssignment" ("employeeId")

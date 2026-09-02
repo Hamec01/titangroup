@@ -15,23 +15,45 @@
 -- drifted since the preflight.
 --
 -- Run FIRST, then Migration 2 (20260902180000_add_one_live_primary_index).
--- Usage:  psql ... -v actor="'<super-admin-user-uuid>'" -f fix-double-primary.sql
---   actor defaults to pilot-owner (cba8d0ff-0fd2-45bc-b83c-1d19ceee2bee).
+--
+-- REQUIRED: -v actor="'<uuid>'" — the UUID of an ACTIVE SUPER_ADMIN User. There is NO default;
+-- the transaction validates the id (ACTIVE + active SUPER_ADMIN UserRole) BEFORE any UPDATE.
+--   psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -v actor="'cba8d0ff-0fd2-45bc-b83c-1d19ceee2bee'" \
+--        -f ops/titanor-time/r15-d7/fix-double-primary.sql
 
 \set ON_ERROR_STOP on
+
 \if :{?actor}
 \else
-  \set actor '''cba8d0ff-0fd2-45bc-b83c-1d19ceee2bee'''
+  \echo '*** ERROR: -v actor="''<active-SUPER_ADMIN-user-uuid>''" is required. No default actor. ***'
+  \quit 1
 \endif
 
 BEGIN;
+
+-- 0. actor must be an ACTIVE SUPER_ADMIN — checked before anything is touched.
+DO $$
+DECLARE ok int;
+BEGIN
+  SELECT count(*) INTO ok
+    FROM "User" u
+    JOIN "UserRole" ur ON ur."userId" = u.id
+    JOIN "Role" r ON r.id = ur."roleId"
+   WHERE u.id = :actor::uuid
+     AND u.status = 'ACTIVE'
+     AND ur."validTo" IS NULL
+     AND r.name = 'SUPER_ADMIN';
+  IF ok < 1 THEN
+    RAISE EXCEPTION 'actor % is not an ACTIVE SUPER_ADMIN — ABORT', :'actor';
+  END IF;
+END $$;
 
 -- serialise with any concurrent /change /end /promote on these two workers (same key the
 -- service uses: 'titanor_time:assignment_lifecycle:<employeeId>'). Lock order = employeeId asc.
 SELECT pg_advisory_xact_lock(hashtext('titanor_time:assignment_lifecycle:1f8b5243-cec5-4c06-8ea3-a5e664865ad8')::bigint);
 SELECT pg_advisory_xact_lock(hashtext('titanor_time:assignment_lifecycle:8bb03525-8fe6-4b53-92e7-dc94c38f6a99')::bigint);
 
--- preflight guard — abort unless the four rows are exactly as verified.
+-- 1. preflight guard — abort unless the four rows are exactly as verified.
 DO $$
 DECLARE
   demote_primary int;
@@ -51,21 +73,21 @@ BEGIN
   END IF;
 END $$;
 
--- Nazar Druz — demote 3d95975f
+-- 2. Nazar Druz — demote 3d95975f
 UPDATE "SiteAssignment"
    SET "isPrimary" = false, "version" = "version" + 1, "updatedAt" = now()
  WHERE id = '3d95975f-b4c4-491a-8e10-38f3e88edcd8'
    AND "employeeId" = '1f8b5243-cec5-4c06-8ea3-a5e664865ad8'
    AND "isPrimary" = true;
 
--- Mykhailo Sadovnikov — demote cbf688b7
+-- 3. Mykhailo Sadovnikov — demote cbf688b7
 UPDATE "SiteAssignment"
    SET "isPrimary" = false, "version" = "version" + 1, "updatedAt" = now()
  WHERE id = 'cbf688b7-fe67-46b2-aad3-967c37103c07'
    AND "employeeId" = '8bb03525-8fe6-4b53-92e7-dc94c38f6a99'
    AND "isPrimary" = true;
 
--- post-guard — the index predicate must now be ≤1 per employee for the whole table.
+-- 4. post-guard — the index predicate must now be ≤1 per employee for the whole table.
 DO $$
 DECLARE bad int;
 BEGIN
@@ -79,7 +101,7 @@ BEGIN
   END IF;
 END $$;
 
--- structured history (append-only; the immutability trigger permits INSERT).
+-- 5. structured history (append-only; the immutability trigger permits INSERT).
 INSERT INTO "AssignmentTransition"
   ("employeeId","kind","fromAssignmentId","toAssignmentId","actedAt","effectiveFrom",
    "openShiftHandling","actorUserId","reasonCode","reasonText")
@@ -93,7 +115,7 @@ VALUES
    now(), (now() AT TIME ZONE 'Europe/Helsinki')::date, 'NONE', :actor::uuid, 'OTHER',
    'R15-D7 Deploy D — resolve double primary (owner decision 2026-09-02): keep bc174aef (Meyer — Aros Marine), demote cbf688b7');
 
--- audit (createAuditEvent equivalent — ASSIGNMENT_PROMOTED, one row per kept primary).
+-- 6. audit (createAuditEvent equivalent — ASSIGNMENT_PROMOTED, one row per kept primary).
 INSERT INTO "AuditEvent"
   ("actorUserId","eventType","entityType","entityId","requestId","beforeValue","afterValue","reason")
 VALUES
@@ -106,7 +128,7 @@ VALUES
    '{"assignmentId":"bc174aef-2766-4877-ac43-415ef12433d5","employeeId":"8bb03525-8fe6-4b53-92e7-dc94c38f6a99","demotedAssignmentIds":["cbf688b7-fe67-46b2-aad3-967c37103c07"],"context":"R15-D7 Deploy D manual double-primary fix"}'::jsonb,
    'owner decision 2026-09-02');
 
--- show the result before committing.
+-- 7. show the result before committing.
 SELECT e."employeeNumber" AS num, e."firstName"||' '||e."lastName" AS worker,
        sa.id, COALESCE(wa.name,'(no customer)') AS customer,
        sa."isPrimary", sa."validFrom", sa."validTo", sa."clockInDisabledAt", sa.version
