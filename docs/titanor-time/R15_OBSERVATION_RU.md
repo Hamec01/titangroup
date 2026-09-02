@@ -26,10 +26,16 @@
 | GPS archive / retention на проде | ✅ `titanor-time-gps-archive@production.timer` enabled+active (05:10 UTC); ручной прогон `gps-archive` exit 0 (`sealableDays:0` — раньше 90 дней нечего запечатывать) |
 | место на storage | ✅ диск / 85%; build cache 71 GB (prune отложен до sign-off) |
 
+## Дефекты, найденные за наблюдение
+
+| # | что | severity | статус |
+|---|---|---|---|
+| D1 | **Нет UI «восстановить работника».** Деактивация (`POST /api/admin/workers/<id>/deactivate`) ставит `Employment.active=false` + `User.status=OFFBOARDING/DEACTIVATED`. Обратного действия в приложении нет — `WorkerActions.tsx` показывает секцию только при `employment.active`, а `NewAssignmentForm`/активация даже пишут «сначала восстановите работника», указывая на несуществующую кнопку. В коде `Employment.update` встречается только в deactivate-route и только `active:false`. | P2 (обходится вручную) | вынести в backlog: добавить `POST …/reactivate` + кнопку. 2026-09-02: `druzr` (Ruslan Druz #1003, тестовая деактивация `oleksandr` «plohoi») восстановлен напрямую в БД одной транзакцией (Employment active/end/reason + User.status=ACTIVE + audit `WORKER_REACTIVATED`); назначение и табели не тронуты. |
+
 ## Фаза 3 — 72 ч + период стабильности (не начата)
 
 - [ ] финализировать `R14_CUTOVER_REPORT_RU.md`
-- [ ] закрыть / вынести дефекты, найденные за наблюдение
+- [ ] закрыть / вынести дефекты, найденные за наблюдение (см. выше: D1 → backlog)
 - [ ] обновить runbooks / `IMPLEMENTATION_STATUS` / `NEXT_AGENT_HANDOFF_RU`
 - [ ] **owner sign-off** — закрытие релиза
 - [ ] решить срок хранения старого production backup
