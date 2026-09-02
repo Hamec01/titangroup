@@ -77,7 +77,7 @@ export function NewAssignmentForm({
       .catch(() => {
         // Handled by the submit-time "employeeId required" validation if this silently fails.
       });
-    fetch('/api/admin/sites?pageSize=100', { credentials: 'same-origin' })
+    fetch('/api/admin/sites?pageSize=100&active=true', { credentials: 'same-origin' })
       .then((response) => (response.ok ? response.json() : { items: [] }))
       .then((body: { items?: SiteOption[] }) => {
         if (!cancelled) {

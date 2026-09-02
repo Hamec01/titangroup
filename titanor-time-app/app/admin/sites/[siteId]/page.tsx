@@ -5,6 +5,7 @@ import { getSiteDetail } from '@/lib/sites';
 import { listAssignableForemen } from '@/lib/foreman-assignments';
 import { getGeofenceHistory } from '@/lib/geofences';
 import { SiteEditForm } from './SiteEditForm';
+import { SiteLifecycleAction } from './SiteLifecycleAction';
 import { WorkAreaSection } from './WorkAreaSection';
 import { ForemanAssignmentSection } from './ForemanAssignmentSection';
 import { GeofenceSection } from './GeofenceSection';
@@ -65,6 +66,8 @@ export default async function SiteDetailPage({ params }: { params: Promise<{ sit
         <p>
           <Link href={`/admin/reports/sites?siteId=${site.id}`}>{s.sites.report}</Link>
         </p>
+
+        <SiteLifecycleAction site={{ id: site.id, name: site.name, active: site.active, version: site.version }} />
 
         <WorkAreaSection siteId={site.id} workAreas={site.workAreas} />
 

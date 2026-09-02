@@ -20,6 +20,10 @@ export interface SiteListResult {
   pageSize: number;
   totalItems: number;
   totalPages: number;
+  /** Sites with active=false ("finished"), matching the same search/city filter — hidden from the
+   *  default list and from assignment pickers; ?closed=1 shows them. There is no physical delete
+   *  for WorkSite (geofences, assignments, worked hours reference it). */
+  closedCount: number;
 }
 
 export interface ListSitesFilters {
@@ -46,14 +50,18 @@ export async function listSites(page: number, pageSize: number, filters: ListSit
   const today = helsinkiToday();
   const { field, direction } = parseSort(filters.sort);
 
-  const where = {
+  const scopeWhere = {
     ...(filters.search ? { name: { contains: filters.search, mode: 'insensitive' as const } } : {}),
-    ...(filters.cityId ? { cityId: filters.cityId } : {}),
+    ...(filters.cityId ? { cityId: filters.cityId } : {})
+  };
+  const where = {
+    ...scopeWhere,
     ...(filters.active !== undefined ? { active: filters.active } : {})
   };
 
-  const [totalItems, sites] = await Promise.all([
+  const [totalItems, closedCount, sites] = await Promise.all([
     prisma.workSite.count({ where }),
+    prisma.workSite.count({ where: { ...scopeWhere, active: false } }),
     prisma.workSite.findMany({
       where,
       orderBy: { [field]: direction },
@@ -87,7 +95,8 @@ export async function listSites(page: number, pageSize: number, filters: ListSit
     page,
     pageSize,
     totalItems,
-    totalPages: Math.ceil(totalItems / pageSize)
+    totalPages: Math.ceil(totalItems / pageSize),
+    closedCount
   };
 }
 

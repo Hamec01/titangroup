@@ -67,7 +67,7 @@ export function ChangeAssignmentAction({ assignment, today }: ChangeAssignmentAc
       return;
     }
     let cancelled = false;
-    fetch('/api/admin/sites?pageSize=100', { credentials: 'same-origin' })
+    fetch('/api/admin/sites?pageSize=100&active=true', { credentials: 'same-origin' })
       .then((r) => (r.ok ? r.json() : { items: [] }))
       .then((b: { items?: SiteOption[] }) => {
         if (!cancelled) setSites(b.items ?? []);

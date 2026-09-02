@@ -347,28 +347,33 @@ async function main() {
   const endButtons = await page.locator('.setup-list button', { hasText: /^End$/ }).count();
   check('WA3: worker card shows an "End" action per current assignment', endButtons >= 2, endButtons);
 
-  // WA4: the card's "End" form pre-fills validTo with the assignment's last planned/recorded shift
-  // day (assignmentEndDateDefaults) — the fixture's far-future OPEN period ends 2210-01-14, so
-  // that is the pre-filled value and a plain confirm never trips the dependents guard.
+  // WA4: the card's "End" form pre-fills validTo with TODAY when the worker only has a schedule
+  // (no real recorded hours) — the owner's "remove from this site today, not at the end of the
+  // period" case. assignmentEndDateDefaults no longer counts auto-materialised draft planned shifts.
   const w2Item = page.locator('.setup-item', { hasText: wArea2.name });
   await w2Item.locator('button', { hasText: /^End$/ }).click();
   const prefilled = await w2Item.locator('input[type="date"]').inputValue();
-  check('WA4: End form pre-fills validTo with the last bound-shift day, not a date that 500s', prefilled === '2210-01-14', prefilled);
+  check('WA4: End form pre-fills validTo with today (schedule-only assignment)', prefilled === todayIsoWA, prefilled);
 
-  // WA5/WA6: ending exactly there succeeds (200) and the row is kept, not deleted.
-  const endW2 = await jsonFetch(`${BASE}/api/admin/assignments/${asgW2.body.id}/end`, { method: 'POST', headers: authHeaders(fx.admin.cookie), body: JSON.stringify({ validTo: '2210-01-14', reason: 'T9: owner-requested removal from the worker card (project ended)' }) });
-  check('WA5: End via the card contract succeeds at the pre-filled date (200)', endW2.status === 200 && endW2.body?.validTo === '2210-01-14', { status: endW2.status, body: endW2.body });
-  const w2Row = await prisma.siteAssignment.findUniqueOrThrow({ where: { id: asgW2.body.id } });
-  check('WA6: ended assignment is kept (not deleted), validTo + endedReason set', w2Row.validTo !== null && (w2Row.endedReason ?? '').includes('project ended'), w2Row);
-
-  // WA7: ending the other one *before* its bound shifts is a clean, actionable 409 carrying the
-  // earliest valid date — never the raw 500 the unguarded trigger exception used to produce.
-  const endW1Early = await jsonFetch(`${BASE}/api/admin/assignments/${asgW1.body.id}/end`, { method: 'POST', headers: authHeaders(fx.admin.cookie), body: JSON.stringify({ validTo: todayIsoWA, reason: 'T9: end before dependents' }) });
-  check('WA7: too-early end date -> 409 ASSIGNMENT_HAS_DEPENDENTS (not 500), with earliestValidTo', endW1Early.status === 409 && endW1Early.body?.error?.code === 'ASSIGNMENT_HAS_DEPENDENTS' && endW1Early.body?.error?.earliestValidTo === '2210-01-14', { status: endW1Early.status, body: endW1Early.body });
-
-  // WA8: the rejected end did not partially apply.
+  // WA5/WA6: ending TODAY succeeds (200) — the assignment's own future draft planned shifts are
+  // deleted so the dependents guard doesn't block it — and the row is kept, not deleted.
+  const endW1 = await jsonFetch(`${BASE}/api/admin/assignments/${asgW1.body.id}/end`, { method: 'POST', headers: authHeaders(fx.admin.cookie), body: JSON.stringify({ validTo: todayIsoWA, reason: 'T9: owner-requested removal from the worker card today (project ended)' }) });
+  check('WA5: End today succeeds (200), not pushed to the end of the period', endW1.status === 200 && endW1.body?.validTo === todayIsoWA, { status: endW1.status, body: endW1.body });
   const w1Row = await prisma.siteAssignment.findUniqueOrThrow({ where: { id: asgW1.body.id } });
-  check('WA8: a rejected End leaves the assignment untouched (validTo still null)', w1Row.validTo === null && w1Row.endedReason === null, w1Row);
+  const w1FuturePlanned = await prisma.timesheetDraftPlannedShift.count({ where: { sourceAssignmentId: asgW1.body.id, date: { gt: new Date(`${todayIsoWA}T00:00:00.000Z`) } } });
+  check('WA6: ended assignment kept (validTo + endedReason), and its future draft planned shifts dropped', w1Row.validTo !== null && (w1Row.endedReason ?? '').includes('project ended') && w1FuturePlanned === 0, { row: w1Row, futurePlanned: w1FuturePlanned });
+
+  // WA7: an assignment WITH real recorded time after the chosen date is a clean, actionable 409
+  // (not a 500, not a silent drop). Hand-craft a committed TimesheetDraftSegment on a far-future
+  // day (asgW2 already has a TimesheetDraftPlannedShift there for the composite FK).
+  const waSegDate = new Date('2210-01-10T00:00:00.000Z');
+  const waDraft = await prisma.timesheetDraft.findFirstOrThrow({ where: { employeeId: fx.workerB.employeeId, timesheet: { periodId: fx.periodId } }, select: { id: true } });
+  const waDay = await prisma.timesheetDraftDay.findFirstOrThrow({ where: { draftId: waDraft.id, date: waSegDate }, select: { id: true } });
+  await prisma.timesheetDraftSegment.create({ data: { id: randomUUID(), draftDayId: waDay.id, draftId: waDraft.id, employeeId: fx.workerB.employeeId, date: waSegDate, startAt: new Date('2210-01-10T06:00:00.000Z'), endAt: new Date('2210-01-10T14:00:00.000Z'), siteId: fx.sites.alpha, workAreaId: wArea2.id, sourceAssignmentId: asgW2.body.id } });
+  const endW2Early = await jsonFetch(`${BASE}/api/admin/assignments/${asgW2.body.id}/end`, { method: 'POST', headers: authHeaders(fx.admin.cookie), body: JSON.stringify({ validTo: todayIsoWA, reason: 'T9: end before recorded time' }) });
+  check('WA7: ending before real recorded time -> 409 ASSIGNMENT_HAS_RECORDED_TIME with earliestValidTo', endW2Early.status === 409 && endW2Early.body?.error?.code === 'ASSIGNMENT_HAS_RECORDED_TIME' && endW2Early.body?.error?.earliestValidTo === '2210-01-10', { status: endW2Early.status, body: endW2Early.body });
+  const w2Row = await prisma.siteAssignment.findUniqueOrThrow({ where: { id: asgW2.body.id } });
+  check('WA8: the rejected end did not partially apply (validTo still null)', w2Row.validTo === null && w2Row.endedReason === null, w2Row);
 
   // CH0-CH10 — "Изменить объект / зону" (POST /api/admin/assignments/:id/change). Fully isolated:
   // a dedicated worker + fresh sites, so nothing here can collide with the shared fixture that
@@ -462,8 +467,21 @@ async function main() {
   const alphaCurrent = await jsonFetch(`${BASE}/api/admin/sites/${fx.sites.alpha}`, { headers: authHeaders(fx.admin.cookie) });
   const closeAlpha = await jsonFetch(`${BASE}/api/admin/sites/${fx.sites.alpha}`, { method: 'PATCH', headers: authHeaders(fx.admin.cookie), body: JSON.stringify({ version: alphaCurrent.body.version, name: alphaCurrent.body.name, active: false }) });
   check('Sites: lifecycle close (active=false) succeeds via the same PATCH contract', closeAlpha.status === 200 && closeAlpha.body.active === false, closeAlpha.body);
+  // Sites: a finished site is hidden from the default list + the picker, shown with ?closed=1.
+  const sitesDefault = await jsonFetch(`${BASE}/api/admin/sites?pageSize=100&active=true`, { headers: authHeaders(fx.admin.cookie) });
+  const defaultSiteIds = (sitesDefault.body.items as { id: string }[]).map((x) => x.id);
+  check('Sites: default (active) list hides the finished Alpha and reports closedCount', !defaultSiteIds.includes(fx.sites.alpha) && typeof sitesDefault.body.closedCount === 'number' && sitesDefault.body.closedCount >= 1, { has: defaultSiteIds.includes(fx.sites.alpha), closedCount: sitesDefault.body.closedCount });
+  const sitesAll = await jsonFetch(`${BASE}/api/admin/sites?pageSize=100`, { headers: authHeaders(fx.admin.cookie) });
+  check('Sites: unfiltered list still includes the finished Alpha', (sitesAll.body.items as { id: string }[]).some((x) => x.id === fx.sites.alpha));
+  const sitesPageHtml = await (await fetch(`${BASE}/admin/sites`, { headers: authHeaders(fx.admin.cookie) })).text();
+  check('Sites: /admin/sites hides finished by default and offers "Show finished"', !sitesPageHtml.includes(`Alpha renamed ${fx.run}`) && sitesPageHtml.includes('Show finished'), sitesPageHtml.slice(0, 200));
+  const sitesClosedHtml = await (await fetch(`${BASE}/admin/sites?closed=1`, { headers: authHeaders(fx.admin.cookie) })).text();
+  check('Sites: /admin/sites?closed=1 shows the finished Alpha', sitesClosedHtml.includes(`Alpha renamed ${fx.run}`));
+  const siteDetailHtml = await (await fetch(`${BASE}/admin/sites/${fx.sites.alpha}`, { headers: authHeaders(fx.admin.cookie) })).text();
+  check('Sites: the site detail page offers "Reopen site" for a finished site', siteDetailHtml.includes('Reopen site'));
   // Reopen for the rest of the suite (role-matrix script reuses this fixture pattern independently, but be tidy).
-  await jsonFetch(`${BASE}/api/admin/sites/${fx.sites.alpha}`, { method: 'PATCH', headers: authHeaders(fx.admin.cookie), body: JSON.stringify({ version: closeAlpha.body.version, name: closeAlpha.body.name, active: true }) });
+  const alphaAfterClose = await jsonFetch(`${BASE}/api/admin/sites/${fx.sites.alpha}`, { headers: authHeaders(fx.admin.cookie) });
+  await jsonFetch(`${BASE}/api/admin/sites/${fx.sites.alpha}`, { method: 'PATCH', headers: authHeaders(fx.admin.cookie), body: JSON.stringify({ version: alphaAfterClose.body.version, name: alphaAfterClose.body.name, active: true }) });
 
   // WorkAreas: create second on the same site, toggle doesn't affect the first.
   const workAreaX = await jsonFetch(`${BASE}/api/admin/sites/${fx.sites.alpha}/work-areas`, { method: 'POST', headers: authHeaders(fx.admin.cookie), body: JSON.stringify({ name: `ZoneX ${fx.run}` }) });

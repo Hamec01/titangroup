@@ -34,7 +34,7 @@ const EN = {
     newTitle: 'New site', newHelp: 'City is optional. Entering an address lets you find the site on the map and set its geofence.',
     city: 'City (optional)', noCity: 'No city', address: 'Address (optional)', description: 'Description (optional)',
     create: 'Create site', report: "View this site's time report", defaultForeman: 'default authorized site manager',
-    notFound: 'No site found with this id.'
+    notFound: 'No site found with this id.', showClosed: 'Show finished', hideClosed: 'Hide finished'
   },
   templates: {
     title: 'Work schedule templates', singular: 'template', plural: 'templates', empty: 'No templates yet.',
@@ -98,7 +98,7 @@ const RU = {
     newTitle: 'Новый объект', newHelp: 'Город необязателен. Адрес позволяет найти объект на карте и настроить геозону.',
     city: 'Город (необязательно)', noCity: 'Без города', address: 'Адрес (необязательно)', description: 'Описание (необязательно)',
     create: 'Создать объект', report: 'Открыть отчёт по объекту', defaultForeman: 'уполномоченный по объекту по умолчанию',
-    notFound: 'Объект с таким идентификатором не найден.'
+    notFound: 'Объект с таким идентификатором не найден.', showClosed: 'Показать завершённые', hideClosed: 'Скрыть завершённые'
   },
   templates: {
     title: 'Шаблоны рабочего графика', singular: 'шаблон', plural: 'шаблонов', empty: 'Шаблонов пока нет.',

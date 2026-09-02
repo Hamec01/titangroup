@@ -10,10 +10,11 @@ export const dynamic = 'force-dynamic';
 const PAGE_SIZE = 20;
 
 // docs/titanor-time/01_SCREEN_MAP.md — read-only site list (PROJECT_ROADMAP.md
-// T6.6). Page 1 only, no search/filter/sort UI yet — the API route supports
-// them (04_ADMIN_FIRST_API_CONTRACTS.md §3), but wiring that up is out of
-// scope for this task, same call as /admin/workers's list page.
-export default async function AdminSitesPage() {
+// T6.6). Page 1 only, no search/sort UI yet. Finished ("closed") sites are hidden by default —
+// ?closed=1 shows them, same pattern as /admin/workers's archived toggle.
+export default async function AdminSitesPage(props: {
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
+}) {
   const session = await resolveServerSession();
   if (!session) {
     redirect('/login');
@@ -31,7 +32,9 @@ export default async function AdminSitesPage() {
     );
   }
 
-  const { items, totalItems } = await listSites(1, PAGE_SIZE, {});
+  const searchParams = await props.searchParams;
+  const showClosed = searchParams.closed === '1';
+  const { items, totalItems, closedCount } = await listSites(1, PAGE_SIZE, showClosed ? {} : { active: true });
 
   return (
     <main className="setup-page">
@@ -39,6 +42,19 @@ export default async function AdminSitesPage() {
         <h1>{s.sites.title}</h1>
         <p className="setup-subtitle">
           {totalItems} {totalItems === 1 ? s.sites.singular : s.sites.plural} · <Link href="/admin/sites/new">{s.common.createNew}</Link>
+          {showClosed ? (
+            <>
+              {' · '}
+              <Link href="/admin/sites">{s.sites.hideClosed}</Link>
+            </>
+          ) : closedCount > 0 ? (
+            <>
+              {' · '}
+              <Link href="/admin/sites?closed=1">
+                {s.sites.showClosed} ({closedCount})
+              </Link>
+            </>
+          ) : null}
         </p>
         {items.length === 0 ? (
           <p>{s.sites.empty}</p>

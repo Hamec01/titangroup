@@ -130,9 +130,39 @@ export async function POST(request: NextRequest, { params }: RouteParams): Promi
     );
   }
 
+  // Real recorded / submitted time on a day after the new end date can't be dropped here — those
+  // block the end with an actionable 409 (the admin adjusts the timesheet, or ends later). But an
+  // assignment's own *draft planned shifts* after the end date are just "the schedule expects
+  // work here" — auto-materialised across the whole open period at assignment.create time. When
+  // the worker is being removed they carry no information, so they are deleted below so that
+  // "end today" actually works instead of being pushed to the end of the period.
+  const [recordedSegments, submittedShifts, recordedDraftSegments, recordedFragments] = await Promise.all([
+    prisma.workSegment.count({ where: { sourceAssignmentId: existing.id, date: { gt: newValidTo } } }),
+    prisma.timesheetPlannedShift.count({ where: { sourceAssignmentId: existing.id, date: { gt: newValidTo } } }),
+    prisma.timesheetDraftSegment.count({ where: { sourceAssignmentId: existing.id, date: { gt: newValidTo } } }),
+    prisma.clockShiftFragment.count({ where: { sourceAssignmentId: existing.id, date: { gt: newValidTo } } })
+  ]);
+  if (recordedSegments > 0 || submittedShifts > 0 || recordedDraftSegments > 0 || recordedFragments > 0) {
+    const earliest = await earliestAssignmentEndDate(existing.id);
+    return jsonError(
+      409,
+      {
+        code: 'ASSIGNMENT_HAS_RECORDED_TIME',
+        message: 'The worker has recorded or submitted hours on this assignment after the chosen end date. End it on or after that day, or adjust the timesheet first.',
+        fieldErrors: { validTo: ['must not be earlier than the last recorded or submitted day'] },
+        ...(earliest ? { earliestValidTo: earliest } : {})
+      },
+      requestId
+    );
+  }
+
   let updated;
   try {
     updated = await prisma.$transaction(async (tx) => {
+      await tx.timesheetDraftPlannedShift.deleteMany({
+        where: { sourceAssignmentId: existing.id, date: { gt: newValidTo } }
+      });
+
       const assignment = await tx.siteAssignment.update({
         where: { id: existing.id },
         data: {
@@ -155,18 +185,15 @@ export async function POST(request: NextRequest, { params }: RouteParams): Promi
       return assignment;
     });
   } catch (error) {
-    // The chosen end date lands before a planned/recorded shift this assignment already owns.
-    // Surface it as an actionable 409 with the earliest date that would work, instead of the
-    // raw 500 an unhandled trigger exception would produce (the worker card's "End" action
-    // defaults validTo to exactly this date, so a straight click never hits this).
+    // Last-resort safety net — the prechecks above should have caught every real case.
     if (isAssignmentDependentsConflict(error)) {
       const earliest = await earliestAssignmentEndDate(existing.id);
       return jsonError(
         409,
         {
-          code: 'ASSIGNMENT_HAS_DEPENDENTS',
-          message: 'This assignment already has planned or recorded shifts after the chosen end date.',
-          fieldErrors: { validTo: ['must not be earlier than the assignment’s last planned or recorded shift'] },
+          code: 'ASSIGNMENT_HAS_RECORDED_TIME',
+          message: 'The worker has recorded or submitted hours on this assignment after the chosen end date.',
+          fieldErrors: { validTo: ['must not be earlier than the last recorded or submitted day'] },
           ...(earliest ? { earliestValidTo: earliest } : {})
         },
         requestId

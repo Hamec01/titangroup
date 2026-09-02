@@ -57,24 +57,24 @@ export function EndAssignmentAction({
         } catch {
           // Non-JSON error body — fall through to the generic message.
         }
-        if (code === 'ASSIGNMENT_HAS_DEPENDENTS') {
-          // The assignment already has planned/recorded shifts past the chosen date. Move the
-          // form to the earliest date that will work so a second click just succeeds.
+        if (code === 'ASSIGNMENT_HAS_RECORDED_TIME' || code === 'ASSIGNMENT_HAS_DEPENDENTS') {
+          // The worker has real recorded/submitted hours after the chosen date. Move the form to
+          // the earliest date that will work so a second click just succeeds.
           if (earliestValidTo) {
             setValidTo(earliestValidTo);
             setErrorMessage(
               localeText(
                 locale,
-                `This assignment has planned or recorded shifts through ${earliestValidTo}. The end date has been moved there — confirm again to end it.`,
-                `У этого назначения есть плановые или отмеченные смены по ${earliestValidTo}. Дата окончания перенесена на неё — подтвердите ещё раз.`
+                `The worker has recorded hours here through ${earliestValidTo}. The end date has been moved there — confirm again, or fix the timesheet first.`,
+                `Работник отметил часы по ${earliestValidTo}. Дата окончания перенесена на неё — подтвердите ещё раз, или сначала поправьте табель.`
               )
             );
           } else {
             setErrorMessage(
               localeText(
                 locale,
-                'This assignment has planned or recorded shifts after that date. Choose a later end date.',
-                'У этого назначения есть плановые или отмеченные смены после этой даты. Выберите более позднюю дату окончания.'
+                'The worker has recorded hours here after that date. Choose a later end date, or fix the timesheet first.',
+                'Работник отметил часы после этой даты. Выберите более позднюю дату окончания или сначала поправьте табель.'
               )
             );
           }

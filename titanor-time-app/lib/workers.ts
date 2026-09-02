@@ -295,13 +295,14 @@ export async function getWorkerDetail(employeeId: string): Promise<WorkerDetail 
 }
 
 /**
- * The latest calendar day already spoken for by a planned or recorded shift bound to each of
- * these assignments — across WorkSegment / TimesheetPlannedShift / TimesheetDraftSegment /
- * TimesheetDraftPlannedShift, the exact four tables fn_site_assignment_dependents_guard
- * (05_RAW_SQL_REGISTER.md, TRG-11) checks. POST /api/admin/assignments/:id/end cannot move an
- * assignment's validTo before this day without stranding those rows (a raw trigger 500), so the
- * worker card pre-fills its "End" form with it and the endpoint reports it on the 409.
- * Assignments with no such row are absent from the returned map.
+ * The latest calendar day of *real* recorded or submitted time bound to each of these
+ * assignments — WorkSegment (submitted) / TimesheetPlannedShift (submitted) / TimesheetDraftSegment
+ * (entered hours) / ClockShiftFragment (clocked, not yet materialised). POST
+ * /api/admin/assignments/:id/end cannot move validTo before this day (the admin adjusts the
+ * timesheet first), so the worker card pre-fills its "End" form with it and the endpoint reports
+ * it on a 409. Note this deliberately does NOT include TimesheetDraftPlannedShift — those are
+ * just the auto-materialised schedule for the rest of the open period, and `/end` deletes the
+ * ones after the end date so "end today" works. Assignments with no such row are absent.
  */
 export async function latestBoundShiftDates(assignmentIds: string[]): Promise<Map<string, string>> {
   const out = new Map<string, string>();
@@ -313,12 +314,14 @@ export async function latestBoundShiftDates(assignmentIds: string[]): Promise<Ma
     prisma.workSegment.groupBy({ by: ['sourceAssignmentId'], where, _max: { date: true } }),
     prisma.timesheetPlannedShift.groupBy({ by: ['sourceAssignmentId'], where, _max: { date: true } }),
     prisma.timesheetDraftSegment.groupBy({ by: ['sourceAssignmentId'], where, _max: { date: true } }),
-    prisma.timesheetDraftPlannedShift.groupBy({ by: ['sourceAssignmentId'], where, _max: { date: true } })
+    prisma.clockShiftFragment.groupBy({ by: ['sourceAssignmentId'], where, _max: { date: true } })
   ]);
   const latest = new Map<string, Date>();
   for (const row of grouped.flat()) {
     const day = row._max.date;
-    if (!day) {
+    // ClockShiftFragment.sourceAssignmentId is nullable (a fragment whose assignment is not yet
+    // resolved) — those carry no "this assignment owns day X" fact, so skip them.
+    if (!day || !row.sourceAssignmentId) {
       continue;
     }
     const prev = latest.get(row.sourceAssignmentId);
