@@ -248,6 +248,10 @@ export async function changeWorkplace(input: ChangeWorkplaceInput): Promise<Chan
         data: {
           validTo: closedValidTo,
           ...(isImmediate ? { clockInDisabledAt: now } : {}),
+          // The old assignment is closed and replaced — it is never "the primary" afterwards. The
+          // from→to AssignmentTransition below is its record. (createAssignmentInTx's demote step
+          // then only has to deal with OTHER live primaries.)
+          ...(existing.isPrimary ? { isPrimary: false } : {}),
           endedReason: reasonText ?? 'Изменение объекта / заказчика',
           version: { increment: 1 }
         }
