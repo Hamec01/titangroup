@@ -1,7 +1,8 @@
 # R15-D7 — Deploy F («Часы заказчику»): отчёт
 
-**Статус:** разработка + disposable-тесты завершены. **Production не изменялся.** Ждёт отдельного
-разрешения владельца. Deploy F — последний этап R15-D7.
+**Статус:** разработка + disposable-тесты завершены, всё зелёное (browser 9/9, db 64/64, unit 18/18,
+typecheck/lint/build clean). **Production НЕ изменялся.** Ждёт отдельного разрешения владельца.
+Deploy F — последний этап R15-D7 (A→F).
 
 Ветка `feature/titanor-time-foundation`. **Миграции нет** (`WorkArea` уже несёт `workAreaId` на
 `WorkSegment` / `TimesheetDraftSegment` с Миграции 1). Схема остаётся **100**.
@@ -59,18 +60,28 @@ Deploy F: отчёт **привязан к настоящим `WorkArea` id**, �
 
 ## 3. Disposable-проверка
 
-*(таблица дополняется после прогона; tsc + lint + `next build` — <в прогоне>)*
+Всё гоняется на disposable PG16 + одноразовых app-контейнерах из релизного образа
+(`ops/titanor-time/run-browser-acceptance.sh` — на тест своя чистая клон-БД). Production не
+затронут. Прогон 2026-09-03, образ `d7f-3abf4ea` (app-код финальный; после — только правки тестов).
 
 | Тест | Результат |
 |---|---|
-| `_test-customer-hours` (db, **переписан**, сценарии 1–5, 8–10) | _<в прогоне>_ |
-| `_test-customer-report-scope-ui` (browser, **переписан**, 1, 6, 7, 10 + ворота + RU/EN + URL) | _<в прогоне>_ |
-| `_test-custom-report-canonical` / `_test-customer-report-scope` (фикс) | _<в прогоне>_ |
-| `_test-custom-report-pdf-csv` (регрессия «custom report») | _<в прогоне>_ |
-| Deploy B/C/E: `_test-t9-worker-card-b` / `_test-t9-site-lifecycle` / `_test-t9-group-transfer` | _<в прогоне>_ |
-| `_test-t9-assignment-lifecycle` / `_test-t9-full-flow` / `_test-t9-setup-lifecycle` / `_test-t9-setup-ui` / `_test-t9-role-matrix` | _<в прогоне>_ |
-| db lane / unit lane | _<в прогоне>_ |
-| восстановление пароля + QR (boot/read-only smoke) | _<в прогоне>_ |
+| `_test-customer-hours` (db, **переписан**, сценарии 1–5, 8–10) | ✅ PASS |
+| `_test-customer-report-scope-ui` (browser, **переписан**, 1, 6, 7, 10 + ворота + RU/EN + URL) | ✅ PASS · 17/17 |
+| `_test-custom-report-canonical` / `_test-customer-report-scope` (фикс Миграции 100) | ✅ PASS / PASS |
+| `_test-custom-report-pdf-csv` (регрессия «custom report») | ✅ PASS |
+| Deploy B/C/E: `_test-t9-worker-card-b` / `_test-t9-site-lifecycle` / `_test-t9-group-transfer` | ✅ 34/34 · 38/38 · 16/16 |
+| `_test-t9-assignment-lifecycle` / `_test-t9-full-flow` / `_test-t9-setup-lifecycle` / `_test-t9-setup-ui` / `_test-t9-role-matrix` | ✅ 118/118 · 84/84 · 113/113 · 26/26 · 33/33 |
+| browser lane (серийно, 9 тестов) | ✅ **9 pass / 0 fail** |
+| db lane / unit lane | ✅ **64/64** · **18/18** |
+| `npm run typecheck` / `npm run lint` / `next build` | ✅ clean / clean / clean (сборка образа прошла) |
+| восстановление пароля + QR (boot / read-only smoke на финальном образе) | ✅ `/api/ready` 200 · schema 100 · `/reset-password` 200 (форма) · `_test-account-recovery` + `_test-recovery-api` зелёные в db lane |
+
+Правки тестов после сборки образа (только тест-файл, app-код не менялся):
+- `_test-customer-report-scope-ui.ts` — CSV качается in-page fetch'ем (cookie `tt_session` — `Secure`;
+  Playwright `APIRequestContext` не шлёт `Secure`-cookie по `http://127.0.0.1`, а Chromium — шлёт);
+  проверка суммы по `"9900"` (все поля CSV в кавычках); RU-локаль через `User.locale` (cookie
+  `NEXT_LOCALE` — только для неаутентифицированных).
 
 ### Обязательные сценарии (§8)
 - **1** — один объект, два заказчика (Aros/Beta), разные работники: отчёт(Aros) содержит только работника A и только 450 мин; CSV(Aros) не содержит Beta и номер работника B.
@@ -87,11 +98,26 @@ Deploy F: отчёт **привязан к настоящим `WorkArea` id**, �
 
 ## 4. План production (после отдельного разрешения)
 
-Web-only swap `d7e-5cce319` → `d7f-<sha>`, **без миграции** (схема 100). Standard verified backup +
-restore-test; кандидат `:3198` **read-only** smoke; rollback-контейнер `titanor-time-prod-app-pre-<sha>`
-(образ `d7e-5cce319`), откат = revert образа. scheduler / Caddy / DNS / пароли / публичный сайт —
-не трогать. **Production write-smoke не выполняется** — отчёт доказан на disposable-базе. Ожидаемый
-простой ~3–4 c.
+**Текущий prod-образ:** `d7e-5cce319` (Deploy E), контейнер `titanor-time-prod-app`, порт 3199, схема 100.
+
+Шаги (тот же паттерн, что A→E):
+1. Финальная сборка `titanor-time-app:d7f-<HEAD-sha>` из этой ветки (уже собран как `d7f-3abf4ea` —
+   app-код идентичен; при деплое пересобрать под точный HEAD и записать digest сюда).
+2. `backup-titanor-time.sh pre-deploy` + off-box копия + `restore-test` (ожидается 13/13).
+3. Кандидат на `127.0.0.1:3198` из нового образа — **только read-only smoke**: `/api/ready` 200,
+   `/admin/reports/customer` рендерит форму, `?action=search` отдаёт заказчиков,
+   `?action=preview` для тест-диапазона (только чтение), `/reset-password` 200. **Ни одного write.**
+4. Web-only swap: `docker stop -t 30 titanor-time-prod-app` → `docker rename titanor-time-prod-app
+   titanor-time-prod-app-pre-<sha>` → `docker run` с идентичным конфигом (env, порт 3199, healthcheck,
+   volume) из `d7f-<sha>`.
+5. Post-swap: `/api/ready` 200, `/admin/reports/customer` + `/reset-password` рендерятся, `schema 100/100`,
+   0 ошибок в логах. **Read-only.**
+6. Откат: `docker stop titanor-time-prod-app` → `docker rename titanor-time-prod-app-pre-<sha>
+   titanor-time-prod-app` → `docker start`. Только revert образа, **без отката схемы** (миграции нет).
+
+**Без миграции** (схема остаётся 100). scheduler / Caddy / DNS / пароли / публичный сайт / backup+gps
+таймеры — не трогать. **Production write-smoke не выполняется** — отчёт доказан на disposable-базе.
+Ожидаемый простой ~3–4 c.
 
 ---
 
