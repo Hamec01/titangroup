@@ -69,11 +69,11 @@ Deploy F: отчёт **привязан к настоящим `WorkArea` id**, �
 (`ops/titanor-time/run-browser-acceptance.sh` — на тест своя чистая клон-БД). Production не
 затронут. Прогон 2026-09-03.
 
-**Финальный образ:** `titanor-time-app:d7f-f6922cf` (HEAD `f6922cf`, ветка `feature/titanor-time-foundation`,
-`org.opencontainers.image.revision=f6922cf`, digest `sha256:f7c03ced74c2d9a8590126184cf235d86a1db349bce2920e062e6c90f43157ef`).
-Browser/db/unit прогоны сделаны на `d7f-3abf4ea` — runtime-код идентичен `d7f-f6922cf` (единственная
-разница `3abf4ea..f6922cf` — тест-файл `_test-customer-report-scope-ui.ts` + этот отчёт, ни то ни
-другое не попадает в standalone-бандл). Boot / read-only smoke ниже — на самом `d7f-f6922cf`.
+**Финальный образ (кандидат к выкладке):** `titanor-time-app:d7f-d216482` — см. §3.1. Первичная
+disposable-регрессия (таблица ниже) прошла на `d7f-3abf4ea` (== `d7f-f6922cf` по runtime); после
+follow-up review (§2.1) ветка сдвинулась до `d216482` и образ пересобран как `d7f-d216482`, на
+котором db lane (64/64, вкл. новый тест readiness) и `_test-customer-report-scope-ui` перепрогнаны
+(§3.1). `d7f-18c2091` / `d7f-f6922cf` — **не** кандидаты к выкладке.
 
 | Тест | Результат |
 |---|---|
@@ -95,6 +95,32 @@ Browser/db/unit прогоны сделаны на `d7f-3abf4ea` — runtime-к�
   проверка суммы по `"9900"` (все поля CSV в кавычках); RU-локаль через `User.locale` (cookie
   `NEXT_LOCALE` — только для неаутентифицированных).
 
+### 3.1 Production-выкладка — попытка 1 (провал + авто-откат) и повторная проверка
+
+**Попытка 1 (2026-09-03 19:08Z, образ `d7f-18c2091`) — НЕ удалась, авто-откат сработал.**
+`deploy-f-swap.sh` после review получил `set -euo pipefail`; из-за этого `code=$(curl … /api/ready)`
+в цикле ожидания стал фатальным — новый контейнер ещё поднимался (~1–2 c), первый `curl` вышел с
+кодом 56, `set -e` оборвал скрипт на 1-й итерации → сработал trap авто-восстановления. Хронология:
+`docker stop` 19:08:58.2Z → старый контейнер вернулся 19:09:09.7Z → **простой ≈ 11.5 c** (Caddy
+отдавал 503). Данные не затронуты (схему/БД не трогали), scheduler не заметил. `/api/ready` 200
+`current 100/100` и локально, и через Caddy сразу после отката. Прод остался на `d7e-5cce319`.
+
+**Исправление:** `code=$(curl … || true)` в цикле обоих скриптов (curl всё равно пишет `000` через
+`-w` при ошибке); `set -e` для остальных шагов и trap сохранены.
+
+**Ветка затем сдвинулась** до `d216482` (снят лимит `take:200` в `resolveCustomerReadiness` +
+регрессионный тест — см. §2.1). `d7f-18c2091` устарел. Пересобран **`titanor-time-app:d7f-d216482`**
+из `d216482` (runtime = HEAD `9e70e07`; `9e70e07` — только ops-скрипты, в образ не входят).
+
+**Повторная disposable-проверка на `d216482`:**
+
+| Проверка | Результат |
+|---|---|
+| db lane (вкл. новый тест readiness в `_test-customer-hours`) | ✅ **64/64** |
+| `_test-customer-report-scope-ui` (browser) | ✅ PASS · 17/17 |
+| backup `production-20260903T175352Z-pre-deploy` (on+off-box) + `restore-test` | ✅ **13/13** |
+| кандидат `d7f-d216482` на `:3198` против **реальной prod-БД** | ✅ `/api/ready` 200 `current 100/100`, healthy, лог чистый; `/login` 200 · `/reset-password` 200 · `/admin/reports/customer` 307→login · scope API 401 · неверные креды 401 |
+
 ### Обязательные сценарии (§8)
 - **1** — один объект, два заказчика (Aros/Beta), разные работники: отчёт(Aros) содержит только работника A и только 450 мин; CSV(Aros) не содержит Beta и номер работника B.
 - **2** — один работник, два заказчика в разные дни: 450 мин на Aros (один день), 450 на Beta (другой день), даты не совпадают.
@@ -112,22 +138,27 @@ Browser/db/unit прогоны сделаны на `d7f-3abf4ea` — runtime-к�
 
 **Текущий prod-образ:** `d7e-5cce319` (Deploy E), контейнер `titanor-time-prod-app`, порт 3199, схема 100.
 
+Скрипты: `ops/titanor-time/r15-d7/deploy-f-swap.sh` (с trap авто-отката) + `deploy-f-rollback.sh`.
+
 Шаги (тот же паттерн, что A→E):
-1. Образ `titanor-time-app:d7f-f6922cf` уже собран (digest выше). При деплое — пересобрать под точный
-   HEAD ветки на момент разрешения и сверить `org.opencontainers.image.revision`.
-2. `backup-titanor-time.sh pre-deploy` + off-box копия + `restore-test` (ожидается 13/13).
-3. Кандидат на `127.0.0.1:3198` из нового образа — **только read-only smoke**: `/api/ready` 200,
-   `/admin/reports/customer` рендерит форму, `?action=search` отдаёт заказчиков,
-   `?action=preview` для тест-диапазона (только чтение), `/reset-password` 200. **Ни одного write.**
-4. Web-only swap: `docker stop -t 30 titanor-time-prod-app` → `docker rename titanor-time-prod-app
-   titanor-time-prod-app-pre-f6922cf` → `docker run` с идентичным конфигом (сеть `titanor-time-prod-net`,
-   `-p 127.0.0.1:3199:3000`, uploads-bind, тот же `--env-file`, healthcheck 15s/5s/40s/×4,
-   `--restart unless-stopped`) из `d7f-f6922cf`.
+1. Образ `titanor-time-app:d7f-d216482` собран из `d216482` (`org.opencontainers.image.revision=d216482`;
+   runtime = HEAD, ops-коммит `9e70e07` в образ не входит). Пересобрать под точный HEAD, если ветка
+   сдвинется.
+2. `backup-titanor-time.sh pre-deploy` + off-box копия + `restore-test` (13/13) — **свежий**, перед свапом.
+   Готовый: `production-20260903T175352Z-pre-deploy`.
+3. Кандидат на `127.0.0.1:3198` из `d7f-d216482` — **только read-only smoke**: `/api/ready` 200,
+   `/admin/reports/customer` 307→login, `/login` 200, `/reset-password` 200, scope API 401. **Ни одного write.**
+   (сделано 2026-09-03 — см. §3.1.)
+4. Web-only swap: `bash ops/titanor-time/r15-d7/deploy-f-swap.sh` — `docker stop -t 30
+   titanor-time-prod-app` → `docker rename … titanor-time-prod-app-pre-d216482` → `docker run` с
+   идентичным конфигом (сеть `titanor-time-prod-net`, `-p 127.0.0.1:3199:3000`, uploads-bind, тот же
+   `--env-file`, healthcheck 15s/5s/40s/×4, `--restart unless-stopped`) из `d7f-d216482`. При любом
+   сбое / неготовности за 40 c скрипт сам возвращает `d7e-5cce319`.
 5. Post-swap: `/api/ready` 200, `/admin/reports/customer` + `/reset-password` рендерятся, `schema 100/100`,
-   0 ошибок в логах. **Read-only.**
-6. Откат: `docker stop titanor-time-prod-app` → `docker rename titanor-time-prod-app-pre-f6922cf
-   titanor-time-prod-app` → `docker start`. Rollback-образ = `d7e-5cce319` (Deploy E). Только revert
-   образа, **без отката схемы** (миграции нет). Держать `-pre-f6922cf` контейнер + `pre-deploy` backup
+   0 ошибок в логах приложения и scheduler. **Read-only.**
+6. Откат: `bash ops/titanor-time/r15-d7/deploy-f-rollback.sh` — контейнер `titanor-time-prod-app-pre-d216482`
+   назад под именем `titanor-time-prod-app`. Rollback-образ = `d7e-5cce319` (Deploy E). Только revert
+   образа, **без отката схемы** (миграции нет). Держать `-pre-d216482` контейнер + `pre-deploy` backup
    до owner sign-off всего R15-D7.
 
 **Без миграции** (схема остаётся 100). scheduler / Caddy / DNS / пароли / публичный сайт / backup+gps
