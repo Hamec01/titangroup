@@ -1,7 +1,8 @@
 # R15-D7 — Deploy C («Завершение объекта / отключение заказчика»): отчёт
 
-**Статус:** разработка + disposable-тесты завершены. **Production не изменялся.** Ждёт отдельного
-разрешения владельца. Deploy E / F не начаты.
+**Статус:** ✅ **РАЗВЁРНУТО НА PRODUCTION 2026-09-03 ~09:34 UTC** (`titanor-time-app:d7c-ad780f8`,
+**без миграции**, схема 100, простой **≈ 2.5 c**). Разрешение владельца — 2026-09-03. Итог — §6.
+Deploy E / F не начаты.
 
 Ветка `feature/titanor-time-foundation`, коммит **`1317d1a`**. Образ `titanor-time-app:d7c-1317d1a`
 (в образе кода теста/отчёта нет). **Миграции нет** — колонка `WorkSite.finishedAt` уже в Миграции 1
@@ -103,3 +104,40 @@ Standard verified backup перед swap; rollback-контейнер `titanor-t
   этого объекта» одной атомарной операцией. Сейчас: карточка каждого работника (Deploy B) или
   `LEAVE_ON_SITE_NO_CUSTOMER` + назначить заново.
 - Отчёт «Часы заказчику» (Deploy F).
+
+---
+
+## 6. Production deploy — выполнено 2026-09-03 (строго по плану)
+
+### Хронология
+| шаг | детали |
+|---|---|
+| Финальная сборка | `titanor-time-app:d7c-ad780f8` из HEAD `ad780f8` (`GIT_SHA=ad780f8` в образе). `git diff 1317d1a ad780f8` = **только 1 docs-файл** → полная регрессия на `d7c-1317d1a` покрывает. Boot-smoke: `migrate deploy` → схема 100/100, `/api/ready` 200, `/login` 200, `/reset-password` 200, `/worker` 307, 0 ошибок. |
+| Backup | `production-20260903T093118Z-pre-deploy` — 2273 строки, 100 миграций, on+off-box. `restore-test`: **13/13 PASS**. |
+| Кандидат `:3198` | `d7c-ad780f8` на `127.0.0.1:3198` (prod-сеть, prod env-file, uploads `:ro`). `/api/ready` 200 `current 100/100`. **Read-only smoke на реальных prod-данных:** `/admin`, `/admin/sites`, реальный объект (31 KB), `/admin/work-areas`, реальный заказчик, реальная карточка работника, `/admin/timesheets` — **все 200**. **Новые GET-preflight'ы** (`…/finish`, `…/work-areas/:id/disable`) на реальных объектах → 200, отдают корректные данные (объект `Pipe and Co`: 1 назначен; заказчик на объекте `UKI`). Страница объекта рендерит новый flow («Завершить объект», «Статус объекта»). Сессия — 1 INSERT/DELETE. 0 ошибок в логе. |
+| **Web-only swap** | T0 `docker stop -t 30` **09:34:13.734Z** → `docker rename → titanor-time-prod-app-pre-ad780f8` → `docker run` новый (идентичная конфигурация: net `titanor-time-prod-net`, `-p 127.0.0.1:3199:3000`, uploads-bind, тот же `--env-file`, тот же healthcheck, `--restart unless-stopped`) → **`/api/ready` 200 в 09:34:16.273Z**. **Простой ≈ 2.5 c.** |
+| Health | `healthy` через ~40 c. |
+
+### Пост-swap проверки (live prod, через Caddy)
+- `/api/ready` → **200 `current 100/100`**; `/login` 200; неверные креды → **401**; `/worker` 307; `/reset-password` 200;
+- аутентифицированно (сессия INSERT+DELETE): `/admin`, `/admin/sites`, `/admin/work-areas`, реальная карточка работника, `/admin/timesheets` — **200**; карточка Deploy B + кнопка recovery на месте; **Mykhailo #1004 `currentAssignments` = 1** (фикс D2 держится);
+- **Контейнерный write-smoke на одноразовом наборе `SMOKE-C …` (создан и убран за собой):**
+  - **завершение объекта:** preflight считает 2 назначенных + 1 будущий + 1 заказчик и называет их поимённо; finish → 2 закрыто + 1 будущий отменён; `finishingState='finished'`;
+  - **запрет на завершённом объекте:** `POST /assignments` → **409 `SITE_FINISHED`** (и через контейнерный тест, и повторно с открытой сменой);
+  - **повторное открытие:** reopen → `active`, `assignmentsRevived:false`, `finishingState='active'`, после reopen назначение снова проходит;
+  - **открытая смена:** работник сделал Check In → finish → `finishingState='finishing'`, `stuckOpenShifts=1` → **Check Out НЕ заблокирован (201)** → после Check Out `finishingState='finished'`;
+  - **отключение заказчика — оба варианта:** preflight называет работников + отдаёт `otherActiveCustomers`; без `decision` → **409 `DECISION_REQUIRED`** (+ preview); `PATCH {active:false}` с работниками → **409 `CUSTOMER_HAS_WORKERS`**; `LEAVE_ON_SITE_NO_CUSTOMER` → старое закрыто/демоутнуто, создана материализованная замена на том же объекте без заказчика с `validFrom=завтра` (проверено прямым запросом к prod-БД: 2 строки, новая `workAreaId=null`, `isPrimary=true`); `REMOVE_WORKERS` → работник снят; enable → `assignmentsRevived:false`;
+  - `AssignmentTransition` `SITE_FINISH` / `CUSTOMER_DISABLE` (с `groupId`) + `AuditEvent` `SITE_FINISHED`×4 / `SITE_REOPENED`×1 / `CUSTOMER_DISABLED`×2 / `CUSTOMER_ENABLED`×1 — записаны;
+- **восстановление пароля + QR** (реальный браузер, Ruslan Druz #1003): код `XXXX-XXXX-XXXX`, **QR — настоящий `data:image/png` (6.3 KB)**, ссылка `…/reset-password#login=…&code=…` (**query пустой**), `/reset-password` предзаполняет логин+код и чистит фрагмент; тестовые `PasswordResetToken` для Ruslan → `revokedAt`;
+- лог приложения и scheduler после swap: **0 ошибок**.
+
+### Что НЕ менялось
+Схема (100), scheduler (`r14-release-1416503`), Caddy, DNS, пароли, публичный сайт.
+
+### Rollback
+Контейнер **`titanor-time-prod-app-pre-ad780f8` (образ `d7b-recovery-80d5c9c`, ID `a3fc6c1ce43e`)** сохранён — откат образа (~4 c), **без отката схемы** (миграций не было). Backup `production-20260903T093118Z-pre-deploy` (on+off-box).
+
+### Тестовые артефакты (одноразовые, `SMOKE-C … <ts>`)
+Не удаляемы физически (нет hard-delete у `WorkSite`/`Employee`), но **все переведены в неактивное
+состояние** и не видны в обычных списках: 4 объекта → завершены, 3 заказчика → отключены,
+8 работников → 7 `DEACTIVATED` + 1 `OFFBOARDING` (делал реальный Check In/Out). Часов у них нет.
