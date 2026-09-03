@@ -29,6 +29,11 @@ export interface ApiErrorBody {
   // collide with, so the UI can render "keep / replace the scheduled transfer" without a round-trip.
   scheduledAssignmentId?: string;
   scheduledValidFrom?: string;
+  // R15-D7 §8-E — POST /api/admin/assignments/group-change 409 BATCH_CONFLICT: the one worker whose
+  // conflict rolled the whole batch back, so the UI can point the admin at that row.
+  employeeId?: string;
+  assignmentId?: string;
+  conflict?: string;
 }
 
 // requestId is optional so existing callers keep working unchanged, but every

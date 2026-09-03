@@ -6,6 +6,7 @@ import { listAssignableForemen } from '@/lib/foreman-assignments';
 import { getGeofenceHistory } from '@/lib/geofences';
 import { SiteEditForm } from './SiteEditForm';
 import { SiteFinishFlow } from './SiteFinishFlow';
+import { GroupTransferFlow } from './GroupTransferFlow';
 import { WorkAreaSection } from './WorkAreaSection';
 import { ForemanAssignmentSection } from './ForemanAssignmentSection';
 import { GeofenceSection } from './GeofenceSection';
@@ -92,6 +93,10 @@ export default async function SiteDetailPage({ params }: { params: Promise<{ sit
             ))}
           </ul>
         )}
+
+        {site.finishingState === 'active' && site.activeAssignments.length > 0 ? (
+          <GroupTransferFlow siteId={site.id} workAreas={site.workAreas} />
+        ) : null}
 
         <SiteEditForm site={site} />
       </div>

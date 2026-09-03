@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { Prisma } from '@prisma/client';
 import type { SiteAssignment, AssignmentTransitionReason } from '@prisma/client';
 import { prisma } from '@/lib/prisma';
@@ -248,11 +249,31 @@ export interface ChangeWorkplaceResult {
  * the old assignment; MOVE_TO_NEW re-points the open shift so the whole shift lands on the new one
  * (§P6). Check Out is never blocked by either.
  */
-export async function changeWorkplace(input: ChangeWorkplaceInput): Promise<ChangeWorkplaceResult | ChangeWorkplaceError> {
+export interface ChangeWorkplaceTxOptions {
+  /** AssignmentTransition.kind for the from→to row — 'CHANGE' (single) or 'GROUP_CHANGE' (batch, §M). */
+  kind?: 'CHANGE' | 'GROUP_CHANGE';
+  /** Shared batch id for a group transfer; undefined for a single change. */
+  groupId?: string;
+  /** Skip the per-worker AuditEvent — the batch caller writes ONE for the whole batch. */
+  skipAudit?: boolean;
+}
+
+/**
+ * The transactional core of changeWorkplace — runs inside a caller-supplied `tx` so groupChangeWorkplace
+ * (§M) can apply it to every worker of a batch in ONE transaction. Acquires the per-employee advisory
+ * lock. Throws ScheduledPrimaryConflictError / SiteOrCustomerUnavailableError / the Prisma exclusion +
+ * dependents + primary-period errors — the caller maps them (see changeWorkplace / groupChangeWorkplace).
+ */
+export async function changeWorkplaceInTx(
+  tx: Prisma.TransactionClient,
+  input: ChangeWorkplaceInput,
+  opts: ChangeWorkplaceTxOptions = {}
+): Promise<ChangeWorkplaceResult> {
   const { existing, effectiveFrom, actorUserId, requestId } = input;
   const now = new Date();
   const today = helsinkiToday();
   const { reasonCode, reasonText } = reasonFromFreeText(input.reasonText);
+  const transitionKind = opts.kind ?? 'CHANGE';
   const openShiftHandling: 'MOVE_TO_NEW' | 'KEEP_ON_OLD' | null = input.openShiftPresent
     ? input.movesOpenShift
       ? 'MOVE_TO_NEW'
@@ -260,8 +281,7 @@ export async function changeWorkplace(input: ChangeWorkplaceInput): Promise<Chan
     : null;
   const isImmediate = effectiveFrom.getTime() <= today.getTime();
 
-  try {
-    return await prisma.$transaction(async (tx) => {
+  return await (async () => {
       await acquireEmployeeLifecycleLock(tx, existing.employeeId);
 
       // §P5 — an immediate transfer normally closes the old assignment the day BEFORE the switch
@@ -350,7 +370,7 @@ export async function changeWorkplace(input: ChangeWorkplaceInput): Promise<Chan
 
       const transition = await recordAssignmentTransition(tx, {
         employeeId: existing.employeeId,
-        kind: 'CHANGE',
+        kind: transitionKind,
         fromAssignmentId: existing.id,
         toAssignmentId: newAssignment.id,
         actedAt: now,
@@ -358,11 +378,12 @@ export async function changeWorkplace(input: ChangeWorkplaceInput): Promise<Chan
         openShiftHandling:
           openShiftHandling === 'MOVE_TO_NEW' ? 'MOVED_TO_NEW' : openShiftHandling === 'KEEP_ON_OLD' ? 'AFTER_CHECK_OUT' : 'NONE',
         actorUserId,
+        groupId: opts.groupId ?? null,
         reasonCode,
         reasonText
       });
 
-      await createAuditEvent(tx, {
+      if (!opts.skipAudit) await createAuditEvent(tx, {
         actorUserId,
         eventType: 'ASSIGNMENT_CHANGED',
         entityType: 'SITE_ASSIGNMENT',
@@ -402,28 +423,38 @@ export async function changeWorkplace(input: ChangeWorkplaceInput): Promise<Chan
         newAssignment,
         transitionId: transition.id
       };
-    });
+  })();
+}
+
+/** Map the errors changeWorkplaceInTx throws to a typed ChangeWorkplaceError, or re-throw. */
+function mapChangeWorkplaceError(error: unknown): ChangeWorkplaceError {
+  if (error instanceof ScheduledPrimaryConflictError) {
+    return {
+      code: 'SCHEDULED_PRIMARY_CONFLICT',
+      scheduledAssignmentId: error.scheduledAssignmentId,
+      scheduledValidFrom: error.scheduledValidFrom.toISOString().slice(0, 10)
+    };
+  }
+  if (error instanceof SiteOrCustomerUnavailableError) {
+    return { code: error.code };
+  }
+  if (isExclusionViolation(error)) {
+    return { code: 'ASSIGNMENT_OVERLAP' };
+  }
+  if (isAssignmentDependentsConflict(error)) {
+    return { code: 'ASSIGNMENT_HAS_RECORDED_TIME' };
+  }
+  if (isPrimaryPeriodConflict(error)) {
+    return { code: 'PRIMARY_PERIOD_CONFLICT' };
+  }
+  throw error;
+}
+
+export async function changeWorkplace(input: ChangeWorkplaceInput): Promise<ChangeWorkplaceResult | ChangeWorkplaceError> {
+  try {
+    return await prisma.$transaction((tx) => changeWorkplaceInTx(tx, input));
   } catch (error) {
-    if (error instanceof ScheduledPrimaryConflictError) {
-      return {
-        code: 'SCHEDULED_PRIMARY_CONFLICT',
-        scheduledAssignmentId: error.scheduledAssignmentId,
-        scheduledValidFrom: error.scheduledValidFrom.toISOString().slice(0, 10)
-      };
-    }
-    if (error instanceof SiteOrCustomerUnavailableError) {
-      return { code: error.code };
-    }
-    if (isExclusionViolation(error)) {
-      return { code: 'ASSIGNMENT_OVERLAP' };
-    }
-    if (isAssignmentDependentsConflict(error)) {
-      return { code: 'ASSIGNMENT_HAS_RECORDED_TIME' };
-    }
-    if (isPrimaryPeriodConflict(error)) {
-      return { code: 'PRIMARY_PERIOD_CONFLICT' };
-    }
-    throw error;
+    return mapChangeWorkplaceError(error);
   }
 }
 
@@ -588,6 +619,262 @@ export async function promoteToPrimary(
   } catch (error) {
     if (isPrimaryPeriodConflict(error)) {
       return { code: 'PRIMARY_PERIOD_CONFLICT' };
+    }
+    throw error;
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────────────────────
+// groupChangeWorkplace — "Групповой перевод" (§M / design §8-E) — one groupId, one transaction
+// ─────────────────────────────────────────────────────────────────────────────────────────────
+
+export type GroupTransferWorkerStatus = 'READY' | 'HAS_HOURS_AFTER' | 'ALREADY_SCHEDULED';
+
+export interface GroupTransferPreviewWorker {
+  employeeId: string;
+  employeeNumber: string;
+  name: string;
+  assignmentId: string;
+  workAreaId: string | null;
+  workAreaName: string | null;
+  isPrimary: boolean;
+  workingNow: boolean;
+  status: GroupTransferWorkerStatus;
+}
+
+export interface GroupTransferPreview {
+  sourceSiteId: string;
+  sourceSiteName: string;
+  sourceWorkAreaId: string | null;
+  sourceWorkAreaName: string | null;
+  effectiveFrom: string;
+  workers: GroupTransferPreviewWorker[];
+  readyCount: number;
+}
+
+/**
+ * §8-E preflight breakdown — every operationally-live assignment on `sourceSiteId` (optionally only
+ * customer `sourceWorkAreaId`) with a READY / not-READY status for a FUTURE-dated batch transfer
+ * (`effectiveFrom` must be > today). Not READY:
+ *  - HAS_HOURS_AFTER: recorded / submitted / planned time dated on-or-after effectiveFrom (would trip
+ *    TRG-11 when the old row closes at effectiveFrom−1);
+ *  - ALREADY_SCHEDULED: the worker already has a SCHEDULED future primary whose period would overlap
+ *    the new one (only when the batch target is primary).
+ */
+export async function groupChangeWorkplacePreview(params: {
+  sourceSiteId: string;
+  sourceWorkAreaId?: string | null;
+  effectiveFrom: Date;
+  targetIsPrimary: boolean;
+}): Promise<GroupTransferPreview | null> {
+  const { sourceSiteId, effectiveFrom, targetIsPrimary } = params;
+  const today = helsinkiToday();
+  const now = new Date();
+
+  const site = await prisma.workSite.findUnique({ where: { id: sourceSiteId }, select: { id: true, name: true } });
+  if (!site) return null;
+  let sourceWorkAreaName: string | null = null;
+  if (params.sourceWorkAreaId) {
+    const wa = await prisma.workArea.findUnique({ where: { id: params.sourceWorkAreaId }, select: { name: true } });
+    sourceWorkAreaName = wa?.name ?? null;
+  }
+
+  const rows = await prisma.siteAssignment.findMany({
+    where: {
+      siteId: sourceSiteId,
+      ...(params.sourceWorkAreaId ? { workAreaId: params.sourceWorkAreaId } : {}),
+      validFrom: { lte: today },
+      OR: [{ validTo: null }, { validTo: { gte: today } }],
+      clockInDisabledAt: null
+    },
+    orderBy: [{ isPrimary: 'desc' }, { employee: { employeeNumber: 'asc' } }],
+    select: {
+      id: true,
+      employeeId: true,
+      workAreaId: true,
+      isPrimary: true,
+      validFrom: true,
+      validTo: true,
+      workArea: { select: { name: true } },
+      employee: {
+        select: { employeeNumber: true, firstName: true, lastName: true, openShift: { select: { sourceAssignmentId: true } } }
+      }
+    }
+  });
+
+  const workers: GroupTransferPreviewWorker[] = [];
+  for (const r of rows) {
+    const [wseg, pshift, dseg, frag] = await Promise.all([
+      prisma.workSegment.count({ where: { sourceAssignmentId: r.id, date: { gte: effectiveFrom } } }),
+      prisma.timesheetPlannedShift.count({ where: { sourceAssignmentId: r.id, date: { gte: effectiveFrom } } }),
+      prisma.timesheetDraftSegment.count({ where: { sourceAssignmentId: r.id, date: { gte: effectiveFrom } } }),
+      prisma.clockShiftFragment.count({ where: { sourceAssignmentId: r.id, date: { gte: effectiveFrom } } })
+    ]);
+    let status: GroupTransferWorkerStatus = 'READY';
+    if (r.validTo !== null && r.validTo.getTime() < effectiveFrom.getTime()) {
+      // the source assignment already ends before the transfer date — a scheduled transfer /
+      // removal already covers this worker; a batch move would make a backwards date range.
+      status = 'ALREADY_SCHEDULED';
+    } else if (wseg + pshift + dseg + frag > 0) {
+      status = 'HAS_HOURS_AFTER';
+    } else if (targetIsPrimary) {
+      const scheduled = await prisma.siteAssignment.count({
+        where: {
+          employeeId: r.employeeId,
+          id: { not: r.id },
+          validFrom: { gt: today },
+          ...overlappingPrimaryWhere({ validFrom: effectiveFrom, validTo: r.validTo })
+        }
+      });
+      if (scheduled > 0) status = 'ALREADY_SCHEDULED';
+    }
+    workers.push({
+      employeeId: r.employeeId,
+      employeeNumber: r.employee.employeeNumber,
+      name: `${r.employee.firstName} ${r.employee.lastName}`,
+      assignmentId: r.id,
+      workAreaId: r.workAreaId,
+      workAreaName: r.workArea?.name ?? null,
+      isPrimary: r.isPrimary,
+      workingNow: r.employee.openShift?.sourceAssignmentId === r.id,
+      status
+    });
+  }
+
+  return {
+    sourceSiteId: site.id,
+    sourceSiteName: site.name,
+    sourceWorkAreaId: params.sourceWorkAreaId ?? null,
+    sourceWorkAreaName,
+    effectiveFrom: formatDate(effectiveFrom),
+    workers,
+    readyCount: workers.filter((w) => w.status === 'READY').length
+  };
+}
+
+export interface GroupChangeWorkplaceInput {
+  /** The source assignmentIds to transfer — the UI only sends the ones the preview marked READY. */
+  assignmentIds: string[];
+  siteId: string;
+  workAreaId: string | null;
+  templateVersionId: string | null;
+  isPrimary: boolean;
+  /** UTC-midnight; MUST be > today (a batch transfer is always scheduled, never immediate). */
+  effectiveFrom: Date;
+  reasonText: string | null;
+  actorUserId: string;
+  requestId: string;
+}
+
+export type GroupChangeWorkplaceError =
+  | { code: 'EFFECTIVE_FROM_NOT_FUTURE' }
+  | { code: 'NO_ASSIGNMENTS' }
+  | { code: 'SOURCE_NOT_FOUND' }
+  | { code: 'SITE_FINISHED' }
+  | { code: 'CUSTOMER_DISABLED' }
+  // A worker in the batch hit a conflict on execute — the WHOLE batch was rolled back (test 27).
+  | { code: 'BATCH_CONFLICT'; employeeId: string; assignmentId: string; conflict: ChangeWorkplaceError['code'] };
+
+export interface GroupChangeWorkplaceResult {
+  groupId: string;
+  transferredCount: number;
+  workers: { employeeId: string; fromAssignmentId: string; newAssignmentId: string }[];
+}
+
+class BatchConflict extends Error {
+  constructor(
+    public employeeId: string,
+    public assignmentId: string,
+    public conflict: ChangeWorkplaceError['code']
+  ) {
+    super('BATCH_CONFLICT');
+  }
+}
+
+/**
+ * §M / §8-E — move a batch of workers from one site/customer to another, all in ONE transaction
+ * under one `groupId`. Future-dated only (each old row keeps isPrimary over its now-shortened past
+ * period; the new one is live from `effectiveFrom` — pure calendar handover, no cron). Any single
+ * worker's conflict rolls back the entire batch (BATCH_CONFLICT) — the preview already excluded the
+ * non-READY ones. One ASSIGNMENT_GROUP_CHANGED audit event for the batch + one GROUP_CHANGE
+ * AssignmentTransition per worker.
+ */
+export async function groupChangeWorkplace(
+  input: GroupChangeWorkplaceInput
+): Promise<GroupChangeWorkplaceResult | GroupChangeWorkplaceError> {
+  const today = helsinkiToday();
+  if (input.assignmentIds.length === 0) return { code: 'NO_ASSIGNMENTS' };
+  if (input.effectiveFrom.getTime() <= today.getTime()) return { code: 'EFFECTIVE_FROM_NOT_FUTURE' };
+
+  const groupId = randomUUID();
+  const uniqueIds = [...new Set(input.assignmentIds)];
+
+  try {
+    return await prisma.$transaction(async (tx) => {
+      // Load every source row up front, ordered by employeeId so concurrent batches take the
+      // per-employee advisory locks in a consistent order (no deadlock).
+      const sources = await tx.siteAssignment.findMany({
+        where: { id: { in: uniqueIds } },
+        orderBy: { employeeId: 'asc' }
+      });
+      if (sources.length !== uniqueIds.length) {
+        return { code: 'SOURCE_NOT_FOUND' as const };
+      }
+
+      const workers: GroupChangeWorkplaceResult['workers'] = [];
+      for (const src of sources) {
+        let res: ChangeWorkplaceResult;
+        try {
+          res = await changeWorkplaceInTx(
+            tx,
+            {
+              existing: src,
+              effectiveFrom: input.effectiveFrom,
+              siteId: input.siteId,
+              workAreaId: input.workAreaId,
+              templateVersionId: input.templateVersionId,
+              isPrimary: input.isPrimary,
+              newValidTo: src.validTo,
+              movesOpenShift: false,
+              openShiftPresent: false,
+              reasonText: input.reasonText,
+              actorUserId: input.actorUserId,
+              requestId: input.requestId
+            },
+            { kind: 'GROUP_CHANGE', groupId, skipAudit: true }
+          );
+        } catch (e) {
+          const mapped = mapChangeWorkplaceError(e); // throws for a truly unexpected error
+          throw new BatchConflict(src.employeeId, src.id, mapped.code);
+        }
+        workers.push({ employeeId: src.employeeId, fromAssignmentId: src.id, newAssignmentId: res.newAssignment.id });
+      }
+
+      await createAuditEvent(tx, {
+        actorUserId: input.actorUserId,
+        eventType: 'ASSIGNMENT_GROUP_CHANGED',
+        entityType: 'WORK_SITE',
+        entityId: input.siteId,
+        requestId: input.requestId,
+        beforeValue: null,
+        afterValue: {
+          groupId,
+          effectiveFrom: formatDate(input.effectiveFrom),
+          targetSiteId: input.siteId,
+          targetWorkAreaId: input.workAreaId,
+          targetTemplateVersionId: input.templateVersionId,
+          targetIsPrimary: input.isPrimary,
+          transferredCount: workers.length,
+          fromAssignmentIds: workers.map((w) => w.fromAssignmentId),
+          newAssignmentIds: workers.map((w) => w.newAssignmentId)
+        }
+      });
+
+      return { groupId, transferredCount: workers.length, workers };
+    });
+  } catch (error) {
+    if (error instanceof BatchConflict) {
+      return { code: 'BATCH_CONFLICT', employeeId: error.employeeId, assignmentId: error.assignmentId, conflict: error.conflict };
     }
     throw error;
   }

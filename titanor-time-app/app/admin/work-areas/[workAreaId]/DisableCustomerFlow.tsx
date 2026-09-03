@@ -209,10 +209,9 @@ export function DisableCustomerFlow({
             </label>
             {preview.otherActiveCustomers.length > 0 ? (
               <p className="setup-subtitle">
-                {t(
-                  'To move them to another customer of this site, use each worker’s card (group transfer comes later).',
-                  'Чтобы перевести их на другого заказчика этого объекта — используйте карточку каждого работника (групповой перевод будет позже).'
-                )}
+                {t('To move them to another customer of this site, use ', 'Чтобы перевести их на другого заказчика этого объекта — используйте ')}
+                <Link href={`/admin/sites/${preview.siteId}`}>{t('Group transfer on the site page', '«Групповой перевод» на странице объекта')}</Link>
+                {t(' first, then disable this customer.', ', затем отключите этого заказчика.')}
               </p>
             ) : null}
           </fieldset>
