@@ -1,8 +1,9 @@
 # R15-D7 — Deploy D («Одно основное назначение»): отчёт (v4 — исправленная модель primary)
 
-**Статус:** ✅ **D1 РАЗВЁРНУТ НА PRODUCTION 2026-09-02 22:14 UTC** (простой ≈ 3.9 c). **D2 не начат —
-ждёт отдельного разрешения владельца.** Схема production не менялась (99), Migration 2 не
-применялась, `fix-double-primary.sql` в production не запускался. Итог D1 — §9.
+**Статус:** ✅ **D1 + D2 РАЗВЁРНУТЫ НА PRODUCTION** (D1 2026-09-02 22:14 UTC, простой ≈ 3.9 c;
+D2 2026-09-03 03:44–03:52 UTC, `fix-double-primary.sql` + Migration 2 + swap, простой ≈ 3.6 c).
+Схема production — **100/100**, constraint `ex_site_assignment_one_primary_per_period` validated.
+Итог D1 — §9, итог D2 — §10.
 
 История STOP-GATE'ов:
 - **v1** (`bdf8608`) — аудит нашёл 7 сценарных проблем.
@@ -310,3 +311,75 @@ docker start titanor-time-prod-app
 curl -s http://127.0.0.1:3199/api/ready        # ожидается d7a: schema:current 99/99
 ```
 Схему трогать не нужно. `titanor-time-prod-app-pre-b9cb5e7` (образ `d7a-37dddb1`, Exited) — готовый rollback-контейнер, сохраняется до конца R15.
+**(После D2 этот путь БОЛЬШЕ НЕ действителен — см. §10.)**
+
+---
+
+## 10. D2 — выполнено на production (2026-09-03, разрешение владельца)
+
+Строго по двухфазному runbook. **Простой ≈ 3.6 c** (только финальный swap).
+
+### Шаг 1 — свежий verified backup
+`production-20260903T034904Z-pre-migration` — 99 миграций, 2160 строк. SHA256SUMS проверены **on-box и off-box**.
+
+### Шаг 2 — `fix-double-primary.sql` (actor = `pilot-owner` `cba8d0ff…`, ACTIVE SUPER_ADMIN)
+`BEGIN → SELECT :'actor'::uuid → 2× pg_advisory_xact_lock → preflight DO → UPDATE 1 ×2 → post-guard DO → INSERT 0 2 (Transition) → INSERT 0 2 (Audit) → 4-row result → COMMIT` (exit 0).
+
+| id | worker | было | стало |
+|---|---|---|---|
+| `c6825d98` | #1002 Nazar | primary v1 | **primary v1 (не тронут)** |
+| `3d95975f` | #1002 Nazar | primary v5 | **isPrimary=false v6** |
+| `bc174aef` | #1004 Mykhailo | primary v1 | **primary v1 (не тронут)** |
+| `cbf688b7` | #1004 Mykhailo | primary v2 | **isPrimary=false v3** |
+
+- **`validFrom` / `validTo` / `clockInDisabledAt` / `endedReason` — не изменены** (`3d95975f` validTo `2026-09-02` endedReason `1111`; `cbf688b7` validTo `2026-09-03` clockInDisabledAt `2026-09-02 21:33` endedReason `1`).
+- **Часы не изменены:** `cbf688b7` — 10 `WorkSegment` / 5 `ClockShift` (было 10 / 5).
+- `AssignmentTransition` 1 → **3** (+2, kind=CHANGE, actor=pilot-owner, from демотированное → to оставленное).
+- `AuditEvent ASSIGNMENT_PROMOTED` 0 → **2**.
+- **overlapping_primary_pairs = 0** · workers с >1 live primary = **0**.
+
+### Шаг 3 — Migration 2 через отдельный контейнер `d7d3-5690632` (D1 продолжал обслуживать)
+- pass 1: `Applying migration 20260902180000_add_primary_period_exclusion` → `All migrations have been successfully applied.` (exit 0).
+- pass 2: `No pending migrations to apply.` (**no-op**, exit 0).
+- Схема: **100 applied · 0 unfinished/rolled-back**.
+- `ex_site_assignment_one_primary_per_period` создан: `EXCLUDE USING gist ("employeeId" WITH =, daterange("validFrom", COALESCE(("validTo"+1),'infinity'::date),'[)') WITH &&) WHERE ((("isPrimary"=true) AND ("clockInDisabledAt" IS NULL)))`, `convalidated = true`.
+
+### Шаг 4 — D1 (`d7d1-b9cb5e7`) на схеме 100
+- контейнер `Up 6 hours (healthy)`;
+- `/api/ready` = 200 `status:ready`, **`schema:ahead`, `aheadBy:1`** (D1 корректно допускает ahead);
+- `/admin/workers`, `/admin/assignments`, `/admin/sites` → 200; карточки Nazar + Mykhailo → 200; `/api/worker/context` + `/worker` → 200;
+- Mykhailo резолвится в `bc174aef` (Aros Marine);
+- app-лог: **0** `error/23P01/500`; scheduler `runnerOutcome:"ok"`.
+
+### Шаг 5 — web-only swap
+`d7d1-b9cb5e7` → `d7d3-5690632`. `SWAP 2026-09-03T03:52:10Z → READY 200 03:52:13Z`, **простой ≈ 3.6 c**.
+D1-контейнер переименован в **`titanor-time-prod-app-pre-5690632`** (rollback-цель).
+
+### Шаг 6 — после swap
+| | |
+|---|---|
+| `/api/ready` локально + через Caddy | **200 `schema:current 100/100` `aheadBy:0`** |
+| контейнер | `titanor-time-app:d7d3-5690632`, healthy |
+| `/login` | 200 · `POST /api/auth/login` (неверные creds) → 401 (роут жив) |
+| `/admin` `/admin/workers` `/admin/sites` `/admin/assignments` `/admin/reports` `/admin/periods` | все 200 |
+| карточки Nazar #1002 / Mykhailo #1004 | 200 · Mykhailo `currentAssignments` = ровно 1 (`Aros Marine`, primary) |
+| `/api/worker/context` + `/worker` (сессия Mykhailo) | 200 |
+| app-лог | **0** `error/exception/23P01/500` |
+| scheduler / Caddy / DNS / пароли / публичный сайт | не трогались · `titanor-time-prod-scheduler` (`r14-release-1416503`) Up 2 дня, `outcome:"ok"`, `failed:0` |
+
+Post-D2 backup схемы 100: `production-20260903T035327Z-manual` (100 миграций, 742 TOC, on+off-box).
+Смоук-сессии (admin + worker) выпускались через прямой INSERT и **удалены** после каждой проверки. Write-smoke на живом prod не выполнялся.
+
+### Точная команда rollback ПОСЛЕ D2 — только на сохранённый D1-контейнер
+**НЕ откатывать на Deploy A `d7a-37dddb1`.** **Схему НЕ откатывать** (constraint additive, D1-код держит инвариант сам).
+```
+docker stop -t 30 titanor-time-prod-app
+docker rename titanor-time-prod-app titanor-time-prod-app-d2-failed
+docker rename titanor-time-prod-app-pre-5690632 titanor-time-prod-app      # <-- D1-контейнер, образ d7d1-b9cb5e7
+docker start titanor-time-prod-app
+curl -s http://127.0.0.1:3199/api/ready        # ожидается d7d1: status ready, schema ahead, aheadBy 1
+```
+`titanor-time-prod-app-pre-5690632` (образ `d7d1-b9cb5e7`, Exited) — rollback-контейнер D2, сохраняется до конца R15.
+Полный откат схемы (крайняя мера): `ALTER TABLE "SiteAssignment" DROP CONSTRAINT "ex_site_assignment_one_primary_per_period"` либо restore `production-20260903T034904Z-pre-migration`.
+
+**Данные `fix-double-primary.sql` откату не подлежат** (целевое состояние, согласованное владельцем).
