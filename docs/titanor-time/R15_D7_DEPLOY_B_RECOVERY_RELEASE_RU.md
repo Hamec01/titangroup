@@ -1,11 +1,12 @@
 # R15-D7 — объединённый релиз: Deploy B + восстановление пароля (ссылка + QR)
 
-**Статус:** ✅ сборка + все проверки объединённого дерева зелёные. **Production не изменялся.**
-Ждёт отдельного разрешения на production-деплой.
+**Статус:** ✅ **РАЗВЁРНУТО НА PRODUCTION 2026-09-03 ~06:40 UTC** (`titanor-time-app:d7b-recovery-80d5c9c`,
+**без миграции**, схема 100, простой **≈ 2.6 c**). Разрешение владельца — 2026-09-03. Итог — §6.
 
-Ветка `feature/titanor-time-foundation`, HEAD **`7fd9bd2`** (`git cherry-pick cdc04b6` поверх
-Deploy B `157850f`). Объединённый образ **`titanor-time-app:d7b-recovery-7fd9bd2`** (794 MB).
-Перед production — свежая пересборка под финальный SHA (после push).
+Ветка `feature/titanor-time-foundation`, HEAD **`80d5c9c`** (= `7fd9bd2` код + этот отчёт; между
+ними только docs). `git cherry-pick cdc04b6` поверх Deploy B `157850f`.
+Финальный образ **`titanor-time-app:d7b-recovery-80d5c9c`** (собран из HEAD `80d5c9c`; код идентичен
+`d7b-recovery-7fd9bd2`, на котором прошла полная регрессия).
 
 ---
 
@@ -92,3 +93,54 @@ Deploy B (новая карточка работника: «Место рабо�
 
 **Нет:** Deploy C (завершение объекта / отключение заказчика), Deploy E (групповой перевод),
 Deploy F (отчёт «Часы заказчику»).
+
+---
+
+## 6. Production deploy — выполнено 2026-09-03 (строго по плану)
+
+### Хронология
+| шаг | детали |
+|---|---|
+| Финальная сборка | `titanor-time-app:d7b-recovery-80d5c9c` из HEAD `80d5c9c` (`GIT_SHA=80d5c9c`). Код `git diff 7fd9bd2 80d5c9c` = **только 1 docs-файл**, 0 изменений кода/конфига/тестов → полная регрессия на `7fd9bd2` покрывает. Boot-smoke финального образа: `migrate deploy` → схема 100/100, `/api/ready` 200, `/login` 200, `/reset-password` 200, `/worker` 307, 0 ошибок. |
+| Backup | `production-20260903T063748Z-pre-deploy` — 2256 строк, 100 миграций, on+off-box mirror OK. `restore-test`: **13/13 PASS** (паритет: миграции, 75 таблиц, 41 триггер, 182 FK, построчные count'ы, all-data SHA-256, uploads). |
+| Кандидат `:3198` | `d7b-recovery-80d5c9c` на `127.0.0.1:3198`, сеть `titanor-time-prod-net`, prod `--env-file`, uploads-bind **`:ro`**. `/api/ready` 200 `current 100/100`. **Read-only smoke на реальных prod-данных:** `/admin`, `/admin/workers`, реальная карточка работника (41 KB), `/admin/sites`, реальный объект, реальный заказчик, `/admin/timesheets`, `/api/admin/{workers,assignments}` — **все 200**. Карточка работника содержит новые блоки Deploy B («Место работы сейчас» / «Изменить место работы» / «Снять с объекта») **и** кнопку «Создать ссылку для нового пароля». Сессия для проверки — 1 INSERT в `UserSession` + DELETE после (проверено: 0). 0 ошибок в логе кандидата. |
+| **Web-only swap** | T0 `docker stop -t 30` **06:40:08.105Z** → контейнер остановился 06:40:08.628 → `docker rename titanor-time-prod-app → titanor-time-prod-app-pre-80d5c9c` → `docker run` новый (идентичная конфигурация: net `titanor-time-prod-net`, `-p 127.0.0.1:3199:3000`, uploads-bind, тот же `--env-file`, тот же healthcheck 15s/5s/40s/×4, `--restart unless-stopped`) 06:40:09.103 → **`/api/ready` = 200 в 06:40:10.741**. **Простой ≈ 2.6 c.** |
+| Health | контейнер `healthy` через ~40 c (start-period). |
+
+### Пост-swap проверки (live prod, через Caddy `https://app.titanorgroup.fi`)
+- `/api/ready` → **200 `schema: current 100/100`** (локально и через Caddy);
+- `/login` 200, неверные креды → **401**, `/worker` → **307**, `/reset-password` → **200**;
+- аутентифицированно (сессия INSERT+DELETE): `/admin`, `/admin/workers`, реальная карточка
+  работника, `/admin/sites`, `/admin/timesheets`, `/api/admin/{workers,assignments}` — **все 200**;
+- карточка работника: блоки Deploy B + кнопка «Создать ссылку для нового пароля» присутствуют;
+- **Mykhailo Sadovnikov #1004** (был двойной primary, исправлен в Deploy D2): `currentAssignments`
+  = ровно 1 (Meyer Turku Shipyard — Aros Marine, primary) — фикс D2 держится под новой карточкой;
+- **восстановление пароля — end-to-end через реальный браузер** (Ruslan Druz #1003, prod
+  тест-аккаунт): «Создать ссылку для нового пароля» → выдан код `XXXX-XXXX-XXXX`, **QR —
+  настоящий `data:image/png` (6.4 KB), сгенерирован в браузере**; «Копировать ссылку» →
+  `https://app.titanorgroup.fi/reset-password#login=…&code=…` (**query пустой — секрет только во
+  фрагменте**); переход по ссылке → `/reset-password` предзаполняет логин `druzr` + код, фрагмент
+  из URL очищается, поля пароля пустые. Все 5 выданных при тесте `PasswordResetToken` для Ruslan
+  → `revokedAt` проставлен (0 используемых кодов осталось), пароль/сессии не тронуты;
+- лог приложения после swap: **0 ошибок**.
+
+### Что НЕ менялось
+Схема (100), scheduler (`r14-release-1416503`, up 2 дня), Caddy, DNS, пароли, публичный сайт —
+без изменений.
+
+### Rollback
+- **Контейнер `titanor-time-prod-app-pre-80d5c9c` (образ `recovery-cdc04b6`) сохранён** —
+  быстрый откат: `docker stop titanor-time-prod-app && docker rename titanor-time-prod-app
+  titanor-time-prod-app-d7b-failed && docker rename titanor-time-prod-app-pre-80d5c9c
+  titanor-time-prod-app && docker start titanor-time-prod-app` (~4 c).
+- **Схему откатывать НЕ нужно** — миграций не было, оба образа ждут схему 100.
+- Хранятся: контейнер `…-pre-80d5c9c`, образ `recovery-cdc04b6` (`c4a768aabf47`), backup
+  `production-20260903T063748Z-pre-deploy` (on+off-box).
+
+### Ветка / worktree
+`feature/titanor-time-foundation` @ `80d5c9c` — задеплоенный код; worktree
+`titanor-time-foundation` переключён с `fix/recovery-link-qr` на `feature/titanor-time-foundation`.
+
+### Осталось в R15-D7
+Deploy C (завершение объекта / отключение заказчика), Deploy E (групповой перевод), Deploy F
+(отчёт «Часы заказчику») — не начаты, каждый — отдельное подтверждение владельца.
