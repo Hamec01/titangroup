@@ -1,15 +1,21 @@
 #!/usr/bin/env bash
 # R15-D7 Deploy F — «Часы заказчику». Web-only swap of the production app container.
 #
-#   d7e-5cce319  ->  d7f-18c2091   (NO migration — schema stays 100)
+#   d7e-5cce319  ->  d7f-d216482   (NO migration — schema stays 100)
 #
-# Prereqs already done by the assistant (2026-09-03):
-#   - image titanor-time-app:d7f-18c2091 built from HEAD 18c2091 (runtime identical to the
-#     fully-tested d7f-f6922cf — only the report .md differs, and docs/ is not in the image)
-#   - backup production-20260903T175352Z-pre-deploy (on+off-box), restore-test 13/13 PASS
-#   - candidate d7f-18c2091 booted on :3198 against the REAL prod DB: /api/ready 200 current
-#     100/100, healthy, clean logs; /login 200, /reset-password 200, /admin/reports/customer 307,
-#     scope API 401, bad-creds login 401
+# History:
+#   - 2026-09-03 19:08Z: first swap attempt on image d7f-18c2091 aborted on a script bug
+#     (set -e + an unguarded curl in the readiness loop). The restore trap brought d7e-5cce319
+#     back; ~11.5s prod blip, no data impact. Fixed here: `... || true` on the loop curl.
+#   - Branch then moved to d216482 (readiness take:200 cap removed + regression test). Image
+#     rebuilt as d7f-d216482 and re-verified. This script targets that image.
+#
+# Prereqs (must all be true before running — the guards below check the load-bearing ones):
+#   - image titanor-time-app:d7f-d216482 built from HEAD d216482
+#   - fresh backup-titanor-time.sh pre-deploy (on+off-box) + restore-test 13/13
+#   - candidate d7f-d216482 booted on :3198 against the REAL prod DB: /api/ready 200 current
+#     100/100, healthy, clean logs; /login 200, /reset-password 200, /admin/reports/customer 307
+#   - db lane (incl. the new readiness test) + _test-customer-report-scope-ui green on d216482
 #
 # This script ONLY swaps the web container. It does NOT touch: the DB / schema, the scheduler
 # (titanor-time-prod-scheduler on r14-release-1416503), Caddy, DNS, passwords, the public site.
@@ -19,8 +25,8 @@
 
 set -euo pipefail
 
-NEW=titanor-time-app:d7f-18c2091
-PRE=titanor-time-prod-app-pre-18c2091
+NEW=titanor-time-app:d7f-d216482
+PRE=titanor-time-prod-app-pre-d216482
 ENVFILE=/home/deploy/app-data/titanor-time-prod/app.env
 UPLOADS=/home/deploy/app-data/titanor-time-prod/uploads
 NET=titanor-time-prod-net

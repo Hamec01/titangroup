@@ -3,11 +3,11 @@
 # (d7e-5cce319, Deploy E). Image revert ONLY — there was NO migration, so the schema (100)
 # is NOT touched. Scheduler / Caddy / DNS / passwords / public site are NOT touched.
 #
-# Safe to run any time after deploy-f-swap.sh while titanor-time-prod-app-pre-18c2091 still exists.
+# Safe to run any time after deploy-f-swap.sh while titanor-time-prod-app-pre-d216482 still exists.
 
 set -euo pipefail
 
-PRE=titanor-time-prod-app-pre-18c2091
+PRE=titanor-time-prod-app-pre-d216482
 
 docker inspect "$PRE" >/dev/null 2>&1 || { echo "ABORT: $PRE not found — nothing to roll back to"; exit 1; }
 pre_img=$(docker inspect "$PRE" --format '{{.Config.Image}}')
