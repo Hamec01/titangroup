@@ -3,6 +3,7 @@
 import { useEffect, useState, type FormEvent } from 'react';
 import Link from 'next/link';
 import { DEFAULT_LOGIN_LOCALE, LOGIN_LOCALE_STORAGE_KEY, isLoginLocale, type LoginLocale } from '../login/i18n';
+import { parseRecoveryLinkFragment } from '@/lib/recovery-link';
 
 const CSRF_HEADER_VALUE = 'titanor-time';
 
@@ -70,6 +71,13 @@ export default function ResetPasswordPage() {
 
   useEffect(() => {
     setLocale(readLocale());
+    const prefill = parseRecoveryLinkFragment(window.location.hash);
+    if (prefill) {
+      setLogin(prefill.login);
+      setCode(prefill.code);
+      // Keep Next's existing history state and any non-secret query string intact.
+      window.history.replaceState(window.history.state, '', `${window.location.pathname}${window.location.search}`);
+    }
   }, []);
 
   const t = T[locale];

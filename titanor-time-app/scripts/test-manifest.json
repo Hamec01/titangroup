@@ -26,6 +26,7 @@
     { "file": "_test-personal-identity-code.ts", "lane": "unit", "note": "henkilötunnus validation + AES-256-GCM module; generates its own throwaway key." },
     { "file": "_test-presence-pacing.ts", "lane": "unit", "note": "shouldCapturePresence pacing rule — pure." },
     { "file": "_test-qualification-expiry.ts", "lane": "unit", "note": "computeQualificationExpiryStatus — pure." },
+    { "file": "_test-recovery-link.ts", "lane": "unit", "note": "Admin-assisted recovery link uses a server-invisible URL fragment and round-trips only allowlisted login/code fields." },
     { "file": "_test-retention-pacing.ts", "lane": "unit", "tags": ["scheduler"], "note": "maybeRunRetentionCore 24h pacing gate — pure, no DB." },
     { "file": "_test-time-rounding.ts", "lane": "unit", "note": "roundReportedInstant / roundReportedInterval — pure." },
     { "file": "_test-warm-cache.ts", "lane": "unit", "note": "warmOfflineShellCache retry/concurrency via mocked fetch/caches globals." },

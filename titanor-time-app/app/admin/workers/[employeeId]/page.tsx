@@ -89,7 +89,7 @@ export default async function WorkerDetailPage({ params }: { params: Promise<{ e
           {worker.activationStatus === 'ALREADY_ACTIVE' ? (
             <div style={{ marginTop: 8 }}>
               <p className="setup-subtitle">{ru ? 'Работник забыл пароль?' : 'Worker forgot their password?'}</p>
-              <RecoveryCodeIssuer kind="worker" id={employeeId} />
+              <RecoveryCodeIssuer kind="worker" id={employeeId} login={worker.username} />
             </div>
           ) : null}
         </section>
