@@ -81,6 +81,7 @@ async function main(): Promise<void> {
       console.log('  [scope preview]', r.status(), (await r.text()).slice(0, 400));
     }
   });
+  page.on('requestfailed', (r) => console.log('  [requestfailed]', r.url(), r.failure()?.errorText));
   await login(page, fx.admin.username, fx.admin.password);
 
   await page.goto(`${BASE}/admin/reports/customer`, { waitUntil: 'networkidle' });
@@ -135,13 +136,20 @@ async function main(): Promise<void> {
   await page.locator('label', { hasText: /no customer|без заказчика/i }).locator('input[type=checkbox]').click();
   await page.waitForTimeout(400);
 
-  // CSV / PDF minutes agree with the UI: fetch the CSV, check the GRAND/CUSTOMER total
+  // CSV / PDF minutes agree with the UI: fetch the CSV, check the GRAND/CUSTOMER total.
+  // Fetch from inside the page (browser context) — the tt_session cookie is Secure and Playwright's
+  // APIRequestContext won't send Secure cookies over http://127.0.0.1, but Chromium itself will
+  // (localhost is a trustworthy origin), so an in-page fetch carries the session.
   const waIds = await page.evaluate(() => new URL(location.href).searchParams.get('waIds'));
-  const csvRes = await page.request.get(`${BASE}/api/admin/reports/customer/export?dateFrom=2099-09-07&dateTo=2099-09-13&waIds=${waIds}&format=CSV&mode=FINAL`);
-  check('export: CSV downloads 200', csvRes.status() === 200);
-  const csv = await csvRes.text();
-  // 22 workers × 450 min = 9900 min
-  check('export: CSV CUSTOMER_TOTAL = 9900 min (matches 22 × 7h30) and no Meyer', csv.includes(',9900,') && !csv.includes('Meyer Yard'), csv.split('\r\n').find((l) => l.includes('CUSTOMER_TOTAL')));
+  const csvOut = await page.evaluate(async (url) => {
+    const r = await fetch(url, { credentials: 'same-origin' });
+    return { status: r.status, text: await r.text() };
+  }, `${BASE}/api/admin/reports/customer/export?dateFrom=2099-09-07&dateTo=2099-09-13&waIds=${waIds}&format=CSV&mode=FINAL`);
+  const csv = csvOut.text;
+  check('export: CSV downloads 200', csvOut.status === 200, { status: csvOut.status, waIds, body: csv.slice(0, 500) });
+  // 22 workers × 450 min = 9900 min (every CSV field is quoted)
+  const totalRow = csv.split('\r\n').find((l) => l.includes('CUSTOMER_TOTAL')) ?? '';
+  check('export: CSV CUSTOMER_TOTAL = 9900 min (matches 22 × 7h30) and no Meyer', totalRow.includes('"9900"') && !csv.includes('Meyer Yard'), totalRow);
 
   // URL round-trip: reload keeps the selection
   await page.reload({ waitUntil: 'networkidle' });
@@ -154,12 +162,13 @@ async function main(): Promise<void> {
   await page.waitForSelector('[data-testid="ch-customer-card"]', { timeout: 8000 });
   check('Back: returns to the customer report with the selection intact', (await page.evaluate(() => new URL(location.href).searchParams.get('waIds')))?.includes(waAros.id) ?? false);
 
-  // RU/EN: the same page in Russian (NEXT_LOCALE cookie)
+  // RU/EN: the same page in Russian. An authenticated request resolves the locale from
+  // User.locale (lib/i18n/server.ts — the NEXT_LOCALE cookie is only for pre-auth visitors), so
+  // flip the admin's stored locale and log in fresh. All EN checks above are already done.
+  await prisma.user.update({ where: { username: fx.admin.username }, data: { locale: 'RU' } });
   const ctxRu = await browser.newContext({ viewport: DESKTOP });
   const ruPage = await ctxRu.newPage();
   await login(ruPage, fx.admin.username, fx.admin.password);
-  const origin = new URL(BASE);
-  await ctxRu.addCookies([{ name: 'NEXT_LOCALE', value: 'RU', domain: origin.hostname, path: '/' }]);
   await ruPage.goto(`${BASE}/admin/reports/customer?dateFrom=2099-09-07&dateTo=2099-09-13&waIds=${waAros.id}`, { waitUntil: 'networkidle' });
   const ruText = await ruPage.locator('body').innerText();
   check('RU: key labels are Russian ("Заказчик" / "Часы заказчику")', ruText.includes('Заказчик') && ruText.includes('Часы заказчику'), ruText.slice(0, 160));
