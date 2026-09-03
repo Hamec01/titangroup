@@ -62,7 +62,13 @@ Deploy F: отчёт **привязан к настоящим `WorkArea` id**, �
 
 Всё гоняется на disposable PG16 + одноразовых app-контейнерах из релизного образа
 (`ops/titanor-time/run-browser-acceptance.sh` — на тест своя чистая клон-БД). Production не
-затронут. Прогон 2026-09-03, образ `d7f-3abf4ea` (app-код финальный; после — только правки тестов).
+затронут. Прогон 2026-09-03.
+
+**Финальный образ:** `titanor-time-app:d7f-f6922cf` (HEAD `f6922cf`, ветка `feature/titanor-time-foundation`,
+`org.opencontainers.image.revision=f6922cf`, digest `sha256:f7c03ced74c2d9a8590126184cf235d86a1db349bce2920e062e6c90f43157ef`).
+Browser/db/unit прогоны сделаны на `d7f-3abf4ea` — runtime-код идентичен `d7f-f6922cf` (единственная
+разница `3abf4ea..f6922cf` — тест-файл `_test-customer-report-scope-ui.ts` + этот отчёт, ни то ни
+другое не попадает в standalone-бандл). Boot / read-only smoke ниже — на самом `d7f-f6922cf`.
 
 | Тест | Результат |
 |---|---|
@@ -75,7 +81,8 @@ Deploy F: отчёт **привязан к настоящим `WorkArea` id**, �
 | browser lane (серийно, 9 тестов) | ✅ **9 pass / 0 fail** |
 | db lane / unit lane | ✅ **64/64** · **18/18** |
 | `npm run typecheck` / `npm run lint` / `next build` | ✅ clean / clean / clean (сборка образа прошла) |
-| восстановление пароля + QR (boot / read-only smoke на финальном образе) | ✅ `/api/ready` 200 · schema 100 · `/reset-password` 200 (форма) · `_test-account-recovery` + `_test-recovery-api` зелёные в db lane |
+| boot / read-only smoke на `d7f-f6922cf` | ✅ `/api/ready` 200 `schema:current 100/100 aheadBy 0` · `/reset-password` 200 · `/admin/reports/customer` 307→login (роут на месте) · `/login` 200 · 0 ошибок в логах приложения |
+| восстановление пароля + QR | ✅ `_test-recovery-link` (unit) · `_test-account-recovery` + `_test-recovery-api` (db lane) зелёные; `/reset-password` рендерится на финальном образе. Комбинированный релиз их не теряет. |
 
 Правки тестов после сборки образа (только тест-файл, app-код не менялся):
 - `_test-customer-report-scope-ui.ts` — CSV качается in-page fetch'ем (cookie `tt_session` — `Secure`;
@@ -101,19 +108,22 @@ Deploy F: отчёт **привязан к настоящим `WorkArea` id**, �
 **Текущий prod-образ:** `d7e-5cce319` (Deploy E), контейнер `titanor-time-prod-app`, порт 3199, схема 100.
 
 Шаги (тот же паттерн, что A→E):
-1. Финальная сборка `titanor-time-app:d7f-<HEAD-sha>` из этой ветки (уже собран как `d7f-3abf4ea` —
-   app-код идентичен; при деплое пересобрать под точный HEAD и записать digest сюда).
+1. Образ `titanor-time-app:d7f-f6922cf` уже собран (digest выше). При деплое — пересобрать под точный
+   HEAD ветки на момент разрешения и сверить `org.opencontainers.image.revision`.
 2. `backup-titanor-time.sh pre-deploy` + off-box копия + `restore-test` (ожидается 13/13).
 3. Кандидат на `127.0.0.1:3198` из нового образа — **только read-only smoke**: `/api/ready` 200,
    `/admin/reports/customer` рендерит форму, `?action=search` отдаёт заказчиков,
    `?action=preview` для тест-диапазона (только чтение), `/reset-password` 200. **Ни одного write.**
 4. Web-only swap: `docker stop -t 30 titanor-time-prod-app` → `docker rename titanor-time-prod-app
-   titanor-time-prod-app-pre-<sha>` → `docker run` с идентичным конфигом (env, порт 3199, healthcheck,
-   volume) из `d7f-<sha>`.
+   titanor-time-prod-app-pre-f6922cf` → `docker run` с идентичным конфигом (сеть `titanor-time-prod-net`,
+   `-p 127.0.0.1:3199:3000`, uploads-bind, тот же `--env-file`, healthcheck 15s/5s/40s/×4,
+   `--restart unless-stopped`) из `d7f-f6922cf`.
 5. Post-swap: `/api/ready` 200, `/admin/reports/customer` + `/reset-password` рендерятся, `schema 100/100`,
    0 ошибок в логах. **Read-only.**
-6. Откат: `docker stop titanor-time-prod-app` → `docker rename titanor-time-prod-app-pre-<sha>
-   titanor-time-prod-app` → `docker start`. Только revert образа, **без отката схемы** (миграции нет).
+6. Откат: `docker stop titanor-time-prod-app` → `docker rename titanor-time-prod-app-pre-f6922cf
+   titanor-time-prod-app` → `docker start`. Rollback-образ = `d7e-5cce319` (Deploy E). Только revert
+   образа, **без отката схемы** (миграции нет). Держать `-pre-f6922cf` контейнер + `pre-deploy` backup
+   до owner sign-off всего R15-D7.
 
 **Без миграции** (схема остаётся 100). scheduler / Caddy / DNS / пароли / публичный сайт / backup+gps
 таймеры — не трогать. **Production write-smoke не выполняется** — отчёт доказан на disposable-базе.
