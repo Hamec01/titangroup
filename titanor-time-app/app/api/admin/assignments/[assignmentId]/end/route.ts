@@ -6,6 +6,7 @@ import { resolveAuthenticatedSession } from '@/lib/auth';
 import { hasPermission } from '@/lib/permissions';
 import { SESSION_COOKIE_NAME } from '@/lib/session';
 import { removeFromSite } from '@/lib/assignment-lifecycle-service';
+import { isAssignmentTransitionReason } from '@/lib/assignment-transitions';
 
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
@@ -67,18 +68,34 @@ export async function POST(request: NextRequest, { params }: RouteParams): Promi
     return jsonError(400, { code: 'VALIDATION_ERROR', message: 'Request body must be valid JSON.' }, requestId);
   }
   const bodyObject = rawBody && typeof rawBody === 'object' ? (rawBody as Record<string, unknown>) : {};
-  const { validTo, reason } = bodyObject as { validTo?: unknown; reason?: unknown };
+  // `reason` (free text) is the legacy /end field; `reasonCode` + `reasonText` are Deploy B's
+  // structured presets from the worker card. `reasonText` on its own is treated like `reason`.
+  const { validTo, reason, reasonCode, reasonText } = bodyObject as {
+    validTo?: unknown;
+    reason?: unknown;
+    reasonCode?: unknown;
+    reasonText?: unknown;
+  };
 
   const fieldErrors: Record<string, string[]> = {};
   if (typeof validTo !== 'string' || !DATE_PATTERN.test(validTo)) {
     fieldErrors.validTo = ['required'];
   }
+  let normalizedReasonCode: 'PROJECT_DONE' | 'TRANSFER' | 'ASSIGNED_BY_MISTAKE' | 'OTHER' | null = null;
+  if (reasonCode !== undefined && reasonCode !== null) {
+    if (!isAssignmentTransitionReason(reasonCode)) {
+      fieldErrors.reasonCode = ['invalid'];
+    } else {
+      normalizedReasonCode = reasonCode;
+    }
+  }
+  const rawFreeText = typeof reasonText === 'string' ? reasonText : typeof reason === 'string' ? reason : null;
   let trimmedReason: string | null = null;
-  if (reason !== undefined && reason !== null) {
-    if (typeof reason !== 'string' || reason.trim().length === 0 || reason.length > MAX_REASON_LENGTH) {
+  if (rawFreeText !== null) {
+    if (rawFreeText.trim().length === 0 || rawFreeText.length > MAX_REASON_LENGTH) {
       fieldErrors.reason = ['invalid'];
     } else {
-      trimmedReason = reason.trim();
+      trimmedReason = rawFreeText.trim();
     }
   }
 
@@ -114,7 +131,10 @@ export async function POST(request: NextRequest, { params }: RouteParams): Promi
   // only when ending earlier than whatever was previously planned (a null
   // validTo counts as "never", so any concrete date here is earlier than that).
   const isEarlierThanPlanned = existing.validTo === null || newValidTo.getTime() < existing.validTo.getTime();
-  if (isEarlierThanPlanned && trimmedReason === null) {
+  // A preset code (PROJECT_DONE / TRANSFER / ASSIGNED_BY_MISTAKE) satisfies "reason required"; OTHER
+  // still needs the free text.
+  const hasReason = (normalizedReasonCode !== null && normalizedReasonCode !== 'OTHER') || trimmedReason !== null;
+  if (isEarlierThanPlanned && !hasReason) {
     return NextResponse.json(
       errorBody({ code: 'VALIDATION_ERROR', message: 'Invalid request body.', fieldErrors: { reason: ['required when ending earlier than planned'] } }, requestId),
       { status: 400, headers: successHeaders(requestId) }
@@ -125,6 +145,7 @@ export async function POST(request: NextRequest, { params }: RouteParams): Promi
     existing,
     validTo: newValidTo,
     reasonText: trimmedReason,
+    reasonCode: normalizedReasonCode,
     actorUserId: authenticated.user.id,
     requestId
   });

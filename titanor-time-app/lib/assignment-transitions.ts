@@ -39,6 +39,36 @@ export function reasonFromFreeText(text: string | null | undefined): {
   return { reasonCode: 'OTHER', reasonText: trimmed.length > 0 ? trimmed : null };
 }
 
+export const ASSIGNMENT_TRANSITION_REASONS: AssignmentTransitionReason[] = [
+  'PROJECT_DONE',
+  'TRANSFER',
+  'ASSIGNED_BY_MISTAKE',
+  'OTHER'
+];
+
+export function isAssignmentTransitionReason(value: unknown): value is AssignmentTransitionReason {
+  return typeof value === 'string' && (ASSIGNMENT_TRANSITION_REASONS as string[]).includes(value);
+}
+
+/** R15-D7 Deploy B — the worker card's structured "Снять с объекта" reason. A preset code carries
+ *  no free text (except OTHER); the persisted `endedReason` string on the SiteAssignment row keeps
+ *  a canonical value so the "досрочное завершение" audit still has a human reason. */
+export function reasonFromPreset(
+  code: AssignmentTransitionReason | null | undefined,
+  freeText: string | null | undefined
+): { reasonCode: AssignmentTransitionReason; reasonText: string | null; endedReason: string | null } {
+  if (!code) {
+    const ft = reasonFromFreeText(freeText);
+    return { ...ft, endedReason: ft.reasonText };
+  }
+  if (code === 'OTHER') {
+    const trimmed = typeof freeText === 'string' ? freeText.trim() : '';
+    const text = trimmed.length > 0 ? trimmed : null;
+    return { reasonCode: 'OTHER', reasonText: text, endedReason: text };
+  }
+  return { reasonCode: code, reasonText: null, endedReason: code };
+}
+
 export async function recordAssignmentTransition(
   tx: Prisma.TransactionClient,
   input: RecordAssignmentTransitionInput

@@ -103,6 +103,21 @@ export interface TimesheetCardDay {
   autoUnpaidBreakMinutes: number;
 }
 
+/** R15-D7 Deploy B — a "место работы изменено" line shown on the timesheet card when a lifecycle
+ *  transition landed in this period. Does NOT change any hours — it just explains the day. */
+export interface TimesheetTransitionMarker {
+  id: string;
+  /** ISO instant the admin performed the action. */
+  actedAt: string;
+  /** YYYY-MM-DD the new arrangement takes effect. */
+  effectiveFrom: string;
+  kind: 'CHANGE' | 'REMOVE' | 'SITE_FINISH' | 'CUSTOMER_DISABLE' | 'GROUP_CHANGE';
+  fromLabel: string | null;
+  toLabel: string | null;
+  openShiftHandling: 'AFTER_CHECK_OUT' | 'MOVED_TO_NEW' | 'NONE' | null;
+  actorName: string;
+}
+
 export interface TimesheetCard {
   timesheetId: string;
   employeeId: string;
@@ -116,6 +131,8 @@ export interface TimesheetCard {
   /** Task A — id of an open (PENDING / DRAFT_OPEN) CorrectionRequest on this timesheet, if any.
    * When set, the card links straight to it instead of offering to start another one. */
   openCorrectionRequestId: string | null;
+  /** R15-D7 Deploy B — workplace changes that took effect in this period (design §4). */
+  transitionMarkers: TimesheetTransitionMarker[];
 }
 
 export async function getTimesheetCard(timesheetId: string): Promise<TimesheetCard | null> {
@@ -127,12 +144,44 @@ export async function getTimesheetCard(timesheetId: string): Promise<TimesheetCa
       periodId: true,
       employeeId: true,
       employee: { select: { firstName: true, lastName: true } },
-      currentVersionId: true
+      currentVersionId: true,
+      period: { select: { startDate: true, endDate: true } }
     }
   });
   if (!timesheet) {
     return null;
   }
+
+  // R15-D7 Deploy B — lifecycle transitions that take effect inside this period (design §4).
+  const transitionRows = await prisma.assignmentTransition.findMany({
+    where: {
+      employeeId: timesheet.employeeId,
+      effectiveFrom: { gte: timesheet.period.startDate, lte: timesheet.period.endDate }
+    },
+    orderBy: { effectiveFrom: 'asc' },
+    select: {
+      id: true,
+      actedAt: true,
+      effectiveFrom: true,
+      kind: true,
+      openShiftHandling: true,
+      actor: { select: { username: true, employee: { select: { firstName: true, lastName: true } } } },
+      fromAssignment: { select: { site: { select: { name: true } }, workArea: { select: { name: true } } } },
+      toAssignment: { select: { site: { select: { name: true } }, workArea: { select: { name: true } } } }
+    }
+  });
+  const label = (a: { site: { name: string }; workArea: { name: string } | null } | null): string | null =>
+    a ? (a.workArea ? `${a.site.name} — ${a.workArea.name}` : a.site.name) : null;
+  const transitionMarkers: TimesheetTransitionMarker[] = transitionRows.map((t) => ({
+    id: t.id,
+    actedAt: t.actedAt.toISOString(),
+    effectiveFrom: formatDate(t.effectiveFrom),
+    kind: t.kind as TimesheetTransitionMarker['kind'],
+    fromLabel: label(t.fromAssignment),
+    toLabel: label(t.toAssignment),
+    openShiftHandling: (t.openShiftHandling as TimesheetTransitionMarker['openShiftHandling']) ?? null,
+    actorName: t.actor.employee ? `${t.actor.employee.firstName} ${t.actor.employee.lastName}`.trim() : t.actor.username
+  }));
 
   let days: TimesheetCardDay[] = [];
   let versionNumber: number | null = null;
@@ -212,7 +261,8 @@ export async function getTimesheetCard(timesheetId: string): Promise<TimesheetCa
     versionNumber,
     days,
     approvalActions: [],
-    openCorrectionRequestId: openCorrection?.id ?? null
+    openCorrectionRequestId: openCorrection?.id ?? null,
+    transitionMarkers
   };
 }
 

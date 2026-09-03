@@ -344,16 +344,17 @@ async function main() {
   await page.goto(`${BASE}/admin/workers/${fx.workerB.employeeId}`, { waitUntil: 'networkidle' });
   const wbAssignText = await page.locator('body').innerText();
   check('WA2: both work-area names are shown on the worker card', wbAssignText.includes(wArea1.name) && wbAssignText.includes(wArea2.name), wbAssignText.slice(0, 600));
-  const endButtons = await page.locator('.setup-list button', { hasText: /^End$/ }).count();
-  check('WA3: worker card shows an "End" action per current assignment', endButtons >= 2, endButtons);
+  // R15-D7 Deploy B — the card's "End" action is now "Remove from site" (structured reason presets).
+  const endButtons = await page.locator('#worker-assignments button', { hasText: /Remove from site/ }).count();
+  check('WA3: worker card shows a "Remove from site" action per current assignment', endButtons >= 2, endButtons);
 
-  // WA4: the card's "End" form pre-fills validTo with TODAY when the worker only has a schedule
-  // (no real recorded hours) — the owner's "remove from this site today, not at the end of the
-  // period" case. assignmentEndDateDefaults no longer counts auto-materialised draft planned shifts.
-  const w2Item = page.locator('.setup-item', { hasText: wArea2.name });
-  await w2Item.locator('button', { hasText: /^End$/ }).click();
-  const prefilled = await w2Item.locator('input[type="date"]').inputValue();
-  check('WA4: End form pre-fills validTo with today (schedule-only assignment)', prefilled === todayIsoWA, prefilled);
+  // WA4: "Remove from site" defaults to removing TODAY when the worker only has a schedule (no real
+  // recorded hours) — the owner's "remove from this site today, not at the end of the period" case.
+  const w2Item = page.locator('#worker-assignments li', { hasText: wArea2.name });
+  await w2Item.getByRole('button', { name: /Remove from site/ }).click();
+  const removeForm = page.locator('.assignment-end-form');
+  const todayChecked = await removeForm.locator('input[type="radio"]').first().isChecked();
+  check('WA4: Remove-from-site form defaults to "Today" (schedule-only assignment)', todayChecked, todayChecked);
 
   // WA5/WA6: ending TODAY succeeds (200) — the assignment's own future draft planned shifts are
   // deleted so the dependents guard doesn't block it — and the row is kept, not deleted.
@@ -454,13 +455,14 @@ async function main() {
   check('CH9: MOVE_TO_NEW keeps today and re-points the open shift to the new site + assignment', chMove.status === 200 && chMove.body?.effectiveFrom === todayIsoWA && osMove.siteId === chDest.body.id && osMove.sourceAssignmentId === chMove.body?.newAssignment?.id, { status: chMove.status, body: chMove.body, os: osMove });
   await prisma.employeeOpenShift.delete({ where: { employeeId: chWId } }).catch(() => {});
 
-  // CH10: the card shows the "Change site / customer" action and its mode picker.
+  // CH10 (R15-D7 Deploy B): the card offers ONE "Change workplace" form with Site / Customer /
+  // Schedule / main-workplace fields and a Today / Tomorrow / Pick-a-date choice.
   await page.goto(`${BASE}/admin/workers/${chWId}`, { waitUntil: 'networkidle' });
-  const changeBtn = page.locator('.setup-item button', { hasText: 'Change site / customer' });
-  check('CH10: worker card offers "Change site / customer" per current assignment', (await changeBtn.count()) >= 1, await changeBtn.count());
+  const changeBtn = page.locator('#worker-assignments button', { hasText: /Change workplace/ });
+  check('CH10: worker card offers a "Change workplace" action per current assignment', (await changeBtn.count()) >= 1, await changeBtn.count());
   await changeBtn.first().click();
-  const pickerText = await page.locator('.assignment-end-form', { hasText: 'Change the customer only' }).innerText().catch(() => '');
-  check('CH10b: the mode picker offers the quick and the full change', pickerText.includes('Change the customer only') && pickerText.includes('Move to another site'), pickerText.slice(0, 300));
+  const cwForm = await page.locator('.assignment-end-form').innerText().catch(() => '');
+  check('CH10b: the one form has Site / Customer / Schedule fields and a Today/Tomorrow/Pick-a-date choice', /Site/.test(cwForm) && /Customer/.test(cwForm) && /Work schedule/.test(cwForm) && /Today/.test(cwForm) && /Tomorrow/.test(cwForm) && /Pick a date/.test(cwForm), cwForm.slice(0, 300));
 
   // CH11 (R15-D7 Deploy D) — the real "Set primary" button on /admin/assignments routes the
   // primary change through promoteToPrimary: the prior live primary is demoted, one live primary

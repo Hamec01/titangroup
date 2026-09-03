@@ -2,9 +2,9 @@ import { redirect } from 'next/navigation';
 import Link from 'next/link';
 import { resolveServerSession } from '@/lib/server-session';
 import { getWorkerDetail, helsinkiToday, assignmentEndDateDefaults } from '@/lib/workers';
+import { getWorkerAssignmentCard } from '@/lib/assignment-card';
 import { NewAssignmentForm } from '@/app/admin/assignments/new/NewAssignmentForm';
-import { EndAssignmentAction } from '@/app/admin/assignments/EndAssignmentAction';
-import { ChangeAssignmentAction } from '@/app/admin/assignments/ChangeAssignmentAction';
+import { WorkplaceNowSection, ScheduledChangesSection, PastAssignmentsSection } from './WorkplaceSections';
 import { WorkerActions } from './WorkerActions';
 import { RecoveryCodeIssuer } from '@/components/account/RecoveryCodeIssuer';
 import { WorkerSubmissionScheduleForm } from './WorkerSubmissionScheduleForm';
@@ -57,11 +57,16 @@ export default async function WorkerDetailPage({ params }: { params: Promise<{ e
     );
   }
 
-  const [submissionSchedule, profile, endDateDefaults] = await Promise.all([
+  const [submissionSchedule, profile, assignmentCard] = await Promise.all([
     getWorkerSubmissionScheduleView(employeeId),
     getEmployeeProfileView(employeeId, false),
-    assignmentEndDateDefaults(worker.currentAssignments.map((assignment) => assignment.assignmentId))
+    getWorkerAssignmentCard(employeeId)
   ]);
+  const endDateDefaults = Object.fromEntries(
+    await assignmentEndDateDefaults(assignmentCard.currentAssignments.map((a) => a.assignmentId))
+  );
+  const todayIso = helsinkiToday().toISOString().slice(0, 10);
+  const tomorrowIso = new Date(helsinkiToday().getTime() + 86400000).toISOString().slice(0, 10);
   const safetyCard = profile?.qualifications.find((q) => q.definitionCode === 'OCCUPATIONAL_SAFETY_CARD') ?? null;
   const hotWorkCard = profile?.qualifications.find((q) => q.definitionCode === 'HOT_WORK_CARD') ?? null;
   const expiryDates = (profile?.qualifications ?? []).filter((q) => q.expiresOn !== null).sort((a, b) => (a.expiresOn! < b.expiresOn! ? -1 : 1));
@@ -125,74 +130,23 @@ export default async function WorkerDetailPage({ params }: { params: Promise<{ e
           </ul>
         </section>
 
-        <h2 id="worker-assignments">{s.workers.currentAssignments}</h2>
-        {worker.currentAssignments.length === 0 ? (
-          <div className="worker-setup-callout">
-            <p>{s.workers.noAssignment}</p>
-          </div>
-        ) : (
-          <ul className="setup-list">
-            {worker.currentAssignments.map((assignment) => (
-              <li key={assignment.assignmentId} className="setup-item setup-item-column">
-                <span className="setup-label">
-                  <Link href={`/admin/sites/${assignment.siteId}`}>{assignment.siteName}</Link>
-                  {assignment.workAreaId && assignment.workAreaName ? (
-                    <>
-                      {' — '}
-                      <Link href={`/admin/work-areas/${assignment.workAreaId}`}>{assignment.workAreaName}</Link>
-                    </>
-                  ) : null}
-                  {assignment.isPrimary ? ` (${s.common.primary})` : ''}
-                </span>
-                <div className="assignment-actions">
-                  <ChangeAssignmentAction
-                    assignment={{
-                      id: assignment.assignmentId,
-                      siteId: assignment.siteId,
-                      siteName: assignment.siteName,
-                      workAreaId: assignment.workAreaId,
-                      templateId: assignment.templateId
-                    }}
-                    today={helsinkiToday().toISOString().slice(0, 10)}
-                  />
-                  <EndAssignmentAction
-                    assignment={{ id: assignment.assignmentId }}
-                    defaultValidTo={endDateDefaults.get(assignment.assignmentId) ?? helsinkiToday().toISOString().slice(0, 10)}
-                  />
-                </div>
-              </li>
-            ))}
-          </ul>
-        )}
-
-        {worker.pastAssignments.length > 0 ? (
-          <details className="worker-past-assignments">
-            <summary>
-              {ru ? 'Прошлые назначения' : 'Past assignments'} ({worker.pastAssignments.length})
-            </summary>
-            <ul className="setup-list">
-              {worker.pastAssignments.map((assignment) => (
-                <li key={assignment.assignmentId} className="setup-item">
-                  <span className="setup-label">
-                    {assignment.siteName}
-                    {assignment.workAreaName ? ` — ${assignment.workAreaName}` : ''}
-                  </span>
-                  <span className="setup-subtitle">
-                    {assignment.validFrom} → {assignment.validTo}
-                  </span>
-                </li>
-              ))}
-            </ul>
-          </details>
-        ) : null}
+        <WorkplaceNowSection
+          card={assignmentCard}
+          today={todayIso}
+          tomorrow={tomorrowIso}
+          endDateDefaults={endDateDefaults}
+          locale={locale}
+        />
+        <ScheduledChangesSection card={assignmentCard} locale={locale} />
+        <PastAssignmentsSection card={assignmentCard} locale={locale} />
 
         <section className="worker-work-setup">
           <h2>{s.workers.addWork}</h2>
           <p className="setup-subtitle">{s.workers.addWorkHelp}</p>
           <NewAssignmentForm
             initialEmployeeId={worker.id}
-            initialValidFrom={helsinkiToday().toISOString().slice(0, 10)}
-            initialIsPrimary={worker.currentAssignments.length === 0}
+            initialValidFrom={todayIso}
+            initialIsPrimary={assignmentCard.currentAssignments.length === 0}
             returnEmployeeId={worker.id}
             lockEmployee
           />

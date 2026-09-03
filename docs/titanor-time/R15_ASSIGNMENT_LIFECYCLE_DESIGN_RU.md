@@ -493,14 +493,17 @@ ALTER TABLE "SiteAssignment"
 - `lib/assignment-transitions.ts` — запись/чтение `AssignmentTransition`.
 - `app/api/admin/assignments/[assignmentId]/change/route.ts` — переписать на сервис (уже есть).
 - `app/api/admin/assignments/[assignmentId]/remove/route.ts` — новый (замена смысла `/end`).
-- `app/api/admin/assignments/change-preview/route.ts` — read-only резюме до подтверждения.
+- `app/api/admin/assignments/change-preview/route.ts` — read-only резюме до подтверждения. ✅ Deploy B.
+- `lib/assignment-card.ts` — сборка данных карточки (current / scheduled / past / transitions). ✅ Deploy B.
 - `app/api/admin/sites/[siteId]/finish/route.ts` + `.../finish-preview` — завершение объекта.
 - `app/api/admin/sites/[siteId]/work-areas/[workAreaId]/disable-preview` — preflight заказчика.
 - `app/api/admin/assignments/group-change/route.ts` — M.
 - `prisma/migrations/*_add_assignment_lifecycle/` и `*_add_primary_period_exclusion/`.
-- Компоненты карточки работника: `WorkplaceNowSection.tsx`, `ChangeWorkplaceForm.tsx` (замена
-  `ChangeAssignmentAction`), `RemoveFromSiteAction.tsx` (замена `EndAssignmentAction` на карточке),
-  `ScheduledChangesSection.tsx`, `PastAssignmentsSection.tsx`.
+- Компоненты карточки работника (✅ Deploy B): `WorkplaceSections.tsx` (`WorkplaceNowSection` /
+  `ScheduledChangesSection` / `PastAssignmentsSection`), `ChangeWorkplaceForm.tsx` (замена
+  `ChangeAssignmentAction` — удалён), `RemoveFromSiteAction.tsx` (замена `EndAssignmentAction` на
+  карточке; структурные пресеты причины). Пометка перехода в табеле — `getTimesheetCard.transitionMarkers`.
+  Тест `_test-t9-worker-card-b.ts` — P1–P6 через UI.
 - Компоненты объекта/заказчика: `FinishSiteAction.tsx`, `DisableCustomerFlow.tsx`.
 - Тесты: `_test-t9-assignment-lifecycle.ts` (матрица §7), плюс правки WA/CH блоков.
 

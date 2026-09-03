@@ -70,6 +70,32 @@ export default async function AdminTimesheetCardPage({ params }: RouteParams) {
           {localeText(locale, 'Status:', 'Статус:')} {timesheetStatusLabel(card.status, locale)} {card.versionNumber ? localeText(locale, `· version ${card.versionNumber}`, `· версия ${card.versionNumber}`) : ''}
         </p>
 
+        {card.transitionMarkers.length > 0 ? (
+          <div className="worker-setup-callout" aria-label={localeText(locale, 'Workplace changes in this period', 'Смена места работы в этом периоде')}>
+            {card.transitionMarkers.map((m) => (
+              <p key={m.id} className="setup-subtitle">
+                {new Date(m.actedAt).toLocaleString(locale === 'RU' ? 'ru-RU' : 'en-GB', { timeZone: 'Europe/Helsinki' })}:{' '}
+                {m.kind === 'REMOVE'
+                  ? localeText(locale, `removed from ${m.fromLabel ?? '—'}`, `снят с «${m.fromLabel ?? '—'}»`)
+                  : localeText(locale, 'workplace changed', 'место работы изменено')}
+                {m.kind !== 'REMOVE' && (m.fromLabel || m.toLabel) ? (
+                  <>
+                    {' '}
+                    {m.fromLabel ?? '—'} → {m.toLabel ?? '—'}
+                  </>
+                ) : null}
+                {m.openShiftHandling === 'MOVED_TO_NEW'
+                  ? localeText(locale, " — that day's shift moved to the new site", ' — смена этого дня перенесена на новый объект')
+                  : ''}
+                {localeText(locale, ` · effective ${m.effectiveFrom} · by ${m.actorName}`, ` · с ${m.effectiveFrom} · изменил: ${m.actorName}`)}
+              </p>
+            ))}
+            <p className="setup-subtitle">
+              {localeText(locale, 'This note does not change any hours — it explains the day.', 'Эта пометка не меняет часы — она объясняет день.')}
+            </p>
+          </div>
+        ) : null}
+
         {card.days.length === 0 ? (
           <p>{localeText(locale, 'No submitted version yet.', 'Отправленной версии пока нет.')}</p>
         ) : (

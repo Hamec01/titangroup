@@ -1,9 +1,9 @@
 import { Prisma } from '@prisma/client';
-import type { SiteAssignment } from '@prisma/client';
+import type { SiteAssignment, AssignmentTransitionReason } from '@prisma/client';
 import { prisma } from '@/lib/prisma';
 import { createAuditEvent } from '@/lib/audit';
 import { createAssignmentInTx, isExclusionViolation } from '@/lib/assignments';
-import { recordAssignmentTransition, reasonFromFreeText } from '@/lib/assignment-transitions';
+import { recordAssignmentTransition, reasonFromFreeText, reasonFromPreset } from '@/lib/assignment-transitions';
 import { isAssignmentLiveNow } from '@/lib/assignment-lifecycle';
 import {
   acquireEmployeeLifecycleLock,
@@ -53,8 +53,11 @@ export interface RemoveFromSiteInput {
   /** UTC-midnight calendar date the payroll window closes on. Route guarantees
    *  validFrom <= validTo <= existing.validTo (when set). §3.1: normally today. */
   validTo: Date;
-  /** Free-text reason from the current worker-card UI (Deploy B swaps in presets). */
+  /** Free-text reason from the legacy /end UI. */
   reasonText: string | null;
+  /** R15-D7 Deploy B — the worker card's structured reason preset. When set it wins over
+   *  `reasonText` (which is only kept for OTHER). */
+  reasonCode?: AssignmentTransitionReason | null;
   actorUserId: string;
   requestId: string;
 }
@@ -83,7 +86,7 @@ export interface RemoveFromSiteResult {
 export async function removeFromSite(input: RemoveFromSiteInput): Promise<RemoveFromSiteResult | RemoveFromSiteError> {
   const { existing, validTo, actorUserId, requestId } = input;
   const now = new Date();
-  const { reasonCode, reasonText } = reasonFromFreeText(input.reasonText);
+  const { reasonCode, reasonText, endedReason } = reasonFromPreset(input.reasonCode ?? null, input.reasonText);
 
   // Recorded / submitted time on a day AFTER the new end date can't be dropped — surface it as an
   // actionable 409 (same contract as the old /end). Draft *planned* shifts (the auto-materialised
@@ -133,9 +136,9 @@ export async function removeFromSite(input: RemoveFromSiteInput): Promise<Remove
         data: {
           validTo,
           clockInDisabledAt: now,
-          // Match the legacy /end: only overwrite endedReason when a reason was actually given
-          // (it is required whenever ending earlier than planned).
-          ...(reasonText !== null ? { endedReason: reasonText } : {}),
+          // Only overwrite endedReason when a reason was actually given (a preset code or free
+          // text) — it is required whenever ending earlier than planned.
+          ...(endedReason !== null ? { endedReason } : {}),
           version: { increment: 1 }
         }
       });

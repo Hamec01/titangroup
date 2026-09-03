@@ -119,6 +119,7 @@
     { "file": "_test-t9-restart-persistence.ts", "lane": "browser", "note": "T9 restart persistence — Chromium." },
     { "file": "_test-t9-role-matrix.ts", "lane": "browser", "note": "T9 role/permission matrix (UI + HTTP) — Chromium. R02 made the denial checks language-independent." },
     { "file": "_test-t9-setup-lifecycle.ts", "lane": "browser", "note": "T9 setup lifecycle — Chromium." },
+    { "file": "_test-t9-worker-card-b.ts", "lane": "browser", "note": "R15-D7 Deploy B — redesigned worker card (Chromium): unified \"Место работы сейчас\" block, the ONE \"Изменить место работы\" form (site/customer/schedule/primary + today/tomorrow/pick-a-date + preview), open-shift handling, \"Снять с объекта\" reason presets, \"Запланированные изменения\", \"Прошлые назначения\", timesheet transition marker, and P1–P6 driven through the interface." },
     { "file": "_test-t9-setup-ui.ts", "lane": "browser", "note": "T9 setup UI — Chromium." },
     { "file": "_test-worker-dossier-browser-qa.ts", "lane": "browser", "note": "Worker dossier admin UI — Chromium." }
   ]
