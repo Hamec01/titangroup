@@ -1,8 +1,9 @@
 # R15-D7 — Deploy F («Часы заказчику»): отчёт
 
-**Статус:** разработка + disposable-тесты завершены, всё зелёное (browser 9/9, db 64/64, unit 18/18,
-typecheck/lint/build clean). **Production НЕ изменялся.** Ждёт отдельного разрешения владельца.
-Deploy F — последний этап R15-D7 (A→F).
+**Статус:** ✅ **РАЗВЁРНУТО НА PRODUCTION 2026-09-03 ~19:34 UTC** — образ `titanor-time-app:d7f-d216482`,
+**без миграции**, схема 100, простой **≈ 2.6 c** (со 2-й попытки — 1-я оборвалась на баге скрипта и
+авто-откатилась, ~11.5 c, потерь нет; см. §3.1). Разрешение владельца — 2026-09-03. Итог — §6.
+Deploy F закрывает R15-D7 (A→F).
 
 Ветка `feature/titanor-time-foundation`. **Миграции нет** (`WorkArea` уже несёт `workAreaId` на
 `WorkSegment` / `TimesheetDraftSegment` с Миграции 1). Схема остаётся **100**.
@@ -169,3 +170,39 @@ follow-up review (§2.1) ветка сдвинулась до `d216482` и об�
 
 ## 5. Что НЕ входит
 - Ничего — Deploy F закрывает R15-D7 (A→F).
+
+---
+
+## 6. Production deploy — выполнено 2026-09-03
+
+**Разрешение владельца:** «Ок на d7f-d216482, делай swap. Больше коммитов не будет; деплой строго с
+d216482. Разрешаю только web-only docker stop/rename/run для titanor-time-prod-app, без миграций,
+scheduler/Caddy/DNS/БД не менять.»
+
+### Хронология
+| шаг | детали |
+|---|---|
+| Образ | `titanor-time-app:d7f-d216482` (`org.opencontainers.image.revision=d216482`; runtime = коммит `d216482`, ops-коммиты `9e70e07`/`defa11f` в образ не входят). |
+| Backup | `production-20260903T175352Z-pre-deploy` (on+off-box), `restore-test` **13/13**. 2399 строк, 100 миграций. |
+| Кандидат `:3198` | `d7f-d216482` против реальной prod-БД: `/api/ready` 200 `current 100/100`, healthy, лог чистый; `/login` 200, `/reset-password` 200, `/admin/reports/customer` 307, scope API 401. **Только read-only.** |
+| **Попытка 1** | 19:08Z, образ `d7f-18c2091`. Оборвалась на баге `curl`-под-`set -e` в упрочнённом скрипте; EXIT-trap вернул `d7e-5cce319` (19:08:58→19:09:10Z, **~11.5 c** 503). Потерь нет. Причина исправлена в `d216482`, образ пересобран как `d7f-d216482`. |
+| **Web-only swap (попытка 2)** | `bash ops/titanor-time/r15-d7/deploy-f-swap.sh`. T0 `docker stop -t 30` **19:34:00.875Z** → остановлен 19:34:01.492Z → `docker rename → titanor-time-prod-app-pre-d216482` → `docker run` новый (идентичная конфигурация) 19:34:02.360Z → **`/api/ready` 200 в 19:34:04.128Z**. **Простой ≈ 2.6 c.** |
+| Health | `healthy` через ~45 c. |
+
+### Пост-swap проверки — только read-only (live prod, через Caddy)
+- `/api/ready` → **200 `current 100/100`** (локально и через Caddy);
+- `/login` 200, `/reset-password` 200, `/worker` 307, `/admin` 307, `/admin/reports/customer` 307, `/admin/reports/sites` 307;
+- `GET /api/admin/reports/customer/scope?action=search` без сессии → **401** (роут на месте, права требуются);
+- неверные креды → `INVALID_CREDENTIALS` (чистый отказ, не 500);
+- лог приложения после swap — **чистый** (только строки старта Next.js);
+- scheduler (`r14-release-1416503`) — **не трогали**, тикает каждую минуту, `runnerOutcome: ok`, `failed: 0` (тик в 19:34:03Z во время свапа прошёл).
+- **Никаких write на production не выполнялось.**
+
+### Что НЕ менялось
+Схема (100), БД, scheduler, Caddy, DNS, пароли, публичный сайт, backup+gps таймеры.
+
+### Rollback
+Контейнер **`titanor-time-prod-app-pre-d216482` (образ `d7e-5cce319`)** сохранён.
+`bash ops/titanor-time/r15-d7/deploy-f-rollback.sh` — revert образа (~3 c), **без отката схемы**
+(миграций не было). Backup `production-20260903T175352Z-pre-deploy` (on+off-box). Держать контейнер
++ backup до owner sign-off всего R15-D7.
