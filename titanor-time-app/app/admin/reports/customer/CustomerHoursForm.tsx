@@ -90,15 +90,17 @@ export function CustomerHoursForm({ locale }: { locale: AppLocale }) {
 
   const pushSelection = useCallback(
     (next: { dateFrom?: string; dateTo?: string; waIds?: string[]; noCustomer?: boolean; workersAll?: boolean; workerIds?: Set<string> }) => {
-      const p = new URLSearchParams(searchParams.toString());
+      // Base off the LIVE URL, not the (possibly stale between rapid router.replace calls)
+      // useSearchParams snapshot — otherwise two quick edits drop each other's params.
+      const p = new URLSearchParams(typeof window !== 'undefined' ? window.location.search : searchParams.toString());
       const set = (k: string, v: string | null) => (v ? p.set(k, v) : p.delete(k));
       if (next.dateFrom !== undefined) set('dateFrom', next.dateFrom || null);
       if (next.dateTo !== undefined) set('dateTo', next.dateTo || null);
       if (next.waIds !== undefined) set('waIds', next.waIds.length ? next.waIds.join(',') : null);
       if (next.noCustomer !== undefined) set('noCustomer', next.noCustomer ? '1' : null);
       if (next.workersAll !== undefined || next.workerIds !== undefined) {
-        const all = next.workersAll ?? urlWorkersAll;
-        const ids = next.workerIds ?? urlWorkerIds;
+        const all = next.workersAll ?? (p.get('workers') === 'all' || !p.get('workerIds'));
+        const ids = next.workerIds ?? new Set((p.get('workerIds') ?? '').split(',').filter(Boolean));
         if (all || ids.size === 0) {
           p.set('workers', 'all');
           p.delete('workerIds');
@@ -109,7 +111,7 @@ export function CustomerHoursForm({ locale }: { locale: AppLocale }) {
       }
       router.replace(`${pathname}?${p.toString()}`, { scroll: false });
     },
-    [pathname, router, searchParams, urlWorkersAll, urlWorkerIds]
+    [pathname, router, searchParams]
   );
 
   // ── customer search ─────────────────────────────────────────────────────────────────────────

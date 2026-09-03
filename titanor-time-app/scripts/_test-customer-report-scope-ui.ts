@@ -76,15 +76,26 @@ async function main(): Promise<void> {
   const page = await ctx.newPage();
   page.on('console', (m: ConsoleMessage) => m.type() === 'error' && consoleErrors.push(m.text()));
   page.on('pageerror', (e) => consoleErrors.push(String(e)));
+  page.on('response', async (r) => {
+    if (r.url().includes('/reports/customer/scope') && r.url().includes('preview')) {
+      console.log('  [scope preview]', r.status(), (await r.text()).slice(0, 400));
+    }
+  });
   await login(page, fx.admin.username, fx.admin.password);
 
   await page.goto(`${BASE}/admin/reports/customer`, { waitUntil: 'networkidle' });
   check('page: heading renders, no free-text customer input', await page.locator('h1').first().isVisible() && (await page.locator('input[name="customer"]').count()) === 0);
 
   await page.locator('#ch-from').fill('2099-09-07');
+  await page.waitForTimeout(150);
   await page.locator('#ch-to').fill('2099-09-13');
+  await page.waitForTimeout(150);
+  await page.waitForFunction(() => {
+    const s = new URL(location.href).searchParams;
+    return s.get('dateFrom') === '2099-09-07' && s.get('dateTo') === '2099-09-13';
+  }, undefined, { timeout: 4000 });
   await page.locator('#ch-customer-search').fill(`Aros Marine ${run}`);
-  await page.waitForTimeout(500);
+  await page.waitForTimeout(600);
   const arosRow = page.locator(`[data-testid="ch-customer-results"] input[data-wa="${waAros.id}"]`);
   await arosRow.waitFor({ timeout: 6000 });
   check('search: "Aros Marine" finds the Aros customer', (await arosRow.count()) === 1);
