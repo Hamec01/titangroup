@@ -80,11 +80,14 @@ export async function resolveCustomerReadiness(params: CustomerReadinessParams):
       employee: { select: { firstName: true, lastName: true, employeeNumber: true } },
       currentVersion: {
         select: {
-          workSegments: { where: dateWindow, select: { siteId: true, workAreaId: true }, take: 200 },
+          // Do not cap this relation: readiness must see every segment in the customer scope.
+          // A cap could hide a selected customer's later segment in a highly fragmented timesheet
+          // and incorrectly allow a FINAL export while that timesheet is still in review.
+          workSegments: { where: dateWindow, select: { siteId: true, workAreaId: true } },
           days: { select: { id: true }, take: 1 }
         }
       },
-      draft: { select: { timesheetDraftSegments: { where: dateWindow, select: { siteId: true, workAreaId: true }, take: 200 } } }
+      draft: { select: { timesheetDraftSegments: { where: dateWindow, select: { siteId: true, workAreaId: true } } } }
     }
   });
 
