@@ -157,7 +157,7 @@ async function main() {
   });
   check('E3a: batch with one conflicting worker → 409 BATCH_CONFLICT (ASSIGNMENT_OVERLAP)', bad.status === 409 && bad.body?.error?.code === 'BATCH_CONFLICT' && bad.body?.error?.conflict === 'ASSIGNMENT_OVERLAP', bad.body);
   check('E3b: whole batch rolled back — the OTHER worker was NOT transferred', (await liveOn(w4, dst)) === before4 && (await asg(a4)).validTo === null);
-  check('E3c: no GROUP_CHANGE transitions written for the failed batch', (await prisma.assignmentTransition.count({ where: { fromAssignmentId: { in: [a4, a5] } } })) === 0);
+  check('E3c: no GROUP_CHANGE transitions written for the failed batch', (await prisma.assignmentTransition.count({ where: { fromAssignmentId: { in: [a4, a5] }, kind: 'GROUP_CHANGE' } })) === 0);
 
   // ── E4 — target-site L guard ──────────────────────────────────────────────────────────────
   const finished = await mkSite('finished');
