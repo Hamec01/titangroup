@@ -86,9 +86,10 @@ async function main(): Promise<void> {
   await page.locator('#ch-customer-search').fill(`Aros Marine ${run}`);
   await page.waitForTimeout(500);
   const arosRow = page.locator(`[data-testid="ch-customer-results"] input[data-wa="${waAros.id}"]`);
+  await arosRow.waitFor({ timeout: 6000 });
   check('search: "Aros Marine" finds the Aros customer', (await arosRow.count()) === 1);
-  await arosRow.check();
-  await page.waitForFunction(() => new URL(location.href).searchParams.get('waIds') !== null, undefined, { timeout: 4000 });
+  await arosRow.click();
+  await page.waitForFunction((id) => (new URL(location.href).searchParams.get('waIds') ?? '').includes(id), waAros.id, { timeout: 5000 });
   check('URL carries waIds after selecting a customer', (await page.evaluate(() => new URL(location.href).searchParams.get('waIds')))?.includes(waAros.id) ?? false);
 
   // per-customer card
@@ -104,23 +105,24 @@ async function main(): Promise<void> {
   check('worker list: NO Meyer worker leaks into the Aros report', !(await page.locator('[data-testid="ch-worker-table"]').innerText()).includes(`FQA-${run}-24`));
 
   // select-all + go to page 2 -> selection persists across pages
-  await page.getByRole('button', { name: /Select all|Выбрать всех/ }).first().click();
-  await page.getByRole('button', { name: '›' }).click();
+  await page.locator('fieldset', { has: page.locator('[data-testid="ch-worker-table"]') }).getByRole('button', { name: 'Select all', exact: true }).click();
+  await page.getByRole('button', { name: '›', exact: true }).click();
   await page.waitForTimeout(300);
   const page2Checked = await page.locator('[data-testid="ch-worker-table"] tbody input[type=checkbox]:checked').count();
   const page2Total = await page.locator('[data-testid="ch-worker-table"] tbody tr').count();
   check('worker selection persists onto page 2 (all checked)', page2Checked === page2Total && page2Total === 2, { page2Checked, page2Total });
 
   // export gate: with an active customer + all FINAL, PDF is allowed
-  const pdfLink = page.getByRole('link', { name: /Download PDF|Скачать PDF/ });
-  check('export: Download PDF enabled (customer chosen, all final-approved)', (await pdfLink.getAttribute('aria-disabled')) !== 'true');
+  const pdfLink = page.locator('[data-testid="ch-pdf"]');
+  check('export: Download PDF enabled (customer chosen, all final-approved)', (await pdfLink.getAttribute('aria-disabled')) === 'false');
+  check('export: the PDF href targets mode=FINAL', ((await pdfLink.getAttribute('href')) ?? '').includes('mode=FINAL'));
 
   // add the "no customer" internal toggle -> client PDF must be blocked
-  await page.getByLabel(/no customer|без заказчика/i).check();
+  await page.locator('label', { hasText: /no customer|без заказчика/i }).locator('input[type=checkbox]').click();
+  await page.waitForTimeout(500);
+  check('export: after "no customer" toggle the client PDF is blocked with a reason', (await pdfLink.getAttribute('aria-disabled')) === 'true' && (await page.locator('[data-testid="ch-export-blocked"]').innerText()).length > 0);
+  await page.locator('label', { hasText: /no customer|без заказчика/i }).locator('input[type=checkbox]').click();
   await page.waitForTimeout(400);
-  check('export: after "no customer" toggle the client PDF is blocked with a reason', (await pdfLink.getAttribute('aria-disabled')) === 'true' && (await page.locator('.login-error').innerText()).length > 0);
-  await page.getByLabel(/no customer|без заказчика/i).uncheck();
-  await page.waitForTimeout(300);
 
   // CSV / PDF minutes agree with the UI: fetch the CSV, check the GRAND/CUSTOMER total
   const waIds = await page.evaluate(() => new URL(location.href).searchParams.get('waIds'));
@@ -141,14 +143,15 @@ async function main(): Promise<void> {
   await page.waitForSelector('[data-testid="ch-customer-card"]', { timeout: 8000 });
   check('Back: returns to the customer report with the selection intact', (await page.evaluate(() => new URL(location.href).searchParams.get('waIds')))?.includes(waAros.id) ?? false);
 
-  // RU/EN: the same page in Russian
-  const ctxRu = await browser.newContext({ viewport: DESKTOP, extraHTTPHeaders: {} });
+  // RU/EN: the same page in Russian (NEXT_LOCALE cookie)
+  const ctxRu = await browser.newContext({ viewport: DESKTOP });
   const ruPage = await ctxRu.newPage();
   await login(ruPage, fx.admin.username, fx.admin.password);
-  await ruPage.evaluate(() => localStorage.setItem('tt.locale', 'RU'));
+  const origin = new URL(BASE);
+  await ctxRu.addCookies([{ name: 'NEXT_LOCALE', value: 'RU', domain: origin.hostname, path: '/' }]);
   await ruPage.goto(`${BASE}/admin/reports/customer?dateFrom=2099-09-07&dateTo=2099-09-13&waIds=${waAros.id}`, { waitUntil: 'networkidle' });
   const ruText = await ruPage.locator('body').innerText();
-  check('RU: key labels are Russian ("Заказчик" / "Часы")', ruText.includes('Заказчик') && (ruText.includes('Часы') || ruText.includes('часов')), ruText.slice(0, 120));
+  check('RU: key labels are Russian ("Заказчик" / "Часы заказчику")', ruText.includes('Заказчик') && ruText.includes('Часы заказчику'), ruText.slice(0, 160));
   await ctxRu.close();
 
   check('no console errors on the customer report page', consoleErrors.length === 0, consoleErrors.slice(0, 3));

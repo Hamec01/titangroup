@@ -131,8 +131,17 @@ export function CustomerHoursForm({ locale }: { locale: AppLocale }) {
     };
   }, [query]);
 
-  // resolve the labels for waIds already in the URL (so a reloaded page shows the chips)
+  // Keep the chip/label map in sync with the URL (reload, Back/Forward, shared link). Prune ids the
+  // URL no longer has; fetch the labels for any it gained that we don't know yet.
   useEffect(() => {
+    setSelectedLabels((prev) => {
+      const kept = new Map<string, WorkAreaOption>();
+      for (const id of urlWaIds) {
+        const known = prev.get(id);
+        if (known) kept.set(id, known);
+      }
+      return kept.size === prev.size && urlWaIds.every((id) => kept.has(id)) ? prev : kept;
+    });
     const missing = urlWaIds.filter((id) => !selectedLabels.has(id));
     if (missing.length === 0) return;
     fetch(`/api/admin/reports/customer/scope?action=search&q=`, { credentials: 'same-origin' })
@@ -334,7 +343,8 @@ export function CustomerHoursForm({ locale }: { locale: AppLocale }) {
 
         <ul className="setup-list" data-testid="ch-customer-results">
           {results.map((w) => {
-            const sel = urlWaIds.includes(w.workAreaId);
+            // reflect the optimistic local selection immediately (the URL round-trip is async)
+            const sel = selectedLabels.has(w.workAreaId) || urlWaIds.includes(w.workAreaId);
             return (
               <li key={w.workAreaId} className="setup-item">
                 <label style={{ fontWeight: sel ? 700 : 400 }}>
@@ -474,25 +484,29 @@ export function CustomerHoursForm({ locale }: { locale: AppLocale }) {
           {/* downloads */}
           <fieldset>
             <legend>{t('Download', 'Скачать')}</legend>
-            {exportBlockedReason ? <p className="login-error">{exportBlockedReason}</p> : null}
+            {exportBlockedReason ? <p className="login-error" data-testid="ch-export-blocked">{exportBlockedReason}</p> : null}
             <div className="activation-actions">
               <a
+                data-testid="ch-pdf"
                 className="setup-action"
-                aria-disabled={!!exportBlockedReason}
-                href={exportBlockedReason ? undefined : exportHref('PDF', 'FINAL')}
-                style={exportBlockedReason ? { pointerEvents: 'none', opacity: 0.5 } : undefined}
+                aria-disabled={exportBlockedReason ? 'true' : 'false'}
+                href={exportBlockedReason ? exportHref('PDF', 'PREVIEW') : exportHref('PDF', 'FINAL')}
+                onClick={(e) => exportBlockedReason && e.preventDefault()}
+                style={exportBlockedReason ? { opacity: 0.5 } : undefined}
               >
                 {t('Download PDF', 'Скачать PDF')}
               </a>
               <a
+                data-testid="ch-csv"
                 className="setup-action"
-                aria-disabled={!!exportBlockedReason}
-                href={exportBlockedReason ? undefined : exportHref('CSV', 'FINAL')}
-                style={exportBlockedReason ? { pointerEvents: 'none', opacity: 0.5 } : undefined}
+                aria-disabled={exportBlockedReason ? 'true' : 'false'}
+                href={exportBlockedReason ? exportHref('CSV', 'PREVIEW') : exportHref('CSV', 'FINAL')}
+                onClick={(e) => exportBlockedReason && e.preventDefault()}
+                style={exportBlockedReason ? { opacity: 0.5 } : undefined}
               >
                 {t('Download CSV', 'Скачать CSV')}
               </a>
-              <a className="login-submit" href={exportHref('PDF', 'PREVIEW')}>
+              <a className="login-submit" data-testid="ch-preview-pdf" href={exportHref('PDF', 'PREVIEW')}>
                 {t('Internal preview PDF', 'Внутренний предпросмотр PDF')}
               </a>
             </div>
