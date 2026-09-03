@@ -108,8 +108,11 @@ async function mkEmployee(tag: string) {
   await prisma.employment.create({ data: { employeeId: emp.id, active: true, startDate: ASG_START } });
   return emp;
 }
-async function mkAssignment(employeeId: string, siteId: string, adminId: string, validFrom: Date, validTo: Date | null) {
-  return prisma.siteAssignment.create({ data: { employeeId, siteId, isPrimary: true, validFrom, validTo, assignedByUserId: adminId } });
+// Migration 100 (ex_site_assignment_one_primary_per_period) forbids two overlapping isPrimary rows
+// for one worker. The scope resolver reads assignments/segments regardless of primary-ness, so a
+// worker's 2nd concurrent-site assignment is created non-primary.
+async function mkAssignment(employeeId: string, siteId: string, adminId: string, validFrom: Date, validTo: Date | null, isPrimary = true) {
+  return prisma.siteAssignment.create({ data: { employeeId, siteId, isPrimary, validFrom, validTo, assignedByUserId: adminId } });
 }
 /** A submitted-then-final timesheet with one WORK day (07:00–15:00) -> a real WorkSegment on `site`. */
 async function mkWorkedTimesheet(adminId: string, employeeId: string, siteId: string, assignmentId: string, dayBase: Date) {
@@ -152,7 +155,7 @@ async function main() {
   // W3 — on BOTH: assigned to A (open, no hours there) + has hours on B
   const w3 = await mkEmployee('W3');
   await mkAssignment(w3.id, siteA.id, admin, ASG_START, null);
-  const a3b = await mkAssignment(w3.id, siteB.id, admin, ASG_START, null);
+  const a3b = await mkAssignment(w3.id, siteB.id, admin, ASG_START, null, false); // 2nd concurrent site — non-primary
   await mkWorkedTimesheet(admin, w3.id, siteB.id, a3b.id, dayBase);
 
   // W4 — HISTORICAL: assignment to A ends mid-range (validTo 2098-06-04 < dateTo 2098-06-07), worked
