@@ -5,7 +5,7 @@ import { hasPermission } from '@/lib/permissions';
 import { getWorkAreaDetail } from '@/lib/work-areas';
 import { resolveAppLocale } from '@/lib/i18n/server';
 import { localeText } from '@/lib/i18n/locale';
-import { WorkAreaToggle } from './WorkAreaToggle';
+import { DisableCustomerFlow } from './DisableCustomerFlow';
 
 export const dynamic = 'force-dynamic';
 
@@ -97,13 +97,13 @@ export default async function WorkAreaDetailPage({ params }: { params: Promise<{
             <p className="setup-subtitle">
               {area.active
                 ? ru
-                  ? 'Когда работа для этого заказчика закончена — отключите его. Ничего не удаляется, он просто пропадает из выбора при назначении.'
-                  : 'When the work for this customer is done, deactivate it. Nothing is deleted — it just disappears from the assignment picker.'
+                  ? 'Когда работа для этого заказчика закончена — отключите его. Если на нём есть работники, система покажет их и спросит, что с ними сделать. Ничего не удаляется.'
+                  : 'When the work for this customer is done, disable it. If it still has workers, you’ll see them and choose what happens to them. Nothing is deleted.'
                 : ru
-                  ? 'Заказчик отключён — его нельзя выбрать для новых назначений. Включите, чтобы снова им пользоваться.'
-                  : 'This customer is inactive — it can\'t be chosen for new assignments. Reactivate it to use it again.'}
+                  ? 'Заказчик отключён — его нельзя выбрать для новых назначений. Включите, чтобы снова им пользоваться (назначения не восстанавливаются).'
+                  : 'This customer is disabled — it can\'t be chosen for new assignments. Reactivate it to use it again (assignments are not restored).'}
             </p>
-            <WorkAreaToggle workArea={{ id: area.id, siteId: area.site.id, name: area.name, active: area.active, version: area.version }} />
+            <DisableCustomerFlow workArea={{ id: area.id, siteId: area.site.id, name: area.name, active: area.active }} />
           </section>
         ) : null}
       </div>

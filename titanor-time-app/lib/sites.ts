@@ -133,6 +133,13 @@ export interface SiteDetail {
   address: string | null;
   description: string | null;
   active: boolean;
+  // R15-D7 Deploy C (§3.8) — a finished site keeps active=false; finishedAt records when. The
+  // status the site page shows: 'active' | 'finishing' (finished but some worker still on an open
+  // shift) | 'finished' (0 open shifts). `stuckOpenShifts` are the workers holding it in
+  // 'finishing' so the admin can fix / force-close them.
+  finishedAt: string | null;
+  finishingState: 'active' | 'finishing' | 'finished';
+  stuckOpenShifts: { employeeId: string; employeeName: string; openedAt: string }[];
   // T14 (2026-08-29) — when true, an offline GPS_NOT_VERIFIED with no coordinate at all (plain
   // TIMEOUT / POSITION_UNAVAILABLE) at this site is auto-acknowledged on ingestion instead of
   // joining the review queue. For sites where the phone reliably can't get a fix (ship hulls,
@@ -163,12 +170,16 @@ export async function getSiteDetail(siteId: string): Promise<SiteDetail | null> 
       address: true,
       description: true,
       active: true,
+      finishedAt: true,
       gpsOftenUnavailable: true,
       defaultForemanUserId: true,
       defaultForemanUser: { select: { username: true } },
       version: true,
       createdAt: true,
       updatedAt: true,
+      employeeOpenShifts: {
+        select: { openedAt: true, employee: { select: { id: true, firstName: true, lastName: true } } }
+      },
       workAreas: {
         orderBy: { name: 'asc' },
         select: { id: true, name: true, active: true, version: true }
@@ -200,6 +211,13 @@ export async function getSiteDetail(siteId: string): Promise<SiteDetail | null> 
     return null;
   }
 
+  const isFinished = site.finishedAt !== null || !site.active;
+  const finishingState: SiteDetail['finishingState'] = !isFinished
+    ? 'active'
+    : site.employeeOpenShifts.length > 0
+      ? 'finishing'
+      : 'finished';
+
   return {
     id: site.id,
     name: site.name,
@@ -207,6 +225,16 @@ export async function getSiteDetail(siteId: string): Promise<SiteDetail | null> 
     address: site.address,
     description: site.description,
     active: site.active,
+    finishedAt: site.finishedAt ? site.finishedAt.toISOString() : null,
+    finishingState,
+    stuckOpenShifts:
+      finishingState === 'finishing'
+        ? site.employeeOpenShifts.map((s) => ({
+            employeeId: s.employee.id,
+            employeeName: `${s.employee.firstName} ${s.employee.lastName}`,
+            openedAt: s.openedAt.toISOString()
+          }))
+        : [],
     gpsOftenUnavailable: site.gpsOftenUnavailable,
     defaultForemanUserId: site.defaultForemanUserId,
     defaultForemanUsername: site.defaultForemanUser?.username ?? null,

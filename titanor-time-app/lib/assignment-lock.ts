@@ -60,6 +60,18 @@ export class ScheduledPrimaryConflictError extends Error {
   }
 }
 
+/**
+ * R15-D7 Deploy C (§3.13 L) — thrown from createAssignmentInTx when the target site is finished
+ * (`finishedAt` set / `active=false`) or the target customer is disabled (`active=false`). The
+ * route maps it to 409 SITE_FINISHED / CUSTOMER_DISABLED. Enforced in the tx, not only the picker.
+ */
+export class SiteOrCustomerUnavailableError extends Error {
+  constructor(public code: 'SITE_FINISHED' | 'CUSTOMER_DISABLED') {
+    super(code);
+    this.name = 'SiteOrCustomerUnavailableError';
+  }
+}
+
 /** ex_site_assignment_one_primary_per_period is a Postgres EXCLUDE constraint (SQLSTATE 23P01);
  *  Prisma has no typed code for it — match SQLSTATE + the constraint name in the raw message. */
 export function isPrimaryPeriodConflict(error: unknown): boolean {

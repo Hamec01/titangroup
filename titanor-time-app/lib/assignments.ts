@@ -7,7 +7,8 @@ import {
   acquireEmployeeLifecycleLock,
   overlappingPrimaryWhere,
   isPrimaryPeriodConflict,
-  ScheduledPrimaryConflictError
+  ScheduledPrimaryConflictError,
+  SiteOrCustomerUnavailableError
 } from '@/lib/assignment-lock';
 import { recordAssignmentTransition } from '@/lib/assignment-transitions';
 import { helsinkiToday } from '@/lib/workers';
@@ -76,7 +77,11 @@ export type CreateAssignmentError =
   | { code: 'EMPLOYEE_NOT_ACTIVE' }
   | { code: 'ASSIGNMENT_OVERLAP'; conflictingAssignmentId: string }
   | { code: 'PRIMARY_PERIOD_CONFLICT' }
-  | { code: 'SCHEDULED_PRIMARY_CONFLICT'; scheduledAssignmentId: string; scheduledValidFrom: string };
+  | { code: 'SCHEDULED_PRIMARY_CONFLICT'; scheduledAssignmentId: string; scheduledValidFrom: string }
+  // R15-D7 Deploy C (§3.13 L) — a finished site / disabled customer cannot take a new assignment
+  // even by a direct API call.
+  | { code: 'SITE_FINISHED' }
+  | { code: 'CUSTOMER_DISABLED' };
 
 export interface CreateAssignmentResult {
   id: string;
@@ -129,6 +134,19 @@ export async function createAssignmentInTx(
    *  demoted only because `replaceScheduledPrimary` was set — its assignment is NOT cancelled. */
   demotedScheduledPrimaryIds: string[];
 }> {
+  // R15-D7 Deploy C (§3.13 L) — a finished site (finishedAt set / active=false) or a disabled
+  // customer (active=false) never takes a new assignment, even from changeWorkplace inside a tx.
+  const targetSite = await tx.workSite.findUnique({ where: { id: params.siteId }, select: { active: true, finishedAt: true } });
+  if (!targetSite || targetSite.finishedAt !== null || !targetSite.active) {
+    throw new SiteOrCustomerUnavailableError('SITE_FINISHED');
+  }
+  if (params.workAreaId !== null) {
+    const targetArea = await tx.workArea.findFirst({ where: { id: params.workAreaId, siteId: params.siteId }, select: { active: true } });
+    if (!targetArea || !targetArea.active) {
+      throw new SiteOrCustomerUnavailableError('CUSTOMER_DISABLED');
+    }
+  }
+
   // R15-D7 Deploy D2 (§3.6) — "≤1 primary per OVERLAPPING period". Before making the new row
   // primary, demote every OTHER non-removed primary of this employee whose date range OVERLAPS the
   // new one's. A CURRENT primary and a disjoint SCHEDULED FUTURE primary stay both primary — only
@@ -306,15 +324,23 @@ export async function createAssignment(
     return { code: 'EMPLOYEE_NOT_ACTIVE' };
   }
 
-  const site = await prisma.workSite.findUnique({ where: { id: input.siteId }, select: { id: true } });
+  const site = await prisma.workSite.findUnique({ where: { id: input.siteId }, select: { id: true, active: true, finishedAt: true } });
   if (!site) {
     return { code: 'SITE_NOT_FOUND' };
   }
+  // §3.13 L — a finished site (finishedAt set, or active=false from the legacy D5 toggle) rejects
+  // any new assignment. The server enforces it, not just the picker.
+  if (site.finishedAt !== null || !site.active) {
+    return { code: 'SITE_FINISHED' };
+  }
 
   if (input.workAreaId !== null) {
-    const workArea = await prisma.workArea.findFirst({ where: { id: input.workAreaId, siteId: input.siteId }, select: { id: true } });
+    const workArea = await prisma.workArea.findFirst({ where: { id: input.workAreaId, siteId: input.siteId }, select: { id: true, active: true } });
     if (!workArea) {
       return { code: 'WORK_AREA_NOT_FOUND' };
+    }
+    if (!workArea.active) {
+      return { code: 'CUSTOMER_DISABLED' };
     }
   }
 

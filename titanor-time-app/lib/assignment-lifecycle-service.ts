@@ -9,7 +9,8 @@ import {
   acquireEmployeeLifecycleLock,
   overlappingPrimaryWhere,
   isPrimaryPeriodConflict,
-  ScheduledPrimaryConflictError
+  ScheduledPrimaryConflictError,
+  SiteOrCustomerUnavailableError
 } from '@/lib/assignment-lock';
 import { helsinkiToday, earliestAssignmentEndDate } from '@/lib/workers';
 
@@ -214,7 +215,9 @@ export type ChangeWorkplaceError =
   | { code: 'ASSIGNMENT_OVERLAP' }
   | { code: 'ASSIGNMENT_HAS_RECORDED_TIME' }
   | { code: 'PRIMARY_PERIOD_CONFLICT' }
-  | { code: 'SCHEDULED_PRIMARY_CONFLICT'; scheduledAssignmentId: string; scheduledValidFrom: string };
+  | { code: 'SCHEDULED_PRIMARY_CONFLICT'; scheduledAssignmentId: string; scheduledValidFrom: string }
+  | { code: 'SITE_FINISHED' }
+  | { code: 'CUSTOMER_DISABLED' };
 
 export interface ChangeWorkplaceResult {
   closedAssignmentId: string;
@@ -407,6 +410,9 @@ export async function changeWorkplace(input: ChangeWorkplaceInput): Promise<Chan
         scheduledAssignmentId: error.scheduledAssignmentId,
         scheduledValidFrom: error.scheduledValidFrom.toISOString().slice(0, 10)
       };
+    }
+    if (error instanceof SiteOrCustomerUnavailableError) {
+      return { code: error.code };
     }
     if (isExclusionViolation(error)) {
       return { code: 'ASSIGNMENT_OVERLAP' };

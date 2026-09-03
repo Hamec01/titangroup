@@ -40,9 +40,17 @@ export function WorkAreaList({ workAreas, canManage }: { workAreas: WorkAreaItem
         return;
       }
       const body = (await response.json().catch(() => null)) as { error?: { code?: string } } | null;
-      setErrorMessage(body?.error?.code === 'VERSION_CONFLICT'
-        ? localeText(locale, 'This customer changed elsewhere — reload and try again.', 'Заказчик изменён в другом окне — обновите страницу и повторите.')
-        : localeText(locale, 'The customer could not be updated. Please try again.', 'Не удалось изменить заказчика. Повторите попытку.'));
+      setErrorMessage(
+        body?.error?.code === 'VERSION_CONFLICT'
+          ? localeText(locale, 'This customer changed elsewhere — reload and try again.', 'Заказчик изменён в другом окне — обновите страницу и повторите.')
+          : body?.error?.code === 'CUSTOMER_HAS_WORKERS'
+            ? localeText(
+                locale,
+                'This customer still has assigned workers — open the customer to choose what happens to them.',
+                'На заказчике ещё есть назначенные работники — откройте заказчика, чтобы выбрать, что с ними делать.'
+              )
+            : localeText(locale, 'The customer could not be updated. Please try again.', 'Не удалось изменить заказчика. Повторите попытку.')
+      );
       if (body?.error?.code === 'VERSION_CONFLICT') router.refresh();
     } catch {
       setErrorMessage(localeText(locale, 'Network error. Please try again.', 'Ошибка сети. Повторите попытку.'));

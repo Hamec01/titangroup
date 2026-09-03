@@ -7,6 +7,7 @@ import { resolveAuthenticatedSession } from '@/lib/auth';
 import { hasPermission } from '@/lib/permissions';
 import { SESSION_COOKIE_NAME } from '@/lib/session';
 import { createAuditEvent } from '@/lib/audit';
+import { helsinkiToday } from '@/lib/workers';
 
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
@@ -80,6 +81,33 @@ export async function PATCH(request: NextRequest, { params }: RouteParams): Prom
       errorBody({ code: 'VALIDATION_ERROR', message: 'Invalid request body.', fieldErrors }, requestId),
       { status: 400, headers: successHeaders(requestId) }
     );
+  }
+
+  // R15-D7 Deploy C (§3.9 / §3.13 L) — a customer with operationally-live or future assignments is
+  // never silently deactivated. The admin must make an explicit decision via
+  // POST /api/admin/sites/:siteId/work-areas/:workAreaId/disable.
+  if (data.active === false) {
+    const today = helsinkiToday();
+    const blocking = await prisma.siteAssignment.count({
+      where: {
+        workAreaId,
+        clockInDisabledAt: null,
+        OR: [
+          { validFrom: { gt: today } },
+          { AND: [{ validFrom: { lte: today } }, { OR: [{ validTo: null }, { validTo: { gte: today } }] }] }
+        ]
+      }
+    });
+    if (blocking > 0) {
+      return jsonError(
+        409,
+        {
+          code: 'CUSTOMER_HAS_WORKERS',
+          message: `This customer has ${blocking} assigned or scheduled worker(s). Open the customer and choose what happens to them (leave on the site with no customer, or remove).`
+        },
+        requestId
+      );
+    }
   }
 
   let updated;

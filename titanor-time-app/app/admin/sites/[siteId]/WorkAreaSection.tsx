@@ -28,6 +28,12 @@ function errorMessageFor(locale: AppLocale, code: string | undefined): string {
       return localeText(locale, 'This customer was changed elsewhere — reloading.', 'Заказчик изменён в другом окне — обновляем страницу.');
     case 'FORBIDDEN':
       return localeText(locale, 'You no longer have permission to manage customers.', 'У вас больше нет права управлять заказчиками.');
+    case 'CUSTOMER_HAS_WORKERS':
+      return localeText(
+        locale,
+        'This customer still has assigned workers. Open the customer page to choose what happens to them.',
+        'На заказчике ещё есть назначенные работники. Откройте страницу заказчика, чтобы выбрать, что с ними делать.'
+      );
     default:
       return localeText(locale, 'Something went wrong. Please try again.', 'Произошла ошибка. Попробуйте ещё раз.');
   }

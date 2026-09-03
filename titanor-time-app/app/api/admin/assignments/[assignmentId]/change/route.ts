@@ -174,14 +174,21 @@ export async function POST(request: NextRequest, { params }: RouteParams): Promi
     );
   }
 
-  const site = await prisma.workSite.findUnique({ where: { id: siteId as string }, select: { id: true, active: true } });
+  const site = await prisma.workSite.findUnique({ where: { id: siteId as string }, select: { id: true, active: true, finishedAt: true } });
   if (!site) {
     return jsonError(404, { code: 'SITE_NOT_FOUND', message: 'siteId does not reference an existing site.' }, requestId);
   }
+  // §3.13 L — cannot move a worker ONTO a finished site (the lifecycle service enforces it too).
+  if (site.finishedAt !== null || !site.active) {
+    return jsonError(409, { code: 'SITE_FINISHED', message: 'This site is finished — assign the worker to an active site.' }, requestId);
+  }
   if (normalizedWorkAreaId !== null) {
-    const workArea = await prisma.workArea.findFirst({ where: { id: normalizedWorkAreaId, siteId: siteId as string }, select: { id: true } });
+    const workArea = await prisma.workArea.findFirst({ where: { id: normalizedWorkAreaId, siteId: siteId as string }, select: { id: true, active: true } });
     if (!workArea) {
       return jsonError(404, { code: 'WORK_AREA_NOT_FOUND', message: 'workAreaId does not reference an existing work area on this site.' }, requestId);
+    }
+    if (!workArea.active) {
+      return jsonError(409, { code: 'CUSTOMER_DISABLED', message: 'This customer is disabled — choose an active customer or leave the worker on the site without one.' }, requestId);
     }
   }
   let templateVersionId: string | null = null;
@@ -338,6 +345,12 @@ export async function POST(request: NextRequest, { params }: RouteParams): Promi
         { code: 'PRIMARY_PERIOD_CONFLICT', message: 'The worker already has a primary assignment covering that period — refresh the card and try again.' },
         requestId
       );
+    }
+    if (result.code === 'SITE_FINISHED') {
+      return jsonError(409, { code: 'SITE_FINISHED', message: 'This site is finished — assign the worker to an active site.' }, requestId);
+    }
+    if (result.code === 'CUSTOMER_DISABLED') {
+      return jsonError(409, { code: 'CUSTOMER_DISABLED', message: 'This customer is disabled — choose an active customer or leave the worker on the site without one.' }, requestId);
     }
     return jsonError(
       409,

@@ -257,6 +257,10 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
             requestId
           )
         );
+      case 'SITE_FINISHED':
+        return respond(409, errorBody({ code: 'SITE_FINISHED', message: 'This site is finished — it cannot take new assignments. Reopen it first, or choose an active site.' }, requestId));
+      case 'CUSTOMER_DISABLED':
+        return respond(409, errorBody({ code: 'CUSTOMER_DISABLED', message: 'This customer is disabled — choose an active customer, or assign to the site without a customer.' }, requestId));
     }
   }
 
