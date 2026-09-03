@@ -1,7 +1,8 @@
 # R15-D7 — Deploy E («Групповой перевод работников»): отчёт
 
-**Статус:** разработка + disposable-тесты завершены. **Production не изменялся.** Ждёт отдельного
-разрешения владельца. Deploy F не начат.
+**Статус:** ✅ **РАЗВЁРНУТО НА PRODUCTION 2026-09-03 ~12:16 UTC** (`titanor-time-app:d7e-5cce319`,
+**без миграции**, схема 100, простой **≈ 4 c**). Разрешение владельца — 2026-09-03. Итог — §6.
+Deploy F (последний этап R15-D7) не начат.
 
 Ветка `feature/titanor-time-foundation`, коммит **`3b75c98`**. Образ `titanor-time-app:d7e-3b75c98`.
 **Миграции нет.** Схема остаётся **100**.
@@ -85,3 +86,34 @@ DNS / пароли / публичный сайт — не трогать. Ожи
 
 - **Немедленный** групповой перевод (только будущая дата — открытые смены и §P5 не усложняют батч).
 - Отчёт «Часы заказчику» (Deploy F) — последний этап R15-D7.
+
+---
+
+## 6. Production deploy — выполнено 2026-09-03
+
+Перед деплоем — очистка тестовых записей SMOKE-C (write-smoke Deploy C), отдельный отчёт
+`docs/titanor-time/R15_D7_SMOKE_C_CLEANUP_RU.md`.
+
+### Хронология
+| шаг | детали |
+|---|---|
+| Финальная сборка | `titanor-time-app:d7e-5cce319` из HEAD `5cce319` (код == `d7e-3b75c98`, на котором прошла полная регрессия; `5cce319` = +1 docs + 1 строка теста). Boot-smoke: `migrate deploy` → 100/100, `/api/ready` 200, `/login` 200, `/worker` 307, 0 ошибок. |
+| Backup | `production-20260903T121237Z-pre-deploy` (2379 строк — после cleanup SMOKE-C, on+off-box). `restore-test` **13/13 PASS**. |
+| Кандидат `:3198` | `d7e-5cce319` (prod-сеть, prod env-file, uploads `:ro`). **Только read-only** на реальных prod-данных: `/admin`, `/admin/sites`, реальный объект, `/admin/workers`, реальная карточка, `/admin/review`, `/admin/reports/customer` — **все 200**. `GET /api/admin/assignments/group-change` preflight на реальном объекте → 200 (`Pipe and Co`). Страница объекта содержит секцию «Групповой перевод». 0 ошибок в логе. |
+| **Web-only swap** | T0 `docker stop -t 30` **12:16:10.605Z** → `docker rename → titanor-time-prod-app-pre-5cce319` → `docker run` новый (та же конфигурация) → **`/api/ready` 200 в 12:16:14.655Z**. **Простой ≈ 4 c.** |
+| Health | `healthy` через ~40 c. |
+
+### Пост-swap проверки — **только read-only** (live prod, через Caddy)
+- `/api/ready` → **200 `current 100/100`**; `/login` 200, неверные креды → **401**; `/worker` 307; `/reset-password` 200;
+- `/admin`, `/admin/sites`, реальный объект, `/admin/workers`, `/admin/review`, `/admin/reports/customer`, `/admin/timesheets` — **все 200** (сессия INSERT + DELETE, никаких write);
+- **`GET /api/admin/assignments/group-change` preflight → 200**; `effectiveFrom = сегодня` → **400 `EFFECTIVE_FROM_NOT_FUTURE`** (future-only guard работает);
+- страница объекта рендерит секцию «Групповой перевод»;
+- **SMOKE-C — 0 упоминаний** в `/admin/review` + `/admin/workers` + `/admin/sites`;
+- лог приложения и scheduler после swap — **0 ошибок**.
+- **Никаких write-smoke на production не выполнялось** (групповой перевод доказан на disposable-базе: `_test-t9-group-transfer` 16/16).
+
+### Что НЕ менялось
+Схема (100), scheduler (`r14-release-1416503`), Caddy, DNS, пароли, публичный сайт.
+
+### Rollback
+Контейнер **`titanor-time-prod-app-pre-5cce319` (образ `d7c-ad780f8`)** сохранён — откат образа (~4 c), **без отката схемы** (миграций не было). Backup `production-20260903T121237Z-pre-deploy` (on+off-box).
