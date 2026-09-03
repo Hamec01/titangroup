@@ -1,12 +1,20 @@
-// T13.11 (2026-08-29) — Customer Project Working Hours: resolveCustomerReadiness (FINAL /
-// blocker / noData), the daily rows, and the PDF / CSV builders (row_type column, decimal hours,
-// no UUID / PII / money).
+// R15-D7 Deploy F — "Часы заказчику". getCustomerTimeReport + resolveCustomerReadiness scoped by
+// workAreaId, the CSV / PDF builders. Needs a disposable PostgreSQL 16 (DATABASE_URL).
 //
-// Needs a disposable PostgreSQL 16 with all migrations applied (DATABASE_URL).
+// Mandatory scenarios (docs/titanor-time/R15_D7_DEPLOY_F_SPEC_RU.md §8):
+//   1  one site, two customers, different workers/hours — reports fully separated
+//   2  one worker, two customers on different days — minutes split correctly
+//   3  worker later transferred — historical hours stay with the OLD customer (by segment workAreaId)
+//   4  disabled customer still reportable
+//   5  an unapproved timesheet blocks the FINAL export of ITS customer only
+//   8  PDF, CSV and the report object agree to the minute
+//   9  a foreign workAreaId / spoofed name never mixes data (names resolved by id, filter by id)
+//  (6/7/10 — pagination, reload/Back-Forward/RU-EN, "no customer" no client PDF — the browser test)
+
 import { randomUUID } from 'node:crypto';
 import { prisma } from '../lib/prisma';
 import { submitWorkerTimesheetCore } from '../lib/worker-timesheets';
-import { getCustomTimeReport } from '../lib/reporting/custom-time-report';
+import { getCustomerTimeReport } from '../lib/reporting/customer-time-report';
 import { resolveCustomerReadiness } from '../lib/reporting/customer-hours';
 import { buildCustomerHoursCsv } from '../lib/reporting/customer-hours-csv';
 import { buildCustomerHoursPdf } from '../lib/reporting/customer-hours-pdf';
@@ -18,96 +26,182 @@ const check = (n: string, c: boolean, x?: unknown) => {
   if (c) pass++;
   else {
     fail++;
-    console.log('FAIL:', n, x ?? '');
+    console.log('FAIL:', n, x !== undefined ? JSON.stringify(x).slice(0, 400) : '');
   }
 };
 
-const ASG_START = new Date('2020-01-01T00:00:00.000Z');
 const at = (day: Date, h: number) => new Date(day.getTime() + h * 3600_000);
+let adminId = '';
 
-async function buildTimesheet(adminId: string, weekOffset: number, finalApprove: boolean, empty = false) {
-  const site = await prisma.workSite.create({ data: { name: `CH ${randomUUID().slice(0, 5)}` } });
-  const emp = await prisma.employee.create({ data: { employeeNumber: `CH-${randomUUID().slice(0, 8)}`, firstName: 'C', lastName: `H${weekOffset}` } });
-  await prisma.employment.create({ data: { employeeId: emp.id, active: true, startDate: ASG_START } });
-  const asg = await prisma.siteAssignment.create({ data: { employeeId: emp.id, siteId: site.id, isPrimary: true, validFrom: ASG_START, validTo: null, assignedByUserId: adminId } });
-  const dayBase = new Date(Date.UTC(2099, 3, 6) + weekOffset * 7 * 86400000);
-  const period = await prisma.payrollPeriod.create({ data: { startDate: dayBase, endDate: new Date(dayBase.getTime() + 6 * 86400000), status: 'OPEN', openedByUserId: adminId } });
-  await prisma.payrollPeriodParticipant.create({ data: { periodId: period.id, employeeId: emp.id, expected: true } });
-  const ts = await prisma.timesheet.create({ data: { employeeId: emp.id, periodId: period.id, status: 'DRAFT' } });
-  const draft = await prisma.timesheetDraft.create({ data: { timesheetId: ts.id, employeeId: emp.id } });
+async function mkSite(tag: string) {
+  return prisma.workSite.create({ data: { name: `F-${tag}-${randomUUID().slice(0, 5)}` } });
+}
+async function mkWorkArea(siteId: string, name: string, active = true) {
+  return prisma.workArea.create({ data: { siteId, name: `${name}-${randomUUID().slice(0, 4)}`, active } });
+}
+async function mkWorker(tag: string) {
+  const emp = await prisma.employee.create({ data: { employeeNumber: `F-${tag}-${randomUUID().slice(0, 6)}`, firstName: tag, lastName: 'Worker' } });
+  await prisma.employment.create({ data: { employeeId: emp.id, active: true, startDate: new Date('2020-01-01T00:00:00.000Z') } });
+  return emp;
+}
+async function mkAssignment(employeeId: string, siteId: string, workAreaId: string | null, isPrimary: boolean, validFrom = new Date('2020-01-01T00:00:00.000Z'), validTo: Date | null = null) {
+  return prisma.siteAssignment.create({ data: { employeeId, siteId, workAreaId, isPrimary, validFrom, validTo, assignedByUserId: adminId } });
+}
 
-  if (!empty) {
-    await prisma.timesheetDraftPlannedShift.create({ data: { draftId: draft.id, employeeId: emp.id, date: dayBase, siteId: site.id, sourceAssignmentId: asg.id, plannedStartAt: at(dayBase, 7), plannedEndAt: at(dayBase, 15), plannedBreakMinutes: 0 } });
-    const dd = await prisma.timesheetDraftDay.create({ data: { draftId: draft.id, date: dayBase, dayType: 'WORK', confirmedZero: false } });
-    await prisma.timesheetDraftSegment.create({ data: { draftDayId: dd.id, draftId: draft.id, employeeId: emp.id, date: dayBase, startAt: at(dayBase, 7), endAt: at(dayBase, 15), siteId: site.id, sourceAssignmentId: asg.id } });
-    await prisma.$transaction(async (tx) => {
-      await tx.$queryRaw`SELECT id FROM "Employee" WHERE id = ${emp.id}::uuid FOR UPDATE`;
-      await tx.$queryRaw`SELECT id FROM "Timesheet" WHERE id = ${ts.id}::uuid FOR UPDATE`;
-      await tx.$queryRaw`SELECT id FROM "TimesheetDraft" WHERE id = ${draft.id}::uuid FOR UPDATE`;
-      await submitWorkerTimesheetCore(tx, emp.id, ts.id, adminId, randomUUID(), SubmissionSource.MANUAL);
-    });
-    if (finalApprove) {
-      await prisma.timesheet.update({ where: { id: ts.id }, data: { status: 'FINAL_APPROVED' } });
-    }
+/** One worked day (07:00–15:00 → 7h30 after the 30-min auto lunch) on the given site+workArea,
+ *  submitted (materialises a WorkSegment carrying workAreaId), optionally final-approved. */
+async function workedDay(opts: {
+  employeeId: string;
+  siteId: string;
+  workAreaId: string | null;
+  assignmentId: string;
+  day: Date;
+  finalApprove?: boolean;
+}) {
+  const { employeeId, siteId, workAreaId, assignmentId, day } = opts;
+  let period = await prisma.payrollPeriod.findFirst({ where: { startDate: { lte: day }, endDate: { gte: day } } });
+  if (!period) {
+    const start = new Date(day.getTime());
+    period = await prisma.payrollPeriod.create({ data: { startDate: start, endDate: new Date(start.getTime() + 6 * 86400000), status: 'OPEN', openedByUserId: adminId } });
   }
-  return { employeeId: emp.id, timesheetId: ts.id, dayBase, siteId: site.id, periodEnd: new Date(dayBase.getTime() + 6 * 86400000) };
+  await prisma.payrollPeriodParticipant.upsert({
+    where: { periodId_employeeId: { periodId: period.id, employeeId } },
+    create: { periodId: period.id, employeeId, expected: true },
+    update: {}
+  });
+  let ts = await prisma.timesheet.findFirst({ where: { periodId: period.id, employeeId } });
+  if (!ts) ts = await prisma.timesheet.create({ data: { employeeId, periodId: period.id, status: 'DRAFT' } });
+  let draft = await prisma.timesheetDraft.findFirst({ where: { timesheetId: ts.id } });
+  if (!draft) draft = await prisma.timesheetDraft.create({ data: { timesheetId: ts.id, employeeId } });
+
+  await prisma.timesheetDraftPlannedShift.create({ data: { draftId: draft.id, employeeId, date: day, siteId, sourceAssignmentId: assignmentId, plannedStartAt: at(day, 7), plannedEndAt: at(day, 15), plannedBreakMinutes: 0 } });
+  const dd = await prisma.timesheetDraftDay.create({ data: { draftId: draft.id, date: day, dayType: 'WORK', confirmedZero: false } });
+  await prisma.timesheetDraftSegment.create({ data: { draftDayId: dd.id, draftId: draft.id, employeeId, date: day, startAt: at(day, 7), endAt: at(day, 15), siteId, workAreaId, sourceAssignmentId: assignmentId } });
+
+  await prisma.$transaction(async (tx) => {
+    await tx.$queryRaw`SELECT id FROM "Employee" WHERE id = ${employeeId}::uuid FOR UPDATE`;
+    await tx.$queryRaw`SELECT id FROM "Timesheet" WHERE id = ${ts!.id}::uuid FOR UPDATE`;
+    await tx.$queryRaw`SELECT id FROM "TimesheetDraft" WHERE id = ${draft!.id}::uuid FOR UPDATE`;
+    await submitWorkerTimesheetCore(tx, employeeId, ts!.id, adminId, randomUUID(), SubmissionSource.MANUAL);
+  });
+  if (opts.finalApprove) await prisma.timesheet.update({ where: { id: ts.id }, data: { status: 'FINAL_APPROVED' } });
+  return { periodId: period.id, timesheetId: ts.id };
 }
 
 async function main() {
   const role = await prisma.role.findFirstOrThrow({ where: { name: 'ADMIN' } });
-  const admin = (await prisma.user.create({ data: { username: `ch_${randomUUID().slice(0, 8)}`, status: 'ACTIVE', locale: 'EN', userRoles: { create: { roleId: role.id } } } })).id;
+  adminId = (await prisma.user.create({ data: { username: `f_${randomUUID().slice(0, 8)}`, status: 'ACTIVE', locale: 'EN', userRoles: { create: { roleId: role.id } } } })).id;
 
-  const finalTs = await buildTimesheet(admin, 0, true);
-  const submittedTs = await buildTimesheet(admin, 1, false);
-  const emptyTs = await buildTimesheet(admin, 2, false, true);
+  const D = (y: number, m: number, d: number) => new Date(Date.UTC(y, m, d));
 
-  const from = new Date(Date.UTC(2099, 3, 6));
-  const to = new Date(finalTs.periodEnd.getTime());
+  // ── Scenario 1 + 9: one SITE, two CUSTOMERS, different workers ──────────────────────────────
+  const site = await mkSite('s1');
+  const waA = await mkWorkArea(site.id, 'Aros');
+  const waB = await mkWorkArea(site.id, 'Beta');
+  const wA = await mkWorker('A1');
+  const wB = await mkWorker('B1');
+  const asgA = await mkAssignment(wA.id, site.id, waA.id, true);
+  const asgB = await mkAssignment(wB.id, site.id, waB.id, true);
+  const day1 = D(2099, 5, 1);
+  await workedDay({ employeeId: wA.id, siteId: site.id, workAreaId: waA.id, assignmentId: asgA.id, day: day1, finalApprove: true });
+  await workedDay({ employeeId: wB.id, siteId: site.id, workAreaId: waB.id, assignmentId: asgB.id, day: day1, finalApprove: true });
 
-  // 1. readiness for the FINAL-only worker -> CUSTOMER_FINAL
+  const from = D(2099, 5, 1);
+  const to = D(2099, 5, 7);
   {
-    const r = await resolveCustomerReadiness({ dateFrom: from, dateTo: to, employeeIds: [finalTs.employeeId], siteIds: null });
-    check('FINAL-only scope -> CUSTOMER_FINAL, no blockers', r.level === 'CUSTOMER_FINAL' && r.blockers.length === 0, r);
+    const rep = await getCustomerTimeReport({ dateFrom: from, dateTo: to, workAreaIds: [waA.id], includeNoCustomer: false, employeeIds: null, dataMode: 'CURRENT_CANONICAL' });
+    const empIds = rep.sections.flatMap((s) => s.workers.map((w) => w.employee.id));
+    check('1: report(Aros) has exactly one section for Aros', rep.sections.length === 1 && rep.sections[0].workAreaId === waA.id, rep.sections.map((s) => s.workAreaName));
+    check('1: report(Aros) contains ONLY worker A — not worker B', empIds.length === 1 && empIds[0] === wA.id, empIds);
+    check('1: report(Aros) total = 450 min (7h30), grand = 450', rep.sections[0].totalMinutes === 450 && rep.grandTotalMinutes === 450, { sec: rep.sections[0].totalMinutes, grand: rep.grandTotalMinutes });
+    check('1: report(Aros) assignedNow = 1, workedInPeriod = 1', rep.sections[0].assignedNowCount === 1 && rep.sections[0].workedInPeriodCount === 1, rep.sections[0]);
+
+    const csv = buildCustomerHoursCsv(rep).toString();
+    check('9: CSV(Aros) has no "Beta" customer + no worker B number', !csv.includes(waB.name) && !csv.includes(wB.employeeNumber), csv.slice(0, 200));
+  }
+  {
+    // both customers -> two sections, grand = 900
+    const rep = await getCustomerTimeReport({ dateFrom: from, dateTo: to, workAreaIds: [waA.id, waB.id], includeNoCustomer: false, employeeIds: null, dataMode: 'CURRENT_CANONICAL' });
+    check('1: report(Aros+Beta) has 2 sections, grand = 900', rep.sections.length === 2 && rep.grandTotalMinutes === 900, rep.sections.map((s) => s.totalMinutes));
+    const csv = buildCustomerHoursCsv(rep).toString();
+    check('8: CSV GRAND_TOTAL row = 900 min & 15.00 h', csv.includes('"GRAND_TOTAL"') && csv.includes(',900,') && csv.includes('"15.00"'), csv.split('\r\n').find((l) => l.includes('GRAND_TOTAL')));
+    const pdf = await buildCustomerHoursPdf(rep, { generatedAtHelsinki: '01/01/2026, 12:00', preparedBy: 'admin', isFinalApproved: true });
+    check('8: PDF builds (%PDF)', pdf.subarray(0, 4).toString() === '%PDF' && pdf.length > 900);
+    check('8: report grand = sum of section totals (to the minute)', rep.grandTotalMinutes === rep.sections.reduce((s, x) => s + x.totalMinutes, 0));
   }
 
-  // 2. readiness including the SUBMITTED worker -> blocked, with a link
+  // ── Scenario 2: one worker, two customers on different days — minutes split ─────────────────
   {
-    const wideTo = new Date(submittedTs.periodEnd.getTime());
-    const r = await resolveCustomerReadiness({ dateFrom: from, dateTo: wideTo, employeeIds: [finalTs.employeeId, submittedTs.employeeId], siteIds: null });
-    check('scope with a SUBMITTED timesheet -> INTERNAL_PREVIEW_ONLY', r.level === 'INTERNAL_PREVIEW_ONLY', r.level);
-    check('  blocker names the worker + links to the timesheet', r.blockers.length === 1 && r.blockers[0].timesheetId === submittedTs.timesheetId && r.blockers[0].link.includes(submittedTs.timesheetId), r.blockers);
+    const w2 = await mkWorker('C2');
+    const asg2a = await mkAssignment(w2.id, site.id, waA.id, true);
+    const asg2b = await mkAssignment(w2.id, site.id, waB.id, false);
+    await workedDay({ employeeId: w2.id, siteId: site.id, workAreaId: waA.id, assignmentId: asg2a.id, day: D(2099, 5, 2), finalApprove: true });
+    await workedDay({ employeeId: w2.id, siteId: site.id, workAreaId: waB.id, assignmentId: asg2b.id, day: D(2099, 5, 3), finalApprove: true });
+
+    const repA = await getCustomerTimeReport({ dateFrom: from, dateTo: to, workAreaIds: [waA.id], includeNoCustomer: false, employeeIds: [w2.id], dataMode: 'CURRENT_CANONICAL' });
+    const repB = await getCustomerTimeReport({ dateFrom: from, dateTo: to, workAreaIds: [waB.id], includeNoCustomer: false, employeeIds: [w2.id], dataMode: 'CURRENT_CANONICAL' });
+    check('2: worker C2 has 450 min on Aros (one day only)', repA.sections[0]?.workers[0]?.workedMinutes === 450 && repA.sections[0].workers[0].workDates.length === 1, repA.sections[0]?.workers[0]);
+    check('2: worker C2 has 450 min on Beta (the other day)', repB.sections[0]?.workers[0]?.workedMinutes === 450 && repB.sections[0].workers[0].workDates[0] === '2099-06-03', repB.sections[0]?.workers[0]);
+    check('2: Aros date != Beta date (minutes not double-counted)', repA.sections[0].workers[0].workDates[0] !== repB.sections[0].workers[0].workDates[0]);
   }
 
-  // 3. empty draft worker -> noData, not a hard blocker
+  // ── Scenario 3: worker transferred to another customer — historical hours stay with OLD ─────
   {
-    const wideTo = new Date(emptyTs.periodEnd.getTime());
-    const r = await resolveCustomerReadiness({ dateFrom: from, dateTo: wideTo, employeeIds: [finalTs.employeeId, emptyTs.employeeId], siteIds: null });
-    check('empty draft worker -> noData, still CUSTOMER_FINAL', r.level === 'CUSTOMER_FINAL' && r.noData.length === 1 && r.noData[0].employeeNumber !== '', r);
+    const w3 = await mkWorker('T3');
+    // worked for Aros on day 4, THEN transferred to Beta (old Aros assignment ended)
+    const asg3a = await mkAssignment(w3.id, site.id, waA.id, true, D(2020, 0, 1), D(2099, 5, 4));
+    await workedDay({ employeeId: w3.id, siteId: site.id, workAreaId: waA.id, assignmentId: asg3a.id, day: D(2099, 5, 4), finalApprove: true });
+    await mkAssignment(w3.id, site.id, waB.id, true, D(2099, 5, 5), null); // now on Beta
+
+    const repA = await getCustomerTimeReport({ dateFrom: from, dateTo: to, workAreaIds: [waA.id], includeNoCustomer: false, employeeIds: [w3.id], dataMode: 'CURRENT_CANONICAL' });
+    check('3: transferred worker T3 STILL in the Aros report for the day worked there', repA.sections[0]?.workers.some((w) => w.employee.id === w3.id && w.workedMinutes === 450), repA.sections[0]?.workers);
+    check('3: T3 is NOT "assigned now" to Aros (assignment ended) but IS worked-in-period', repA.sections[0].assignedNowCount === 1 && repA.sections[0].workers.find((w) => w.employee.id === w3.id)?.assignedNow === false, repA.sections[0]);
+    const repB = await getCustomerTimeReport({ dateFrom: from, dateTo: to, workAreaIds: [waB.id], includeNoCustomer: false, employeeIds: [w3.id], dataMode: 'CURRENT_CANONICAL' });
+    check('3: T3 has NO Aros hours leaking into the Beta report', !repB.sections.some((s) => s.workers.some((w) => w.employee.id === w3.id && w.workedMinutes > 0)), repB.sections.map((s) => s.workers));
   }
 
-  // 4. site filter narrows the readiness scope
+  // ── Scenario 4: disabled customer still reportable ─────────────────────────────────────────
   {
-    const wideTo = new Date(submittedTs.periodEnd.getTime());
-    const r = await resolveCustomerReadiness({ dateFrom: from, dateTo: wideTo, employeeIds: null, siteIds: [finalTs.siteId] });
-    check('site filter -> only the FINAL site is in scope -> CUSTOMER_FINAL', r.level === 'CUSTOMER_FINAL', r);
+    const site4 = await mkSite('s4');
+    const waDisabled = await mkWorkArea(site4.id, 'Gone', false);
+    const w4 = await mkWorker('D4');
+    const asg4 = await mkAssignment(w4.id, site4.id, waDisabled.id, true);
+    await workedDay({ employeeId: w4.id, siteId: site4.id, workAreaId: waDisabled.id, assignmentId: asg4.id, day: D(2099, 5, 6), finalApprove: true });
+    const rep = await getCustomerTimeReport({ dateFrom: from, dateTo: to, workAreaIds: [waDisabled.id], includeNoCustomer: false, employeeIds: null, dataMode: 'CURRENT_CANONICAL' });
+    check('4: disabled customer report still returns the section + hours', rep.sections.length === 1 && rep.sections[0].customerActive === false && rep.sections[0].totalMinutes === 450, rep.sections[0]);
   }
 
-  // 5. report daily rows + PDF/CSV
+  // ── Scenario 5: an unapproved timesheet blocks the FINAL export of ITS customer only ───────
   {
-    const report = await getCustomTimeReport({ dateFrom: from, dateTo: to, employeeIds: [finalTs.employeeId], siteIds: null, dataMode: 'FINAL_APPROVED_ONLY' });
-    check('report has 1 daily row (one worker, one day, one site)', report.dailyRows.length === 1, report.dailyRows);
-    // 8h gross, minus the automatic 30-min unpaid lunch (T10-D) -> 450 worked minutes = 7.50 h.
-    check('  daily row: 7.5h worked (8h - 30min auto lunch), first/last time set', report.dailyRows[0].workedMinutes === 450 && !!report.dailyRows[0].firstStartAt && !!report.dailyRows[0].lastEndAt, report.dailyRows[0]);
+    const site5 = await mkSite('s5');
+    const wa5a = await mkWorkArea(site5.id, 'Ready');
+    const wa5b = await mkWorkArea(site5.id, 'Pending');
+    const w5a = await mkWorker('R5');
+    const w5b = await mkWorker('P5');
+    const a5a = await mkAssignment(w5a.id, site5.id, wa5a.id, true);
+    const a5b = await mkAssignment(w5b.id, site5.id, wa5b.id, true);
+    const dd = D(2099, 6, 6);
+    await workedDay({ employeeId: w5a.id, siteId: site5.id, workAreaId: wa5a.id, assignmentId: a5a.id, day: dd, finalApprove: true });
+    await workedDay({ employeeId: w5b.id, siteId: site5.id, workAreaId: wa5b.id, assignmentId: a5b.id, day: dd, finalApprove: false }); // stays SUBMITTED
 
-    const csv = buildCustomerHoursCsv(report);
-    const text = csv.toString();
-    check('CSV: BOM + row_type header + DETAIL + GRAND_TOTAL', csv.subarray(0, 3).toString('hex') === 'efbbbf' && text.includes('row_type') && text.includes('"DETAIL"') && text.includes('"GRAND_TOTAL"'), text.slice(0, 120));
-    check('  CSV decimal hours with a dot, no UUID, no henkilötunnus/address', /"7\.50"/.test(text) && !/[0-9a-f]{8}-[0-9a-f]{4}-/.test(text) && !/personalIdentity|addressStreet/i.test(text));
+    const f5 = D(2099, 6, 6);
+    const t5 = D(2099, 6, 12);
+    const rReady = await resolveCustomerReadiness({ dateFrom: f5, dateTo: t5, employeeIds: null, workAreaIds: [wa5a.id], includeNoCustomer: false });
+    check('5: readiness(Ready only) = CUSTOMER_FINAL (no blocker)', rReady.level === 'CUSTOMER_FINAL' && rReady.blockers.length === 0, rReady);
+    const rPending = await resolveCustomerReadiness({ dateFrom: f5, dateTo: t5, employeeIds: null, workAreaIds: [wa5b.id], includeNoCustomer: false });
+    check('5: readiness(Pending only) = INTERNAL_PREVIEW_ONLY, 1 blocker linking the timesheet', rPending.level === 'INTERNAL_PREVIEW_ONLY' && rPending.blockers.length === 1 && rPending.blockers[0].link.includes('/admin/timesheets/'), rPending);
+    const rBoth = await resolveCustomerReadiness({ dateFrom: f5, dateTo: t5, employeeIds: null, workAreaIds: [wa5a.id, wa5b.id], includeNoCustomer: false });
+    check('5: readiness(Ready+Pending) is blocked (the pending one carries over)', rBoth.level === 'INTERNAL_PREVIEW_ONLY' && rBoth.blockers.length === 1, rBoth);
+  }
 
-    const pdfFinal = await buildCustomerHoursPdf(report, { customer: 'Meyer Turku', projectReference: 'PO-42', generatedAtHelsinki: '01/01/2026, 12:00', preparedBy: 'admin', isFinalApproved: true });
-    check('final PDF builds (%PDF)', pdfFinal.subarray(0, 4).toString() === '%PDF' && pdfFinal.length > 900);
-    const pdfPreview = await buildCustomerHoursPdf(report, { customer: '', projectReference: '', generatedAtHelsinki: '01/01/2026, 12:00', preparedBy: 'admin', isFinalApproved: false });
-    check('preview PDF builds', pdfPreview.subarray(0, 4).toString() === '%PDF');
+  // ── Scenario 10 (server flag): includeNoCustomer marks the report so the route can refuse ──
+  {
+    const site10 = await mkSite('s10');
+    const w10 = await mkWorker('N10');
+    const asg10 = await mkAssignment(w10.id, site10.id, null, true); // NO customer
+    await workedDay({ employeeId: w10.id, siteId: site10.id, workAreaId: null, assignmentId: asg10.id, day: D(2099, 7, 6), finalApprove: true });
+    const rep = await getCustomerTimeReport({ dateFrom: D(2099, 7, 6), dateTo: D(2099, 7, 12), workAreaIds: [], includeNoCustomer: true, employeeIds: null, dataMode: 'CURRENT_CANONICAL' });
+    check('10: no-customer report has includesNoCustomer=true + a NULL-workArea section', rep.includesNoCustomer === true && rep.sections.length === 1 && rep.sections[0].workAreaId === null, rep.sections);
   }
 
   console.log(JSON.stringify({ pass, fail }));

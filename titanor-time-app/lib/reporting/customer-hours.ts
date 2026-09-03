@@ -18,7 +18,13 @@ export interface CustomerReadinessParams {
   dateFrom: Date;
   dateTo: Date;
   employeeIds: string[] | null;
-  siteIds: string[] | null;
+  /** @deprecated Deploy F — kept for the legacy /export path; prefer workAreaIds. */
+  siteIds?: string[] | null;
+  /** R15-D7 Deploy F — readiness is scoped to the selected customer(s): a covering timesheet is
+   *  only a blocker when it has a segment with one of these workAreaIds (or NULL when
+   *  includeNoCustomer). null = not customer-scoped (legacy behaviour). */
+  workAreaIds?: string[] | null;
+  includeNoCustomer?: boolean;
 }
 
 export interface ReadinessBlocker {
@@ -52,6 +58,16 @@ export async function resolveCustomerReadiness(params: CustomerReadinessParams):
   }
   const periodLabelById = new Map(periods.map((p) => [p.id, `${formatDate(p.startDate)} – ${formatDate(p.endDate)}`]));
 
+  // R15-D7 Deploy F — customer scope. A covering timesheet is only "relevant" (a possible blocker)
+  // when it has at least one segment for one of the selected workAreas, in the selected date range.
+  const waFilter = params.workAreaIds && params.workAreaIds.length > 0 ? new Set(params.workAreaIds) : null;
+  const noCustomer = params.includeNoCustomer === true;
+  const dateWindow = { date: { gte: params.dateFrom, lte: params.dateTo } } as const;
+  const segMatchesScope = (workAreaId: string | null): boolean => {
+    if (workAreaId === null) return noCustomer;
+    return waFilter ? waFilter.has(workAreaId) : true;
+  };
+
   const timesheets = await prisma.timesheet.findMany({
     where: {
       periodId: { in: periods.map((p) => p.id) },
@@ -64,23 +80,24 @@ export async function resolveCustomerReadiness(params: CustomerReadinessParams):
       employee: { select: { firstName: true, lastName: true, employeeNumber: true } },
       currentVersion: {
         select: {
-          workSegments: { select: { siteId: true, date: true }, take: 1 },
+          workSegments: { where: dateWindow, select: { siteId: true, workAreaId: true }, take: 200 },
           days: { select: { id: true }, take: 1 }
         }
       },
-      draft: { select: { timesheetDraftSegments: { select: { siteId: true }, take: 1 } } }
+      draft: { select: { timesheetDraftSegments: { where: dateWindow, select: { siteId: true, workAreaId: true }, take: 200 } } }
     }
   });
 
-  // Keep only timesheets that actually intersect the selected sites (when a site filter is set).
-  const siteFilter = params.siteIds ? new Set(params.siteIds) : null;
+  const legacySiteFilter = !waFilter && !noCustomer && params.siteIds ? new Set(params.siteIds) : null;
   const relevant = timesheets.filter((t) => {
-    if (!siteFilter) return true;
-    const versionSites = t.currentVersion?.workSegments.map((s) => s.siteId) ?? [];
-    const draftSites = t.draft?.timesheetDraftSegments.map((s) => s.siteId) ?? [];
-    // A timesheet with no segments yet can't be filtered by site — keep it so it shows as noData.
-    if (versionSites.length === 0 && draftSites.length === 0) return true;
-    return [...versionSites, ...draftSites].some((id) => siteFilter.has(id));
+    const versionSegs = t.currentVersion?.workSegments ?? [];
+    const draftSegs = t.draft?.timesheetDraftSegments ?? [];
+    const allSegs = [...versionSegs, ...draftSegs];
+    // A timesheet with no segments yet can't be scope-filtered — keep it so it shows as noData.
+    if (allSegs.length === 0) return true;
+    if (waFilter || noCustomer) return allSegs.some((s) => segMatchesScope(s.workAreaId));
+    if (legacySiteFilter) return allSegs.some((s) => legacySiteFilter.has(s.siteId));
+    return true;
   });
 
   const blockers: ReadinessBlocker[] = [];

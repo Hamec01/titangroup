@@ -6,21 +6,36 @@ import { hasPermission } from '@/lib/permissions';
 import { SESSION_COOKIE_NAME } from '@/lib/session';
 import { UUID_PATTERN } from '@/lib/attendance-exceptions';
 import { MAX_CUSTOM_REPORT_DAYS } from '@/lib/reporting/custom-time-report';
-import { resolveCustomerScopeWorkers } from '@/lib/reporting/customer-report-scope';
+import { searchCustomerWorkAreas } from '@/lib/reporting/customer-workarea-picker';
+import { getCustomerTimeReport } from '@/lib/reporting/customer-time-report';
+import { resolveCustomerReadiness } from '@/lib/reporting/customer-hours';
 
-// docs/titanor-time/CUSTOMER_REPORT_SCOPE_PICKER_RU.md §5 — read-only "which workers are in scope for
-// these sites/date range or directly across workers" lookup for the customer scope picker. Same permission set
-// as the export route; never writes, never an ExportBatch, never an AuditEvent.
+// R15-D7 Deploy F — read-only picker + preview for /admin/reports/customer.
+//   action=search&q=…                    -> { workAreas: [{ workAreaId, label, active, ... }] }
+//   action=preview&waIds=…&dateFrom&dateTo -> { report, readiness }   (per-customer cards + worker list)
+// Same permission set as the export route; never writes, never an AuditEvent.
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
 
 const REQUIRED_PERMISSIONS = ['worker.read.all', 'site.read.all', 'timesheet.read.all', 'export.read'];
 const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
 const MS_PER_DAY = 86_400_000;
+const NO_STORE = { 'Cache-Control': 'private, no-store' } as const;
+
+function idList(sp: URLSearchParams, key: string): string[] {
+  return Array.from(
+    new Set(
+      sp
+        .getAll(key)
+        .flatMap((v) => v.split(','))
+        .map((s) => s.trim().toLowerCase())
+        .filter((s) => s.length > 0)
+    )
+  );
+}
 
 export async function GET(request: NextRequest): Promise<NextResponse> {
   const requestId = randomUUID();
-
   const authenticated = await resolveAuthenticatedSession(request.cookies.get(SESSION_COOKIE_NAME)?.value);
   if (!authenticated) {
     return jsonError(401, { code: 'NOT_AUTHENTICATED', message: 'No active session.' }, requestId);
@@ -32,6 +47,14 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   }
 
   const sp = request.nextUrl.searchParams;
+  const action = (sp.get('action') ?? 'search').toLowerCase();
+
+  if (action === 'search') {
+    const workAreas = await searchCustomerWorkAreas(sp.get('q') ?? '', { limit: 50 });
+    return NextResponse.json({ workAreas }, { status: 200, headers: { ...NO_STORE, 'X-Request-Id': requestId } });
+  }
+
+  // action=preview
   const dateFrom = sp.get('dateFrom');
   const dateTo = sp.get('dateTo');
   if (!dateFrom || !DATE_PATTERN.test(dateFrom) || !dateTo || !DATE_PATTERN.test(dateTo)) {
@@ -39,33 +62,44 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   }
   const from = new Date(`${dateFrom}T00:00:00.000Z`);
   const to = new Date(`${dateTo}T00:00:00.000Z`);
-  if (from > to) {
-    return jsonError(400, { code: 'VALIDATION_ERROR', message: 'dateFrom must be <= dateTo.' }, requestId);
-  }
+  if (from > to) return jsonError(400, { code: 'VALIDATION_ERROR', message: 'dateFrom must be <= dateTo.' }, requestId);
   if (Math.round((to.getTime() - from.getTime()) / MS_PER_DAY) + 1 > MAX_CUSTOM_REPORT_DAYS) {
     return jsonError(400, { code: 'VALIDATION_ERROR', message: `Date range must be ${MAX_CUSTOM_REPORT_DAYS} days or fewer.` }, requestId);
   }
 
-  const siteMode = (sp.get('siteMode') ?? '').toUpperCase() === 'ALL' ? 'ALL' : 'PICK';
-  const scopeBasis = (sp.get('scopeBasis') ?? '').toUpperCase() === 'WORKERS' ? 'WORKERS' : 'SITES';
-  const siteIds = sp
-    .getAll('siteIds')
-    .flatMap((v) => v.split(','))
-    .map((s) => s.trim().toLowerCase())
-    .filter((s) => s.length > 0);
-  if (scopeBasis === 'SITES' && siteMode === 'PICK') {
-    if (siteIds.length === 0) {
-      return NextResponse.json({ workers: [] }, { status: 200, headers: { 'Cache-Control': 'private, no-store', 'X-Request-Id': requestId } });
-    }
-    if (siteIds.some((id) => !UUID_PATTERN.test(id))) {
-      return jsonError(400, { code: 'VALIDATION_ERROR', message: 'Invalid siteIds.', fieldErrors: { siteIds: ['list of UUIDs'] } }, requestId);
-    }
+  const workAreaIds = idList(sp, 'waIds');
+  if (workAreaIds.some((id) => !UUID_PATTERN.test(id))) {
+    return jsonError(400, { code: 'VALIDATION_ERROR', message: 'Invalid waIds.', fieldErrors: { waIds: ['list of UUIDs'] } }, requestId);
+  }
+  const includeNoCustomer = sp.get('noCustomer') === '1';
+  if (workAreaIds.length === 0 && !includeNoCustomer) {
+    return NextResponse.json(
+      { report: null, readiness: null },
+      { status: 200, headers: { ...NO_STORE, 'X-Request-Id': requestId } }
+    );
+  }
+  const employeeIds = idList(sp, 'workerIds');
+  if (employeeIds.some((id) => !UUID_PATTERN.test(id))) {
+    return jsonError(400, { code: 'VALIDATION_ERROR', message: 'Invalid workerIds.', fieldErrors: { workerIds: ['list of UUIDs'] } }, requestId);
   }
 
-  const workers = await resolveCustomerScopeWorkers({ scopeBasis, siteMode, siteIds, dateFrom, dateTo });
+  const [report, readiness] = await Promise.all([
+    getCustomerTimeReport({
+      dateFrom: from,
+      dateTo: to,
+      workAreaIds,
+      includeNoCustomer,
+      employeeIds: employeeIds.length ? employeeIds : null,
+      dataMode: 'CURRENT_CANONICAL'
+    }),
+    resolveCustomerReadiness({
+      dateFrom: from,
+      dateTo: to,
+      employeeIds: employeeIds.length ? employeeIds : null,
+      workAreaIds,
+      includeNoCustomer
+    })
+  ]);
 
-  return NextResponse.json(
-    { workers },
-    { status: 200, headers: { 'Cache-Control': 'private, no-store', 'X-Request-Id': requestId } }
-  );
+  return NextResponse.json({ report, readiness }, { status: 200, headers: { ...NO_STORE, 'X-Request-Id': requestId } });
 }

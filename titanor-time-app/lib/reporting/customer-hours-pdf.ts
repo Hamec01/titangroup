@@ -3,31 +3,27 @@ import { existsSync } from 'node:fs';
 import PDFDocument from 'pdfkit';
 import { formatWorkedDuration } from '@/lib/reporting/report-format';
 import { companyLegalInfo } from '@/lib/reporting/company-legal-info';
-import type { CustomTimeReport } from '@/lib/reporting/custom-time-report';
+import type { CustomerTimeReport } from '@/lib/reporting/customer-time-report';
 
-// T13.11 — Customer Project Working Hours PDF. A document for the customer: confirmed hours by
-// site. pdfkit + embedded DejaVu Sans + the real Titanor logo. NO signature, NO invoice, NO
-// money, NO TES, NO henkilötunnus / address / phone / contract. Always renders in English.
+// R15-D7 Deploy F — "Часы заказчику" PDF. One section per selected customer: customer + site
+// header, a row per worker (name · number · work dates · worked hours), a customer total, and a
+// grand total when more than one customer. pdfkit + embedded DejaVu Sans + the Titanor logo.
+// NO signature, NO invoice, NO money/rates/TES, NO henkilötunnus / address / phone / GPS. English.
 
 const FONT_REGULAR_PATH = path.join(process.cwd(), 'assets/fonts/DejaVuSans.ttf');
 const FONT_BOLD_PATH = path.join(process.cwd(), 'assets/fonts/DejaVuSans-Bold.ttf');
 const LOGO_PATH = path.join(process.cwd(), 'assets/brand/titanor-group.png');
 
 export interface CustomerHoursMeta {
-  customer: string;
-  projectReference: string;
+  /** Resolved server-side by workArea id — never the browser's text (single-customer reports). */
   generatedAtHelsinki: string;
   preparedBy: string;
   isFinalApproved: boolean;
 }
 
-interface Column {
-  header: string;
-  width: number;
-  align?: 'left' | 'right';
-}
-const ROW_HEIGHT = 20;
-const HEADER_ROW_HEIGHT = 22;
+const ROW_HEIGHT = 19;
+const HEADER_ROW_HEIGHT = 20;
+const CELL_H = 11;
 
 function finalizePdf(doc: PDFKit.PDFDocument): Promise<Buffer> {
   return new Promise((resolve, reject) => {
@@ -39,24 +35,18 @@ function finalizePdf(doc: PDFKit.PDFDocument): Promise<Buffer> {
   });
 }
 
-function helsinkiTime(iso: string | null): string {
-  if (!iso) return '—';
-  return new Intl.DateTimeFormat('en-GB', { timeZone: 'Europe/Helsinki', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).format(new Date(iso));
-}
-
-export async function buildCustomerHoursPdf(report: CustomTimeReport, meta: CustomerHoursMeta): Promise<Buffer> {
+export async function buildCustomerHoursPdf(report: CustomerTimeReport, meta: CustomerHoursMeta): Promise<Buffer> {
   const doc = new PDFDocument({ size: 'A4', layout: 'portrait', margins: { top: 46, bottom: 44, left: 40, right: 40 }, bufferPages: true, autoFirstPage: true });
   doc.registerFont('DejaVu', FONT_REGULAR_PATH);
   doc.registerFont('DejaVu-Bold', FONT_BOLD_PATH);
   doc.font('DejaVu');
   const x = doc.page.margins.left;
   const contentWidth = doc.page.width - doc.page.margins.left - doc.page.margins.right;
+  const bottomLimit = doc.page.height - doc.page.margins.bottom;
   const company = companyLegalInfo();
 
   let y = doc.page.margins.top;
-  if (existsSync(LOGO_PATH)) {
-    doc.image(LOGO_PATH, x, y, { width: 110 });
-  }
+  if (existsSync(LOGO_PATH)) doc.image(LOGO_PATH, x, y, { width: 110 });
   const titleX = x + 126;
   doc.font('DejaVu-Bold').fontSize(15).text(company.legalName, titleX, y);
   doc.font('DejaVu').fontSize(8.5).fillColor('#555555');
@@ -70,10 +60,9 @@ export async function buildCustomerHoursPdf(report: CustomTimeReport, meta: Cust
     ly += 11;
   }
   doc.fillColor('#000000');
-  // Logo is ~48px tall; leave room for it and for any business-id / address lines, no more.
   y = Math.max(y + 52, ly + 6);
 
-  doc.font('DejaVu-Bold').fontSize(13).text('WORKING TIME REPORT', x, y);
+  doc.font('DejaVu-Bold').fontSize(13).text('CUSTOMER WORKING HOURS', x, y);
   y += 17;
   doc.font('DejaVu-Bold').fontSize(9.5).fillColor(meta.isFinalApproved ? '#1f7a3d' : '#a34d00');
   doc.text(meta.isFinalApproved ? 'FINAL APPROVED' : 'NOT FINAL — INTERNAL PREVIEW', x, y);
@@ -81,99 +70,91 @@ export async function buildCustomerHoursPdf(report: CustomTimeReport, meta: Cust
   y += 18;
 
   doc.font('DejaVu').fontSize(9);
-  const lines: [string, string][] = [
-    ['Customer', meta.customer || '—'],
-    ['Project / Reference', meta.projectReference || '—'],
-    ['Sites', report.sites.length > 0 ? report.sites.map((s) => s.name).join(', ') : 'All'],
+  const customerLabels = report.sections.map((s) => `${s.workAreaName ?? '(no customer)'} — ${s.siteName}`);
+  const headLines: [string, string][] = [
+    ['Customer(s)', customerLabels.join('; ') || '—'],
     ['Period', `${report.dateFrom} – ${report.dateTo}`],
+    ['Workers', String(report.grandWorkerCount)],
     ['Generated (Europe/Helsinki)', meta.generatedAtHelsinki],
     ['Prepared by', meta.preparedBy]
   ];
-  for (const [label, value] of lines) {
+  for (const [label, value] of headLines) {
     doc.font('DejaVu-Bold').text(`${label}: `, x, y, { continued: true });
     doc.font('DejaVu').text(value);
     y += 13;
   }
   y += 8;
 
-  const columns: Column[] = [
-    { header: 'Date', width: 58 },
-    { header: 'Employee', width: 130 },
-    { header: 'Site', width: 110 },
-    { header: 'Start', width: 40, align: 'right' },
-    { header: 'End', width: 40, align: 'right' },
-    { header: 'Worked', width: 60, align: 'right' }
+  // Table geometry: Employee | Number | Work dates | Worked
+  const cols = [
+    { w: 170, align: 'left' as const },
+    { w: 70, align: 'left' as const },
+    { w: contentWidth - 170 - 70 - 66, align: 'left' as const },
+    { w: 66, align: 'right' as const }
   ];
-  const totalWidth = columns.reduce((a, c) => a + c.width, 0);
-  const bottomLimit = doc.page.height - doc.page.margins.bottom;
+  const totalW = cols.reduce((a, c) => a + c.w, 0);
 
-  const drawHead = (yy: number): number => {
+  const drawColHead = (yy: number): number => {
     doc.font('DejaVu-Bold').fontSize(8);
-    doc.rect(x, yy, totalWidth, HEADER_ROW_HEIGHT).fillAndStroke('#eeeeee', '#333333');
+    doc.rect(x, yy, totalW, HEADER_ROW_HEIGHT).fillAndStroke('#eeeeee', '#333333');
     doc.fillColor('#000000');
+    const labels = ['Employee', 'Number', 'Work dates', 'Worked'];
     let cx = x;
-    for (const c of columns) {
-      doc.text(c.header, cx + 3, yy + 6, { width: c.width - 6, align: c.align ?? 'left', lineBreak: false });
-      cx += c.width;
+    for (let i = 0; i < cols.length; i++) {
+      doc.text(labels[i], cx + 3, yy + 6, { width: cols[i].w - 6, align: cols[i].align, lineBreak: false });
+      cx += cols[i].w;
     }
     doc.font('DejaVu').fontSize(8);
     return yy + HEADER_ROW_HEIGHT;
   };
-  // `height` set to a single line forces pdfkit to clip (with ellipsis) instead of ever wrapping
-  // a too-long value into the next row.
-  const CELL_H = 11;
   const drawRow = (cells: string[], yy: number, bold = false): number => {
     doc.font(bold ? 'DejaVu-Bold' : 'DejaVu').fontSize(8);
-    doc.rect(x, yy, totalWidth, ROW_HEIGHT).stroke('#cccccc');
+    doc.rect(x, yy, totalW, ROW_HEIGHT).stroke('#cccccc');
     let cx = x;
-    for (let i = 0; i < columns.length; i++) {
-      doc.text(cells[i] ?? '', cx + 3, yy + 5, { width: columns[i].width - 6, height: CELL_H, align: columns[i].align ?? 'left', lineBreak: false, ellipsis: true });
-      cx += columns[i].width;
+    for (let i = 0; i < cols.length; i++) {
+      doc.text(cells[i] ?? '', cx + 3, yy + 5, { width: cols[i].w - 6, height: CELL_H, align: cols[i].align, lineBreak: false, ellipsis: true });
+      cx += cols[i].w;
     }
     return yy + ROW_HEIGHT;
   };
-  // A subtotal / grand-total line: the label spans every column except the last, so a long site
-  // name ("Subtotal — Meyer Turku Shipyard") fits on one line instead of wrapping and overlapping
-  // the next row. The value stays right-aligned in the "Worked" column.
-  const lastColWidth = columns[columns.length - 1].width;
-  const labelWidth = totalWidth - lastColWidth;
-  const drawSummaryRow = (label: string, value: string, yy: number): number => {
-    doc.font('DejaVu-Bold').fontSize(8);
-    doc.rect(x, yy, totalWidth, ROW_HEIGHT).stroke('#cccccc');
-    doc.text(label, x + 3, yy + 5, { width: labelWidth - 6, height: CELL_H, lineBreak: false, ellipsis: true });
-    doc.text(value, x + labelWidth + 3, yy + 5, { width: lastColWidth - 6, height: CELL_H, align: 'right', lineBreak: false });
-    return yy + ROW_HEIGHT;
+  const ensure = (need: number) => {
+    if (y + need > bottomLimit) {
+      doc.addPage();
+      y = doc.page.margins.top;
+    }
   };
 
-  y = drawHead(y);
-  for (const d of report.dailyRows) {
-    if (y + ROW_HEIGHT > bottomLimit) {
-      doc.addPage();
-      y = drawHead(doc.page.margins.top);
+  for (const section of report.sections) {
+    ensure(HEADER_ROW_HEIGHT + ROW_HEIGHT * 2 + 24);
+    doc.font('DejaVu-Bold').fontSize(10.5).text(`${section.workAreaName ?? '(no customer)'}`, x, y);
+    y += 14;
+    doc.font('DejaVu').fontSize(8.5).fillColor('#555555');
+    doc.text(`Site: ${section.siteName}${section.customerActive ? '' : '  (customer disabled)'}   ·   assigned now: ${section.assignedNowCount}   ·   worked in period: ${section.workedInPeriodCount}`, x, y);
+    doc.fillColor('#000000');
+    y += 14;
+    y = drawColHead(y);
+    for (const w of section.workers) {
+      ensure(ROW_HEIGHT);
+      if (y === doc.page.margins.top) y = drawColHead(y);
+      y = drawRow(
+        [`${w.employee.lastName} ${w.employee.firstName}`, w.employee.employeeNumber, w.workDates.join(', ') || '—', formatWorkedDuration(w.workedMinutes, 'EN')],
+        y
+      );
     }
-    y = drawRow([d.date, `${d.employee.lastName} ${d.employee.firstName}`, d.site.name, helsinkiTime(d.firstStartAt), helsinkiTime(d.lastEndAt), formatWorkedDuration(d.workedMinutes, 'EN')], y);
+    ensure(ROW_HEIGHT);
+    y = drawRow(['Customer total', '', '', formatWorkedDuration(section.totalMinutes, 'EN')], y, true);
+    y += 12;
   }
 
-  const ensure = () => {
-    if (y + ROW_HEIGHT > bottomLimit) {
-      doc.addPage();
-      y = drawHead(doc.page.margins.top);
-    }
-  };
-  if (report.siteSubtotals.length > 1) {
-    for (const s of report.siteSubtotals) {
-      ensure();
-      y = drawSummaryRow(`Site total — ${s.site.name}`, formatWorkedDuration(s.totals.workedMinutes, 'EN'), y);
-    }
+  if (report.sections.length > 1) {
+    ensure(ROW_HEIGHT + 6);
+    doc.font('DejaVu-Bold').fontSize(9.5);
+    doc.rect(x, y, totalW, ROW_HEIGHT).fillAndStroke('#f3f3f3', '#333333');
+    doc.fillColor('#000000');
+    doc.text('GRAND TOTAL', x + 3, y + 5, { width: totalW - 72, lineBreak: false });
+    doc.text(formatWorkedDuration(report.grandTotalMinutes, 'EN'), x + totalW - 69, y + 5, { width: 66, align: 'right', lineBreak: false });
+    y += ROW_HEIGHT;
   }
-  if (report.employeeSubtotals.length > 1) {
-    for (const e of report.employeeSubtotals) {
-      ensure();
-      y = drawSummaryRow(`Employee total — ${e.employee.lastName} ${e.employee.firstName}`, formatWorkedDuration(e.totals.workedMinutes, 'EN'), y);
-    }
-  }
-  ensure();
-  drawSummaryRow('GRAND TOTAL', formatWorkedDuration(report.grandTotal.workedMinutes, 'EN'), y);
 
   const range = doc.bufferedPageRange();
   for (let i = range.start; i < range.start + range.count; i++) {
@@ -191,6 +172,8 @@ export async function buildCustomerHoursPdf(report: CustomTimeReport, meta: Cust
   return finalizePdf(doc);
 }
 
-export function customerHoursPdfFileName(report: CustomTimeReport): string {
-  return `titanor-project-hours_${report.dateFrom}_${report.dateTo}.pdf`;
+export function customerHoursPdfFileName(report: CustomerTimeReport): string {
+  const one = report.sections.length === 1 ? report.sections[0].workAreaName : null;
+  const slug = (one ?? 'customers').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '').slice(0, 40) || 'customers';
+  return `titanor-customer-hours_${slug}_${report.dateFrom}_${report.dateTo}.pdf`;
 }

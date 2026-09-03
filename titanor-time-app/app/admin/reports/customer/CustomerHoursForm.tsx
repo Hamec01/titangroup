@@ -1,30 +1,50 @@
 'use client';
 
-// docs/titanor-time/CUSTOMER_REPORT_SCOPE_PICKER_RU.md — the scope picker for the customer hours
-// report. Flow: dates -> choose by Sites or Workers -> selection panel(s) -> selection summary ->
-// "Show & check" -> result. URL is the source of truth (reload / Back-Forward / shared link
-// reproduce the selection). Explicit ALL / PICK modes — an empty list never silently means "the
-// whole company". Serializes back onto the EXISTING export API params (absent list = "all"), so the
-// report itself, PDF and CSV are byte-identical for the same effective scope.
+// R15-D7 Deploy F — "Часы заказчику". Flow: dates → pick one or more REAL customers (search by
+// customer + site name) → per-customer cards → paginated worker list (20/page, cross-page
+// selection) → preview → download PDF / CSV. The URL is the source of truth (reload, Back/Forward,
+// shared link all reproduce the selection). The customer name/site for the document come from the
+// server by id — never from this component.
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { usePathname, useRouter } from 'next/navigation';
+import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { localeText } from '@/lib/i18n/locale';
-import { ScopePickerPanel, type ScopeItem } from '@/components/reports/ScopePickerPanel';
-import { serializeScopeToExportParams, type CustomerReportScope, type ScopeBasis } from '@/lib/reporting/customer-report-scope';
+import type { AppLocale } from '@/lib/i18n/locale';
 
-interface SiteOption {
-  id: string;
-  name: string;
+interface WorkAreaOption {
+  workAreaId: string;
+  workAreaName: string;
+  siteId: string;
+  siteName: string;
+  active: boolean;
+  label: string;
 }
-interface ScopeWorker {
-  employeeId: string;
-  firstName: string;
-  lastName: string;
-  employeeNumber: string;
-  siteIds: string[];
-  assigned: boolean;
-  hasHours: boolean;
+interface WorkerRow {
+  employee: { id: string; employeeNumber: string; firstName: string; lastName: string };
+  workedMinutes: number;
+  workDates: string[];
+  timesheetStatus: string;
+  assignedNow: boolean;
+  workedInPeriod: boolean;
+}
+interface Section {
+  workAreaId: string | null;
+  workAreaName: string | null;
+  siteId: string;
+  siteName: string;
+  customerActive: boolean;
+  assignedNowCount: number;
+  workedInPeriodCount: number;
+  totalMinutes: number;
+  workers: WorkerRow[];
+}
+interface Report {
+  dateFrom: string;
+  dateTo: string;
+  includesNoCustomer: boolean;
+  sections: Section[];
+  grandTotalMinutes: number;
+  grandWorkerCount: number;
 }
 interface Blocker {
   employeeName: string;
@@ -34,467 +54,417 @@ interface Blocker {
   status: string;
   link: string;
 }
-interface Preview {
-  readiness: { level: string; blockers: Blocker[]; noData: { employeeName: string; periodLabel: string }[]; coveredTimesheetCount: number };
-  report: { dailyRows: unknown[]; grandTotal: { workedMinutes: number; workedDays: number }; sites: { name: string }[] };
+interface Readiness {
+  level: 'CUSTOMER_FINAL' | 'INTERNAL_PREVIEW_ONLY';
+  blockers: Blocker[];
+  noData: { employeeName: string; employeeNumber: string; periodLabel: string }[];
 }
 
-function hoursLabel(minutes: number, ru: boolean): string {
+const PAGE_SIZE = 20;
+const NO_CUSTOMER = 'none';
+
+function hoursLabel(minutes: number, locale: AppLocale): string {
   const h = Math.floor(minutes / 60);
   const m = minutes % 60;
-  return ru ? `${h} ч ${m} мин` : `${h} h ${m} min`;
+  return locale === 'RU' ? `${h} ч ${m} мин` : `${h} h ${m} min`;
 }
 
-export function CustomerHoursForm({ allSites, initial, locale }: { allSites: SiteOption[]; initial: CustomerReportScope; locale: 'EN' | 'RU' }) {
-  const ru = locale === 'RU';
-  const t = (en: string, r: string) => localeText(locale, en, r);
+export function CustomerHoursForm({ locale }: { locale: AppLocale }) {
   const router = useRouter();
   const pathname = usePathname();
-  const today = new Date().toISOString().slice(0, 10);
-  const siteName = useMemo(() => new Map(allSites.map((s) => [s.id, s.name])), [allSites]);
+  const searchParams = useSearchParams();
+  const ru = locale === 'RU';
+  const t = (en: string, r: string) => localeText(locale, en, r);
 
-  const [dateFrom, setDateFrom] = useState(initial.dateFrom ?? '');
-  const [dateTo, setDateTo] = useState(initial.dateTo ?? '');
-  const [customer, setCustomer] = useState(initial.customer);
-  const [projectReference, setProjectReference] = useState(initial.projectReference);
-  const [scopeBasis, setScopeBasis] = useState<ScopeBasis>(initial.scopeBasis);
-
-  // The picker only offers two visible modes: "Choose sites" (PICK) and "All sites" (ALL). A URL
-  // that carried neither (siteMode NONE) opens in PICK with nothing selected — the report button
-  // then stays disabled with a hint, so an empty list still never means "the whole company".
-  const [siteMode, setSiteMode] = useState<'ALL' | 'PICK'>(initial.siteMode === 'ALL' ? 'ALL' : 'PICK');
-  const [siteIds, setSiteIds] = useState<Set<string>>(() => new Set(initial.siteIds));
-
-  // Worker selection: `workersAllMode` is flipped by the "select all / clear" buttons only; single
-  // toggles don't change it. ALL -> serialize as workers=all (+ wx for manual removals); PICK ->
-  // workerIds. `pendingWorkerSel` seeds the selection once the scope list arrives.
-  const [workersAllMode, setWorkersAllMode] = useState(initial.workerMode === 'ALL');
-  const [workerIds, setWorkerIds] = useState<Set<string>>(() => new Set(initial.workerIds));
-  const workerIdsRef = useRef(workerIds);
-  workerIdsRef.current = workerIds;
-  const workersAllModeRef = useRef(workersAllMode);
-  workersAllModeRef.current = workersAllMode;
-  const workerExcludeRef = useRef<Set<string>>(new Set(initial.workerExcludeIds));
-
-  const [scopeWorkers, setScopeWorkers] = useState<ScopeWorker[] | null>(null);
-  const [scopeLoading, setScopeLoading] = useState(false);
-  const [scopeError, setScopeError] = useState<string | null>(null);
-  const [prunedCount, setPrunedCount] = useState(0);
-
-  const [busy, setBusy] = useState(false);
-  const [formError, setFormError] = useState<string | null>(null);
-  const [preview, setPreview] = useState<Preview | null>(null);
-
-  const datesValid = !!dateFrom && !!dateTo && dateFrom <= dateTo;
-  const siteScopeReady = datesValid && (scopeBasis === 'WORKERS' || siteMode === 'ALL' || (siteMode === 'PICK' && siteIds.size > 0));
-  const sortedSiteIds = useMemo(() => [...siteIds].sort(), [siteIds]);
-  const scopeKey = `${scopeBasis}|${siteMode}|${sortedSiteIds.join(',')}|${dateFrom}|${dateTo}`;
-
-  // ---- fetch the in-scope worker list whenever sites / dates change --------------------------
-  useEffect(() => {
-    if (!siteScopeReady) {
-      setScopeWorkers(null);
-      return;
-    }
-    let cancelled = false;
-    const handle = setTimeout(async () => {
-      setScopeLoading(true);
-      setScopeError(null);
-      try {
-        const q = new URLSearchParams({ dateFrom, dateTo, siteMode: scopeBasis === 'WORKERS' ? 'ALL' : siteMode, scopeBasis });
-        if (scopeBasis === 'SITES') for (const id of sortedSiteIds) q.append('siteIds', id);
-        const r = await fetch(`/api/admin/reports/customer/scope?${q.toString()}`, { credentials: 'same-origin' });
-        if (cancelled) return;
-        if (!r.ok) {
-          setScopeError(t('Could not load the worker list.', 'Не удалось загрузить список работников.'));
-          setScopeWorkers([]);
-          return;
-        }
-        const body = (await r.json()) as { workers: ScopeWorker[] };
-        if (cancelled) return;
-        setScopeWorkers(body.workers);
-      } catch {
-        if (!cancelled) {
-          setScopeError(t('Network error.', 'Ошибка сети.'));
-          setScopeWorkers([]);
-        }
-      } finally {
-        if (!cancelled) setScopeLoading(false);
-      }
-    }, 250);
-    return () => {
-      cancelled = true;
-      clearTimeout(handle);
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [scopeKey, siteScopeReady]);
-
-  // ---- reconcile the worker selection against a freshly-arrived scope list ------------------
-  useEffect(() => {
-    if (!scopeWorkers) return;
-    const inScope = new Set(scopeWorkers.map((w) => w.employeeId));
-    // Keep the exclude set trimmed to what is actually in scope so it can never hide a selected
-    // worker outside the visible list (ТЗ §5).
-    const trimmedExcludes = new Set<string>();
-    for (const id of workerExcludeRef.current) if (inScope.has(id)) trimmedExcludes.add(id);
-    workerExcludeRef.current = trimmedExcludes;
-
-    const prev = workerIdsRef.current;
-    const next = workersAllModeRef.current
-      ? new Set(scopeWorkers.filter((w) => !trimmedExcludes.has(w.employeeId)).map((w) => w.employeeId))
-      : new Set([...prev].filter((id) => inScope.has(id)));
-    setPrunedCount([...prev].filter((id) => !inScope.has(id)).length);
-    if (next.size !== prev.size || [...next].some((id) => !prev.has(id))) setWorkerIds(next);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [scopeWorkers]);
-
-  // ---- keep the URL in sync (source of truth) ----------------------------------------------
-  const buildUrl = useCallback(() => {
-    const p = new URLSearchParams();
-    if (dateFrom) p.set('dateFrom', dateFrom);
-    if (dateTo) p.set('dateTo', dateTo);
-    if (customer.trim()) p.set('customer', customer.trim());
-    if (projectReference.trim()) p.set('projectReference', projectReference.trim());
-    if (scopeBasis === 'WORKERS') {
-      p.set('scopeBy', 'workers');
-    } else if (siteMode === 'ALL') p.set('sites', 'all');
-    else for (const id of sortedSiteIds) p.append('siteIds', id);
-    if (workersAllMode) {
-      p.set('workers', 'all');
-      for (const id of [...workerExcludeRef.current].sort()) p.append('wx', id);
-    } else {
-      for (const id of [...workerIds].sort()) p.append('workerIds', id);
-    }
-    return `${pathname}?${p.toString()}`;
-  }, [dateFrom, dateTo, customer, projectReference, scopeBasis, siteMode, sortedSiteIds, workersAllMode, workerIds, pathname]);
-
-  useEffect(() => {
-    const handle = setTimeout(() => {
-      router.replace(buildUrl(), { scroll: false });
-    }, 400);
-    return () => clearTimeout(handle);
-  }, [buildUrl, router]);
-
-  // ---- site panel ------------------------------------------------------------------------
-  const siteItems: ScopeItem[] = useMemo(
-    () => allSites.map((s) => ({ id: s.id, primary: s.name, searchText: s.name.toLowerCase() })),
-    [allSites]
+  // ── URL-backed selection ────────────────────────────────────────────────────────────────────
+  const urlDateFrom = searchParams.get('dateFrom') ?? '';
+  const urlDateTo = searchParams.get('dateTo') ?? '';
+  const urlWaIds = useMemo(
+    () => (searchParams.get('waIds') ?? '').split(',').map((s) => s.trim()).filter(Boolean),
+    [searchParams]
   );
-  const toggleSite = (id: string) =>
-    setSiteIds((prev) => {
-      const next = new Set(prev);
-      next.has(id) ? next.delete(id) : next.add(id);
-      return next;
-    });
+  const urlNoCustomer = searchParams.get('noCustomer') === '1';
+  const urlWorkersAll = searchParams.get('workers') === 'all';
+  const urlWorkerIds = useMemo(
+    () => new Set((searchParams.get('workerIds') ?? '').split(',').map((s) => s.trim()).filter(Boolean)),
+    [searchParams]
+  );
 
-  // ---- worker panel --------------------------------------------------------------------
-  const workerItems: ScopeItem[] = useMemo(() => {
-    if (!scopeWorkers) return [];
-    return scopeWorkers.map((w) => {
-      const sites = w.siteIds.map((id) => siteName.get(id) ?? '—');
-      const chips: string[] = [];
-      if (w.hasHours) chips.push(t('has hours in period', 'есть часы за период'));
-      else if (w.assigned) chips.push(t('assigned to site', 'назначен на объект'));
-      const secondaryParts = [`#${w.employeeNumber}`];
-      if (sites.length) secondaryParts.push(sites.join(', '));
-      else if (scopeBasis === 'WORKERS') secondaryParts.push(t('No site assigned in this period', 'Объект за этот период не назначен'));
-      if (chips.length) secondaryParts.push(chips.join(', '));
-      return {
-        id: w.employeeId,
-        primary: `${w.lastName} ${w.firstName}`,
-        secondary: secondaryParts.join(' · '),
-        searchText: `${w.lastName} ${w.firstName} ${w.employeeNumber} ${sites.join(' ')}`.toLowerCase()
-      };
-    });
-  }, [scopeWorkers, siteName, locale, scopeBasis]);
-
-  const changeScopeBasis = (next: ScopeBasis) => {
-    if (next === scopeBasis) return;
-    setScopeBasis(next);
-    setScopeWorkers(null);
-    setWorkersAllMode(false);
-    workersAllModeRef.current = false;
-    workerExcludeRef.current = new Set();
-    setWorkerIds(new Set());
-    setPrunedCount(0);
-    setPreview(null);
-  };
-
-  const toggleWorker = (id: string) => {
-    setPrunedCount(0);
-    setWorkerIds((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) {
-        next.delete(id);
-        workerExcludeRef.current.add(id);
-      } else {
-        next.add(id);
-        workerExcludeRef.current.delete(id);
+  const pushSelection = useCallback(
+    (next: { dateFrom?: string; dateTo?: string; waIds?: string[]; noCustomer?: boolean; workersAll?: boolean; workerIds?: Set<string> }) => {
+      const p = new URLSearchParams(searchParams.toString());
+      const set = (k: string, v: string | null) => (v ? p.set(k, v) : p.delete(k));
+      if (next.dateFrom !== undefined) set('dateFrom', next.dateFrom || null);
+      if (next.dateTo !== undefined) set('dateTo', next.dateTo || null);
+      if (next.waIds !== undefined) set('waIds', next.waIds.length ? next.waIds.join(',') : null);
+      if (next.noCustomer !== undefined) set('noCustomer', next.noCustomer ? '1' : null);
+      if (next.workersAll !== undefined || next.workerIds !== undefined) {
+        const all = next.workersAll ?? urlWorkersAll;
+        const ids = next.workerIds ?? urlWorkerIds;
+        if (all || ids.size === 0) {
+          p.set('workers', 'all');
+          p.delete('workerIds');
+        } else {
+          p.delete('workers');
+          p.set('workerIds', [...ids].join(','));
+        }
       }
-      return next;
+      router.replace(`${pathname}?${p.toString()}`, { scroll: false });
+    },
+    [pathname, router, searchParams, urlWorkersAll, urlWorkerIds]
+  );
+
+  // ── customer search ─────────────────────────────────────────────────────────────────────────
+  const [query, setQuery] = useState('');
+  const [results, setResults] = useState<WorkAreaOption[]>([]);
+  const [selectedLabels, setSelectedLabels] = useState<Map<string, WorkAreaOption>>(new Map());
+
+  useEffect(() => {
+    const ctrl = new AbortController();
+    const id = setTimeout(() => {
+      fetch(`/api/admin/reports/customer/scope?action=search&q=${encodeURIComponent(query)}`, { credentials: 'same-origin', signal: ctrl.signal })
+        .then((r) => r.json())
+        .then((b: { workAreas?: WorkAreaOption[] }) => setResults(b.workAreas ?? []))
+        .catch(() => {});
+    }, 220);
+    return () => {
+      clearTimeout(id);
+      ctrl.abort();
+    };
+  }, [query]);
+
+  // resolve the labels for waIds already in the URL (so a reloaded page shows the chips)
+  useEffect(() => {
+    const missing = urlWaIds.filter((id) => !selectedLabels.has(id));
+    if (missing.length === 0) return;
+    fetch(`/api/admin/reports/customer/scope?action=search&q=`, { credentials: 'same-origin' })
+      .then((r) => r.json())
+      .then((b: { workAreas?: WorkAreaOption[] }) => {
+        const byId = new Map((b.workAreas ?? []).map((w) => [w.workAreaId, w]));
+        setSelectedLabels((prev) => {
+          const nextMap = new Map(prev);
+          for (const id of urlWaIds) {
+            const w = byId.get(id);
+            if (w) nextMap.set(id, w);
+          }
+          return nextMap;
+        });
+      })
+      .catch(() => {});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [urlWaIds.join(',')]);
+
+  function toggleCustomer(w: WorkAreaOption): void {
+    const has = urlWaIds.includes(w.workAreaId);
+    const nextIds = has ? urlWaIds.filter((id) => id !== w.workAreaId) : [...urlWaIds, w.workAreaId];
+    setSelectedLabels((prev) => {
+      const m = new Map(prev);
+      if (has) m.delete(w.workAreaId);
+      else m.set(w.workAreaId, w);
+      return m;
     });
-  };
-  const selectAllWorkers = () => {
-    setPrunedCount(0);
-    setWorkersAllMode(true);
-    workerExcludeRef.current = new Set();
-    setWorkerIds(new Set((scopeWorkers ?? []).map((w) => w.employeeId)));
-  };
-  const clearAllWorkers = () => {
-    setPrunedCount(0);
-    setWorkersAllMode(false);
-    workerExcludeRef.current = new Set((scopeWorkers ?? []).map((w) => w.employeeId));
-    setWorkerIds(new Set());
-  };
-
-  // ---- current explicit scope (for serialization + summary) ---------------------------------
-  const currentScope: CustomerReportScope = {
-    scopeBasis,
-    dateFrom: dateFrom || null,
-    dateTo: dateTo || null,
-    customer,
-    projectReference,
-    siteMode: scopeBasis === 'WORKERS' ? 'ALL' : siteMode,
-    siteIds: scopeBasis === 'SITES' && siteMode === 'PICK' ? sortedSiteIds : [],
-    workerMode: workersAllMode ? 'ALL' : workerIds.size > 0 ? 'PICK' : 'NONE',
-    workerIds: workersAllMode ? [] : [...workerIds],
-    workerExcludeIds: workersAllMode ? [...workerExcludeRef.current] : []
-  };
-  const scopeWorkerIds = (scopeWorkers ?? []).map((w) => w.employeeId);
-  const exportParams = (extra: Record<string, string>) => serializeScopeToExportParams(currentScope, scopeWorkerIds, extra);
-  const canRun = siteScopeReady && !!scopeWorkers && !scopeLoading && exportParams({}) !== null;
-
-  async function handlePreview() {
-    setFormError(null);
-    if (!datesValid) {
-      setFormError(t('Both dates are required and "from" must be on or before "to".', 'Укажите обе даты; «с» — не позже «по».'));
-      return;
-    }
-    const p = exportParams({ preview: '1', mode: 'PREVIEW' });
-    if (!p) {
-      setFormError(t('Choose sites and workers first.', 'Сначала выберите объекты и работников.'));
-      return;
-    }
-    setBusy(true);
-    setPreview(null);
-    try {
-      const r = await fetch(`/api/admin/reports/customer/export?${p.toString()}`, { credentials: 'same-origin' });
-      if (!r.ok) {
-        setFormError(t('Could not load the preview.', 'Не удалось получить предпросмотр.'));
-        return;
-      }
-      setPreview(await r.json());
-    } catch {
-      setFormError(t('Network error.', 'Ошибка сети.'));
-    } finally {
-      setBusy(false);
-    }
+    pushSelection({ waIds: nextIds });
+  }
+  function selectAllVisible(): void {
+    const ids = Array.from(new Set([...urlWaIds, ...results.map((r) => r.workAreaId)]));
+    setSelectedLabels((prev) => {
+      const m = new Map(prev);
+      for (const r of results) m.set(r.workAreaId, r);
+      return m;
+    });
+    pushSelection({ waIds: ids });
+  }
+  function clearCustomers(): void {
+    setSelectedLabels(new Map());
+    pushSelection({ waIds: [], noCustomer: false });
   }
 
-  const ready = preview?.readiness.level === 'CUSTOMER_FINAL';
+  // ── preview ─────────────────────────────────────────────────────────────────────────────────
+  const [report, setReport] = useState<Report | null>(null);
+  const [readiness, setReadiness] = useState<Readiness | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const previewSeq = useRef(0);
 
-  // ---- selection summary (ТЗ §7) --------------------------------------------------------
-  const sitesSummary =
-    scopeBasis === 'WORKERS'
-      ? t('all sites where the selected workers recorded hours', 'все объекты, где выбранные работники записали часы')
-      : siteMode === 'ALL'
-      ? t('all', 'все')
-      : siteIds.size === 1
-        ? siteName.get([...siteIds][0]) ?? t('1 selected', 'выбран 1')
-        : t(`${siteIds.size} selected`, `выбрано ${siteIds.size}`);
-  const workersSummary = !scopeWorkers
-    ? '—'
-    : workersAllMode && workerExcludeRef.current.size === 0
-      ? scopeBasis === 'WORKERS'
-        ? t('all workers', 'все работники')
-        : t('all workers of the selected sites', 'все работники выбранных объектов')
-      : t(`${workerIds.size} of ${scopeWorkers.length} selected`, `выбрано ${workerIds.size} из ${scopeWorkers.length}`);
+  const canQuery = !!urlDateFrom && !!urlDateTo && (urlWaIds.length > 0 || urlNoCustomer);
 
+  useEffect(() => {
+    if (!canQuery) {
+      setReport(null);
+      setReadiness(null);
+      return;
+    }
+    const seq = ++previewSeq.current;
+    setLoading(true);
+    setError(null);
+    const p = new URLSearchParams({ action: 'preview', dateFrom: urlDateFrom, dateTo: urlDateTo });
+    if (urlWaIds.length) p.set('waIds', urlWaIds.join(','));
+    if (urlNoCustomer) p.set('noCustomer', '1');
+    fetch(`/api/admin/reports/customer/scope?${p.toString()}`, { credentials: 'same-origin' })
+      .then(async (r) => {
+        const b = await r.json();
+        if (seq !== previewSeq.current) return;
+        if (!r.ok) {
+          setError(b?.error?.message ?? t('Could not load the preview.', 'Не удалось загрузить предпросмотр.'));
+          setReport(null);
+          return;
+        }
+        setReport(b.report);
+        setReadiness(b.readiness);
+      })
+      .catch(() => seq === previewSeq.current && setError(t('Network error.', 'Ошибка сети.')))
+      .finally(() => seq === previewSeq.current && setLoading(false));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [canQuery, urlDateFrom, urlDateTo, urlWaIds.join(','), urlNoCustomer]);
+
+  // ── flattened worker rows (one per worker × customer) ────────────────────────────────────────
+  const allRows = useMemo(() => {
+    if (!report) return [] as { section: Section; w: WorkerRow }[];
+    return report.sections.flatMap((section) => section.workers.map((w) => ({ section, w })));
+  }, [report]);
+
+  const [workerSearch, setWorkerSearch] = useState('');
+  const [page, setPage] = useState(0);
+  const filteredRows = useMemo(() => {
+    const q = workerSearch.trim().toLowerCase();
+    if (!q) return allRows;
+    return allRows.filter(({ section, w }) => {
+      const hay = `${w.employee.lastName} ${w.employee.firstName} ${w.employee.employeeNumber} ${section.siteName} ${section.workAreaName ?? ''}`.toLowerCase();
+      return hay.includes(q);
+    });
+  }, [allRows, workerSearch]);
+  const pageCount = Math.max(1, Math.ceil(filteredRows.length / PAGE_SIZE));
+  const pageRows = filteredRows.slice(page * PAGE_SIZE, page * PAGE_SIZE + PAGE_SIZE);
+  useEffect(() => {
+    if (page >= pageCount) setPage(0);
+  }, [page, pageCount]);
+
+  const workerSelected = (id: string) => urlWorkersAll || (!urlWorkersAll && (urlWorkerIds.has(id) || urlWorkerIds.size === 0));
+  function toggleWorker(id: string): void {
+    const currentAll = urlWorkersAll || urlWorkerIds.size === 0;
+    if (currentAll) {
+      // switch to explicit "all except this one"
+      const ids = new Set(allRows.map((r) => r.w.employee.id));
+      ids.delete(id);
+      pushSelection({ workersAll: false, workerIds: ids });
+    } else {
+      const ids = new Set(urlWorkerIds);
+      if (ids.has(id)) ids.delete(id);
+      else ids.add(id);
+      pushSelection({ workersAll: ids.size === 0, workerIds: ids });
+    }
+  }
+  function selectAllWorkers(): void {
+    pushSelection({ workersAll: true, workerIds: new Set() });
+  }
+  function clearWorkers(): void {
+    pushSelection({ workersAll: false, workerIds: new Set(['__none__']) });
+  }
+
+  // ── export links ────────────────────────────────────────────────────────────────────────────
+  const exportBlockedReason = useMemo(() => {
+    if (urlWaIds.length === 0) return t('Select at least one real customer.', 'Выберите хотя бы одного настоящего заказчика.');
+    if (urlNoCustomer) return t('Remove "no customer" — it cannot be in a client export.', 'Уберите «Без заказчика» — он не может быть в клиентском экспорте.');
+    if (readiness && readiness.level !== 'CUSTOMER_FINAL')
+      return t('Some timesheets for this customer are not final-approved.', 'Некоторые табели этого заказчика не утверждены окончательно.');
+    return null;
+  }, [urlWaIds.length, urlNoCustomer, readiness, locale]);
+
+  function exportHref(format: 'PDF' | 'CSV', mode: 'FINAL' | 'PREVIEW'): string {
+    const p = new URLSearchParams({ dateFrom: urlDateFrom, dateTo: urlDateTo, format, mode });
+    if (urlWaIds.length) p.set('waIds', urlWaIds.join(','));
+    if (urlNoCustomer && mode === 'PREVIEW') p.set('noCustomer', '1');
+    if (!urlWorkersAll && urlWorkerIds.size > 0) p.set('workerIds', [...urlWorkerIds].join(','));
+    return `/api/admin/reports/customer/export?${p.toString()}`;
+  }
+
+  // ── render ──────────────────────────────────────────────────────────────────────────────────
   return (
-    <div className="ch-form" style={{ display: 'grid', gap: 16 }}>
-      <div className="ov-filters" style={{ display: 'grid', gap: 12 }}>
-        <div className="ov-filter-field">
-          <label htmlFor="ch-from">{t('Date from', 'Дата с')} *</label>
-          <input id="ch-from" type="date" max={today} value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} />
-        </div>
-        <div className="ov-filter-field">
-          <label htmlFor="ch-to">{t('Date to', 'Дата по')} *</label>
-          <input id="ch-to" type="date" max={today} value={dateTo} onChange={(e) => setDateTo(e.target.value)} />
-        </div>
-        <div className="ov-filter-field">
-          <label htmlFor="ch-customer">{t('Customer / recipient', 'Заказчик / получатель')}</label>
-          <input id="ch-customer" type="text" maxLength={200} value={customer} onChange={(e) => setCustomer(e.target.value)} />
-        </div>
-        <div className="ov-filter-field">
-          <label htmlFor="ch-project">{t('Project / reference', 'Проект / ссылка')}</label>
-          <input id="ch-project" type="text" maxLength={200} value={projectReference} onChange={(e) => setProjectReference(e.target.value)} />
-        </div>
-      </div>
-
-      <fieldset className="scope-mode">
-        <legend>{t('How to choose', 'Как выбрать')}</legend>
+    <div className="worker-work-setup">
+      <fieldset>
+        <legend>{t('Period', 'Период')}</legend>
         <label>
-          <input type="radio" name="ch-scope-basis" checked={scopeBasis === 'SITES'} onChange={() => changeScopeBasis('SITES')} /> {t('By sites', 'По объектам')}
-        </label>
+          {t('From', 'С')}: <input type="date" value={urlDateFrom} onChange={(e) => pushSelection({ dateFrom: e.target.value })} />
+        </label>{' '}
         <label>
-          <input type="radio" name="ch-scope-basis" checked={scopeBasis === 'WORKERS'} onChange={() => changeScopeBasis('WORKERS')} /> {t('By workers', 'По работникам')}
+          {t('To', 'По')}: <input type="date" value={urlDateTo} onChange={(e) => pushSelection({ dateTo: e.target.value })} />
         </label>
-        <p className="setup-subtitle">
-          {scopeBasis === 'WORKERS'
-            ? t('Choose workers directly, even if they have no current site or changed sites.', 'Выберите работников напрямую — даже если объект не назначен или работник сменил объект.')
-            : t('Choose sites first, then their workers.', 'Сначала выберите объекты, затем их работников.')}
-        </p>
       </fieldset>
 
-      {/* ---- 1. Sites ---- */}
-      {scopeBasis === 'SITES' && <fieldset className="scope-mode">
-        <legend>{t('Sites', 'Объекты')}</legend>
-        <label>
-          <input type="radio" name="ch-site-mode" checked={siteMode === 'PICK'} onChange={() => setSiteMode('PICK')} /> {t('Choose sites', 'Выбрать объекты')}
-        </label>
-        <label>
-          <input type="radio" name="ch-site-mode" checked={siteMode === 'ALL'} onChange={() => setSiteMode('ALL')} /> {t('All sites', 'Все объекты')}
-        </label>
-      </fieldset>}
-
-      {scopeBasis === 'SITES' && siteMode === 'PICK' && (
-        <ScopePickerPanel
-          title={t('Sites', 'Объекты')}
-          items={siteItems}
-          selectedIds={siteIds}
-          onToggle={toggleSite}
-          onSelectAll={() => setSiteIds(new Set(allSites.map((s) => s.id)))}
-          onClearAll={() => setSiteIds(new Set())}
-          idPrefix="ch-site"
-          labels={{
-            count: (n) => t(`Sites selected: ${n}`, `Выбрано объектов: ${n}`),
-            searchPlaceholder: t('Search by site name', 'Поиск по названию объекта'),
-            selectAll: t('Select all', 'Выбрать все'),
-            clearAll: t('Clear selection', 'Снять выбор'),
-            empty: t('No sites.', 'Объектов нет.'),
-            noMatch: t('No sites match the search.', 'Нет объектов по запросу.'),
-            page: (c, tot) => t(`Page ${c} of ${tot}`, `Страница ${c} из ${tot}`),
-            prev: t('Previous', 'Назад'),
-            next: t('Next', 'Далее')
-          }}
+      <fieldset>
+        <legend>{t('Customers', 'Заказчики')}</legend>
+        <input
+          type="search"
+          value={query}
+          placeholder={t('Search by customer or site…', 'Поиск по заказчику или объекту…')}
+          onChange={(e) => setQuery(e.target.value)}
+          style={{ width: '100%', maxWidth: 420 }}
         />
-      )}
-
-      {/* ---- 2. Workers of the selected sites ---- */}
-      {siteScopeReady && (
-        <div className="scope-workers-wrap">
-          {scopeLoading && !scopeWorkers ? (
-            <p className="setup-subtitle">{t('Loading workers…', 'Загрузка работников…')}</p>
-          ) : scopeError ? (
-            <p className="login-error" role="alert">
-              {scopeError}
-            </p>
-          ) : (
-            <>
-              {prunedCount > 0 && (
-                <p className="scope-notice" role="status">
-                  {t(
-                    `${prunedCount} worker(s) removed — they are not on the selected sites.`,
-                    `Снято ${prunedCount} работник(а/ов), которые не относятся к выбранным объектам.`
-                  )}
-                </p>
-              )}
-              <ScopePickerPanel
-                title={scopeBasis === 'WORKERS' ? t('Workers', 'Работники') : t('Workers of the selected sites', 'Работники выбранных объектов')}
-                items={workerItems}
-                selectedIds={workerIds}
-                onToggle={toggleWorker}
-                onSelectAll={selectAllWorkers}
-                onClearAll={clearAllWorkers}
-                idPrefix="ch-worker"
-                labels={{
-                  count: (n, tot) => t(`Workers selected: ${n} of ${tot}`, `Выбрано работников: ${n} из ${tot}`),
-                  searchPlaceholder: t('Search by name or employee number', 'Поиск по имени, фамилии, табельному номеру'),
-                  selectAll:
-                    scopeBasis === 'WORKERS'
-                      ? t('Select all workers', 'Выбрать всех работников')
-                      : siteMode === 'PICK' && siteIds.size === 1
-                      ? t(`Select all workers of "${siteName.get([...siteIds][0]) ?? ''}"`, `Выбрать всех работников объекта «${siteName.get([...siteIds][0]) ?? ''}»`)
-                      : t('Select all workers of the selected sites', 'Выбрать всех работников выбранных объектов'),
-                  clearAll: t('Clear all', 'Снять выбор со всех'),
-                  empty: scopeBasis === 'WORKERS'
-                    ? t('No workers in this period.', 'За этот период работников нет.')
-                    : t('No workers on the selected sites in this period.', 'На выбранных объектах за период работников нет.'),
-                  noMatch: t('No workers match the search.', 'Нет работников по запросу.'),
-                  page: (c, tot) => t(`Page ${c} of ${tot}`, `Страница ${c} из ${tot}`),
-                  prev: t('Previous', 'Назад'),
-                  next: t('Next', 'Далее')
-                }}
-              />
-            </>
-          )}
+        <div className="activation-actions">
+          <button type="button" className="login-submit" onClick={selectAllVisible} disabled={results.length === 0}>
+            {t('Select all shown', 'Выбрать всех показанных')}
+          </button>
+          <button type="button" className="login-submit" onClick={clearCustomers} disabled={urlWaIds.length === 0 && !urlNoCustomer}>
+            {t('Clear selection', 'Снять выбор')}
+          </button>
         </div>
-      )}
 
-      {/* ---- 3. Selection summary ---- */}
-      <div className="scope-summary">
-        <p>
-          <strong>{t('Sites: ', 'Объекты: ')}</strong>
-          {sitesSummary}
-        </p>
-        <p>
-          <strong>{t('Workers: ', 'Работники: ')}</strong>
-          {workersSummary}
-        </p>
-      </div>
-
-      {formError ? (
-        <p className="login-error" role="alert">
-          {formError}
-        </p>
-      ) : null}
-
-      {/* ---- 4. Show & check ---- */}
-      <div className="ov-filter-actions">
-        <button type="button" className="exc-apply-button" onClick={handlePreview} disabled={busy || !canRun}>
-          {busy ? t('Loading…', 'Загрузка…') : t('Show & check', 'Показать и проверить')}
-        </button>
-        {!canRun && !busy ? (
-          <span className="setup-subtitle">
-            {!datesValid
-              ? t('Set both dates.', 'Укажите обе даты.')
-              : scopeBasis === 'SITES' && siteMode === 'PICK' && siteIds.size === 0
-                ? t('Choose sites or "All sites".', 'Выберите объекты или режим «Все объекты».')
-                : !scopeWorkers
-                  ? t('Loading…', 'Загрузка…')
-                  : currentScope.workerMode === 'NONE'
-                    ? t('Choose workers or "Select all…".', 'Выберите работников или «Выбрать всех…».')
-                    : ''}
-          </span>
-        ) : null}
-      </div>
-
-      {/* ---- 5. Result ---- */}
-      {preview ? (
-        <div className="setup-item setup-item-column" style={{ display: 'grid', gap: 8 }}>
+        {selectedLabels.size > 0 || urlNoCustomer ? (
           <p>
-            <strong>{t('Readiness: ', 'Готовность: ')}</strong>
-            {ready ? (
-              <span style={{ color: '#1f7a3d' }}>{t('all timesheets final-approved — ready for the customer', 'все табели окончательно одобрены — можно отправлять заказчику')}</span>
-            ) : (
-              <span style={{ color: '#a34d00' }}>{t('some timesheets are not final-approved — final export is blocked', 'есть неутверждённые табели — финальная выгрузка заблокирована')}</span>
-            )}
+            <strong>{t('Selected', 'Выбрано')}:</strong>{' '}
+            {[...selectedLabels.values()].map((w) => (
+              <button
+                key={w.workAreaId}
+                type="button"
+                className="setup-action"
+                style={{ margin: '2px', background: '#1f7a3d', color: '#fff' }}
+                onClick={() => toggleCustomer(w)}
+                title={t('Click to remove', 'Нажмите, чтобы убрать')}
+              >
+                {w.label}
+                {w.active ? '' : ` (${t('disabled', 'отключён')})`} ✕
+              </button>
+            ))}
+            {urlNoCustomer ? (
+              <button type="button" className="setup-action" style={{ margin: '2px' }} onClick={() => pushSelection({ noCustomer: false })}>
+                {t('No customer (internal)', 'Без заказчика (внутр.)')} ✕
+              </button>
+            ) : null}
           </p>
-          <p className="setup-subtitle">
-            {t('Total worked: ', 'Итого отработано: ')}
-            {hoursLabel(preview.report.grandTotal.workedMinutes, ru)} · {preview.report.grandTotal.workedDays} {t('worked days', 'раб. дн.')} · {preview.report.dailyRows.length} {t('rows', 'строк')}
-          </p>
+        ) : null}
 
-          {preview.readiness.blockers.length > 0 ? (
-            <div>
+        <ul className="setup-list">
+          {results.map((w) => {
+            const sel = urlWaIds.includes(w.workAreaId);
+            return (
+              <li key={w.workAreaId} className="setup-item">
+                <label style={{ fontWeight: sel ? 700 : 400 }}>
+                  <input type="checkbox" checked={sel} onChange={() => toggleCustomer(w)} /> {w.label}
+                  {w.active ? '' : ` · ${t('disabled', 'отключён')}`}
+                </label>
+              </li>
+            );
+          })}
+        </ul>
+        <label className="setup-subtitle">
+          <input type="checkbox" checked={urlNoCustomer} onChange={(e) => pushSelection({ noCustomer: e.target.checked })} />{' '}
+          {t('Also show "no customer" hours (internal preview only — no client PDF)', 'Также показать часы «без заказчика» (только внутренний предпросмотр — без клиентского PDF)')}
+        </label>
+      </fieldset>
+
+      {error ? <p className="login-error" role="alert">{error}</p> : null}
+      {loading ? <p className="setup-subtitle">{t('Loading…', 'Загрузка…')}</p> : null}
+
+      {report ? (
+        <>
+          {report.sections.map((s) => (
+            <div key={`${s.workAreaId ?? 'none'}:${s.siteId}`} className="activation-print-card">
               <p>
-                <strong>{t('Not final-approved:', 'Не окончательно одобрены:')}</strong>
+                <strong>{t('Customer', 'Заказчик')}:</strong> {s.workAreaName ?? t('(no customer)', '(без заказчика)')}
+                {s.customerActive ? '' : ` · ${t('disabled', 'отключён')}`}
+                <br />
+                <strong>{t('Site', 'Объект')}:</strong> {s.siteName}
+                <br />
+                <strong>{t('Assigned now', 'Сейчас назначено')}:</strong> {s.assignedNowCount}{' '}
+                {t('workers', 'работников')}
+                <br />
+                <strong>{t('Worked in period', 'Работали за период')}:</strong> {s.workedInPeriodCount} {t('workers', 'работников')}
+                <br />
+                <strong>{t('Total hours', 'Всего часов')}:</strong> {hoursLabel(s.totalMinutes, locale)}
+              </p>
+            </div>
+          ))}
+          {report.sections.length > 1 ? (
+            <p>
+              <strong>{t('Grand total', 'Общий итог')}:</strong> {hoursLabel(report.grandTotalMinutes, locale)} ·{' '}
+              {report.grandWorkerCount} {t('workers', 'работников')}
+            </p>
+          ) : null}
+
+          {/* worker list */}
+          <fieldset>
+            <legend>{t('Workers', 'Работники')}</legend>
+            <input
+              type="search"
+              value={workerSearch}
+              placeholder={t('Search name, number, site, customer…', 'Поиск по имени, номеру, объекту, заказчику…')}
+              onChange={(e) => {
+                setWorkerSearch(e.target.value);
+                setPage(0);
+              }}
+              style={{ width: '100%', maxWidth: 420 }}
+            />
+            <div className="activation-actions">
+              <button type="button" className="login-submit" onClick={selectAllWorkers}>
+                {t('Select all', 'Выбрать всех')}
+              </button>
+              <button type="button" className="login-submit" onClick={clearWorkers}>
+                {t('Clear', 'Снять выбор')}
+              </button>
+              <span className="setup-subtitle">
+                {urlWorkersAll || urlWorkerIds.size === 0
+                  ? t('all workers in scope', 'все работники в выборке')
+                  : `${urlWorkerIds.size} ${t('selected', 'выбрано')}`}
+              </span>
+            </div>
+            <div style={{ overflowX: 'auto' }}>
+              <table className="setup-list" style={{ width: '100%' }}>
+                <thead>
+                  <tr>
+                    <th></th>
+                    <th>{t('Name', 'ФИО')}</th>
+                    <th>{t('No.', 'Таб.№')}</th>
+                    <th>{t('Site', 'Объект')}</th>
+                    <th>{t('Customer', 'Заказчик')}</th>
+                    <th>{t('Work dates', 'Даты работы')}</th>
+                    <th>{t('Hours', 'Часы')}</th>
+                    <th>{t('Timesheet', 'Табель')}</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {pageRows.map(({ section, w }) => (
+                    <tr key={`${w.employee.id}:${section.workAreaId ?? section.siteId}`}>
+                      <td>
+                        <input type="checkbox" checked={workerSelected(w.employee.id)} onChange={() => toggleWorker(w.employee.id)} />
+                      </td>
+                      <td>
+                        {w.employee.lastName} {w.employee.firstName}
+                      </td>
+                      <td>{w.employee.employeeNumber}</td>
+                      <td>{section.siteName}</td>
+                      <td>{section.workAreaName ?? t('(no customer)', '(без заказчика)')}</td>
+                      <td>{w.workDates.join(', ') || '—'}</td>
+                      <td>{hoursLabel(w.workedMinutes, locale)}</td>
+                      <td>{w.timesheetStatus || '—'}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            {pageCount > 1 ? (
+              <p>
+                <button type="button" className="login-submit" disabled={page === 0} onClick={() => setPage((p) => p - 1)}>
+                  ‹
+                </button>{' '}
+                {t('Page', 'Стр.')} {page + 1} / {pageCount}{' '}
+                <button type="button" className="login-submit" disabled={page + 1 >= pageCount} onClick={() => setPage((p) => p + 1)}>
+                  ›
+                </button>
+              </p>
+            ) : null}
+          </fieldset>
+
+          {/* readiness */}
+          {readiness && readiness.blockers.length > 0 ? (
+            <div className="worker-setup-callout">
+              <p>
+                <strong>{t('Timesheets not final-approved:', 'Табели не утверждены окончательно:')}</strong>
               </p>
               <ul className="setup-list">
-                {preview.readiness.blockers.map((b) => (
-                  <li key={b.timesheetId} className="setup-item">
+                {readiness.blockers.map((b) => (
+                  <li key={b.timesheetId}>
                     <a href={b.link}>
-                      {b.employeeName} · {b.periodLabel} · {b.status}
+                      {b.employeeName} #{b.employeeNumber} — {b.periodLabel} ({b.status})
                     </a>
                   </li>
                 ))}
@@ -502,33 +472,37 @@ export function CustomerHoursForm({ allSites, initial, locale }: { allSites: Sit
             </div>
           ) : null}
 
-          {preview.readiness.noData.length > 0 ? (
-            <p className="setup-subtitle">
-              {t('Not submitted: ', 'Не сдали табель: ')}
-              {preview.readiness.noData.map((n) => `${n.employeeName} (${n.periodLabel})`).join(', ')}
-            </p>
-          ) : null}
-
-          <div className="wk-switch-actions">
-            <a
-              className="login-submit"
-              style={{ display: 'inline-block', textAlign: 'center', textDecoration: 'none', opacity: ready ? 1 : 0.5, pointerEvents: ready ? 'auto' : 'none' }}
-              href={`/api/admin/reports/customer/export?${(exportParams({ mode: 'FINAL', format: 'PDF' }) ?? new URLSearchParams()).toString()}`}
-            >
-              {t('Download PDF (final)', 'Скачать PDF (финал)')}
-            </a>
-            <a
-              className="wk-inline-secondary"
-              style={{ opacity: ready ? 1 : 0.5, pointerEvents: ready ? 'auto' : 'none' }}
-              href={`/api/admin/reports/customer/export?${(exportParams({ mode: 'FINAL', format: 'CSV' }) ?? new URLSearchParams()).toString()}`}
-            >
-              {t('Download CSV (final)', 'Скачать CSV (финал)')}
-            </a>
-            <a className="wk-inline-secondary" href={`/api/admin/reports/customer/export?${(exportParams({ mode: 'PREVIEW', format: 'PDF' }) ?? new URLSearchParams()).toString()}`}>
-              {t('Internal preview PDF (not final)', 'Внутренний предпросмотр PDF (не финал)')}
-            </a>
-          </div>
-        </div>
+          {/* downloads */}
+          <fieldset>
+            <legend>{t('Download', 'Скачать')}</legend>
+            {exportBlockedReason ? <p className="login-error">{exportBlockedReason}</p> : null}
+            <div className="activation-actions">
+              <a
+                className="setup-action"
+                aria-disabled={!!exportBlockedReason}
+                href={exportBlockedReason ? undefined : exportHref('PDF', 'FINAL')}
+                style={exportBlockedReason ? { pointerEvents: 'none', opacity: 0.5 } : undefined}
+              >
+                {t('Download PDF', 'Скачать PDF')}
+              </a>
+              <a
+                className="setup-action"
+                aria-disabled={!!exportBlockedReason}
+                href={exportBlockedReason ? undefined : exportHref('CSV', 'FINAL')}
+                style={exportBlockedReason ? { pointerEvents: 'none', opacity: 0.5 } : undefined}
+              >
+                {t('Download CSV', 'Скачать CSV')}
+              </a>
+              <a className="login-submit" href={exportHref('PDF', 'PREVIEW')}>
+                {t('Internal preview PDF', 'Внутренний предпросмотр PDF')}
+              </a>
+            </div>
+          </fieldset>
+        </>
+      ) : canQuery && !loading && !error ? (
+        <p className="setup-subtitle">{t('No hours for this selection.', 'Часов по этой выборке нет.')}</p>
+      ) : !canQuery ? (
+        <p className="setup-subtitle">{t('Pick a period and at least one customer.', 'Выберите период и хотя бы одного заказчика.')}</p>
       ) : null}
     </div>
   );

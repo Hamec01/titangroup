@@ -3,19 +3,16 @@ import { redirect } from 'next/navigation';
 import { resolveServerSession } from '@/lib/server-session';
 import { hasPermission } from '@/lib/permissions';
 import { resolveAppLocale } from '@/lib/i18n/server';
-import { listSiteOptionsForAdmin } from '@/lib/attendance-overview-lookups';
-import { parseCustomerReportScope } from '@/lib/reporting/customer-report-scope';
 import { AdminReportTabs } from '@/components/reports/AdminReportTabs';
 import { CustomerHoursForm } from './CustomerHoursForm';
 
 export const dynamic = 'force-dynamic';
 
-// T13.11 — Customer Project Working Hours. Same permission set as the custom report endpoint.
+// R15-D7 Deploy F — "Часы заказчику". Pick real customers (WorkAreas), workers, a date range;
+// preview; download a PDF/CSV scoped to those customers only. Same permission set as the export.
 const REQUIRED_PERMISSIONS = ['worker.read.all', 'site.read.all', 'timesheet.read.all', 'export.read'];
 
-type RouteParams = { searchParams: Promise<Record<string, string | string[] | undefined>> };
-
-export default async function AdminCustomerHoursPage({ searchParams }: RouteParams) {
+export default async function AdminCustomerHoursPage() {
   const session = await resolveServerSession();
   if (!session) {
     redirect('/login');
@@ -25,30 +22,21 @@ export default async function AdminCustomerHoursPage({ searchParams }: RoutePara
 
   for (const permissionCode of REQUIRED_PERMISSIONS) {
     if (!(await hasPermission(session.user.roles, permissionCode))) {
-      return (
-        <AccessDeniedNotice area="reports" locale={locale} permission={permissionCode} />
-      );
+      return <AccessDeniedNotice area="reports" locale={locale} permission={permissionCode} />;
     }
   }
-
-  const sp = await searchParams;
-  // CUSTOMER_REPORT_SCOPE_PICKER_RU.md §4 — the URL is the source of truth. The site list is small
-  // and bounded; the worker list is fetched by the client from /api/admin/reports/customer/scope
-  // once dates plus the site-first/direct-worker mode are ready (it depends on the date range).
-  const sites = await listSiteOptionsForAdmin();
-  const initial = parseCustomerReportScope(sp);
 
   return (
     <main className="setup-page">
       <div className="setup-card worker-card">
-        <h1>{ru ? 'Часы заказчику по объекту' : 'Customer project working hours'}</h1>
+        <h1>{ru ? 'Часы заказчику' : 'Customer working hours'}</h1>
         <AdminReportTabs active="customer" locale={locale} />
         <p className="setup-subtitle">
           {ru
-            ? 'Документ заказчику: подтверждённые (окончательно одобренные) часы по объекту за период. Без зарплат, ставок и TES.'
-            : 'A document for the customer: confirmed (final-approved) hours by site for a date range. No salary, rates or TES.'}
+            ? 'Документ заказчику: часы по выбранному заказчику (WorkArea) за период. Часы разных заказчиков одного объекта не смешиваются. Без зарплат, ставок, GPS и TES.'
+            : 'A document for the customer: hours for the selected customer(s) (WorkArea) over a period. Hours of different customers on the same site are never mixed. No salary, rates, GPS or TES.'}
         </p>
-        <CustomerHoursForm allSites={sites} initial={initial} locale={locale} />
+        <CustomerHoursForm locale={locale} />
       </div>
     </main>
   );

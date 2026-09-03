@@ -1,58 +1,80 @@
 import { CSV_BOM, buildCsvRow } from '@/lib/csv-export';
-import type { CustomTimeReport } from '@/lib/reporting/custom-time-report';
+import type { CustomerTimeReport } from '@/lib/reporting/customer-time-report';
 
-// T13.11 — Customer Project Working Hours CSV. UTF-8 BOM, CRLF, formula-injection guard
-// (buildCsvRow). Numeric minutes + decimal hours with a dot. A row_type column
-// (DETAIL / EMPLOYEE_SUBTOTAL / SITE_SUBTOTAL / GRAND_TOTAL). No UUIDs, no sensitive PII, no money.
+// R15-D7 Deploy F — "Часы заказчику" CSV. UTF-8 BOM, CRLF, formula-injection guard (buildCsvRow).
+// One section per selected customer; a WORKER row per worker; a CUSTOMER_TOTAL row per customer;
+// a GRAND_TOTAL row when more than one customer. Minutes AND decimal hours (dot). Customer + site
+// names come from the report (resolved server-side by id). NO money, rates, GPS, personal docs.
 
-const HUMAN_TEXT_INDICES = new Set([2, 3]); // employee_name, site_name
+const HUMAN_TEXT_INDICES = new Set([1, 2, 3]); // customer_name, site_name, employee_name
 
 function hours(minutes: number): string {
   return (minutes / 60).toFixed(2);
 }
-function helsinkiTime(iso: string | null): string {
-  if (!iso) return '';
-  return new Intl.DateTimeFormat('en-GB', { timeZone: 'Europe/Helsinki', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).format(new Date(iso));
-}
 
-export function buildCustomerHoursCsv(report: CustomTimeReport): Buffer {
-  const header = ['row_type', 'date', 'employee_name', 'site_name', 'first_start', 'last_end', 'worked_minutes', 'worked_hours', 'gross_minutes', 'paid_break_minutes', 'unpaid_break_minutes', 'worked_days'];
+export function buildCustomerHoursCsv(report: CustomerTimeReport): Buffer {
+  const header = [
+    'row_type',
+    'customer_name',
+    'site_name',
+    'employee_name',
+    'employee_number',
+    'work_dates',
+    'worked_minutes',
+    'worked_hours',
+    'timesheet_status',
+    'date_from',
+    'date_to',
+    'final_approved'
+  ];
   const lines: string[] = [buildCsvRow(header, new Set())];
+  const finalApproved = report.dataMode === 'FINAL_APPROVED_ONLY' ? 'yes' : 'no';
 
-  for (const d of report.dailyRows) {
+  for (const section of report.sections) {
+    const customerName = section.workAreaName ?? '(no customer)';
+    for (const w of section.workers) {
+      lines.push(
+        buildCsvRow(
+          [
+            'WORKER',
+            customerName,
+            section.siteName,
+            `${w.employee.lastName} ${w.employee.firstName}`,
+            w.employee.employeeNumber,
+            w.workDates.join(' '),
+            w.workedMinutes,
+            hours(w.workedMinutes),
+            w.timesheetStatus,
+            report.dateFrom,
+            report.dateTo,
+            finalApproved
+          ],
+          HUMAN_TEXT_INDICES
+        )
+      );
+    }
     lines.push(
       buildCsvRow(
-        ['DETAIL', d.date, `${d.employee.lastName} ${d.employee.firstName}`, d.site.name, helsinkiTime(d.firstStartAt), helsinkiTime(d.lastEndAt), d.workedMinutes, hours(d.workedMinutes), d.grossMinutes, d.paidBreakMinutes, d.unpaidBreakMinutes, ''],
+        ['CUSTOMER_TOTAL', customerName, section.siteName, '', '', '', section.totalMinutes, hours(section.totalMinutes), '', report.dateFrom, report.dateTo, finalApproved],
         HUMAN_TEXT_INDICES
       )
     );
   }
-  for (const e of report.employeeSubtotals) {
+
+  if (report.sections.length > 1) {
     lines.push(
       buildCsvRow(
-        ['EMPLOYEE_SUBTOTAL', '', `${e.employee.lastName} ${e.employee.firstName}`, '', '', '', e.totals.workedMinutes, hours(e.totals.workedMinutes), e.totals.grossMinutes, e.totals.paidBreakMinutes, e.totals.unpaidBreakMinutes, e.totals.workedDays],
+        ['GRAND_TOTAL', '', '', '', '', '', report.grandTotalMinutes, hours(report.grandTotalMinutes), '', report.dateFrom, report.dateTo, finalApproved],
         HUMAN_TEXT_INDICES
       )
     );
   }
-  for (const s of report.siteSubtotals) {
-    lines.push(
-      buildCsvRow(
-        ['SITE_SUBTOTAL', '', '', s.site.name, '', '', s.totals.workedMinutes, hours(s.totals.workedMinutes), s.totals.grossMinutes, s.totals.paidBreakMinutes, s.totals.unpaidBreakMinutes, s.totals.workedDays],
-        HUMAN_TEXT_INDICES
-      )
-    );
-  }
-  lines.push(
-    buildCsvRow(
-      ['GRAND_TOTAL', '', '', '', '', '', report.grandTotal.workedMinutes, hours(report.grandTotal.workedMinutes), report.grandTotal.grossMinutes, report.grandTotal.paidBreakMinutes, report.grandTotal.unpaidBreakMinutes, report.grandTotal.workedDays],
-      HUMAN_TEXT_INDICES
-    )
-  );
 
   return Buffer.concat([CSV_BOM, Buffer.from(lines.join(''), 'utf8')]);
 }
 
-export function customerHoursCsvFileName(report: CustomTimeReport): string {
-  return `titanor-project-hours_${report.dateFrom}_${report.dateTo}.csv`;
+export function customerHoursCsvFileName(report: CustomerTimeReport): string {
+  const one = report.sections.length === 1 ? report.sections[0].workAreaName : null;
+  const slug = (one ?? 'customers').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '').slice(0, 40) || 'customers';
+  return `titanor-customer-hours_${slug}_${report.dateFrom}_${report.dateTo}.csv`;
 }
