@@ -17,7 +17,7 @@
 #
 # Rollback: ops/titanor-time/r15-d7/deploy-f-rollback.sh  (revert to image d7e-5cce319)
 
-set -uo pipefail
+set -euo pipefail
 
 NEW=titanor-time-app:d7f-18c2091
 PRE=titanor-time-prod-app-pre-18c2091
@@ -25,6 +25,32 @@ ENVFILE=/home/deploy/app-data/titanor-time-prod/app.env
 UPLOADS=/home/deploy/app-data/titanor-time-prod/uploads
 NET=titanor-time-prod-net
 HC="node -e \"fetch('http://127.0.0.1:3000/api/ready').then(r=>process.exit(r.status===200?0:1)).catch(()=>process.exit(1))\""
+SWAP_STARTED=0
+
+# Once the old container has been stopped, any failed command or readiness timeout must restore it
+# automatically. Keep a failed new container for diagnosis; never leave the production name absent.
+restore_on_failure() {
+  local rc=$?
+  trap - EXIT
+  if [ "$rc" -ne 0 ] && [ "$SWAP_STARTED" -eq 1 ]; then
+    echo "ABORT: swap failed; restoring d7e-5cce319"
+    if docker inspect "$PRE" >/dev/null 2>&1; then
+      if docker inspect titanor-time-prod-app >/dev/null 2>&1; then
+        docker stop -t 10 titanor-time-prod-app >/dev/null 2>&1 || true
+        docker rename titanor-time-prod-app "titanor-time-prod-app-failed-d7f-$(date -u +%Y%m%dT%H%M%SZ)" >/dev/null 2>&1 || true
+      fi
+      docker rename "$PRE" titanor-time-prod-app
+      docker start titanor-time-prod-app
+      echo "RESTORED: titanor-time-app:d7e-5cce319"
+    elif docker inspect titanor-time-prod-app >/dev/null 2>&1; then
+      docker start titanor-time-prod-app >/dev/null 2>&1 || true
+      echo "RESTORED: original container name was never moved"
+    else
+      echo "CRITICAL: rollback container is unavailable; investigate immediately" >&2
+    fi
+  fi
+  exit "$rc"
+}
 
 # ---- guards --------------------------------------------------------------------------------
 docker image inspect "$NEW" >/dev/null 2>&1        || { echo "ABORT: image $NEW not found"; exit 1; }
@@ -37,7 +63,9 @@ echo "  ok — prod on d7e-5cce319, no $PRE, image + env present"
 echo
 echo "== web-only swap =="
 echo "T0 stop  $(date -u +%FT%T.%3NZ)"
+trap restore_on_failure EXIT
 docker stop -t 30 titanor-time-prod-app
+SWAP_STARTED=1
 echo "stopped  $(date -u +%FT%T.%3NZ)"
 docker rename titanor-time-prod-app "$PRE"
 docker run -d --name titanor-time-prod-app \
@@ -50,11 +78,18 @@ docker run -d --name titanor-time-prod-app \
   "$NEW" >/dev/null
 echo "started  $(date -u +%FT%T.%3NZ)"
 
+ready=0
 for i in $(seq 1 40); do
   code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 4 http://127.0.0.1:3199/api/ready)
-  [ "$code" = 200 ] && { echo "READY 200 $(date -u +%FT%T.%3NZ)  (~${i}s)"; break; }
+  if [ "$code" = 200 ]; then
+    echo "READY 200 $(date -u +%FT%T.%3NZ)  (~${i}s)"
+    ready=1
+    break
+  fi
   sleep 1
 done
+[ "$ready" = 1 ] || { echo "ABORT: new container did not become ready within 40 seconds" >&2; exit 1; }
+trap - EXIT
 
 echo
 echo "--- /api/ready (local) ---"; curl -s http://127.0.0.1:3199/api/ready; echo

@@ -5,7 +5,7 @@
 #
 # Safe to run any time after deploy-f-swap.sh while titanor-time-prod-app-pre-18c2091 still exists.
 
-set -uo pipefail
+set -euo pipefail
 
 PRE=titanor-time-prod-app-pre-18c2091
 
@@ -19,11 +19,17 @@ docker rename titanor-time-prod-app "titanor-time-prod-app-failed-d7f-$(date -u 
 docker rename "$PRE" titanor-time-prod-app
 docker start titanor-time-prod-app
 
+ready=0
 for i in $(seq 1 40); do
   code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 4 http://127.0.0.1:3199/api/ready)
-  [ "$code" = 200 ] && { echo "READY 200 $(date -u +%FT%T.%3NZ)  (~${i}s)"; break; }
+  if [ "$code" = 200 ]; then
+    echo "READY 200 $(date -u +%FT%T.%3NZ)  (~${i}s)"
+    ready=1
+    break
+  fi
   sleep 1
 done
+[ "$ready" = 1 ] || { echo "ABORT: rollback container did not become ready within 40 seconds" >&2; exit 1; }
 echo "--- /api/ready ---"; curl -s http://127.0.0.1:3199/api/ready; echo
 echo "--- running image ---"; docker inspect titanor-time-prod-app --format '{{.Config.Image}}'
 echo "(the failed d7f container is kept as titanor-time-prod-app-failed-d7f-* for inspection — remove by hand once done)"
