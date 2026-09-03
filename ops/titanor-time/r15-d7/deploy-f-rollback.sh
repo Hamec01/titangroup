@@ -21,7 +21,8 @@ docker start titanor-time-prod-app
 
 ready=0
 for i in $(seq 1 40); do
-  code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 4 http://127.0.0.1:3199/api/ready)
+  # `|| true` is load-bearing under `set -e` — see deploy-f-swap.sh.
+  code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 4 http://127.0.0.1:3199/api/ready || true)
   if [ "$code" = 200 ]; then
     echo "READY 200 $(date -u +%FT%T.%3NZ)  (~${i}s)"
     ready=1
