@@ -2374,6 +2374,31 @@ permission requirement или CSV byte contract этим коммитом не �
   БД (никаких mutation-эффектов) — ноль CSRF/idempotency, тот же посыл, что и у трёх существующих
   T8 report GET'ов
 
+### R15-D7 Deploy F — «Часы заказчику» (`/admin/reports/customer`)
+
+Заменяет прежний вариант (свободный текст `customer` + `siteIds`/`employeeIds`). Отчёт **привязан
+к настоящим `WorkArea` id**; сегменты фильтруются по `workAreaId`, поэтому в документ одного
+заказчика не попадают часы другого заказчика того же объекта.
+
+#### `GET /api/admin/reports/customer/scope`
+- Permission: `worker.read.all` + `site.read.all` + `timesheet.read.all` + `export.read` вместе. Read-only, ноль CSRF/audit.
+- `?action=search&q=<строка>` → `{ "workAreas": [{ workAreaId, workAreaName, siteId, siteName, active, label }] }`. Поиск по названию заказчика **и** названию объекта (case-insensitive substring). Возвращает **активных и отключённых** заказчиков (старые часы должны оставаться доступны). `label` = `"Aros Marine — Meyer Turku Shipyard"`. limit 50.
+- `?action=preview&dateFrom&dateTo&waIds=<uuid,uuid>&noCustomer=1&workerIds=<uuid,…>` → `{ report, readiness }` для UI-предпросмотра (карточки по каждому заказчику + список работников + список неутверждённых табелей). `report` = `null`, если ни заказчик, ни `noCustomer` не выбраны. `dataMode` всегда `CURRENT_CANONICAL`. Даты `YYYY-MM-DD`, ≤366 дней.
+
+#### `GET /api/admin/reports/customer/export`
+- Та же permission-комбинация. Query: `dateFrom`, `dateTo` (обяз., `YYYY-MM-DD`, ≤366 дней), `waIds` (repeated или comma-separated uuid), `noCustomer` (`1` — внутренний вариант «Без заказчика», `workAreaId IS NULL`), `workerIds` (пусто = все работники в customer-scope), `mode` (`FINAL` default | `PREVIEW`), `format` (`PDF` default | `CSV`), `preview` (`1` → JSON `{ readiness, report }` вместо файла).
+- **Имя заказчика и объект для PDF/CSV сервер берёт по `waIds` из БД — текст из браузера игнорируется.**
+- Историческая принадлежность — по `workAreaId` самого записанного сегмента (`WorkSegment` / `TimesheetDraftSegment`), не по сегодняшнему назначению. Уволенный / переведённый работник остаётся в историческом отчёте своего заказчика. `readiness` считается **только внутри выбранного customer-scope**.
+- **Финальный клиентский экспорт (`mode=FINAL`, файл) отклоняется:**
+  - `400 CUSTOMER_REQUIRED` — не выбран ни один настоящий заказчик;
+  - `409 NO_CUSTOMER_NOT_EXPORTABLE` — выбран внутренний вариант «Без заказчика»;
+  - `409 NOT_FINAL_APPROVED` (тело: `blockers[]` со ссылками `/admin/timesheets/:id`, `noData[]`) — в customer-scope есть табель не `FINAL_APPROVED`.
+  - `400 VALIDATION_ERROR` `fieldErrors.waIds: ["unknown id"]` — среди `waIds` есть несуществующий.
+- `mode=PREVIEW` и `?preview=1` работают всегда (внутренний предпросмотр не блокируется).
+- Файл: `Content-Disposition: attachment`, `filename=titanor-customer-hours_<slug>_<from>_<to>.pdf|csv`. PDF: `application/pdf`; CSV: `text/csv; charset=utf-8`, UTF-8 BOM, CRLF, formula-injection guard. Обе: `X-Content-Type-Options: nosniff`, `Cache-Control: private, no-store`.
+- Содержимое: заказчик · объект · период · ФИО и табельные номера · часы каждого работника · итог по заказчику · общий итог (при нескольких) · отметка `FINAL APPROVED` / `NOT FINAL — INTERNAL PREVIEW`. **Без зарплат, ставок, GPS, персональных документов и внутренних замечаний.** Все суммы (UI/preview/PDF/CSV) совпадают до минуты — одна округляющая точка на `(employee, site, workArea, date)`.
+- Stateless — ноль `ExportBatch`. Только `mode=FINAL` пишет один лёгкий `AuditEvent` `REPORT_EXPORTED` (`entityType=CUSTOMER_HOURS_REPORT`, `afterValue`: format, диапазон, `workAreaIds`, `customerCount`, `workerCount`, `totalMinutes` — без имён/номеров/разбивки).
+
 ## 26. Worker Dossier (2026-08-26)
 
 Ноль новых permission code (`02_ROLE_PERMISSION_MATRIX.md` §2.10b) — каждый route переиспользует

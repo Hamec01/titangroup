@@ -48,45 +48,39 @@ async function mkAssignment(employeeId: string, siteId: string, workAreaId: stri
   return prisma.siteAssignment.create({ data: { employeeId, siteId, workAreaId, isPrimary, validFrom, validTo, assignedByUserId: adminId } });
 }
 
-/** One worked day (07:00–15:00 → 7h30 after the 30-min auto lunch) on the given site+workArea,
- *  submitted (materialises a WorkSegment carrying workAreaId), optionally final-approved. */
-async function workedDay(opts: {
+/** N worked days (07:00–15:00 each → 7h30 after the 30-min auto lunch) for one worker, ALL inside
+ *  one fresh period/timesheet/draft, ONE submit (materialises WorkSegments carrying workAreaId),
+ *  optionally final-approved. Every day must land in the same 7-day window (anchored on days[0]). */
+async function workedDays(opts: {
   employeeId: string;
   siteId: string;
-  workAreaId: string | null;
-  assignmentId: string;
-  day: Date;
+  days: { day: Date; workAreaId: string | null; assignmentId: string }[];
   finalApprove?: boolean;
 }) {
-  const { employeeId, siteId, workAreaId, assignmentId, day } = opts;
-  let period = await prisma.payrollPeriod.findFirst({ where: { startDate: { lte: day }, endDate: { gte: day } } });
-  if (!period) {
-    const start = new Date(day.getTime());
-    period = await prisma.payrollPeriod.create({ data: { startDate: start, endDate: new Date(start.getTime() + 6 * 86400000), status: 'OPEN', openedByUserId: adminId } });
-  }
-  await prisma.payrollPeriodParticipant.upsert({
-    where: { periodId_employeeId: { periodId: period.id, employeeId } },
-    create: { periodId: period.id, employeeId, expected: true },
-    update: {}
-  });
-  let ts = await prisma.timesheet.findFirst({ where: { periodId: period.id, employeeId } });
-  if (!ts) ts = await prisma.timesheet.create({ data: { employeeId, periodId: period.id, status: 'DRAFT' } });
-  let draft = await prisma.timesheetDraft.findFirst({ where: { timesheetId: ts.id } });
-  if (!draft) draft = await prisma.timesheetDraft.create({ data: { timesheetId: ts.id, employeeId } });
+  const { employeeId, siteId, days } = opts;
+  const anchor = days[0].day;
+  const period = await prisma.payrollPeriod.create({ data: { startDate: anchor, endDate: new Date(anchor.getTime() + 6 * 86400000), status: 'OPEN', openedByUserId: adminId } });
+  await prisma.payrollPeriodParticipant.create({ data: { periodId: period.id, employeeId, expected: true } });
+  const ts = await prisma.timesheet.create({ data: { employeeId, periodId: period.id, status: 'DRAFT' } });
+  const draft = await prisma.timesheetDraft.create({ data: { timesheetId: ts.id, employeeId } });
 
-  await prisma.timesheetDraftPlannedShift.create({ data: { draftId: draft.id, employeeId, date: day, siteId, sourceAssignmentId: assignmentId, plannedStartAt: at(day, 7), plannedEndAt: at(day, 15), plannedBreakMinutes: 0 } });
-  const dd = await prisma.timesheetDraftDay.create({ data: { draftId: draft.id, date: day, dayType: 'WORK', confirmedZero: false } });
-  await prisma.timesheetDraftSegment.create({ data: { draftDayId: dd.id, draftId: draft.id, employeeId, date: day, startAt: at(day, 7), endAt: at(day, 15), siteId, workAreaId, sourceAssignmentId: assignmentId } });
+  for (const { day, workAreaId, assignmentId } of days) {
+    await prisma.timesheetDraftPlannedShift.create({ data: { draftId: draft.id, employeeId, date: day, siteId, sourceAssignmentId: assignmentId, plannedStartAt: at(day, 7), plannedEndAt: at(day, 15), plannedBreakMinutes: 0 } });
+    const dd = await prisma.timesheetDraftDay.create({ data: { draftId: draft.id, date: day, dayType: 'WORK', confirmedZero: false } });
+    await prisma.timesheetDraftSegment.create({ data: { draftDayId: dd.id, draftId: draft.id, employeeId, date: day, startAt: at(day, 7), endAt: at(day, 15), siteId, workAreaId, sourceAssignmentId: assignmentId } });
+  }
 
   await prisma.$transaction(async (tx) => {
     await tx.$queryRaw`SELECT id FROM "Employee" WHERE id = ${employeeId}::uuid FOR UPDATE`;
-    await tx.$queryRaw`SELECT id FROM "Timesheet" WHERE id = ${ts!.id}::uuid FOR UPDATE`;
-    await tx.$queryRaw`SELECT id FROM "TimesheetDraft" WHERE id = ${draft!.id}::uuid FOR UPDATE`;
-    await submitWorkerTimesheetCore(tx, employeeId, ts!.id, adminId, randomUUID(), SubmissionSource.MANUAL);
+    await tx.$queryRaw`SELECT id FROM "Timesheet" WHERE id = ${ts.id}::uuid FOR UPDATE`;
+    await tx.$queryRaw`SELECT id FROM "TimesheetDraft" WHERE id = ${draft.id}::uuid FOR UPDATE`;
+    await submitWorkerTimesheetCore(tx, employeeId, ts.id, adminId, randomUUID(), SubmissionSource.MANUAL);
   });
   if (opts.finalApprove) await prisma.timesheet.update({ where: { id: ts.id }, data: { status: 'FINAL_APPROVED' } });
   return { periodId: period.id, timesheetId: ts.id };
 }
+const workedDay = (opts: { employeeId: string; siteId: string; workAreaId: string | null; assignmentId: string; day: Date; finalApprove?: boolean }) =>
+  workedDays({ employeeId: opts.employeeId, siteId: opts.siteId, finalApprove: opts.finalApprove, days: [{ day: opts.day, workAreaId: opts.workAreaId, assignmentId: opts.assignmentId }] });
 
 async function main() {
   const role = await prisma.role.findFirstOrThrow({ where: { name: 'ADMIN' } });
@@ -124,7 +118,7 @@ async function main() {
     const rep = await getCustomerTimeReport({ dateFrom: from, dateTo: to, workAreaIds: [waA.id, waB.id], includeNoCustomer: false, employeeIds: null, dataMode: 'CURRENT_CANONICAL' });
     check('1: report(Aros+Beta) has 2 sections, grand = 900', rep.sections.length === 2 && rep.grandTotalMinutes === 900, rep.sections.map((s) => s.totalMinutes));
     const csv = buildCustomerHoursCsv(rep).toString();
-    check('8: CSV GRAND_TOTAL row = 900 min & 15.00 h', csv.includes('"GRAND_TOTAL"') && csv.includes(',900,') && csv.includes('"15.00"'), csv.split('\r\n').find((l) => l.includes('GRAND_TOTAL')));
+    check('8: CSV GRAND_TOTAL row = 900 min & 15.00 h', csv.includes('"GRAND_TOTAL"') && csv.includes('"900"') && csv.includes('"15.00"'), csv.split('\r\n').find((l) => l.includes('GRAND_TOTAL')));
     const pdf = await buildCustomerHoursPdf(rep, { generatedAtHelsinki: '01/01/2026, 12:00', preparedBy: 'admin', isFinalApproved: true });
     check('8: PDF builds (%PDF)', pdf.subarray(0, 4).toString() === '%PDF' && pdf.length > 900);
     check('8: report grand = sum of section totals (to the minute)', rep.grandTotalMinutes === rep.sections.reduce((s, x) => s + x.totalMinutes, 0));
@@ -135,8 +129,15 @@ async function main() {
     const w2 = await mkWorker('C2');
     const asg2a = await mkAssignment(w2.id, site.id, waA.id, true);
     const asg2b = await mkAssignment(w2.id, site.id, waB.id, false);
-    await workedDay({ employeeId: w2.id, siteId: site.id, workAreaId: waA.id, assignmentId: asg2a.id, day: D(2099, 5, 2), finalApprove: true });
-    await workedDay({ employeeId: w2.id, siteId: site.id, workAreaId: waB.id, assignmentId: asg2b.id, day: D(2099, 5, 3), finalApprove: true });
+    await workedDays({
+      employeeId: w2.id,
+      siteId: site.id,
+      finalApprove: true,
+      days: [
+        { day: D(2099, 5, 2), workAreaId: waA.id, assignmentId: asg2a.id },
+        { day: D(2099, 5, 3), workAreaId: waB.id, assignmentId: asg2b.id }
+      ]
+    });
 
     const repA = await getCustomerTimeReport({ dateFrom: from, dateTo: to, workAreaIds: [waA.id], includeNoCustomer: false, employeeIds: [w2.id], dataMode: 'CURRENT_CANONICAL' });
     const repB = await getCustomerTimeReport({ dateFrom: from, dateTo: to, workAreaIds: [waB.id], includeNoCustomer: false, employeeIds: [w2.id], dataMode: 'CURRENT_CANONICAL' });
@@ -148,14 +149,17 @@ async function main() {
   // ── Scenario 3: worker transferred to another customer — historical hours stay with OLD ─────
   {
     const w3 = await mkWorker('T3');
-    // worked for Aros on day 4, THEN transferred to Beta (old Aros assignment ended)
-    const asg3a = await mkAssignment(w3.id, site.id, waA.id, true, D(2020, 0, 1), D(2099, 5, 4));
+    // worked for Aros on day 4, THEN transferred to Beta — the old Aros assignment is
+    // operationally removed (clockInDisabledAt) so it is no longer "assigned now".
+    const asg3a = await mkAssignment(w3.id, site.id, waA.id, true, D(2020, 0, 1), null);
     await workedDay({ employeeId: w3.id, siteId: site.id, workAreaId: waA.id, assignmentId: asg3a.id, day: D(2099, 5, 4), finalApprove: true });
+    await prisma.siteAssignment.update({ where: { id: asg3a.id }, data: { clockInDisabledAt: new Date(), isPrimary: false } });
     await mkAssignment(w3.id, site.id, waB.id, true, D(2099, 5, 5), null); // now on Beta
 
     const repA = await getCustomerTimeReport({ dateFrom: from, dateTo: to, workAreaIds: [waA.id], includeNoCustomer: false, employeeIds: [w3.id], dataMode: 'CURRENT_CANONICAL' });
-    check('3: transferred worker T3 STILL in the Aros report for the day worked there', repA.sections[0]?.workers.some((w) => w.employee.id === w3.id && w.workedMinutes === 450), repA.sections[0]?.workers);
-    check('3: T3 is NOT "assigned now" to Aros (assignment ended) but IS worked-in-period', repA.sections[0].assignedNowCount === 1 && repA.sections[0].workers.find((w) => w.employee.id === w3.id)?.assignedNow === false, repA.sections[0]);
+    const t3rowA = repA.sections[0]?.workers.find((w) => w.employee.id === w3.id);
+    check('3: transferred worker T3 STILL in the Aros report for the day worked there (450 min)', t3rowA?.workedMinutes === 450 && t3rowA.workedInPeriod === true, t3rowA);
+    check('3: T3 is NOT "assigned now" to Aros (assignment removed)', t3rowA?.assignedNow === false && repA.sections[0].assignedNowCount === 0, repA.sections[0]);
     const repB = await getCustomerTimeReport({ dateFrom: from, dateTo: to, workAreaIds: [waB.id], includeNoCustomer: false, employeeIds: [w3.id], dataMode: 'CURRENT_CANONICAL' });
     check('3: T3 has NO Aros hours leaking into the Beta report', !repB.sections.some((s) => s.workers.some((w) => w.employee.id === w3.id && w.workedMinutes > 0)), repB.sections.map((s) => s.workers));
   }

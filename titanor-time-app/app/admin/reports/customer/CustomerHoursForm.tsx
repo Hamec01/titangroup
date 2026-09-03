@@ -61,7 +61,6 @@ interface Readiness {
 }
 
 const PAGE_SIZE = 20;
-const NO_CUSTOMER = 'none';
 
 function hoursLabel(minutes: number, locale: AppLocale): string {
   const h = Math.floor(minutes / 60);
@@ -73,7 +72,6 @@ export function CustomerHoursForm({ locale }: { locale: AppLocale }) {
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
-  const ru = locale === 'RU';
   const t = (en: string, r: string) => localeText(locale, en, r);
 
   // ── URL-backed selection ────────────────────────────────────────────────────────────────────
@@ -284,16 +282,17 @@ export function CustomerHoursForm({ locale }: { locale: AppLocale }) {
       <fieldset>
         <legend>{t('Period', 'Период')}</legend>
         <label>
-          {t('From', 'С')}: <input type="date" value={urlDateFrom} onChange={(e) => pushSelection({ dateFrom: e.target.value })} />
+          {t('From', 'С')}: <input id="ch-from" type="date" value={urlDateFrom} onChange={(e) => pushSelection({ dateFrom: e.target.value })} />
         </label>{' '}
         <label>
-          {t('To', 'По')}: <input type="date" value={urlDateTo} onChange={(e) => pushSelection({ dateTo: e.target.value })} />
+          {t('To', 'По')}: <input id="ch-to" type="date" value={urlDateTo} onChange={(e) => pushSelection({ dateTo: e.target.value })} />
         </label>
       </fieldset>
 
       <fieldset>
         <legend>{t('Customers', 'Заказчики')}</legend>
         <input
+          id="ch-customer-search"
           type="search"
           value={query}
           placeholder={t('Search by customer or site…', 'Поиск по заказчику или объекту…')}
@@ -333,13 +332,13 @@ export function CustomerHoursForm({ locale }: { locale: AppLocale }) {
           </p>
         ) : null}
 
-        <ul className="setup-list">
+        <ul className="setup-list" data-testid="ch-customer-results">
           {results.map((w) => {
             const sel = urlWaIds.includes(w.workAreaId);
             return (
               <li key={w.workAreaId} className="setup-item">
                 <label style={{ fontWeight: sel ? 700 : 400 }}>
-                  <input type="checkbox" checked={sel} onChange={() => toggleCustomer(w)} /> {w.label}
+                  <input type="checkbox" data-wa={w.workAreaId} checked={sel} onChange={() => toggleCustomer(w)} /> {w.label}
                   {w.active ? '' : ` · ${t('disabled', 'отключён')}`}
                 </label>
               </li>
@@ -358,7 +357,7 @@ export function CustomerHoursForm({ locale }: { locale: AppLocale }) {
       {report ? (
         <>
           {report.sections.map((s) => (
-            <div key={`${s.workAreaId ?? 'none'}:${s.siteId}`} className="activation-print-card">
+            <div key={`${s.workAreaId ?? "none"}:${s.siteId}`} className="activation-print-card" data-testid="ch-customer-card">
               <p>
                 <strong>{t('Customer', 'Заказчик')}:</strong> {s.workAreaName ?? t('(no customer)', '(без заказчика)')}
                 {s.customerActive ? '' : ` · ${t('disabled', 'отключён')}`}
@@ -408,7 +407,7 @@ export function CustomerHoursForm({ locale }: { locale: AppLocale }) {
               </span>
             </div>
             <div style={{ overflowX: 'auto' }}>
-              <table className="setup-list" style={{ width: '100%' }}>
+              <table className="setup-list" style={{ width: "100%" }} data-testid="ch-worker-table">
                 <thead>
                   <tr>
                     <th></th>

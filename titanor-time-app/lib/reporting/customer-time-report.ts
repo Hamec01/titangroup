@@ -303,11 +303,16 @@ async function finalizeReport(
   const siteName = new Map(sitesRaw.map((s) => [s.id, s.name]));
 
   // "assigned now" — the actual live-assigned employee ids per workArea (used for the count AND to
-  // add zero-hour rows for currently-assigned workers with no segments in the period, §4).
+  // add zero-hour rows for currently-assigned workers with no segments in the period, §4). When the
+  // caller narrowed to a worker list, so does this (the export only shows the picked workers).
   const assignedNowByWa = new Map<string, Set<string>>();
   if (workAreaIds.length) {
     const rows = await tx.siteAssignment.findMany({
-      where: { workAreaId: { in: workAreaIds }, ...liveAssignmentWhere(new Date(), today) },
+      where: {
+        workAreaId: { in: workAreaIds },
+        ...(params.employeeIds ? { employeeId: { in: params.employeeIds } } : {}),
+        ...liveAssignmentWhere(new Date(), today)
+      },
       select: { workAreaId: true, employeeId: true },
       distinct: ['workAreaId', 'employeeId']
     });

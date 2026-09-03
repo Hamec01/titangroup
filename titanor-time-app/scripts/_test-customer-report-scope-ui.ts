@@ -1,20 +1,18 @@
-// CUSTOMER_REPORT_SCOPE_PICKER_RU.md §8 — browser QA for the /admin/reports/customer scope picker.
-// Real Chromium (existing devDependency). Reuses _test-t9-fixtures.buildFixture for auth + a real
-// company, then seeds 28 extra sites and 55 extra workers so pagination (20/page) and "select all =
-// every page" are exercised for real. Covers ТЗ §10 items 5-7, 9-15, 17 + desktop/mobile
-// screenshots. Items 1-4/8 (the site->workers model) are in _test-customer-report-scope.ts (db);
-// items 16/18 (report identical, PDF/CSV regression) are _test-customer-hours.ts (unchanged).
-import { mkdirSync } from 'node:fs';
-import { join } from 'node:path';
+// R15-D7 Deploy F — browser QA for /admin/reports/customer ("Часы заказчику"). Real Chromium.
+// Reuses _test-t9-fixtures.buildFixture, then seeds ONE site with TWO customers + 25 workers so
+// the 20/page worker list, cross-page selection, search, and the two-customer isolation are
+// exercised for real. Covers spec §8 items 1, 6, 7, 10 + the export gates + RU/EN + URL round-trip.
+// The per-customer minute maths (items 2-5, 8, 9) are in _test-customer-hours.ts (db lane).
+
 import { chromium, type ConsoleMessage, type Page } from 'playwright';
 import { randomUUID } from 'node:crypto';
 import { prisma } from '../lib/prisma';
+import { submitWorkerTimesheetCore } from '../lib/worker-timesheets';
+import { SubmissionSource } from '@prisma/client';
 import { buildFixture } from './_test-t9-fixtures';
 
 const BASE = process.env.TEST_BASE_URL || 'http://127.0.0.1:39917';
-const SHOTS = join(process.cwd(), '..', 'docs', 'titanor-time', 'baseline-customer-scope');
 const DESKTOP = { width: 1440, height: 900 };
-const MOBILE = { width: 390, height: 844 };
 
 let pass = 0;
 let fail = 0;
@@ -27,6 +25,7 @@ const check = (name: string, cond: boolean, extra?: unknown) => {
 };
 
 const ASG_START = new Date('2020-01-01T00:00:00.000Z');
+const at = (day: Date, h: number) => new Date(day.getTime() + h * 3600_000);
 
 async function login(page: Page, username: string, password: string) {
   await page.goto(`${BASE}/login`, { waitUntil: 'networkidle' });
@@ -37,220 +36,122 @@ async function login(page: Page, username: string, password: string) {
 }
 
 async function main(): Promise<void> {
-  mkdirSync(SHOTS, { recursive: true });
   const fx = await buildFixture(BASE);
   const adminId = (await prisma.user.findFirstOrThrow({ where: { username: fx.admin.username }, select: { id: true } })).id;
-
-  // ---- seed: 28 extra sites, 55 extra workers, assignments spread across the sites ----
   const run = randomUUID().slice(0, 5);
-  const sites: { id: string; name: string }[] = [];
-  for (let i = 0; i < 28; i++) {
-    const s = await prisma.workSite.create({ data: { name: `QA Site ${run}-${String(i).padStart(2, '0')}` } });
-    sites.push(s);
-  }
-  const bigSite = sites[0]; // gets many workers -> paginated worker list
-  let multiSiteEmployeeNumber = '';
-  for (let i = 0; i < 55; i++) {
-    const emp = await prisma.employee.create({ data: { employeeNumber: `QA-${run}-${String(i).padStart(3, '0')}`, firstName: `Qa${i}`, lastName: `Scope${String(i).padStart(3, '0')}` } });
+
+  const site = await prisma.workSite.create({ data: { name: `F-QA ${run}` } });
+  const waAros = await prisma.workArea.create({ data: { siteId: site.id, name: `Aros Marine ${run}`, active: true } });
+  const waMeyer = await prisma.workArea.create({ data: { siteId: site.id, name: `Meyer Yard ${run}`, active: false } }); // disabled -> still reportable
+
+  const day = new Date(Date.UTC(2099, 8, 7));
+  const period = await prisma.payrollPeriod.create({ data: { startDate: day, endDate: new Date(day.getTime() + 6 * 86400000), status: 'OPEN', openedByUserId: adminId } });
+
+  // 22 workers on Aros (paginates: 20/page), 3 on Meyer. All FINAL_APPROVED so a client export is allowed.
+  const arosNumbers: string[] = [];
+  for (let i = 0; i < 25; i++) {
+    const wa = i < 22 ? waAros : waMeyer;
+    const emp = await prisma.employee.create({ data: { employeeNumber: `FQA-${run}-${String(i).padStart(2, '0')}`, firstName: `Qa${i}`, lastName: `F${String(i).padStart(2, '0')}` } });
+    if (i < 22) arosNumbers.push(emp.employeeNumber);
     await prisma.employment.create({ data: { employeeId: emp.id, active: true, startDate: ASG_START } });
-    // first 30 on bigSite, the rest spread over sites[1..]
-    const site = i < 30 ? bigSite : sites[1 + (i % 27)];
-    await prisma.siteAssignment.create({ data: { employeeId: emp.id, siteId: site.id, isPrimary: true, validFrom: ASG_START, validTo: null, assignedByUserId: adminId } });
-    if (i === 54) {
-      multiSiteEmployeeNumber = emp.employeeNumber;
-      await prisma.siteAssignment.create({ data: { employeeId: emp.id, siteId: sites[2].id, isPrimary: false, validFrom: ASG_START, validTo: null, assignedByUserId: adminId } });
-    }
+    const asg = await prisma.siteAssignment.create({ data: { employeeId: emp.id, siteId: site.id, workAreaId: wa.id, isPrimary: true, validFrom: ASG_START, validTo: null, assignedByUserId: adminId } });
+    await prisma.payrollPeriodParticipant.create({ data: { periodId: period.id, employeeId: emp.id, expected: true } });
+    const ts = await prisma.timesheet.create({ data: { employeeId: emp.id, periodId: period.id, status: 'DRAFT' } });
+    const draft = await prisma.timesheetDraft.create({ data: { timesheetId: ts.id, employeeId: emp.id } });
+    await prisma.timesheetDraftPlannedShift.create({ data: { draftId: draft.id, employeeId: emp.id, date: day, siteId: site.id, sourceAssignmentId: asg.id, plannedStartAt: at(day, 7), plannedEndAt: at(day, 15), plannedBreakMinutes: 0 } });
+    const dd = await prisma.timesheetDraftDay.create({ data: { draftId: draft.id, date: day, dayType: 'WORK', confirmedZero: false } });
+    await prisma.timesheetDraftSegment.create({ data: { draftDayId: dd.id, draftId: draft.id, employeeId: emp.id, date: day, startAt: at(day, 7), endAt: at(day, 15), siteId: site.id, workAreaId: wa.id, sourceAssignmentId: asg.id } });
+    await prisma.$transaction(async (tx) => {
+      await tx.$queryRaw`SELECT id FROM "Employee" WHERE id = ${emp.id}::uuid FOR UPDATE`;
+      await tx.$queryRaw`SELECT id FROM "Timesheet" WHERE id = ${ts.id}::uuid FOR UPDATE`;
+      await tx.$queryRaw`SELECT id FROM "TimesheetDraft" WHERE id = ${draft.id}::uuid FOR UPDATE`;
+      await submitWorkerTimesheetCore(tx, emp.id, ts.id, adminId, randomUUID(), SubmissionSource.MANUAL);
+    });
+    await prisma.timesheet.update({ where: { id: ts.id }, data: { status: 'FINAL_APPROVED' } });
   }
-  const unassigned = await prisma.employee.create({
-    data: { employeeNumber: `QA-${run}-NO-SITE`, firstName: 'NoSite', lastName: 'Worker' }
-  });
-  await prisma.employment.create({ data: { employeeId: unassigned.id, active: true, startDate: ASG_START } });
 
   const browser = await chromium.launch({ headless: true });
   const consoleErrors: string[] = [];
-  const attach = (page: Page) => {
-    page.on('console', (m: ConsoleMessage) => {
-      if (m.type() === 'error') consoleErrors.push(m.text());
-    });
-    page.on('pageerror', (e) => consoleErrors.push(String(e)));
-  };
-
-  // ============================== DESKTOP ==============================
   const ctx = await browser.newContext({ viewport: DESKTOP });
   const page = await ctx.newPage();
-  attach(page);
+  page.on('console', (m: ConsoleMessage) => m.type() === 'error' && consoleErrors.push(m.text()));
+  page.on('pageerror', (e) => consoleErrors.push(String(e)));
   await login(page, fx.admin.username, fx.admin.password);
 
   await page.goto(`${BASE}/admin/reports/customer`, { waitUntil: 'networkidle' });
-  check('page: heading + report tabs render', await page.locator('h1').first().isVisible());
-  check('page: the old <select multiple> is gone', (await page.locator('select[multiple]').count()) === 0);
+  check('page: heading renders, no free-text customer input', await page.locator('h1').first().isVisible() && (await page.locator('input[name="customer"]').count()) === 0);
 
-  // dates
-  await page.locator('#ch-from').fill('2098-06-01');
-  await page.locator('#ch-to').fill('2098-06-30');
+  await page.locator('#ch-from').fill('2099-09-07');
+  await page.locator('#ch-to').fill('2099-09-13');
+  await page.locator('#ch-customer-search').fill(`Aros Marine ${run}`);
+  await page.waitForTimeout(500);
+  const arosRow = page.locator(`[data-testid="ch-customer-results"] input[data-wa="${waAros.id}"]`);
+  check('search: "Aros Marine" finds the Aros customer', (await arosRow.count()) === 1);
+  await arosRow.check();
+  await page.waitForFunction(() => new URL(location.href).searchParams.get('waIds') !== null, undefined, { timeout: 4000 });
+  check('URL carries waIds after selecting a customer', (await page.evaluate(() => new URL(location.href).searchParams.get('waIds')))?.includes(waAros.id) ?? false);
 
-  // --- Sites panel: PICK mode is the default; search + select bigSite ---
-  const sitePanel = page.locator('.scope-panel').first();
-  check('sites: panel visible with count', await sitePanel.locator('.scope-count').isVisible());
-  await sitePanel.locator('.scope-search').fill(bigSite.name);
-  await page.waitForTimeout(150);
-  const siteRows = sitePanel.locator('.scope-row');
-  check('9: site search narrows the list to 1', (await siteRows.count()) === 1, await siteRows.count());
-  await siteRows.first().locator('.scope-row-label').click();
-  check('sites: row is visually selected after click', ((await siteRows.first().getAttribute('class')) ?? '').includes('is-selected'), await siteRows.first().getAttribute('class'));
-  check('sites: count says "Выбрано объектов: 1" / "Sites selected: 1"', /1/.test(await sitePanel.locator('.scope-count').innerText()));
+  // per-customer card
+  await page.waitForSelector('[data-testid="ch-customer-card"]', { timeout: 8000 });
+  const cardText = await page.locator('[data-testid="ch-customer-card"]').first().innerText();
+  check('card: shows the Aros customer + site + 22 assigned + total hours', cardText.includes('Aros Marine') && cardText.includes(site.name) && /22/.test(cardText) && /165 h|165 ч/.test(cardText), cardText.slice(0, 200));
 
-  // --- Workers panel appears, populated from /scope ---
-  await page.waitForSelector('.scope-workers-wrap .scope-panel', { timeout: 10000 });
-  const wp = page.locator('.scope-workers-wrap .scope-panel');
-  const wRows = wp.locator('.scope-row');
-  await page.waitForFunction(() => document.querySelectorAll('.scope-workers-wrap .scope-row').length > 0, null, { timeout: 10000 });
-  check('10: worker list paginates 20 per page', (await wRows.count()) === 20, await wRows.count());
-  check('10: worker pager shows more than one page (30 on bigSite)', await wp.locator('.scope-pager').isVisible());
+  // worker list: 22 Aros workers -> 20/page + a 2nd page
+  await page.waitForSelector('[data-testid="ch-worker-table"] tbody tr', { timeout: 8000 });
+  const page1Rows = await page.locator('[data-testid="ch-worker-table"] tbody tr').count();
+  check('worker list: page 1 shows exactly 20 rows', page1Rows === 20, page1Rows);
+  check('worker list: page indicator "1 / 2"', (await page.locator('body').innerText()).match(/1\s*\/\s*2/) !== null);
+  check('worker list: NO Meyer worker leaks into the Aros report', !(await page.locator('[data-testid="ch-worker-table"]').innerText()).includes(`FQA-${run}-24`));
 
-  // 11: "select all" selects every page, not just the visible 20
-  await wp.locator('.scope-bulk button').first().click();
-  await page.waitForTimeout(100);
-  const cnt = await wp.locator('.scope-count').innerText();
-  check('11: after "select all" the count is 30 (all pages)', /30/.test(cnt), cnt);
-  // go to page 2 and confirm those rows are checked too
-  await wp.locator('.scope-pager button').last().click();
-  await page.waitForTimeout(100);
-  const checkedOnP2 = await wp.locator('.scope-row.is-selected').count();
-  check('11: page 2 rows are also selected', checkedOnP2 > 0, checkedOnP2);
-
-  // 6: deselect one after bulk select
-  await wp.locator('.scope-row').first().locator('.scope-row-label').click();
-  await page.waitForTimeout(50);
-  check('6: count drops to 29 after unticking one', /29/.test(await wp.locator('.scope-count').innerText()), await wp.locator('.scope-count').innerText());
-  // 7: re-click the same row -> back to selected
-  await wp.locator('.scope-row').first().locator('.scope-row-label').click();
-  await page.waitForTimeout(50);
-  check('7: re-click re-selects -> back to 30', /30/.test(await wp.locator('.scope-count').innerText()), await wp.locator('.scope-count').innerText());
-
-  // 9: worker search by employee number
-  await wp.locator('.scope-search').fill(`QA-${run}-005`);
-  await page.waitForTimeout(150);
-  check('9: worker search by employee number -> 1 row', (await wp.locator('.scope-row').count()) === 1, await wp.locator('.scope-row').count());
-  await wp.locator('.scope-search').fill('');
-  await page.waitForTimeout(100);
-
-  // summary (ТЗ §7) — after "select all" with no removals it reads "all workers of the selected sites"
-  const summaryAll = await page.locator('.scope-summary').innerText();
-  check('7-summary: names the single site + "all workers" phrasing', summaryAll.includes(bigSite.name) && /all workers of the selected sites/i.test(summaryAll), summaryAll);
-  // deselect one -> summary switches to "N of M"
-  await wp.locator('.scope-row').first().locator('.scope-row-label').click();
-  await page.waitForTimeout(80);
-  check('7-summary: "29 of 30" after removing one', /29 of 30/.test(await page.locator('.scope-summary').innerText()), await page.locator('.scope-summary').innerText());
-  await wp.locator('.scope-row').first().locator('.scope-row-label').click(); // back to all
-  await page.waitForTimeout(80);
-
-  // 12: URL reflects state; reload reproduces it
-  await page.waitForTimeout(600); // let the debounced router.replace settle
-  const urlBefore = page.url();
-  check('12: URL carries siteIds + workers=all', urlBefore.includes('siteIds=') && urlBefore.includes('workers=all'), urlBefore);
-  await page.reload({ waitUntil: 'networkidle' });
-  await page.waitForSelector('.scope-workers-wrap .scope-panel', { timeout: 10000 });
-  await page.waitForTimeout(400);
-  check('12: after reload the site is still selected', (await page.locator('.scope-panel').first().locator('.scope-row.is-selected').count()) === 1);
-  check('12: after reload workers still "all" (count 30)', /30/.test(await page.locator('.scope-workers-wrap .scope-count').innerText()), await page.locator('.scope-workers-wrap .scope-count').innerText());
-
-  // 8 (client half): changing the sites prunes out-of-scope workers + shows a notice
-  const sp2 = page.locator('.scope-panel').first();
-  await sp2.locator('.scope-search').fill('');
-  await page.waitForTimeout(100);
-  // select a DIFFERENT single site (sites[15]) — none of the bigSite workers belong to it
-  await sp2.locator('.scope-search').fill(sites[15].name);
-  await page.waitForTimeout(150);
-  await sp2.locator('.scope-row').first().locator('.scope-row-label').click(); // now 2 sites selected
-  await page.waitForTimeout(150);
-  await sp2.locator('.scope-search').fill(bigSite.name);
-  await page.waitForTimeout(150);
-  await sp2.locator('.scope-row').first().locator('.scope-row-label').click(); // deselect bigSite -> only sites[15]
-  await page.waitForSelector('.scope-notice', { timeout: 10000 });
-  check('5/8: a "N workers removed" notice appears after the site scope shrinks', await page.locator('.scope-notice').isVisible());
-
-  // 5: "select all workers of <site>" label when exactly one site
+  // select-all + go to page 2 -> selection persists across pages
+  await page.getByRole('button', { name: /Select all|Выбрать всех/ }).first().click();
+  await page.getByRole('button', { name: '›' }).click();
   await page.waitForTimeout(300);
-  const selAllLabel = await page.locator('.scope-workers-wrap .scope-bulk button').first().innerText();
-  check('5: bulk button names the single site', selAllLabel.includes(sites[15].name), selAllLabel);
+  const page2Checked = await page.locator('[data-testid="ch-worker-table"] tbody input[type=checkbox]:checked').count();
+  const page2Total = await page.locator('[data-testid="ch-worker-table"] tbody tr').count();
+  check('worker selection persists onto page 2 (all checked)', page2Checked === page2Total && page2Total === 2, { page2Checked, page2Total });
 
-  // 16: preview with sites=all + workers=all == the legacy "no params" call
-  await page.goto(`${BASE}/admin/reports/customer?dateFrom=2098-06-01&dateTo=2098-06-30&sites=all&workers=all`, { waitUntil: 'networkidle' });
+  // export gate: with an active customer + all FINAL, PDF is allowed
+  const pdfLink = page.getByRole('link', { name: /Download PDF|Скачать PDF/ });
+  check('export: Download PDF enabled (customer chosen, all final-approved)', (await pdfLink.getAttribute('aria-disabled')) !== 'true');
+
+  // add the "no customer" internal toggle -> client PDF must be blocked
+  await page.getByLabel(/no customer|без заказчика/i).check();
   await page.waitForTimeout(400);
-  const [viaScope, viaLegacy] = await Promise.all([
-    page.evaluate(async () => (await fetch('/api/admin/reports/customer/export?dateFrom=2098-06-01&dateTo=2098-06-30&preview=1&mode=PREVIEW', { credentials: 'same-origin' })).json()),
-    page.evaluate(async () => (await fetch('/api/admin/reports/customer/export?dateFrom=2098-06-01&dateTo=2098-06-30&preview=1&mode=PREVIEW', { credentials: 'same-origin' })).json())
-  ]);
-  check('16: ALL/ALL serializes to the same params as the legacy call', JSON.stringify(viaScope.report.grandTotal) === JSON.stringify(viaLegacy.report.grandTotal));
-  // and the picker's "Show & check" button becomes enabled for ALL/ALL
-  check('16: "Show & check" enabled for ALL/ALL', !(await page.locator('.exc-apply-button').first().isDisabled()));
+  check('export: after "no customer" toggle the client PDF is blocked with a reason', (await pdfLink.getAttribute('aria-disabled')) === 'true' && (await page.locator('.login-error').innerText()).length > 0);
+  await page.getByLabel(/no customer|без заказчика/i).uncheck();
+  await page.waitForTimeout(300);
 
-  // Direct worker mode: no site is required; an unassigned worker stays findable and a worker
-  // associated with multiple sites shows that history in the same list.
-  await page.goto(`${BASE}/admin/reports/customer?dateFrom=2098-06-01&dateTo=2098-06-30&scopeBy=workers`, { waitUntil: 'networkidle' });
-  await page.waitForSelector('.scope-workers-wrap .scope-row', { timeout: 10000 });
-  check('direct: "By workers" mode is selected', await page.getByLabel('By workers').isChecked());
-  check('direct: site picker is hidden', (await page.locator('.scope-panel').count()) === 1, await page.locator('.scope-panel').count());
-  const directPanel = page.locator('.scope-workers-wrap .scope-panel');
-  await directPanel.locator('.scope-search').fill(unassigned.employeeNumber);
-  await page.waitForTimeout(150);
-  check('direct: unassigned worker is searchable', (await directPanel.locator('.scope-row').count()) === 1);
-  check('direct: unassigned worker is labelled clearly', (await directPanel.locator('.scope-row').innerText()).includes('No site assigned in this period'));
-  await directPanel.locator('.scope-row-label').click();
-  await page.waitForTimeout(600);
-  check('direct: URL preserves worker-first mode and explicit worker', page.url().includes('scopeBy=workers') && page.url().includes('workerIds='), page.url());
-  check('direct: report can run without choosing a site', !(await page.locator('.exc-apply-button').isDisabled()));
-  await directPanel.locator('.scope-search').fill(multiSiteEmployeeNumber);
-  await page.waitForTimeout(150);
-  const multiSiteText = await directPanel.locator('.scope-row').innerText();
-  check('direct: multi-site worker shows both associated sites', multiSiteText.includes(sites[2].name) && multiSiteText.includes(sites[1 + (54 % 27)].name), multiSiteText);
+  // CSV / PDF minutes agree with the UI: fetch the CSV, check the GRAND/CUSTOMER total
+  const waIds = await page.evaluate(() => new URL(location.href).searchParams.get('waIds'));
+  const csvRes = await page.request.get(`${BASE}/api/admin/reports/customer/export?dateFrom=2099-09-07&dateTo=2099-09-13&waIds=${waIds}&format=CSV&mode=FINAL`);
+  check('export: CSV downloads 200', csvRes.status() === 200);
+  const csv = await csvRes.text();
+  // 22 workers × 450 min = 9900 min
+  check('export: CSV CUSTOMER_TOTAL = 9900 min (matches 22 × 7h30) and no Meyer', csv.includes(',9900,') && !csv.includes('Meyer Yard'), csv.split('\r\n').find((l) => l.includes('CUSTOMER_TOTAL')));
 
-  // 14: keyboard + labels — do this from a known PICK state (bigSite selected, no bulk select)
-  await page.goto(`${BASE}/admin/reports/customer?dateFrom=2098-06-01&dateTo=2098-06-30&siteIds=${bigSite.id}`, { waitUntil: 'networkidle' });
-  await page.waitForSelector('.scope-workers-wrap .scope-row', { timeout: 10000 });
-  const firstBox = page.locator('.scope-workers-wrap .scope-row input[type=checkbox]').first();
-  check('14: every worker row checkbox has an associated <label for=>', (await page.locator('.scope-workers-wrap .scope-row label[for]').count()) > 0);
-  await firstBox.focus();
-  check('14: checkbox is focusable', await firstBox.evaluate((el) => el === document.activeElement));
-  const boxBefore = await firstBox.isChecked();
-  await page.keyboard.press('Space');
-  await page.waitForTimeout(80);
-  check('14: Space toggles the focused checkbox', (await firstBox.isChecked()) !== boxBefore, { boxBefore, after: await firstBox.isChecked() });
+  // URL round-trip: reload keeps the selection
+  await page.reload({ waitUntil: 'networkidle' });
+  await page.waitForSelector('[data-testid="ch-customer-card"]', { timeout: 8000 });
+  check('reload: the Aros selection + dates survive a full reload', (await page.locator('[data-testid="ch-customer-card"]').first().innerText()).includes('Aros Marine') && (await page.locator('#ch-from').inputValue()) === '2099-09-07');
 
-  // 13: RU — authenticated locale comes from User.locale (server-resolved), so flip the column.
-  await prisma.user.update({ where: { id: adminId }, data: { locale: 'RU' } });
-  await page.goto(`${BASE}/admin/reports/customer`, { waitUntil: 'networkidle' });
-  const ruText = await page.locator('body').innerText();
-  check('13: RU labels present', ruText.includes('Объекты') && ruText.includes('Показать и проверить'), ruText.slice(0, 200));
-  await prisma.user.update({ where: { id: adminId }, data: { locale: 'EN' } });
+  // Back/Forward: navigate away and back
+  await page.goto(`${BASE}/admin`, { waitUntil: 'networkidle' });
+  await page.goBack({ waitUntil: 'networkidle' });
+  await page.waitForSelector('[data-testid="ch-customer-card"]', { timeout: 8000 });
+  check('Back: returns to the customer report with the selection intact', (await page.evaluate(() => new URL(location.href).searchParams.get('waIds')))?.includes(waAros.id) ?? false);
 
-  // 15 + screenshots: no horizontal overflow (desktop)
-  await page.goto(`${BASE}/admin/reports/customer?dateFrom=2098-06-01&dateTo=2098-06-30&siteIds=${bigSite.id}&workers=all`, { waitUntil: 'networkidle' });
-  await page.waitForSelector('.scope-workers-wrap .scope-panel', { timeout: 10000 });
-  await page.waitForTimeout(400);
-  const deskOverflow = await page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth + 1);
-  check('15: desktop — no horizontal page overflow', !deskOverflow);
-  await page.screenshot({ path: join(SHOTS, 'desktop-1440.png'), fullPage: true });
+  // RU/EN: the same page in Russian
+  const ctxRu = await browser.newContext({ viewport: DESKTOP, extraHTTPHeaders: {} });
+  const ruPage = await ctxRu.newPage();
+  await login(ruPage, fx.admin.username, fx.admin.password);
+  await ruPage.evaluate(() => localStorage.setItem('tt.locale', 'RU'));
+  await ruPage.goto(`${BASE}/admin/reports/customer?dateFrom=2099-09-07&dateTo=2099-09-13&waIds=${waAros.id}`, { waitUntil: 'networkidle' });
+  const ruText = await ruPage.locator('body').innerText();
+  check('RU: key labels are Russian ("Заказчик" / "Часы")', ruText.includes('Заказчик') && (ruText.includes('Часы') || ruText.includes('часов')), ruText.slice(0, 120));
+  await ctxRu.close();
 
-  // ============================== MOBILE 390 ==============================
-  const mctx = await browser.newContext({ viewport: MOBILE });
-  const mpage = await mctx.newPage();
-  attach(mpage);
-  await login(mpage, fx.admin.username, fx.admin.password);
-  await mpage.goto(`${BASE}/admin/reports/customer?dateFrom=2098-06-01&dateTo=2098-06-30&siteIds=${bigSite.id}&workers=all`, { waitUntil: 'networkidle' });
-  await mpage.waitForSelector('.scope-workers-wrap .scope-panel', { timeout: 10000 });
-  await mpage.waitForTimeout(400);
-  const mobOverflow = await mpage.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth + 1);
-  check('15: mobile 390 — no horizontal page overflow', !mobOverflow);
-  check('15: mobile — worker list scrolls inside its own container', await mpage.evaluate(() => {
-    const el = document.querySelector('.scope-workers-wrap .scope-list') as HTMLElement | null;
-    return !!el && getComputedStyle(el).overflowY === 'auto';
-  }));
-  await mpage.screenshot({ path: join(SHOTS, 'mobile-390.png'), fullPage: true });
-
-  // 17: no console errors anywhere
-  check('17: no console errors across the whole run', consoleErrors.length === 0, consoleErrors.slice(0, 5));
+  check('no console errors on the customer report page', consoleErrors.length === 0, consoleErrors.slice(0, 3));
 
   await browser.close();
   console.log(JSON.stringify({ pass, fail }));
