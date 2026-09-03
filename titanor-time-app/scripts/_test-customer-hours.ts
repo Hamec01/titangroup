@@ -196,6 +196,43 @@ async function main() {
     check('5: readiness(Pending only) = INTERNAL_PREVIEW_ONLY, 1 blocker linking the timesheet', rPending.level === 'INTERNAL_PREVIEW_ONLY' && rPending.blockers.length === 1 && rPending.blockers[0].link.includes('/admin/timesheets/'), rPending);
     const rBoth = await resolveCustomerReadiness({ dateFrom: f5, dateTo: t5, employeeIds: null, workAreaIds: [wa5a.id, wa5b.id], includeNoCustomer: false });
     check('5: readiness(Ready+Pending) is blocked (the pending one carries over)', rBoth.level === 'INTERNAL_PREVIEW_ONLY' && rBoth.blockers.length === 1, rBoth);
+
+    // Regression: readiness must not overlook a matching customer segment after an arbitrary
+    // relation cap. The selected-customer segment is deliberately appended after 200 others.
+    const w5c = await mkWorker('L5');
+    const a5c = await mkAssignment(w5c.id, site5.id, wa5a.id, true);
+    const dense = await workedDay({ employeeId: w5c.id, siteId: site5.id, workAreaId: wa5a.id, assignmentId: a5c.id, day: dd, finalApprove: false });
+    const seedSegment = await prisma.workSegment.findFirstOrThrow({ where: { timesheetVersion: { timesheetId: dense.timesheetId } } });
+    await prisma.workSegment.createMany({
+      data: [
+        ...Array.from({ length: 200 }, () => ({
+          timesheetDayId: seedSegment.timesheetDayId,
+          timesheetVersionId: seedSegment.timesheetVersionId,
+          employeeId: seedSegment.employeeId,
+          date: seedSegment.date,
+          startAt: seedSegment.startAt,
+          endAt: seedSegment.endAt,
+          siteId: seedSegment.siteId,
+          workAreaId: wa5a.id,
+          sourceAssignmentId: seedSegment.sourceAssignmentId,
+          crossesMidnight: seedSegment.crossesMidnight
+        })),
+        {
+          timesheetDayId: seedSegment.timesheetDayId,
+          timesheetVersionId: seedSegment.timesheetVersionId,
+          employeeId: seedSegment.employeeId,
+          date: seedSegment.date,
+          startAt: seedSegment.startAt,
+          endAt: seedSegment.endAt,
+          siteId: seedSegment.siteId,
+          workAreaId: wa5b.id,
+          sourceAssignmentId: seedSegment.sourceAssignmentId,
+          crossesMidnight: seedSegment.crossesMidnight
+        }
+      ]
+    });
+    const rLate = await resolveCustomerReadiness({ dateFrom: f5, dateTo: t5, employeeIds: [w5c.id], workAreaIds: [wa5b.id], includeNoCustomer: false });
+    check('5: readiness finds the selected customer after 200 foreign segments', rLate.level === 'INTERNAL_PREVIEW_ONLY' && rLate.blockers.length === 1, rLate);
   }
 
   // ── Scenario 10 (server flag): includeNoCustomer marks the report so the route can refuse ──
