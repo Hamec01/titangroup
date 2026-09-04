@@ -1,6 +1,10 @@
 // T14.4 (2026-08-29) — offline /sync accepts an APPROXIMATE coordinate (gps null + gpsApproximate)
-// and stores it as an approximate ClockEventLocation (never verified); and a plain no-coordinate
-// GPS_NOT_VERIFIED at a site flagged `gpsOftenUnavailable` is created already resolved.
+// and stores it as an approximate ClockEventLocation (never verified).
+//
+// R15 fixroad F03 (owner, 2026-09-04) — the per-site `gpsOftenUnavailable` flag is now
+// INFORMATIONAL ONLY: a plain no-coordinate GPS_NOT_VERIFIED at a flagged site stays OPEN and joins
+// the review queue like any other, and NO auto ACKNOWLEDGE_AS_VALID audit is written. (Step 3 below
+// asserts the new behaviour.)
 //
 // Direct-route-handler style (real NextRequest / cookies / CSRF), same as _test-pilot-pair-orphan.ts.
 // Needs a disposable PostgreSQL 16 with all migrations applied (DATABASE_URL).
@@ -143,7 +147,7 @@ async function main() {
   check('2: exception OPEN before the site is flagged', exc2.status === 'OPEN', exc2);
   check('2: no ClockEventLocation (no coordinate at all)', (await prisma.clockEventLocation.findUnique({ where: { clockEventId: r2.clientEventId } })) === null);
 
-  // ---- 3. flag the site -> a plain no-coordinate GPS_NOT_VERIFIED is auto-resolved ----
+  // ---- 3. flag the site -> a plain no-coordinate GPS_NOT_VERIFIED still opens (F03: informational only) ----
   await prisma.workSite.update({ where: { id: site.id }, data: { gpsOftenUnavailable: true } });
   await prisma.employeeOpenShift.deleteMany({ where: { employeeId: employee.id } });
   const auditBefore = await prisma.auditEvent.count({ where: { eventType: 'ATTENDANCE_EXCEPTION_ACKNOWLEDGED_AS_VALID' } });
@@ -152,12 +156,14 @@ async function main() {
   const r3 = await syncOneCheckIn({ workerToken, deviceId: deviceC, siteId: site.id, seq: 1, capturedAt: T(10), gps: null, gpsUnavailableReason: 'TIMEOUT' });
   check('3: no-coordinate CHECK_IN at a flagged site -> 200 ACCEPTED', r3.status === 200 && r3.json.results?.[0]?.outcome === 'ACCEPTED', r3.json);
   const exc3 = await prisma.attendanceException.findFirstOrThrow({ where: { clockEventId: r3.clientEventId, type: 'GPS_NOT_VERIFIED' } });
-  check('3: exception is auto-RESOLVED', exc3.status === 'RESOLVED', exc3);
-  check('3: auto-resolution has a system note and no human resolver', exc3.resolvedByUserId === null && !!exc3.resolutionNote && exc3.resolvedAt !== null, exc3);
+  check('3: F03 — exception stays OPEN despite the flag (flag is informational, does not auto-resolve)', exc3.status === 'OPEN', exc3);
+  check('3: F03 — no auto resolver / note / resolvedAt on the exception', exc3.resolvedByUserId === null && exc3.resolutionNote === null && exc3.resolvedAt === null, exc3);
   const auditAfter = await prisma.auditEvent.count({ where: { eventType: 'ATTENDANCE_EXCEPTION_ACKNOWLEDGED_AS_VALID' } });
-  check('3: one ATTENDANCE_EXCEPTION_ACKNOWLEDGED_AS_VALID audit event was written', auditAfter === auditBefore + 1, { auditBefore, auditAfter });
+  check('3: F03 — NO ATTENDANCE_EXCEPTION_ACKNOWLEDGED_AS_VALID audit was written', auditAfter === auditBefore, { auditBefore, auditAfter });
+  // and the site now carries the flag for the informational admin/worker notes
+  check('3: flagged site reports gpsOftenUnavailable=true', (await prisma.workSite.findUniqueOrThrow({ where: { id: site.id }, select: { gpsOftenUnavailable: true } })).gpsOftenUnavailable === true);
 
-  // ---- 4. a LOW_ACCURACY reading (has a coordinate) at the flagged site is NOT auto-resolved ----
+  // ---- 4. a LOW_ACCURACY reading (has a coordinate) at the flagged site also stays OPEN ----
   await prisma.employeeOpenShift.deleteMany({ where: { employeeId: employee.id } });
   const deviceD = randomUUID();
   await contextRoute(req(`http://localhost/api/worker/attendance/context?deviceInstallationId=${deviceD}&platform=iOS`, workerToken));
@@ -172,7 +178,7 @@ async function main() {
   });
   check('4: low-accuracy CHECK_IN at a flagged site -> 200 ACCEPTED', r4.status === 200 && r4.json.results?.[0]?.outcome === 'ACCEPTED', r4.json);
   const exc4 = await prisma.attendanceException.findFirstOrThrow({ where: { clockEventId: r4.clientEventId, type: 'GPS_NOT_VERIFIED' } });
-  check('4: LOW_ACCURACY exception stays OPEN despite the flag (it has a coordinate)', exc4.status === 'OPEN', exc4);
+  check('4: LOW_ACCURACY exception stays OPEN (it has a coordinate)', exc4.status === 'OPEN', exc4);
 
   console.log(JSON.stringify({ pass, fail }));
   await prisma.$disconnect();

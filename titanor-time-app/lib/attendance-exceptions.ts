@@ -362,6 +362,9 @@ export interface ExceptionDetail extends ExceptionListItem {
    * long after the event (background back-fill). Rendered as a dashed "approximate" marker. */
   gpsLocation: { latitude: number; longitude: number; isApproximate: boolean; fixAgeSeconds: number | null; capturedAfterEventSeconds: number | null } | null;
   siteGeofence: { latitude: number; longitude: number; radiusMeters: number } | null;
+  /** R15 fixroad F03 — the exception's site is flagged "GPS often unavailable here" (informational:
+   *  admin should expect no-coordinate check-ins from it; the flag never auto-resolves anything). */
+  siteGpsOftenUnavailable: boolean;
 }
 
 const CLOCK_SHIFT_DETAIL_SELECT = {
@@ -385,7 +388,8 @@ type ClockShiftDetailRow = Prisma.ClockShiftGetPayload<{ select: typeof CLOCK_SH
 const DETAIL_SELECT = {
   ...LIST_SELECT,
   // GPS-1 — site's current geofence, for the "where was this" mini-map on GPS exceptions.
-  site: { select: { name: true, currentGeofenceVersion: { select: { latitude: true, longitude: true, radiusMeters: true } } } },
+  // R15 fixroad F03 — gpsOftenUnavailable for the informational "expect no GPS here" admin note.
+  site: { select: { name: true, gpsOftenUnavailable: true, currentGeofenceVersion: { select: { latitude: true, longitude: true, radiusMeters: true } } } },
   clockEvent: {
     select: {
       id: true,
@@ -510,7 +514,8 @@ export async function getAttendanceExceptionDetail(
             longitude: Number(row.site.currentGeofenceVersion.longitude),
             radiusMeters: row.site.currentGeofenceVersion.radiusMeters
           }
-        : null
+        : null,
+    siteGpsOftenUnavailable: row.site?.gpsOftenUnavailable ?? false
   };
 }
 

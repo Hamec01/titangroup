@@ -175,10 +175,17 @@ export function SiteEditForm({ site }: { site: SiteDetail }) {
             />{' '}
             {localeText(
               locale,
-              'GPS is often unavailable here (auto-accept offline check-ins with no location — for ship hulls, covered halls)',
-              'Здесь часто нет сигнала GPS (офлайн-отметки без координат принимаются автоматически — для корпусов судов, крытых цехов)'
+              'GPS signal is often unavailable at this site (ship hulls, covered halls)',
+              'На объекте часто нет GPS-сигнала (корпуса судов, крытые цеха)'
             )}
           </label>
+          <p className="login-hint" style={{ margin: '4px 0 0 22px', fontSize: '0.85em', opacity: 0.8 }}>
+            {localeText(
+              locale,
+              'Explanatory note only. Check-ins with no location from this site still go to “Attendance issues” for an administrator to review — nothing is accepted or changed automatically.',
+              'Пояснительная пометка. Отметки без координат с этого объекта по-прежнему попадают в «Проблемы учёта» — их проверяет администратор. Автоматически ничего не принимается и не меняется.'
+            )}
+          </p>
         </div>
         {errorMessage ? (
           <p className="login-error" role="alert">

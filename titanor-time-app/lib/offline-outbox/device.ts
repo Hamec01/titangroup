@@ -14,6 +14,8 @@ export interface ContextAssignmentWire {
   workAreaName: string | null;
   isPrimary: boolean;
   geofence: { geofenceVersionId: string; latitude: string; longitude: string; radiusMeters: number } | null;
+  /** R15 fixroad F03 — additive; site flagged "GPS often unavailable here" (informational). */
+  siteGpsOftenUnavailable?: boolean;
 }
 
 interface ContextResponseWire {
@@ -58,6 +60,7 @@ function mapAssignments(wire: ContextAssignmentWire[]): CachedAssignment[] {
     workAreaId: a.workAreaId,
     workAreaName: a.workAreaName,
     isPrimary: a.isPrimary,
+    siteGpsOftenUnavailable: a.siteGpsOftenUnavailable ?? false,
     geofenceVersionId: a.geofence?.geofenceVersionId ?? null,
     geofenceLatitude: a.geofence ? Number(a.geofence.latitude) : null,
     geofenceLongitude: a.geofence ? Number(a.geofence.longitude) : null,

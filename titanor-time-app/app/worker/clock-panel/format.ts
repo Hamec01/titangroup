@@ -25,6 +25,9 @@ export interface ClockPanelAssignment {
   workAreaId: string | null;
   workAreaName: string | null;
   isPrimary: boolean;
+  /** R15 fixroad F03 — site flagged "GPS often unavailable here". Optional so an IndexedDB row
+   *  cached before this field existed (offline shell) still satisfies the shape. Informational. */
+  siteGpsOftenUnavailable?: boolean;
 }
 
 export interface WorkerWeekDayActivity {

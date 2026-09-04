@@ -113,6 +113,13 @@ async function main() {
     check('no includeRawGps -> gpsLocation null', noRaw?.gpsLocation === null, noRaw?.gpsLocation);
     check('no includeRawGps -> siteGeofence null', noRaw?.siteGeofence === null, noRaw?.siteGeofence);
     check('detail JSON still surfaced regardless', noRaw?.detail?.pointInsideGeofence === true, noRaw?.detail);
+
+    // R15 fixroad F03 — the detail DTO carries the site's informational "GPS often unavailable" flag
+    check('siteGpsOftenUnavailable is false by default', noRaw?.siteGpsOftenUnavailable === false, noRaw?.siteGpsOftenUnavailable);
+    await prisma.workSite.update({ where: { id: site.id }, data: { gpsOftenUnavailable: true } });
+    const flagged = await getAttendanceExceptionDetail(exc.id, null);
+    check('siteGpsOftenUnavailable=true once the site is flagged', flagged?.siteGpsOftenUnavailable === true, flagged?.siteGpsOftenUnavailable);
+    check('flagging the site did NOT resolve the exception (informational only)', flagged?.status === 'OPEN', flagged?.status);
   }
 
   // 8. T14 — an approximate ClockEventLocation surfaces its age on the detail DTO

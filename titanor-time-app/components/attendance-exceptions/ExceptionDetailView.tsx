@@ -70,6 +70,17 @@ export function ExceptionDetailView({ basePath, detail, timesheetHref, resolutio
         <span className={exceptionStatusBadgeClass(detail.status)}>{exceptionStatusLabel(detail.status, locale)}</span>
       </div>
       <p className="exc-summary-lead">{detail.summary}</p>
+      {detail.siteGpsOftenUnavailable && detail.type === 'GPS_NOT_VERIFIED' && (
+        <p
+          className="exc-info-note"
+          role="note"
+          style={{ borderLeft: '3px solid #7a7a7a', padding: '6px 10px', margin: '8px 0', fontSize: '0.9em', opacity: 0.9 }}
+        >
+          {ru
+            ? 'Объект отмечен как место, где часто нет GPS-сигнала (корпус судна, крытый цех). Отметка без координат отсюда — обычное дело; как правило её можно принять. Проверка и решение — за администратором; автоматически ничего не принято.'
+            : 'This site is flagged as a place where GPS is often unavailable (ship hull, covered hall). A check-in with no location from here is expected — it can usually be accepted. The review and the decision are the administrator’s; nothing was accepted automatically.'}
+        </p>
+      )}
       <p className="exc-muted exc-id-line">{ru ? 'ID исключения:' : 'Exception ID:'} {detail.id}</p>
 
       <section className="exc-detail-section">

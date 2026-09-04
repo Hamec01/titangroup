@@ -89,6 +89,9 @@ export interface CachedAssignment {
   geofenceLatitude?: number | null;
   geofenceLongitude?: number | null;
   geofenceRadiusMeters?: number | null;
+  /** R15 fixroad F03 — site flagged "GPS often unavailable here". Informational only; optional,
+   * so a row cached before this field existed reads as `undefined` until the next bootstrap. */
+  siteGpsOftenUnavailable?: boolean;
 }
 
 export type DevicePausedReason = 'DEVICE_NOT_OWNED' | 'DEVICE_REVOKED';

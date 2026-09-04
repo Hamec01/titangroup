@@ -268,7 +268,7 @@ export const GUIDE_CONTENT: Record<AppLocale, GuideContent> = {
         items: [
           'Приход и уход без GPS. Если работник нажал «Приход», а телефон ещё не поймал спутники (внутри корпуса судна, в цеху, без интернета), появляется сообщение «подождите около 15 секунд» и кнопка «Всё равно отметить». Отметка и часы сохраняются в любом случае — GPS теперь никогда не мешает отметиться.',
           'Приблизительное местоположение. Когда свежего GPS нет, приложение прикладывает последнюю известную координату телефона (не старше 30 минут) с пометкой «приблизительно» и возрастом («≈ 8 мин назад»). В проблеме учёта такая точка показана на карте серой пунктирной меткой — это не проверка по геозоне, а просто ориентир, где примерно был человек.',
-          'Галочка у объекта «Здесь часто нет сигнала GPS» (в карточке объекта). Для таких объектов офлайн-отметки без координат больше не попадают в список проблем — система принимает их сама, и это видно в журнале.',
+          'Галочка у объекта «На объекте часто нет GPS-сигнала» (в карточке объекта). Это пояснительная пометка: она показывает и администратору (в проблеме учёта), и работнику (на экране отметки), что отсутствие координат здесь — норма. Отметки без координат по-прежнему попадают в проблемы учёта и требуют проверки администратора — автоматически ничего не принимается.',
           'Кнопка «Принять все „GPS не подтверждён" по фильтру» на экране проблем учёта: выберите объект (или работника, или период) и разом примите все накопившиеся отметки без координат.'
         ]
       },
@@ -520,7 +520,7 @@ export const GUIDE_CONTENT: Record<AppLocale, GuideContent> = {
         items: [
           'Check in / out with no GPS. If the worker taps "Check in" while the phone still has no satellite fix (inside a ship hull, a covered hall, offline), a "please wait about 15 seconds" message appears with a "Check in anyway" button. The check-in and the hours are saved either way — GPS can no longer stop someone clocking in.',
           'Approximate location. When there is no fresh fix, the app attaches the phone\'s last known location (no older than 30 minutes) marked "approximate" with its age ("≈ 8 min old"). On an exception it shows on the map as a grey dashed marker — not a geofence check, just a rough "where the person was".',
-          'A per-site "GPS is often unavailable here" checkbox (on the site card). For those sites, offline check-ins with no coordinate no longer land in the exception queue — the system accepts them itself, and it is recorded in the audit log.',
+          'A per-site "GPS signal is often unavailable at this site" checkbox (on the site card). This is an explanatory note: it tells both the administrator (on the exception) and the worker (on the clock screen) that a missing location here is expected. Check-ins with no coordinate still go to the exception queue and need an administrator to review them — nothing is accepted automatically.',
           'An "Acknowledge all GPS not verified in this filter" button on the exceptions screen: pick a site (or a worker, or a period) and clear the whole backlog of no-coordinate check-ins at once.'
         ]
       },

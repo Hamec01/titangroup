@@ -740,6 +740,10 @@ export function WorkerClockPanel({ initialClockState, assignments, workerName, t
   const selectedAssignment = assignments.find((a) => a.id === selectedAssignmentId) ?? assignments[0] ?? null;
   const activeSiteName = projected.state === 'CLOCKED_IN' ? projected.siteName : selectedAssignment?.siteName ?? null;
   const activeWorkAreaName = projected.state === 'CLOCKED_IN' ? projected.workAreaName : selectedAssignment?.workAreaName ?? null;
+  // R15 fixroad F03 — informational note when the site the worker is clocking at is flagged
+  // "GPS often unavailable here". Never blocks anything; only reassures.
+  const clockSiteId = projected.state === 'CLOCKED_IN' ? projected.siteId : selectedAssignment?.siteId ?? null;
+  const clockSiteGpsOftenUnavailable = !!assignments.find((a) => a.siteId === clockSiteId)?.siteGpsOftenUnavailable;
 
   const syncSummary = syncing ? t.syncing : pendingCount > 0 ? t.statusWaitingCount(pendingCount) : t.statusSynced;
 
@@ -799,6 +803,12 @@ export function WorkerClockPanel({ initialClockState, assignments, workerName, t
         onGrant={() => void handleGrantGps()}
         onSkipWait={skipGpsWait}
       />
+
+      {clockSiteGpsOftenUnavailable && (
+        <p className="wk-return-reason-text" role="note" style={{ marginTop: 0 }}>
+          {t.gpsOftenUnavailableSiteNote}
+        </p>
+      )}
 
       <WorkerStatusCard
         workerName={workerName}

@@ -140,10 +140,11 @@ export interface SiteDetail {
   finishedAt: string | null;
   finishingState: 'active' | 'finishing' | 'finished';
   stuckOpenShifts: { employeeId: string; employeeName: string; openedAt: string }[];
-  // T14 (2026-08-29) — when true, an offline GPS_NOT_VERIFIED with no coordinate at all (plain
-  // TIMEOUT / POSITION_UNAVAILABLE) at this site is auto-acknowledged on ingestion instead of
-  // joining the review queue. For sites where the phone reliably can't get a fix (ship hulls,
-  // covered halls). See lib/attendance-sync.ts createGpsNotVerifiedException.
+  // T14 (2026-08-29) / R15 fixroad F03 (owner 2026-09-04) — INFORMATIONAL ONLY. When true, the
+  // admin panel and the worker app explain "this site often has no GPS signal" (ship hulls,
+  // covered halls). It does NOT auto-resolve exceptions or change records — no-coordinate
+  // check-ins still join the review queue. Automatic acceptance is a separate, separately-approved
+  // step: docs/titanor-time/R15_MEYER_GPS_AUTOACCEPT_PLAN_RU.md.
   gpsOftenUnavailable: boolean;
   // Separate from foremanAssignments below (real ForemanAssignment rows,
   // T6.9) — this is WorkSite's own informational field, unrelated schema-wise

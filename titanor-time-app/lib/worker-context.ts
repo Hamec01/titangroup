@@ -54,6 +54,8 @@ export interface WorkerCurrentAssignment {
   isPrimary: boolean;
   validFrom: string;
   validTo: string | null;
+  /** R15 fixroad F03 — the site is flagged "GPS often unavailable here" (informational only). */
+  siteGpsOftenUnavailable: boolean;
 }
 
 /** Operationally-live SiteAssignments for this worker — what the app offers as Check-In options.
@@ -65,7 +67,7 @@ export async function listWorkerCurrentAssignments(employeeId: string, today: Da
     select: {
       id: true,
       siteId: true,
-      site: { select: { name: true } },
+      site: { select: { name: true, gpsOftenUnavailable: true } },
       workAreaId: true,
       workArea: { select: { name: true } },
       templateVersionId: true,
@@ -86,7 +88,8 @@ export async function listWorkerCurrentAssignments(employeeId: string, today: Da
     templateName: a.templateVersion?.template.name ?? null,
     isPrimary: a.isPrimary,
     validFrom: formatDate(a.validFrom),
-    validTo: a.validTo ? formatDate(a.validTo) : null
+    validTo: a.validTo ? formatDate(a.validTo) : null,
+    siteGpsOftenUnavailable: a.site.gpsOftenUnavailable
   }));
 }
 
