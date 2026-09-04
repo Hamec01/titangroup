@@ -18,6 +18,30 @@
 | **F05** | ✅ **закрыт** | обновлены `R15_OBSERVATION_RU.md`, `IMPLEMENTATION_STATUS.md`, `R14_CUTOVER_REPORT_RU.md`, `NEXT_AGENT_HANDOFF_RU.md`; терминология D3/D4 зафиксирована; changelog `/guide` дополнен. Остаётся: backup/restore + production runbooks (мелкое обновление образа/rollback). |
 | **F06–F11 (P2)** | принято как residual risk | зафиксированы в `R15_OBSERVATION_RU.md` §«Финальный аудит». F06 → потенциальная `R15-F1` по запросу заказчика. F07 (`capturedOffline`), F08 (deploy-скрипт-тест), F09 (алертинг), F10 (guard-роуты), F11 (список исключённых функций) — до финала либо явно принять. |
 
+### F01-результат (полный disposable-прогон 2026-09-04, образ `d7f-d216482`, production не тронут)
+
+| lane / runner | результат |
+|---|---|
+| browser harness (`run-browser-acceptance.sh`, весь manifest) | **19 pass / 0 fail / 2 SKIP-HARNESS** |
+| `run-worker-dossier-qa.sh` (dedicated) | **31 / 0** |
+| `run-restart-persistence.sh` (dedicated) | full-flow **84/0** + prepare **5/0** + docker restart + verify **18/0** |
+| unit lane | **18 / 0** |
+| db lane | **64 / 0** (вкл. `_test-custom-report-canonical` + `_test-customer-report-scope` из `34ff631`) |
+| scheduler lane | **5 / 0** |
+| `npm run typecheck` | clean |
+| `npm run lint` | clean (`test-manifest.json in sync` ✓) |
+| `npm run build` (`next build`) | clean (compiled + TS + static pages) |
+| `npm audit` (оба app) | 0 / 0 (по срезу аудита; изменения — только тест-файлы + docs) |
+
+Три исправленные фикстуры: каждая сажала одного работника на 2 пересекающихся `isPrimary=true`
+`SiteAssignment` → Migration 100 (`ex_site_assignment_one_primary_per_period`) отклоняла `23P01`
+**до** кода отчёта. Правка: 2-е одновременное назначение → `isPrimary=false` (отчёты читают
+сегменты, не primary-ность). Constraint НЕ отключён, `23P01` НЕ ловится/маскируется. Коммит
+`bb37cb1`.
+
+**Приёмка F01 выполнена:** 19/19 harness-тестов PASS, 2/2 SKIP-HARNESS + оба dedicated-runner'а
+PASS, Migration 100 не отключалась, итоговые команды с ненулевым exit при любом падении.
+
 ## 1. Вердикт специалиста
 
 **P0-дефектов, требующих немедленно откатывать production, не найдено.** Приложение отвечает,
