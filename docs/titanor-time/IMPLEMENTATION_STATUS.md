@@ -4,11 +4,15 @@
 - **Prod image:** `titanor-time-app:d7f-d216482` (revision `d216482`), контейнер `titanor-time-prod-app`
   порт 3199, healthy, restart 0. **Scheduler:** `titanor-time-app:r14-release-1416503` (не трогается).
   **Schema:** `current`, **100/100** migrations, 0 failed.
-- **R15-D7 «Единый жизненный цикл назначений» — A→F ВЕСЬ LIVE НА PRODUCTION 2026-09-03.**
+- **R15-D7 «Единый жизненный цикл назначений» — образы A→F физически развёрнуты на production
+  2 – 3 сентября** (каждый swap отдельно разрешён владельцем).
   A (`d7a-37dddb1`, миграция 98→99) · D1/D2 (`d7d3-5690632`, миграция 99→100, GiST EXCLUDE
   `ex_site_assignment_one_primary_per_period` + `fix-double-primary.sql`) · B + восстановление пароля
   (`d7b-recovery-80d5c9c`) · C (`d7c-ad780f8`) · E (`d7e-5cce319`) · F (`d7f-d216482`). Отчёты
-  `R15_D7_DEPLOY_{A..F}_REPORT_RU.md`. Технический owner sign-off по A→F получен 2026-09-03.
+  `R15_D7_DEPLOY_{A..F}_REPORT_RU.md`. 2026-09-03 дан **технический** sign-off по коду/деплоям A→F.
+  **Указание владельца 2026-09-04:** Deploy F и запись «Что нового» в `/guide` (`c76d439`, в
+  работающем образе её НЕТ) **НЕ считать production-live** до отдельного отчёта
+  `R15_D7_DEPLOY_F_PROD_REPORT_RU.md` + ревью владельца. Production без явного разрешения не менять.
 - **D3** («часы по заказчику») закрыт Deploy F как `/admin/reports/customer`. **D4** закрыт полностью
   (деплой 1/2 `worker-change-bee072d` + деплой 2/2 = Deploy B/C/E + D5). Site-first разрез по
   заказчикам — потенциальная отдельная задача `R15-F1`, только после запроса заказчика.
