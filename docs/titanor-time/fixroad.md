@@ -1,5 +1,15 @@
 # Titanor Time — финальный аудит и FIX ROAD
 
+> **⚠️ Обновление 2026-09-04 ~15:43 UTC:** второй web-only swap выполнен (владелец разрешил) —
+> **текущий prod-образ `titanor-time-app:d7f-fd8494c`** (был `d7f-d216482` ниже). Везёт F03
+> («часто нет GPS» в пояснительном режиме, `2fa0d5d`+`e5b1a42`) и запись «Что нового» `/guide`
+> (`c76d439`) — оба теперь **live**, подтверждено на живом `/guide`. Без миграции, простой ≈ 2.8 c,
+> итоговый релизный прогон на `fd8494c`: browser harness 19/0/2 skip + worker-dossier-qa 31/0 +
+> restart-persistence 5/0+18/0 + db 64/0 + unit 18/0, typecheck/lint/build clean. Полный отчёт:
+> `R15_D7_DEPLOY_F_PROD_REPORT_RU.md` §7. Rollback: `deploy-f03-rollback.sh` → `d7f-d216482`.
+> Также выполнено (owner-authorized): 3 исключения Andrei #1000 закрыты DISMISS «Тест».
+> Meyer-галочку владелец включит сам через UI. F04 — владелец сам выполняет root-диагностику.
+
 - **Срез аудита:** 2026-09-03 21:54 UTC.
 - **Git:** `feature/titanor-time-foundation` @ `6e6dc12`, до создания этого документа рабочее дерево было чистым, `origin` совпадал.
 - **Production web:** `titanor-time-app:d7f-d216482`, контейнер healthy, restart count 0.
@@ -13,7 +23,7 @@
 |---|---|---|
 | **F01** | ✅ **закрыт** | 3 фикстуры исправлены (`_test-csv-export`, `_test-period-time-report`, `_test-report-rounding-consistency` — 2-е одновременное назначение работника → `isPrimary=false`; constraint не отключён, `23P01` не маскируется). `run-worker-dossier-qa.sh` → mode `100755`. Полный disposable-прогон на `d7f-d216482` — см. §F01-результат ниже. Production не менялся. |
 | **F02** | 🟡 частично · ⏳ владелец | Codex проверил Android/планшет через browser-эмуляцию на live production **без создания часов** — адаптивность, маршруты, PWA manifest **PASS**. Остаётся **минимальная ручная приёмка на реальном Android** (владелец): install PWA · Check In/Out в реальную смену · закрыть/открыть приложение · авиарежим → открыть offline → вернуть сеть → sync без дубля. **Тестовых часов на production не создавать** — только реальная смена или согласованный тестовый аккаунт с документированной нейтрализацией. |
-| **F03** | ✅ **разбор готов** · ⏳ применение | `R15_ATTENDANCE_EXCEPTIONS_REVIEW_RU.md` — полный разбор 23 открытых записей (read-only). Закрытие записей в панели + назначение SLA — за администратором. Галочка «часто нет GPS» на Meyer Turku Shipyard **подготовлена, НЕ применена** (`R15_MEYER_GPS_FLAG_RU.md` + `ops/titanor-time/r15-d7/meyer-gps-often-unavailable.sql` — протестирован на disposable; UI-toggle = равнозначный путь) — ждёт отдельного подтверждения владельца. |
+| **F03** | ✅ **код выпущен на prod** (`d7f-fd8494c`) · ⏳ Meyer-галочка | `R15_ATTENDANCE_EXCEPTIONS_REVIEW_RU.md` — полный разбор 23 открытых записей. Переключатель «часто нет GPS» в пояснительном режиме — live. **3 исключения Andrei #1000 закрыты `DISMISS «Тест»`** (owner-authorized, выполнено). Галочка «часто нет GPS» на Meyer Turku Shipyard **подготовлена, НЕ применена** (`R15_MEYER_GPS_FLAG_RU.md` — владелец включит сам через UI); прочие открытые записи — назначение SLA за администратором. |
 | **F04** | ⏳ root-оператор · runbook готов | `titanorgroup-backup.service` failed с 2026-09-04 03:37 (exit 1, быстрый выход). **Публичный сайт работает** (`titanorgroup-web-1` healthy, `https://titanorgroup.fi/en` → 200). Root-runbook с точными командами (диагностика → причина → правка → ручной запуск → on/off-box + restore-check → приёмка): **`R15_F04_PUBLIC_SITE_BACKUP_RUNBOOK_RU.md`**. Ничего под root не менялось. Titanor Time backup + GPS archive НЕ затронуты. |
 | **F05** | ✅ **закрыт** | обновлены `R15_OBSERVATION_RU.md`, `IMPLEMENTATION_STATUS.md`, `R14_CUTOVER_REPORT_RU.md`, `NEXT_AGENT_HANDOFF_RU.md`; терминология D3/D4 зафиксирована; changelog `/guide` дополнен. Остаётся: backup/restore + production runbooks (мелкое обновление образа/rollback). |
 | **F06–F11 (P2)** | принято как residual risk | зафиксированы в `R15_OBSERVATION_RU.md` §«Финальный аудит». F06 → потенциальная `R15-F1` по запросу заказчика. F07 (`capturedOffline`), F08 (deploy-скрипт-тест), F09 (алертинг), F10 (guard-роуты), F11 (список исключённых функций) — до финала либо явно принять. |

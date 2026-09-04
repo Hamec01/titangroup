@@ -1,7 +1,7 @@
 # Titanor Time — Implementation Status
 
 **`[2026-09-04]` R15 наблюдение — фактическое состояние production.**
-- **Prod image:** `titanor-time-app:d7f-d216482` (revision `d216482`), контейнер `titanor-time-prod-app`
+- **Prod image:** `titanor-time-app:d7f-fd8494c` (revision `fd8494c`), контейнер `titanor-time-prod-app`
   порт 3199, healthy, restart 0. **Scheduler:** `titanor-time-app:r14-release-1416503` (не трогается).
   **Schema:** `current`, **100/100** migrations, 0 failed.
 - **R15-D7 «Единый жизненный цикл назначений» — образы A→F развёрнуты на production 2 – 3 сентября**
@@ -9,21 +9,24 @@
   A (`d7a-37dddb1`, миграция 98→99) · D1/D2 (`d7d3-5690632`, миграция 99→100, GiST EXCLUDE
   `ex_site_assignment_one_primary_per_period` + `fix-double-primary.sql`) · B + восстановление пароля
   (`d7b-recovery-80d5c9c`) · C (`d7c-ad780f8`) · E (`d7e-5cce319`) · F (`d7f-d216482`). Отчёты
-  `R15_D7_DEPLOY_{A..F}_REPORT_RU.md`, production-отчёт `R15_D7_DEPLOY_F_PROD_REPORT_RU.md`.
-  2026-09-03 — **технический** sign-off по коду/деплоям A→F. **2026-09-04 владелец подтвердил:
-  Deploy F можно считать технически live.** Запись «Что нового» `/guide` (`c76d439`) и правка F03 —
-  в работающем образе их НЕТ, поедут следующим web-only swap. **Полный R15 owner sign-off НЕ дан**
-  — открыты F02 (реальный Android), F04 (backup публичного сайта), процесс разбора исключений
+  `R15_D7_DEPLOY_{A..F}_REPORT_RU.md`, production-отчёт `R15_D7_DEPLOY_F_PROD_REPORT_RU.md` §7.
+  2026-09-03 — **технический** sign-off по коду/деплоям A→F; **2026-09-04 владелец подтвердил
+  Deploy F технически live**, затем разрешил 2-й web-only swap: **F03** (переключатель «часто нет
+  GPS» в пояснительном режиме, `2fa0d5d`+`e5b1a42`) + запись «Что нового» `/guide` (`c76d439`) —
+  выполнено 2026-09-04 ~15:43 UTC, образ `d7f-fd8494c`, простой ≈ 2.8 c, релизный прогон
+  19/0/2 skip + worker-dossier-qa 31/0 + restart-persistence 5/0+18/0 + db 64/0 + unit 18/0.
+  **Полный R15 owner sign-off всё ещё НЕ дан** — открыты F02 (реальный Android), F04 (backup
+  публичного сайта — владелец сам ведёт root-диагностику), процесс разбора остальных исключений
   начальником. Production без явного разрешения не менять; тестовых данных на prod не создавать.
 - **D3** («часы по заказчику») закрыт Deploy F как `/admin/reports/customer`. **D4** закрыт полностью
   (деплой 1/2 `worker-change-bee072d` + деплой 2/2 = Deploy B/C/E + D5). Site-first разрез по
   заказчикам — потенциальная отдельная задача `R15-F1`, только после запроса заказчика.
-- **Rollback текущего prod-образа:** `bash ops/titanor-time/r15-d7/deploy-f-rollback.sh` → контейнер
-  `titanor-time-prod-app-pre-d216482` (образ `d7e-5cce319`), только откат образа, схему не откатывать.
-- **Полный R15 owner sign-off НЕ получен.** Открыто 5 P1 (`fixroad.md`): F01 fixture-fix + зелёный
-  release-run *(сделано 2026-09-04)* · F02 device acceptance *(владелец)* · F03 attendance exceptions
-  *(разбор `R15_ATTENDANCE_EXCEPTIONS_REVIEW_RU.md`, действия за администратором)* · F04 failed backup
-  публичного сайта *(root)* · F05 документы *(этот пункт + `R15_OBSERVATION_RU.md`)*.
+- **Rollback текущего prod-образа:** `bash ops/titanor-time/r15-d7/deploy-f03-rollback.sh` → контейнер
+  `titanor-time-prod-app-pre-fd8494c` (образ `d7f-d216482`), только откат образа, схему не откатывать.
+- **Полный R15 owner sign-off НЕ получен.** Открыто (`fixroad.md`): F01 ✅ · F03 код ✅ live (3 исключения
+  Andrei #1000 → `DISMISS «Тест»`, выполнено; Meyer-галочку владелец включит сам через UI) · F05 ✅
+  документы (этот пункт + `R15_OBSERVATION_RU.md`) · F02 device acceptance *(владелец)* · F04 failed
+  backup публичного сайта *(владелец сам ведёт root-диагностику)*.
 - **Заморожено до sign-off:** docker cleanup (owner: «Очистку Docker пока не выполнять»); build cache
   ~71 GB; цепочка `*-pre-*` rollback-контейнеров; удаление старых данных — отдельной задачей.
 - **Тесты на срез:** `npm test` 82/82 (18 unit + 59 db + 5 scheduler), typecheck/lint/`next build`
