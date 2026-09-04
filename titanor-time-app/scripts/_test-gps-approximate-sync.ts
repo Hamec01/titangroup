@@ -179,6 +179,9 @@ async function main() {
   check('4: low-accuracy CHECK_IN at a flagged site -> 200 ACCEPTED', r4.status === 200 && r4.json.results?.[0]?.outcome === 'ACCEPTED', r4.json);
   const exc4 = await prisma.attendanceException.findFirstOrThrow({ where: { clockEventId: r4.clientEventId, type: 'GPS_NOT_VERIFIED' } });
   check('4: LOW_ACCURACY exception stays OPEN (it has a coordinate)', exc4.status === 'OPEN', exc4);
+  // F03 — OUTSIDE_GEOFENCE at a flagged site (a good coordinate elsewhere) stays OPEN and is never
+  // reclassified/weakened by the flag: covered by _test-gps-exception-detail.ts §9 (and by
+  // inspection — createGpsNotVerifiedException is never called for VERIFIED_OUTSIDE).
 
   console.log(JSON.stringify({ pass, fail }));
   await prisma.$disconnect();

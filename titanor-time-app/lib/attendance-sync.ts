@@ -540,14 +540,23 @@ async function writeEventLocation(tx: Prisma.TransactionClient, clockEventId: st
   }
 }
 
-/** Creates a GPS_NOT_VERIFIED exception (always OPEN — it joins the review queue like any other).
+/** Creates a GPS_NOT_VERIFIED exception. It is ALWAYS created OPEN and joins the review queue — the
+ * exact pre-T14 behaviour, and the exact current behaviour for a site whose `gpsOftenUnavailable`
+ * flag is OFF (unchanged).
  *
- * R15 fixroad F03 (owner, 2026-09-04): the per-site `WorkSite.gpsOftenUnavailable` flag is now
- * informational ONLY — it explains "this site often has no GPS signal" in the admin panel and to
- * the worker, but it does NOT auto-resolve exceptions or change any records. Automatic acceptance
- * of no-coordinate marks at such sites is a separate, separately-approved step — see
- * docs/titanor-time/R15_MEYER_GPS_AUTOACCEPT_PLAN_RU.md. (The manual, filter-scoped
- * bulkAcknowledgeGpsNotVerified admin action is unchanged.) */
+ * R15 fixroad F03 (owner, 2026-09-04): `WorkSite.gpsOftenUnavailable` is now INFORMATIONAL ONLY.
+ *  - flag OFF  → this exception opens exactly as before (no notes, nothing special);
+ *  - flag ON   → this exception STILL opens for review; the admin panel and the worker clock
+ *                screen additionally show a calm explanatory note (UI-only, driven by the flag);
+ *  - the flag NEVER auto-resolves an exception and NEVER touches an existing record.
+ * The T14 auto-acknowledge branch (site + no-coordinate → RESOLVED) is removed. Re-enabling
+ * automatic acceptance is a separate, separately-approved step gated behind a second flag — see
+ * docs/titanor-time/R15_MEYER_GPS_AUTOACCEPT_PLAN_RU.md.
+ *
+ * This helper only handles GPS_NOT_VERIFIED. OUTSIDE_GEOFENCE_CHECKIN / OUTSIDE_GEOFENCE_CHECKOUT
+ * (a good coordinate that placed the worker measurably elsewhere) are a different exception type on
+ * a different code path above — the flag does not touch them and their handling is unchanged. The
+ * manual, filter-scoped bulkAcknowledgeGpsNotVerified admin action is also unchanged. */
 async function createGpsNotVerifiedException(
   tx: Prisma.TransactionClient,
   data: Prisma.AttendanceExceptionUncheckedCreateInput

@@ -5,9 +5,22 @@
 // attendance.gps.read.raw.
 // Needs a disposable PostgreSQL 16 (DATABASE_URL) for the getAttendanceExceptionDetail part.
 import { randomUUID } from 'node:crypto';
+import { createElement } from 'react';
+import { renderToStaticMarkup } from 'react-dom/server';
 import { prisma } from '../lib/prisma';
 import { evaluateGpsReading, exceptionDetailForGps, type ClockGeofence } from '../lib/attendance-clock';
-import { sanitizeExceptionDetail, getAttendanceExceptionDetail } from '../lib/attendance-exceptions';
+import { sanitizeExceptionDetail, getAttendanceExceptionDetail, type ExceptionDetail } from '../lib/attendance-exceptions';
+import { ExceptionDetailView } from '../components/attendance-exceptions/ExceptionDetailView';
+
+// R15 fixroad F03 — the "GPS often unavailable at this site" note shows ONLY for a GPS_NOT_VERIFIED
+// with NO coordinate (TIMEOUT / POSITION_UNAVAILABLE) at a flagged site. Renders the real component.
+const NOTE_EN = 'the device sent no coordinate';
+function noteShown(detail: ExceptionDetail): boolean {
+  const html = renderToStaticMarkup(
+    createElement(ExceptionDetailView, { basePath: '/admin/attendance/exceptions', detail, timesheetHref: null, resolutionPanel: null, locale: 'EN' })
+  );
+  return html.includes(NOTE_EN);
+}
 
 let pass = 0;
 let fail = 0;
@@ -116,10 +129,14 @@ async function main() {
 
     // R15 fixroad F03 — the detail DTO carries the site's informational "GPS often unavailable" flag
     check('siteGpsOftenUnavailable is false by default', noRaw?.siteGpsOftenUnavailable === false, noRaw?.siteGpsOftenUnavailable);
+    // flag OFF -> no note, and this exception is a LOW_ACCURACY one (has a coordinate)
+    check('F03: flag OFF -> no "GPS often unavailable" note', noRaw ? !noteShown(noRaw) : false);
     await prisma.workSite.update({ where: { id: site.id }, data: { gpsOftenUnavailable: true } });
     const flagged = await getAttendanceExceptionDetail(exc.id, null);
     check('siteGpsOftenUnavailable=true once the site is flagged', flagged?.siteGpsOftenUnavailable === true, flagged?.siteGpsOftenUnavailable);
     check('flagging the site did NOT resolve the exception (informational only)', flagged?.status === 'OPEN', flagged?.status);
+    // flag ON but reason is LOW_ACCURACY (a real, imprecise coordinate) -> STILL no note (not weakened)
+    check('F03: flag ON + LOW_ACCURACY -> no note (real coordinate keeps full scrutiny)', flagged ? !noteShown(flagged) : false);
   }
 
   // 8. T14 — an approximate ClockEventLocation surfaces its age on the detail DTO
@@ -144,6 +161,39 @@ async function main() {
     });
     const withRaw = await getAttendanceExceptionDetail(exc.id, null, { includeRawGps: true });
     check('approximate ClockEventLocation -> gpsLocation.isApproximate true + fixAgeSeconds 480', withRaw?.gpsLocation?.isApproximate === true && withRaw?.gpsLocation?.fixAgeSeconds === 480 && withRaw?.gpsLocation?.capturedAfterEventSeconds === null, withRaw?.gpsLocation);
+
+    // R15 fixroad F03 — this is a GPS_NOT_VERIFIED with NO coordinate (reason TIMEOUT)
+    const offNote = await getAttendanceExceptionDetail(exc.id, null);
+    check('F03: no-coordinate GPS_NOT_VERIFIED, flag OFF -> no note', offNote ? !noteShown(offNote) : false);
+    await prisma.workSite.update({ where: { id: site.id }, data: { gpsOftenUnavailable: true } });
+    const onNote = await getAttendanceExceptionDetail(exc.id, null);
+    check('F03: no-coordinate GPS_NOT_VERIFIED, flag ON -> note IS shown', onNote ? noteShown(onNote) : false);
+    check('F03: flag ON did not change the exception status', onNote?.status === 'OPEN', onNote?.status);
+  }
+
+  // 9. F03 — OUTSIDE_GEOFENCE at a flagged site: NO note, handling unchanged (a good coordinate that
+  //    placed the worker elsewhere is never "normal GPS absence").
+  {
+    const admin = await prisma.user.create({ data: { username: `gpsog_${randomUUID().slice(0, 6)}`, status: 'ACTIVE', locale: 'EN', userRoles: { create: { roleId: (await prisma.role.findFirstOrThrow({ where: { name: 'ADMIN' } })).id } } } });
+    const site = await prisma.workSite.create({ data: { name: `GPSOG ${randomUUID().slice(0, 4)}`, gpsOftenUnavailable: true } });
+    const emp = await prisma.employee.create({ data: { employeeNumber: `GPSOG-${randomUUID().slice(0, 8)}`, firstName: 'Gps', lastName: 'Outside' } });
+    await prisma.employment.create({ data: { employeeId: emp.id, active: true, startDate: new Date('2020-01-01') } });
+    const period = await prisma.payrollPeriod.create({ data: { startDate: new Date(Date.UTC(2024, 0, 1)), endDate: new Date(Date.UTC(2024, 0, 7)), status: 'OPEN', openedByUserId: admin.id } });
+    const clockEventId = randomUUID();
+    await prisma.clockEvent.create({
+      data: {
+        id: clockEventId, groupId: randomUUID(), employeeId: emp.id, operationType: 'CHECK_IN', siteId: site.id,
+        clientCapturedAt: new Date(), capturedOffline: true, serverReceivedAt: new Date(), effectiveAt: new Date(),
+        clockSkewMs: BigInt(0), gpsAccuracyMeters: 12, gpsVerification: 'VERIFIED_OUTSIDE', gpsUnavailableReason: null,
+        processingState: 'ACCEPTED', channel: 'OFFLINE_SYNC', payloadHash: 'z'.repeat(64), requestId: randomUUID()
+      }
+    });
+    const exc = await prisma.attendanceException.create({
+      data: { type: 'OUTSIDE_GEOFENCE_CHECKIN', employeeId: emp.id, payrollPeriodId: period.id, occurredAt: new Date(), siteId: site.id, clockEventId, status: 'OPEN', detail: { distanceMeters: 1600, thresholdMeters: 650, accuracyMeters: 12 } }
+    });
+    const d = await getAttendanceExceptionDetail(exc.id, null);
+    check('F03: OUTSIDE_GEOFENCE_CHECKIN at a flagged site -> exception stays OPEN', d?.status === 'OPEN', d?.status);
+    check('F03: OUTSIDE_GEOFENCE_CHECKIN at a flagged site -> NO "GPS often unavailable" note', d ? !noteShown(d) : false);
   }
 
   console.log(JSON.stringify({ pass, fail }));

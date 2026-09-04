@@ -358,7 +358,7 @@ export const WORKER_STRINGS: Record<AppLocale, WorkerStrings> = {
     gpsWaitBody: (seconds: number) => `Please wait about ${seconds} more second${seconds === 1 ? '' : 's'} — the phone hasn't got a GPS fix yet. Indoors or in a hull this can take a while.`,
     gpsWaitProceed: 'Clock in anyway',
     savedApproxLocation: 'Saved with an approximate location — the phone had no fresh GPS fix.',
-    gpsOftenUnavailableSiteNote: 'GPS signal is often unavailable at this site. If your phone can’t get a location, that’s fine — your check-in is still saved and an administrator will review it.',
+    gpsOftenUnavailableSiteNote: 'GPS signal is often unavailable at this site. If your phone can’t determine a location, your check-in is still saved and an administrator reviews it — you do not need to do anything.',
     outsideZoneTitle: 'You are outside the site',
     outsideZoneBody: (siteName: string) =>
       `Your GPS location is outside “${siteName}”. Move closer and try again, or check in anyway — the check-in is saved and your manager sees a note about it.`,
@@ -628,7 +628,7 @@ export const WORKER_STRINGS: Record<AppLocale, WorkerStrings> = {
     gpsWaitBody: (seconds: number) => `Прошу подождать ещё около ${seconds} сек — телефон пока не получил координаты GPS. В помещении или внутри корпуса это может занять время.`,
     gpsWaitProceed: 'Всё равно отметить',
     savedApproxLocation: 'Сохранено с приблизительным местоположением — телефон не получил свежих координат GPS.',
-    gpsOftenUnavailableSiteNote: 'На этом объекте часто нет GPS-сигнала. Если телефон не определит местоположение — это нормально: отметка всё равно сохранится, и её проверит администратор.',
+    gpsOftenUnavailableSiteNote: 'На этом объекте часто нет GPS-сигнала. Если телефон не определит местоположение, отметка всё равно сохранится, её проверит администратор — от вас ничего не требуется.',
     outsideZoneTitle: 'Вы за пределами объекта',
     outsideZoneBody: (siteName: string) =>
       `Ваше местоположение по GPS вне территории объекта «${siteName}». Подойдите ближе и попробуйте снова — или отметьте приход всё равно: отметка сохранится, а руководитель увидит пометку.`,

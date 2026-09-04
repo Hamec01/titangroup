@@ -59,6 +59,17 @@ export function ExceptionDetailView({ basePath, detail, timesheetHref, resolutio
   const ru = locale === 'RU';
   const isTerminal = detail.status !== 'OPEN';
 
+  // R15 fixroad F03 — the "GPS often unavailable at this site" explanatory note shows ONLY for a
+  // GPS_NOT_VERIFIED whose device returned NO coordinate at all (a plain TIMEOUT /
+  // POSITION_UNAVAILABLE). It never shows for LOW_ACCURACY (a real, if imprecise, coordinate), for
+  // PERMISSION_DENIED (a "grant permission" situation, not a site-signal one), or for
+  // OUTSIDE_GEOFENCE_* (a good coordinate that placed the worker elsewhere) — those keep their full
+  // normal scrutiny. The flag never changes the exception's status or any record.
+  const noCoordinateReason =
+    detail.clockEvent?.gpsUnavailableReason === 'TIMEOUT' || detail.clockEvent?.gpsUnavailableReason === 'POSITION_UNAVAILABLE';
+  const showGpsOftenUnavailableNote =
+    detail.siteGpsOftenUnavailable && detail.type === 'GPS_NOT_VERIFIED' && noCoordinateReason;
+
   return (
     <div className="setup-card worker-card exc-card">
       <p>
@@ -70,15 +81,15 @@ export function ExceptionDetailView({ basePath, detail, timesheetHref, resolutio
         <span className={exceptionStatusBadgeClass(detail.status)}>{exceptionStatusLabel(detail.status, locale)}</span>
       </div>
       <p className="exc-summary-lead">{detail.summary}</p>
-      {detail.siteGpsOftenUnavailable && detail.type === 'GPS_NOT_VERIFIED' && (
+      {showGpsOftenUnavailableNote && (
         <p
           className="exc-info-note"
           role="note"
           style={{ borderLeft: '3px solid #7a7a7a', padding: '6px 10px', margin: '8px 0', fontSize: '0.9em', opacity: 0.9 }}
         >
           {ru
-            ? 'Объект отмечен как место, где часто нет GPS-сигнала (корпус судна, крытый цех). Отметка без координат отсюда — обычное дело; как правило её можно принять. Проверка и решение — за администратором; автоматически ничего не принято.'
-            : 'This site is flagged as a place where GPS is often unavailable (ship hull, covered hall). A check-in with no location from here is expected — it can usually be accepted. The review and the decision are the administrator’s; nothing was accepted automatically.'}
+            ? 'Объект отмечен как место, где часто нет GPS-сигнала (корпус судна, крытый цех), и телефон не передал координату. Проверьте и примите решение вручную — автоматически ничего не принято, запись не изменена.'
+            : 'This site is flagged as a place where GPS is often unavailable (ship hull, covered hall), and the device sent no coordinate. Review and decide manually — nothing was accepted automatically and no record was changed.'}
         </p>
       )}
       <p className="exc-muted exc-id-line">{ru ? 'ID исключения:' : 'Exception ID:'} {detail.id}</p>
