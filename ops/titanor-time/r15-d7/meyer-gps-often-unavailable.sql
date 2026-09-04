@@ -3,15 +3,15 @@
 -- PREPARED, NOT RUN. Requires explicit owner confirmation before execution (owner, 2026-09-04:
 -- "готовь настройку ... но не применяй без отдельного подтверждения").
 --
--- Effect (lib/attendance-sync.ts createGpsNotVerifiedException): from the moment the flag is set,
--- a NEW GPS_NOT_VERIFIED exception on this site whose device returned NO coordinate at all
--- (a plain TIMEOUT / POSITION_UNAVAILABLE — never LOW_ACCURACY, never a real geofence miss) is
--- created already RESOLVED (ACKNOWLEDGE_AS_VALID, system actor) instead of joining /admin/review.
--- It does NOT touch: existing open exceptions, LOW_ACCURACY cases, OUTSIDE_GEOFENCE_* (a real
--- coordinate showing the worker was measurably elsewhere). Forward-looking only.
+-- Effect (R15 fixroad F03, owner 2026-09-04): the flag is INFORMATIONAL ONLY. When set, the admin
+-- panel (on a GPS_NOT_VERIFIED exception) and the worker clock screen show a note "GPS is often
+-- unavailable at this site". It does NOT auto-resolve exceptions, does NOT change any records, does
+-- NOT touch LOW_ACCURACY / OUTSIDE_GEOFENCE_* / existing open exceptions / hours / geofences.
+-- No-coordinate check-ins still join /admin/review. Automatic acceptance is a separate, separately-
+-- approved step — docs/titanor-time/R15_MEYER_GPS_AUTOACCEPT_PLAN_RU.md.
 --
 -- Equivalent first-class path (preferred if a browser admin session is available): an ADMIN ticks
--- the "Здесь часто нет сигнала GPS" checkbox on /admin/sites/<id> (SiteEditForm) -> PATCH
+-- the "На объекте часто нет GPS-сигнала" checkbox on /admin/sites/<id> (SiteEditForm) -> PATCH
 -- /api/admin/sites/:id {version, gpsOftenUnavailable:true} -> same field write + version+1 +
 -- SITE_UPDATED audit. This script is the psql-only equivalent of that one toggle.
 --
