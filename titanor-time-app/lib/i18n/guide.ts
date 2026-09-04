@@ -7,7 +7,11 @@ import type { AppLocale } from './locale';
 // those directly. Kept as a data module (not JSX) so the content itself stays easy to review/edit
 // without touching component code.
 //
-// Last brought current: 2026-09-01. Covers: grouped admin nav, the notification
+// Last brought current: 2026-09-04 (changelog only — R15-D7 A→F: rebuilt worker card + one-button
+// workplace change, "end today", finish site / disable customer, group transfer, worker
+// archive/restore, "work area" → "customer" rename, the rebuilt Customer working-hours report,
+// the timesheet workplace-change marker, the password-reset QR). The reference sections below are
+// still at 2026-09-01. Covers: grouped admin nav, the notification
 // bell + review-queue badge, the worker dossier, the workforce matrix (professions + qualification
 // filters + PDF/CSV export), worker professions, the unified "Awaiting approval" screen, the three
 // ways to change a timesheet, marking sick-leave/vacation from review, the configurable GPS
@@ -210,6 +214,20 @@ export const GUIDE_CONTENT: Record<AppLocale, GuideContent> = {
     changelogTitle: 'Что нового',
     changelogIntro: 'Коротко — что менялось в системе за последнее время. Самое свежее сверху.',
     changelog: [
+      {
+        date: '2–3 сентября 2026',
+        items: [
+          'Карточка работника переделана. На одной странице видно текущее место работы, запланированные изменения и прошлые назначения. Место работы (объект, заказчик, график, дата) меняется одной кнопкой — раньше нужно было отдельно «завершить» старое назначение и «добавить» новое. Часы за уже отработанные дни при смене места не теряются.',
+          '«Завершить сегодня» действительно работает. Раньше система упиралась в автоматически созданные будущие смены и переносила дату на конец периода — теперь работника можно снять с объекта сегодняшним днём.',
+          'Можно завершить объект и отключить заказчика. У объекта появилась кнопка «Объект завершён»: все назначения закрываются, объект уходит из списков и из выбора для новых назначений, но вся история сохраняется. Заказчика на объекте можно отключить с выбором — оставить работников на объекте без заказчика или снять их.',
+          'Групповой перевод. На странице объекта можно перевести сразу всех работников объекта (или всех работников одного заказчика) на другой объект или к другому заказчику будущей датой — одним действием, с предварительным списком: видно, кто готов к переводу, а у кого есть несданные часы.',
+          'Работника можно вернуть из архива и убрать в архив. «Деактивировать» теперь означает «убрать в архив» — данные целы, работник просто скрыт из основного списка; есть переключатель «Показать архив».',
+          '«Рабочая зона» переименована в «Заказчик» во всей панели, инструкциях и выгрузках — на практике это и есть заказчик (на одном объекте могут работать несколько заказчиков). По имени заказчика можно кликнуть и увидеть его работников.',
+          'Новый отчёт «Часы заказчику». Полностью переделан: заказчик выбирается из базы (поиск по названию заказчика и объекта), а не вписывается вручную. По каждому заказчику — отдельная карточка с числом работников и суммой часов и общий итог. Часы одного заказчика больше не смешиваются с часами другого заказчика на том же объекте. Перед скачиванием — предпросмотр со списком работников и их часами; PDF или CSV для заказчика можно выгрузить, только когда все табели окончательно одобрены (иначе система покажет, каких именно не хватает).',
+          'В табеле видно, когда меняли место работы. Если работнику в течение смены сменили объект, в табеле появляется пометка со временем, старым и новым местом и тем, кто изменил — на часы это не влияет.',
+          'Ссылку для нового пароля можно показать как QR-код. Администратор создаёт ссылку для сброса пароля и показывает работнику QR — тот наводит камеру телефона и сразу попадает на страницу смены пароля, без ручного ввода кода.'
+        ]
+      },
       {
         date: '31 августа — 1 сентября 2026',
         items: [
@@ -448,6 +466,20 @@ export const GUIDE_CONTENT: Record<AppLocale, GuideContent> = {
     changelogTitle: 'What\'s new',
     changelogIntro: 'A short list of what has changed in the system recently. Newest first.',
     changelog: [
+      {
+        date: '2–3 September 2026',
+        items: [
+          'The worker card was rebuilt. One page now shows the current workplace, scheduled changes and past assignments. The workplace (site, customer, schedule, date) changes with a single button — previously you had to "end" the old assignment and "add" a new one separately. Hours already worked are not lost when the workplace changes.',
+          '"End today" actually works now. It used to run into automatically created future shifts and push the date to the end of the period — a worker can now be taken off a site as of today.',
+          'You can finish a site and disable a customer. A site now has a "Site finished" button: every assignment is closed, the site drops out of the lists and out of the picker for new assignments, but all history is kept. A customer on a site can be disabled with a choice — leave the workers on the site with no customer, or take them off.',
+          'Group transfer. On the site page you can move every worker on a site (or every worker of one customer) to another site or customer with a future date — in one action, with a preview list showing who is ready and who still has unsubmitted hours.',
+          'A worker can be restored from the archive and moved to the archive. "Deactivate" now means "move to archive" — the data is intact, the worker is just hidden from the main list; there is a "Show archive" toggle.',
+          '"Work area" was renamed to "Customer" across the panel, the guide and the exports — in practice it is the customer (several customers can work on one site). You can click a customer name to see that customer\'s workers.',
+          'A new "Customer working hours" report. Fully rebuilt: the customer is picked from the database (search by customer and site name) instead of typed in. Each customer gets its own card with a worker count and an hours total, plus a grand total. One customer\'s hours are no longer mixed with another customer\'s on the same site. Before downloading there is a preview with the worker list and their hours; the PDF or CSV for the customer can only be exported once every timesheet is final-approved (otherwise the system shows exactly which ones are missing).',
+          'The timesheet shows when the workplace was changed. If a worker\'s site was changed during a shift, the timesheet carries a note with the time, the old and new place and who changed it — it does not affect the hours.',
+          'The new-password link can be shown as a QR code. The administrator creates a password-reset link and shows the worker a QR — the worker points their phone camera at it and lands straight on the password-change page, with no code to type.'
+        ]
+      },
       {
         date: '31 August – 1 September 2026',
         items: [
