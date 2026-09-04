@@ -47,8 +47,11 @@ async function makeSite(tag: string) {
   return prisma.workSite.create({ data: { name: `Round Site ${tag} ${randomUUID().slice(0, 4)}` } });
 }
 
-async function makeAssignment(employeeId: string, siteId: string) {
-  return prisma.siteAssignment.create({ data: { employeeId, siteId, isPrimary: true, validFrom: new Date('2000-01-01T00:00:00.000Z'), validTo: null, assignedByUserId: admin.user.id } });
+// Migration 100 (ex_site_assignment_one_primary_per_period) forbids two overlapping isPrimary rows
+// for one worker. These report tests read segments, not primary-ness, so a worker on two sites at
+// once gets ONE primary and the rest non-primary.
+async function makeAssignment(employeeId: string, siteId: string, isPrimary = true) {
+  return prisma.siteAssignment.create({ data: { employeeId, siteId, isPrimary, validFrom: new Date('2000-01-01T00:00:00.000Z'), validTo: null, assignedByUserId: admin.user.id } });
 }
 
 async function makePeriod(startDate: Date, endDate: Date) {
@@ -238,7 +241,7 @@ async function main() {
     const siteB = await makeSite('C3B');
     const emp = await makeEmployee('C3');
     const asgA = await makeAssignment(emp.id, siteA.id);
-    const asgB = await makeAssignment(emp.id, siteB.id);
+    const asgB = await makeAssignment(emp.id, siteB.id, false); // 2nd concurrent site — non-primary (Migration 100)
     await makeParticipant(period.id, emp.id);
     const ts = await makeTimesheet(emp.id, period.id, 'FINAL_APPROVED');
     const v = await attachVersion(ts.id, emp.id);

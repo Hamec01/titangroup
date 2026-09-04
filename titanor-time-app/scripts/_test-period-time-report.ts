@@ -73,9 +73,9 @@ async function makeSite(tag: string, active = true) {
   return prisma.workSite.create({ data: { name: `T83A Site ${tag} ${randomUUID().slice(0, 4)}`, active } });
 }
 
-async function makeAssignment(employeeId: string, siteId: string, validFrom?: Date, validTo?: Date | null) {
+async function makeAssignment(employeeId: string, siteId: string, validFrom?: Date, validTo?: Date | null, isPrimary = true) {
   const admin = await ensureAdminUser();
-  return prisma.siteAssignment.create({ data: { employeeId, siteId, isPrimary: true, validFrom: validFrom ?? new Date('2000-01-01T00:00:00.000Z'), validTo: validTo ?? null, assignedByUserId: admin.id } });
+  return prisma.siteAssignment.create({ data: { employeeId, siteId, isPrimary, validFrom: validFrom ?? new Date('2000-01-01T00:00:00.000Z'), validTo: validTo ?? null, assignedByUserId: admin.id } });
 }
 
 // T8.3A's population is company-wide (no employeeId/siteId scope), unlike T8.1/T8.2 — a
@@ -84,8 +84,12 @@ async function makeAssignment(employeeId: string, siteId: string, validFrom?: Da
 // file that wants an assignment to overlap ITS OWN period (the common case) must go through this
 // wrapper, which scopes validity tightly to that period; only the deliberately-historical fixture
 // (case 14) still calls makeAssignment() directly with an explicit non-overlapping window.
-async function makeAssignmentInPeriod(employeeId: string, siteId: string, period: { startDate: Date; endDate: Date }) {
-  return makeAssignment(employeeId, siteId, period.startDate, period.endDate);
+//
+// Migration 100 (ex_site_assignment_one_primary_per_period) forbids two overlapping isPrimary rows
+// for one worker: a multi-site worker's SECOND concurrent assignment must pass isPrimary=false.
+// These report tests read segments, not primary-ness.
+async function makeAssignmentInPeriod(employeeId: string, siteId: string, period: { startDate: Date; endDate: Date }, isPrimary = true) {
+  return makeAssignment(employeeId, siteId, period.startDate, period.endDate, isPrimary);
 }
 
 async function makePeriod(startDate: Date, endDate: Date, status: 'OPEN' | 'LOCKED' | 'EXPORTED' = 'OPEN') {
@@ -349,7 +353,7 @@ async function main() {
     const site2 = await makeSite('Pop2');
     const empMultiSite = await makeEmployee('MultiSite');
     const asgA = await makeAssignmentInPeriod(empMultiSite.id, site.id, period);
-    const asgB = await makeAssignmentInPeriod(empMultiSite.id, site2.id, period);
+    const asgB = await makeAssignmentInPeriod(empMultiSite.id, site2.id, period, false); // 2nd concurrent site — non-primary
     await makeParticipant(period.id, empMultiSite.id, true);
     const tsMulti = await makeTimesheet(empMultiSite.id, period.id, 'FINAL_APPROVED');
     const vMulti = await attachVersion(tsMulti.id, empMultiSite.id);
@@ -681,7 +685,7 @@ async function main() {
 
     const empMulti = await makeEmployee('ReconMulti');
     const asgA = await makeAssignmentInPeriod(empMulti.id, siteA.id, period);
-    const asgB = await makeAssignmentInPeriod(empMulti.id, siteB.id, period);
+    const asgB = await makeAssignmentInPeriod(empMulti.id, siteB.id, period, false); // 2nd concurrent site — non-primary
     await makeParticipant(period.id, empMulti.id, true);
     const tsMulti = await makeTimesheet(empMulti.id, period.id, 'FINAL_APPROVED');
     const vMulti = await attachVersion(tsMulti.id, empMulti.id);

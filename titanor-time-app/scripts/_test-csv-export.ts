@@ -83,9 +83,12 @@ async function makeSite(tag: string, overrides: { name?: string } = {}) {
   return prisma.workSite.create({ data: { name: overrides.name ?? `T84B Site ${tag} ${randomUUID().slice(0, 4)}` } });
 }
 
-async function makeAssignment(employeeId: string, siteId: string, validFrom: Date, validTo: Date | null) {
+// Migration 100 (ex_site_assignment_one_primary_per_period) forbids two overlapping isPrimary rows
+// for one worker. This export test reads segments, not primary-ness, so a worker on two sites at
+// once gets ONE primary and the concurrent second is non-primary.
+async function makeAssignment(employeeId: string, siteId: string, validFrom: Date, validTo: Date | null, isPrimary = true) {
   const admin = await ensureAdminUser();
-  return prisma.siteAssignment.create({ data: { employeeId, siteId, isPrimary: true, validFrom, validTo, assignedByUserId: admin.id } });
+  return prisma.siteAssignment.create({ data: { employeeId, siteId, isPrimary, validFrom, validTo, assignedByUserId: admin.id } });
 }
 
 async function makePeriod(startDate: Date, endDate: Date, status: 'OPEN' | 'LOCKED' | 'EXPORTED' = 'OPEN') {
@@ -425,9 +428,10 @@ async function main() {
       { startAt: new Date(dateA2.getTime() + 12 * 3600000), endAt: new Date(dateA2.getTime() + 12.5 * 3600000), paid: true }
     ]);
 
-    // empB — assigned+worked at both siteX and siteY same day (multi-site bucket split)
+    // empB — assigned+worked at both siteX and siteY same day (multi-site bucket split).
+    // siteX assignment (from makeFinalApprovedWorker) is the primary; the concurrent siteY one is not.
     const empB = await makeFinalApprovedWorker('B', siteX.id, period);
-    await makeAssignment(empB.employee.id, siteY.id, period.startDate, period.endDate);
+    await makeAssignment(empB.employee.id, siteY.id, period.startDate, period.endDate, false);
     await addVersionSegment(empB.version, empB.employee.id, siteX.id, empB.assignment.id, dateB, new Date(dateB.getTime() + 6 * 3600000), new Date(dateB.getTime() + 10 * 3600000));
     const empBSiteYAssignment = await prisma.siteAssignment.findFirstOrThrow({ where: { employeeId: empB.employee.id, siteId: siteY.id } });
     await addVersionSegment(empB.version, empB.employee.id, siteY.id, empBSiteYAssignment.id, dateB, new Date(dateB.getTime() + 11 * 3600000), new Date(dateB.getTime() + 15 * 3600000), [
