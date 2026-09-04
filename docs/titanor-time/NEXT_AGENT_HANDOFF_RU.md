@@ -1,5 +1,32 @@
 # Titanor Time — handoff для следующего агента
 
+> ## ⚠️ ОБНОВЛЕНИЕ 2026-09-04 — читать первым
+>
+> Текст ниже написан на 2026-08-31 и **устарел** (schema 98, образ `e9e7c62`). Актуальное:
+>
+> - **Prod image:** `titanor-time-app:d7f-d216482` · контейнер `titanor-time-prod-app` · порт 3199 · healthy.
+>   **Scheduler:** `titanor-time-app:r14-release-1416503` (не трогать). **Schema:** `current`, **100/100**.
+> - **Ветка** `feature/titanor-time-foundation`, HEAD см. `git log`. `origin` совпадает.
+> - **R15-D7 «Единый жизненный цикл назначений» A→F — ВЕСЬ LIVE НА PROD 2026-09-03.**
+>   Миграции: A 98→99 (`add_assignment_lifecycle`), D2 99→100 (`add_primary_period_exclusion`, GiST
+>   EXCLUDE `ex_site_assignment_one_primary_per_period`). B/C/E/F — без миграции. Отчёты
+>   `R15_D7_DEPLOY_{A..F}_REPORT_RU.md`. **Технический owner sign-off по A→F получен.**
+> - **Rollback текущего образа:** `bash ops/titanor-time/r15-d7/deploy-f-rollback.sh` → контейнер
+>   `titanor-time-prod-app-pre-d216482` (образ `d7e-5cce319`), только откат образа, **схему не откатывать**.
+> - **Полный R15 owner sign-off НЕ получен.** 5 открытых P1 (`fixroad.md`): F01 (fixture-fix — сделано
+>   2026-09-04), F02 device acceptance (владелец), F03 attendance exceptions (разбор
+>   `R15_ATTENDANCE_EXCEPTIONS_REVIEW_RU.md`), F04 failed backup публичного сайта (root-оператор),
+>   F05 документы.
+> - **Заморожено:** любая docker-очистка (owner: «Очистку Docker пока не выполнять»), удаление старых
+>   данных/backup/rollback-контейнеров. Новые деструктивные/деплой-действия — только с отдельного
+>   разрешения владельца.
+> - **Читать по порядку:** `R15_OBSERVATION_RU.md` → `fixroad.md` → `IMPLEMENTATION_STATUS.md` →
+>   `project_titanor_time_d7_lifecycle` (память).
+> - **Правило Caddy** (инцидент 2026-08-31): только `caddy validate`/`adapt`, никогда
+>   `caddy stop/start/run` / bare `reload` на этом хосте.
+
+---
+
 - **Дата фиксации:** 2026-08-31 (обновлено: R14 production cutover PASS)
 - **Ветка:** `feature/titanor-time-foundation`
 - **Главные документы:** `PRODUCTION_RELEASE_TZ_FINAL_RU.md`, `PRODUCTION_RELEASE_ROADMAP_RU.md`, `IMPLEMENTATION_STATUS.md`

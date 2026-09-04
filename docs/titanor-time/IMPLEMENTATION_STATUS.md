@@ -1,5 +1,30 @@
 # Titanor Time — Implementation Status
 
+**`[2026-09-04]` R15 наблюдение — фактическое состояние production.**
+- **Prod image:** `titanor-time-app:d7f-d216482` (revision `d216482`), контейнер `titanor-time-prod-app`
+  порт 3199, healthy, restart 0. **Scheduler:** `titanor-time-app:r14-release-1416503` (не трогается).
+  **Schema:** `current`, **100/100** migrations, 0 failed.
+- **R15-D7 «Единый жизненный цикл назначений» — A→F ВЕСЬ LIVE НА PRODUCTION 2026-09-03.**
+  A (`d7a-37dddb1`, миграция 98→99) · D1/D2 (`d7d3-5690632`, миграция 99→100, GiST EXCLUDE
+  `ex_site_assignment_one_primary_per_period` + `fix-double-primary.sql`) · B + восстановление пароля
+  (`d7b-recovery-80d5c9c`) · C (`d7c-ad780f8`) · E (`d7e-5cce319`) · F (`d7f-d216482`). Отчёты
+  `R15_D7_DEPLOY_{A..F}_REPORT_RU.md`. Технический owner sign-off по A→F получен 2026-09-03.
+- **D3** («часы по заказчику») закрыт Deploy F как `/admin/reports/customer`. **D4** закрыт полностью
+  (деплой 1/2 `worker-change-bee072d` + деплой 2/2 = Deploy B/C/E + D5). Site-first разрез по
+  заказчикам — потенциальная отдельная задача `R15-F1`, только после запроса заказчика.
+- **Rollback текущего prod-образа:** `bash ops/titanor-time/r15-d7/deploy-f-rollback.sh` → контейнер
+  `titanor-time-prod-app-pre-d216482` (образ `d7e-5cce319`), только откат образа, схему не откатывать.
+- **Полный R15 owner sign-off НЕ получен.** Открыто 5 P1 (`fixroad.md`): F01 fixture-fix + зелёный
+  release-run *(сделано 2026-09-04)* · F02 device acceptance *(владелец)* · F03 attendance exceptions
+  *(разбор `R15_ATTENDANCE_EXCEPTIONS_REVIEW_RU.md`, действия за администратором)* · F04 failed backup
+  публичного сайта *(root)* · F05 документы *(этот пункт + `R15_OBSERVATION_RU.md`)*.
+- **Заморожено до sign-off:** docker cleanup (owner: «Очистку Docker пока не выполнять»); build cache
+  ~71 GB; цепочка `*-pre-*` rollback-контейнеров; удаление старых данных — отдельной задачей.
+- **Тесты на срез:** `npm test` 82/82 (18 unit + 59 db + 5 scheduler), typecheck/lint/`next build`
+  clean, `npm audit` (оба app) 0/0, полный browser manifest зелёный после F01-фикса.
+
+---
+
 **`[2026-08-31]` Customer report — прямой выбор работников — DEPLOYED + PASS.**
 Коммит `e9e7c62`, отчёт `CUSTOMER_REPORT_DIRECT_WORKER_DEPLOY_RU.md`.
 - Добавлен режим «По работникам»: сотрудник доступен без объекта; сменивший объект показывает все

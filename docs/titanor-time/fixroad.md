@@ -7,6 +7,17 @@
 - **Схема:** `current`, 100/100 migrations, failed migrations 0.
 - **Метод:** последние отчёты Deploy A→F считаются финальным фактом. Старые документы использованы только для поиска забытых обещаний и противоречий. Production проверялся только read-only; тесты выполнялись на disposable PostgreSQL/контейнерах.
 
+## Ход выполнения (2026-09-04)
+
+| gate | статус | детали |
+|---|---|---|
+| **F01** | ✅ **закрыт** | 3 фикстуры исправлены (`_test-csv-export`, `_test-period-time-report`, `_test-report-rounding-consistency` — 2-е одновременное назначение работника → `isPrimary=false`; constraint не отключён, `23P01` не маскируется). `run-worker-dossier-qa.sh` → mode `100755`. Полный disposable-прогон на `d7f-d216482` — см. §F01-результат ниже. Production не менялся. |
+| **F02** | ⏳ владелец | device acceptance на реальных iPhone/Android — выполняет владелец. |
+| **F03** | ✅ **разбор готов** | `R15_ATTENDANCE_EXCEPTIONS_REVIEW_RU.md` — полный разбор 23 открытых записей (read-only). Закрытие записей в панели + назначение SLA — за администратором. Рекомендация: галочка «часто нет GPS» на Meyer Turku Shipyard (решение бизнеса). |
+| **F04** | ⏳ root-оператор | `titanorgroup-backup.service` failed; journal/скрипт/артефакты только root. **Публичный сайт работает** (`titanorgroup-web-1` healthy, `https://titanorgroup.fi/en` → 200). Нужен root для чтения journal и ручного прогона. Titanor Time backup + GPS archive НЕ затронуты. |
+| **F05** | ✅ **закрыт** | обновлены `R15_OBSERVATION_RU.md`, `IMPLEMENTATION_STATUS.md`, `R14_CUTOVER_REPORT_RU.md`, `NEXT_AGENT_HANDOFF_RU.md`; терминология D3/D4 зафиксирована; changelog `/guide` дополнен. Остаётся: backup/restore + production runbooks (мелкое обновление образа/rollback). |
+| **F06–F11 (P2)** | принято как residual risk | зафиксированы в `R15_OBSERVATION_RU.md` §«Финальный аудит». F06 → потенциальная `R15-F1` по запросу заказчика. F07 (`capturedOffline`), F08 (deploy-скрипт-тест), F09 (алертинг), F10 (guard-роуты), F11 (список исключённых функций) — до финала либо явно принять. |
+
 ## 1. Вердикт специалиста
 
 **P0-дефектов, требующих немедленно откатывать production, не найдено.** Приложение отвечает,

@@ -1,5 +1,20 @@
 # Titanor Time — Backup / Restore runbook (R01)
 
+> **Обновление 2026-09-04.** Production backup — **работает и автоматизирован**. Таймеры
+> `titanor-time-backup@production.timer` + `titanor-time-gps-archive@production.timer` enabled+active
+> (env в `/etc/titanor-time/`, root:root 0600). Автопрогоны идут ежедневно, on-box + off-box
+> `SHA256SUMS` OK. Текущий prod-образ в манифестах бэкапа — `titanor-time-app:d7f-d216482`, схема
+> **100/100**. Deploy-интеграция (§7): `pre-deploy` / `pre-migration` бэкапы делаются перед каждым
+> web-swap; последний — `production-20260903T175352Z-pre-deploy` (Deploy F, restore-test 13/13).
+> **`@pilot` таймеры отключены.** Параметры для production-прогона:
+> `TT_ENV=production TT_DB_CONTAINER=titanor-time-prod-db TT_DB_USER=titanor_time_prod TT_DB_NAME=titanor_time`
+> `TT_UPLOADS_DIR=/home/deploy/app-data/titanor-time-prod/uploads TT_APP_CONTAINER=titanor-time-prod-app`
+> `TT_BACKUP_ROOT=/home/deploy/backups/titanor-time-production`
+> `TT_MIRROR_ROOT=/mnt/250gb/titanor-time-foundation/backups/production`.
+> ⚠️ **Не путать** с `titanorgroup-backup.service` (backup ПУБЛИЧНОГО САЙТА, отдельный root-скрипт
+> `/usr/local/sbin/backup-titanorgroup.sh`) — он в состоянии failed с ~2026-09-01, это НЕ Titanor
+> Time и требует root-оператора (`fixroad.md` F04).
+
 - **Основание:** roadmap R01, TZ §10.
 - **Дата:** 2026-08-29. Первый проверенный backup + restore-test.
 - **Скрипты:** `ops/titanor-time/backup-titanor-time.sh`, `ops/titanor-time/restore-test-titanor-time.sh`.
