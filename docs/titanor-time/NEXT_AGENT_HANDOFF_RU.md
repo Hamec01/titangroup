@@ -7,21 +7,21 @@
 > - **Prod image:** `titanor-time-app:d7f-d216482` · контейнер `titanor-time-prod-app` · порт 3199 · healthy.
 >   **Scheduler:** `titanor-time-app:r14-release-1416503` (не трогать). **Schema:** `current`, **100/100**.
 > - **Ветка** `feature/titanor-time-foundation`, HEAD см. `git log`. `origin` совпадает.
-> - **R15-D7 «Единый жизненный цикл назначений» A→F — образы физически развёрнуты на prod
->   2 – 3 сентября** (каждый swap отдельно разрешён владельцем).
+> - **R15-D7 «Единый жизненный цикл назначений» A→F — образы развёрнуты на prod 2 – 3 сентября**
+>   (каждый swap отдельно разрешён владельцем).
 >   Миграции: A 98→99 (`add_assignment_lifecycle`), D2 99→100 (`add_primary_period_exclusion`, GiST
 >   EXCLUDE `ex_site_assignment_one_primary_per_period`). B/C/E/F — без миграции. Отчёты
->   `R15_D7_DEPLOY_{A..F}_REPORT_RU.md`. 2026-09-03 — только **технический** sign-off по коду/деплоям.
-> - **⚠️ Указание владельца 2026-09-04:** Deploy F и запись «Что нового» в `/guide` (`c76d439`, в
->   работающем образе её НЕТ) **НЕ считать production-live** до отдельного отчёта
->   `R15_D7_DEPLOY_F_PROD_REPORT_RU.md` + ревью владельца. **Production без явного разрешения не
->   менять; тестовых данных на prod не создавать.**
+>   `R15_D7_DEPLOY_{A..F}_REPORT_RU.md`, production-отчёт `R15_D7_DEPLOY_F_PROD_REPORT_RU.md`.
+> - **Deploy F — технически live (владелец подтвердил 2026-09-04).** Запись «Что нового» в `/guide`
+>   (`c76d439`) **и** правка F03 (переключатель «часто нет GPS» в пояснительном режиме) — в
+>   работающем образе `d7f-d216482` их НЕТ, поедут следующим web-only swap (только по отдельному
+>   разрешению). **Production без явного разрешения не менять; тестовых данных на prod не создавать.**
 > - **Rollback текущего образа:** `bash ops/titanor-time/r15-d7/deploy-f-rollback.sh` → контейнер
 >   `titanor-time-prod-app-pre-d216482` (образ `d7e-5cce319`), только откат образа, **схему не откатывать**.
-> - **Полный R15 owner sign-off НЕ получен.** 5 открытых P1 (`fixroad.md`): F01 (fixture-fix — сделано
->   2026-09-04), F02 device acceptance (владелец), F03 attendance exceptions (разбор
->   `R15_ATTENDANCE_EXCEPTIONS_REVIEW_RU.md`), F04 failed backup публичного сайта (root-оператор),
->   F05 документы.
+> - **Полный R15 owner sign-off НЕ получен.** Открыто (`fixroad.md`): F01 ✅ · F05 ✅ · **F02**
+>   реальный Android (владелец) · **F03** процесс разбора attendance exceptions начальником
+>   (`R15_ATTENDANCE_EXCEPTIONS_REVIEW_RU.md`; #1000 Andrei → DISMISS «Тест») · **F04** failed backup
+>   публичного сайта — только read-only root-диагностика по `R15_F04_PUBLIC_SITE_BACKUP_RUNBOOK_RU.md`.
 > - **Заморожено:** любая docker-очистка (owner: «Очистку Docker пока не выполнять»), удаление старых
 >   данных/backup/rollback-контейнеров. Новые деструктивные/деплой-действия — только с отдельного
 >   разрешения владельца.
