@@ -117,12 +117,17 @@ unit **18/18**, scheduler **5/5**, typecheck / lint / `next build` clean.
 ## 6. Открытые пункты — до того, как Deploy F можно считать production-live
 
 1. **Ревью этого отчёта владельцем** + отдельный sign-off (указание 2026-09-04).
-2. **Запись «Что нового» `/guide` (`c76d439`) — не на prod.** Появится при следующем деплое
-   приложения; до тех пор не считать её live.
-3. **F02 (fixroad) — реальная device acceptance** на iPhone/Safari и Android/Chrome — за владельцем.
+2. **Не на prod (появится при СЛЕДУЮЩЕМ деплое приложения, до тех пор не считать live):**
+   - запись «Что нового» `/guide` (`c76d439`);
+   - **F03 — переключатель «часто нет GPS» переведён в пояснительный режим** (`2fa0d5d`,
+     `R15_MEYER_GPS_FLAG_RU.md` / `R15_MEYER_GPS_AUTOACCEPT_PLAN_RU.md`), disposable-протестирован
+     на `d7f-4f085fe` (db 64/64, unit 18/18, browser 8/8, `next build` clean). Без миграции.
+   Следующий деплой = web-only swap `d7f-d216482` → `d7f-<HEAD-sha>`, тот же паттерн, без миграции.
+3. **F02 (fixroad) — минимальная ручная device acceptance на реальном Android** — за владельцем
+   (browser-эмуляция Codex уже PASS). Тестовых часов на prod не создавать.
 4. **F04 (fixroad) — failed `titanorgroup-backup.service`** (публичный сайт, не Titanor Time) —
-   нужен root-оператор. Titanor Time backup + GPS archive работают.
-5. **11 открытых `GPS_NOT_VERIFIED` по Meyer Turku Shipyard** — администратор принимает разом по
+   root-оператор по `R15_F04_PUBLIC_SITE_BACKUP_RUNBOOK_RU.md`. Titanor Time backup + GPS archive работают.
+5. **Открытые `GPS_NOT_VERIFIED` по Meyer Turku Shipyard** — администратор принимает разом по
    фильтру объекта (`R15_ATTENDANCE_EXCEPTIONS_REVIEW_RU.md`). Отдельно подготовлена (НЕ применена)
    галочка «часто нет GPS» для Meyer — `R15_MEYER_GPS_FLAG_RU.md`.
 6. **Полный R15 owner sign-off** — не только технический D7 A→F (см. чек-лист `fixroad.md` §5).
