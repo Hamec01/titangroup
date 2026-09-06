@@ -1,0 +1,15 @@
+[Unit]
+Description=Titanor Group public-site backup
+Wants=docker.service
+After=docker.service network-online.target mnt-250gb.mount
+RequiresMountsFor=/mnt/250gb
+
+[Service]
+Type=oneshot
+TimeoutStartSec=10min
+User=deploy
+Group=deploy
+SupplementaryGroups=docker
+UMask=0077
+Environment=PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+ExecStart=/usr/local/sbin/backup-titanorgroup.sh
