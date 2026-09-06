@@ -443,6 +443,7 @@ model User {
   adminNotificationDismissals    AdminNotificationDismissal[]
   workerNotificationDismissals   WorkerNotificationDismissal[]
   assignmentTransitions          AssignmentTransition[]        @relation("AssignmentTransitionActor")
+  createdReportFiles             ReportFile[]                  @relation("ReportFileCreatedBy")
 }
 
 model Role {
@@ -1133,6 +1134,7 @@ model PayrollPeriod {
   attendanceExceptions AttendanceException[]
   exportBatches        ExportBatch[]
   workerNotifications  WorkerNotification[]
+  reportFiles          ReportFile[]
 
   @@unique([submissionScheduleId, startDate, endDate])
   @@index([status, startDate, endDate])
@@ -2131,24 +2133,30 @@ model ExportItem {
   @@index([timesheetVersionId, employeeId])
 }
 
-// Saved admin report documents. Unlike payroll ExportBatch (which is deliberately append-only),
-// these are user-facing PDF/CSV report files and may be removed from the report history by an admin.
-// The period/user ids are validated by the application service so this additive model does not alter
-// the existing immutable payroll export contract.
+// Saved admin working-report documents. Unlike payroll ExportBatch (which is deliberately
+// append-only), these are user-facing PDF/CSV report files and may be removed from the report
+// history by an admin. Referential integrity + value invariants are enforced by the FK/CHECK
+// constraints added in 20260906210000_harden_report_files (raw SQL, like every CK-* in this
+// schema); the application service (lib/report-files.ts) validates before write and records
+// REPORT_FILE_CREATED / REPORT_FILE_DELETED audit events. This additive model does not touch the
+// immutable payroll export contract.
 model ReportFile {
-  id              String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  periodId        String?  @db.Uuid
-  reportType      String   @db.VarChar(32)
-  format          String   @db.VarChar(8)
-  fileName        String   @db.VarChar(255)
-  mimeType        String   @db.VarChar(80)
-  fileHash        String   @db.VarChar(64)
+  id              String         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  periodId        String?        @db.Uuid
+  reportType      String         @db.VarChar(32)
+  format          String         @db.VarChar(8)
+  fileName        String         @db.VarChar(255)
+  mimeType        String         @db.VarChar(80)
+  fileHash        String         @db.VarChar(64)
   fileSizeBytes   Int
   rowCount        Int?
   content         Bytes
-  createdByUserId String   @db.Uuid
-  createdAt       DateTime @default(now()) @db.Timestamptz(6)
+  createdByUserId String         @db.Uuid
+  createdAt       DateTime       @default(now()) @db.Timestamptz(6)
+  period          PayrollPeriod? @relation(fields: [periodId], references: [id], onDelete: SetNull, onUpdate: Cascade)
+  createdByUser   User           @relation("ReportFileCreatedBy", fields: [createdByUserId], references: [id], onDelete: Restrict, onUpdate: Cascade)
 
   @@index([periodId, createdAt(sort: Desc), id(sort: Desc)])
   @@index([createdAt(sort: Desc), id(sort: Desc)])
+  @@index([createdByUserId])
 }

@@ -5150,3 +5150,26 @@ a.ov-summary-card:focus-visible {
   .admin-modern-sidebar { position: fixed; inset: 0 auto 0 0; transform: translateX(-105%); transition: transform 180ms ease; box-shadow: 18px 0 40px rgba(20, 46, 72, 0.18); }
   .admin-modern-sidebar.is-open { transform: translateX(0); }.admin-sidebar-backdrop { display: block; position: fixed; inset: 0; border: 0; background: rgba(13, 30, 47, 0.32); z-index: 40; }.admin-sidebar-close { display: block; position: absolute; top: 19px; right: 15px; padding: 5px 9px; font-size: 1.5rem; }.admin-modern-shell { display: block; }.admin-modern-header { padding: 11px 16px; }.admin-menu-button { display: inline-block; }.admin-modern-context { display: none; }.admin-modern-header-content { gap: 8px; }.admin-modern-header .admin-brand { display: inline; margin-right: auto; font-size: 0.9rem; }.admin-modern-header .admin-identity, .admin-modern-header .admin-guide-link, .admin-modern-header .admin-design-toggle span:last-child { display: none; }.admin-modern-header .admin-header-actions { gap: 7px; }.admin-modern-content { padding: 24px 14px 42px; }.report-center-header { align-items: flex-start; flex-direction: column; gap: 16px; }.report-header-actions { justify-content: flex-start; }.report-filter-field { min-width: min(100%, 240px); }.report-period-strip { align-items: flex-start; flex-direction: column; }.report-file-row { align-items: flex-start; flex-direction: column; }.report-file-actions { width: 100%; }.report-file-actions a, .report-file-actions button { flex: 1; text-align: center; } }
 @media (max-width: 480px) { .report-kpi-grid { grid-template-columns: 1fr 1fr; gap: 8px; }.report-kpi { min-height: 96px; padding: 13px; }.report-kpi-value { font-size: 1.35rem; }.report-panel { padding: 15px; }.report-button { flex: 1; justify-content: center; }.report-header-actions { width: 100%; } }
+
+/* Report redesign — production-readiness pass (URL-driven tabs, real pagination, working-report
+   notice, honest inline errors), plus the modern shell active-item highlight. */
+.report-working-notice { margin: 16px 0 18px; padding: 13px 16px; border: 1px solid #e6d8b8; border-radius: 12px; background: #fffaf0; color: #705a29; }
+.report-working-notice p { margin: 0; font-size: 0.78rem; line-height: 1.5; }
+.report-working-notice p + p { margin-top: 7px; }
+.report-working-notice-official a { color: #0e77c4; font-weight: 750; }
+.report-picker-form { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+.report-picker-form select { min-width: min(100%, 320px); min-height: 42px; padding: 0 11px; border: 1px solid #dbe5ee; border-radius: 8px; background: #f9fbfd; color: #22374d; font-size: 0.82rem; }
+.report-picker-form select:focus-visible { border-color: #4aa9e9; outline: 3px solid rgba(74, 169, 233, 0.15); }
+.report-pagination { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px; margin-top: 14px; padding-top: 12px; border-top: 1px solid #edf1f5; }
+.report-pagination-info { color: #6c8195; font-size: 0.74rem; }
+.report-pagination-controls { display: flex; gap: 8px; }
+.report-pagination-controls a { min-height: 38px; display: inline-flex; align-items: center; padding: 0 12px; border: 1px solid #d8e4ef; border-radius: 8px; color: #33516d; font-size: 0.76rem; font-weight: 700; text-decoration: none; }
+.report-pagination-controls a:hover, .report-pagination-controls a:focus-visible { border-color: #75bcec; color: #087bcf; outline: none; }
+.report-pagination-disabled { min-height: 38px; display: inline-flex; align-items: center; padding: 0 12px; border: 1px solid #eceff3; border-radius: 8px; color: #b6c1cd; font-size: 0.76rem; }
+.report-fine-print { margin: 12px 0 0; color: #90a0b0; font-size: 0.7rem; line-height: 1.45; }
+.report-inline-retry { margin-left: 6px; padding: 3px 8px; border: 1px solid #e0b9bd; border-radius: 6px; background: #fff; color: #a14955; font-size: 0.72rem; cursor: pointer; }
+.report-inline-retry:hover:not(:disabled) { background: #fff0f1; }
+.report-file-delete { display: inline-flex; flex-direction: column; align-items: flex-end; gap: 4px; }
+.report-file-delete .report-alert { margin: 0; padding: 6px 8px; font-size: 0.7rem; }
+.admin-modern-sub-links a.is-current { color: #087bcf; background: #eaf6ff; font-weight: 750; }
+.admin-modern-today.is-current { box-shadow: inset 0 0 0 1px #b7def7; }

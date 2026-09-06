@@ -23,8 +23,11 @@ function formatDate(date: Date): string {
 export type SiteTimeReportScope = { kind: 'unrestricted' } | { kind: 'foreman'; foremanUserId: string; today: Date };
 
 export interface SiteTimeReportPagination {
-  page: number;
-  pageSize: number;
+  page?: number;
+  pageSize?: number;
+  // `all === true` returns every worker row in the same REPEATABLE READ transaction that computes
+  // the summary — the working-report export path (docs §3.5-§3.7). Unchanged for the UI / API.
+  all?: boolean;
 }
 
 export interface SiteTimeReportSite {
@@ -212,8 +215,12 @@ function buildDays(segments: RawSegment[], grossThresholdMinutes: number): { day
 }
 
 export async function getSiteTimeReport(siteId: string, periodId: string, pagination: SiteTimeReportPagination, scope: SiteTimeReportScope): Promise<SiteTimeReportOutcome> {
-  const page = Number.isInteger(pagination.page) && pagination.page > 0 ? pagination.page : 1;
-  const pageSize = Number.isInteger(pagination.pageSize) && pagination.pageSize > 0 && pagination.pageSize <= MAX_PAGE_SIZE ? pagination.pageSize : DEFAULT_PAGE_SIZE;
+  const returnAll = pagination.all === true;
+  const page = typeof pagination.page === 'number' && Number.isInteger(pagination.page) && pagination.page > 0 ? pagination.page : 1;
+  const pageSize =
+    typeof pagination.pageSize === 'number' && Number.isInteger(pagination.pageSize) && pagination.pageSize > 0 && pagination.pageSize <= MAX_PAGE_SIZE
+      ? pagination.pageSize
+      : DEFAULT_PAGE_SIZE;
 
   return prisma.$transaction(async (tx) => {
     const asOf = new Date();
@@ -429,8 +436,10 @@ export async function getSiteTimeReport(siteId: string, periodId: string, pagina
     };
 
     const totalItems = items.length;
-    const totalPages = Math.ceil(totalItems / pageSize);
-    const pageItems = items.slice((page - 1) * pageSize, (page - 1) * pageSize + pageSize);
+    const effectivePageSize = returnAll ? Math.max(1, totalItems) : pageSize;
+    const effectivePage = returnAll ? 1 : page;
+    const totalPages = returnAll ? 1 : Math.ceil(totalItems / pageSize);
+    const pageItems = returnAll ? items : items.slice((page - 1) * pageSize, (page - 1) * pageSize + pageSize);
 
     return {
       code: 'OK' as const,
@@ -440,8 +449,8 @@ export async function getSiteTimeReport(siteId: string, periodId: string, pagina
         period: { id: period.id, startDate: formatDate(period.startDate), endDate: formatDate(period.endDate), status: period.status },
         summary,
         items: pageItems,
-        page,
-        pageSize,
+        page: effectivePage,
+        pageSize: effectivePageSize,
         totalItems,
         totalPages
       }

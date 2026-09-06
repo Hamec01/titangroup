@@ -1,30 +1,57 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { useRouter } from 'next/navigation';
+import { ADMIN_DESIGN_COOKIE, type AdminDesignMode } from '@/lib/admin-design';
+import { useAppLocale } from '@/components/i18n/AppLocaleProvider';
 
-export type AdminDesignMode = 'modern' | 'classic';
+const LS_KEY = 'titanor-admin-design';
+const ONE_YEAR = 60 * 60 * 24 * 365;
 
-const STORAGE_KEY = 'titanor-admin-design';
+function writeMirror(mode: AdminDesignMode) {
+  try {
+    window.localStorage.setItem(LS_KEY, mode);
+  } catch {
+    // Storage disabled / full — the cookie already carries the choice, nothing breaks (§4.6).
+  }
+}
 
-export function AdminDesignToggle() {
-  const [mode, setMode] = useState<AdminDesignMode>('modern');
+// docs/titanor-time/REPORT_REDESIGN_PRODUCTION_READINESS_RU.md §4. Server renders the shell from
+// the cookie; this button flips the cookie, mirrors to localStorage (guarded), and asks the
+// router to re-render — so the switch is server-rendered too, with no flash.
+export function AdminDesignToggle({ mode: serverMode }: { mode: AdminDesignMode }) {
+  const router = useRouter();
+  const ru = useAppLocale() === 'RU';
+  const [mode, setMode] = useState<AdminDesignMode>(serverMode);
 
   useEffect(() => {
-    const saved = window.localStorage.getItem(STORAGE_KEY);
-    if (saved === 'classic' || saved === 'modern') setMode(saved);
-  }, []);
+    setMode(serverMode);
+    // Reconcile a stale / corrupted mirror against the authoritative cookie.
+    try {
+      const stored = window.localStorage.getItem(LS_KEY);
+      if (stored !== 'modern' && stored !== 'classic') {
+        window.localStorage.removeItem(LS_KEY);
+      }
+      if (stored !== serverMode) writeMirror(serverMode);
+    } catch {
+      /* ignore */
+    }
+  }, [serverMode]);
 
   function toggle() {
     const next: AdminDesignMode = mode === 'modern' ? 'classic' : 'modern';
     setMode(next);
-    window.localStorage.setItem(STORAGE_KEY, next);
-    window.dispatchEvent(new CustomEvent('titanor-admin-design', { detail: next }));
+    document.cookie = `${ADMIN_DESIGN_COOKIE}=${next}; path=/; max-age=${ONE_YEAR}; samesite=lax`;
+    writeMirror(next);
+    router.refresh();
   }
 
+  const label = mode === 'modern' ? (ru ? 'Старый вид' : 'Classic view') : ru ? 'Новый вид' : 'New view';
+
   return (
-    <button type="button" className="admin-design-toggle" onClick={toggle} aria-label="Switch admin design">
-      <span aria-hidden="true">{mode === 'modern' ? '◐' : '◑'}</span>
-      <span>{mode === 'modern' ? 'Старый вид' : 'Новый вид'}</span>
+    <button type="button" className="admin-design-toggle" onClick={toggle} aria-label={label} title={label}>
+      <span aria-hidden="true">{mode === 'modern' ? '◧' : '◨'}</span>
+      <span>{label}</span>
     </button>
   );
 }

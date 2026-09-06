@@ -142,9 +142,20 @@ interface SiteAccumulator {
   segmentCount: number;
 }
 
-export async function getPeriodTimeReport(periodId: string, pagination: { page: number; pageSize: number }): Promise<PeriodTimeReportOutcome> {
-  const page = Number.isInteger(pagination.page) && pagination.page > 0 ? pagination.page : 1;
-  const pageSize = Number.isInteger(pagination.pageSize) && pagination.pageSize > 0 && pagination.pageSize <= MAX_PAGE_SIZE ? pagination.pageSize : DEFAULT_PAGE_SIZE;
+// `pagination.all === true` returns every site row in the same RepeatableRead transaction that
+// computes the summary — the working-report PDF/CSV export path (docs §3.5-§3.7) needs the full,
+// internally consistent detail set, never a re-stitched sequence of HTTP pages. The paginated
+// `{ page, pageSize }` shape is unchanged for the UI and the existing period-report API.
+export async function getPeriodTimeReport(
+  periodId: string,
+  pagination: { page?: number; pageSize?: number; all?: boolean }
+): Promise<PeriodTimeReportOutcome> {
+  const returnAll = pagination.all === true;
+  const page = typeof pagination.page === 'number' && Number.isInteger(pagination.page) && pagination.page > 0 ? pagination.page : 1;
+  const pageSize =
+    typeof pagination.pageSize === 'number' && Number.isInteger(pagination.pageSize) && pagination.pageSize > 0 && pagination.pageSize <= MAX_PAGE_SIZE
+      ? pagination.pageSize
+      : DEFAULT_PAGE_SIZE;
 
   return prisma.$transaction(async (tx) => {
     const asOf = new Date();
@@ -418,12 +429,14 @@ export async function getPeriodTimeReport(periodId: string, pagination: { page: 
     };
 
     const totalItems = sites.length;
-    const totalPages = Math.ceil(totalItems / pageSize);
-    const pageSites = sites.slice((page - 1) * pageSize, (page - 1) * pageSize + pageSize);
+    const effectivePageSize = returnAll ? Math.max(1, totalItems) : pageSize;
+    const effectivePage = returnAll ? 1 : page;
+    const totalPages = returnAll ? 1 : Math.ceil(totalItems / pageSize);
+    const pageSites = returnAll ? sites : sites.slice((page - 1) * pageSize, (page - 1) * pageSize + pageSize);
 
     return {
       code: 'OK' as const,
-      report: { asOf: asOf.toISOString(), period: periodDto, summary, sites: pageSites, page, pageSize, totalItems, totalPages }
+      report: { asOf: asOf.toISOString(), period: periodDto, summary, sites: pageSites, page: effectivePage, pageSize: effectivePageSize, totalItems, totalPages }
     };
   }, REPORT_TX_OPTIONS);
 }
