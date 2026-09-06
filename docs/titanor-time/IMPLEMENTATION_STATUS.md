@@ -1,6 +1,18 @@
 # Titanor Time — Implementation Status
 
-**`[2026-09-04]` R15 наблюдение — фактическое состояние production.**
+**`[2026-09-06]` R15 — FINAL PASS / owner sign-off.**
+- Production `d7f-fd8494c` healthy, schema 100/100; Deploy A→F + F03 + `/guide` live.
+- **F02 PASS:** Android-эмуляция + реальная эксплуатация (10 установок, 7 работников,
+  21 Check In, 19 Check Out, 40 принятых sync-receipt, 0 device conflicts); владелец подтвердил
+  нормальную работу Android, iPhone был подтверждён ранее.
+- **F03 PASS:** техническая часть live; оставшаяся очередь исключений является штатной обязанностью
+  начальника. Meyer-флаг включается начальником при необходимости.
+- **F04 PASS:** public-site backup исправлен (`ops/site/backup-titanorgroup.sh` + systemd unit),
+  `titanorgroup-backup.service` SUCCESS; `auto-20260906T071132Z` on-box+off-box, SHA-256 и
+  restore-check (`/api/health`, `/en` → 200) прошли.
+- F01/F05 закрыты; F06–F11 приняты как документированный residual backlog. Полный R15 завершён.
+
+**`[2026-09-04]` R15 наблюдение — фактическое состояние production (исторический срез).**
 - **Prod image:** `titanor-time-app:d7f-fd8494c` (revision `fd8494c`), контейнер `titanor-time-prod-app`
   порт 3199, healthy, restart 0. **Scheduler:** `titanor-time-app:r14-release-1416503` (не трогается).
   **Schema:** `current`, **100/100** migrations, 0 failed.
@@ -15,19 +27,16 @@
   GPS» в пояснительном режиме, `2fa0d5d`+`e5b1a42`) + запись «Что нового» `/guide` (`c76d439`) —
   выполнено 2026-09-04 ~15:43 UTC, образ `d7f-fd8494c`, простой ≈ 2.8 c, релизный прогон
   19/0/2 skip + worker-dossier-qa 31/0 + restart-persistence 5/0+18/0 + db 64/0 + unit 18/0.
-  **Полный R15 owner sign-off всё ещё НЕ дан** — открыты F02 (реальный Android), F04 (backup
-  публичного сайта — владелец сам ведёт root-диагностику), процесс разбора остальных исключений
-  начальником. Production без явного разрешения не менять; тестовых данных на prod не создавать.
+  На этом срезе полный owner sign-off ещё не был дан; он получен 2026-09-06 (см. финальный блок выше).
+  Production без явного разрешения не менять; тестовых данных на prod не создавать.
 - **D3** («часы по заказчику») закрыт Deploy F как `/admin/reports/customer`. **D4** закрыт полностью
   (деплой 1/2 `worker-change-bee072d` + деплой 2/2 = Deploy B/C/E + D5). Site-first разрез по
   заказчикам — потенциальная отдельная задача `R15-F1`, только после запроса заказчика.
 - **Rollback текущего prod-образа:** `bash ops/titanor-time/r15-d7/deploy-f03-rollback.sh` → контейнер
   `titanor-time-prod-app-pre-fd8494c` (образ `d7f-d216482`), только откат образа, схему не откатывать.
-- **Полный R15 owner sign-off НЕ получен.** Открыто (`fixroad.md`): F01 ✅ · F03 код ✅ live (3 исключения
-  Andrei #1000 → `DISMISS «Тест»`, выполнено; Meyer-галочку владелец включит сам через UI) · F05 ✅
-  документы (этот пункт + `R15_OBSERVATION_RU.md`) · F02 device acceptance *(владелец)* · F04 failed
-  backup публичного сайта *(владелец сам ведёт root-диагностику)*.
-- **Заморожено до sign-off:** docker cleanup (owner: «Очистку Docker пока не выполнять»); build cache
+- **Полный R15 owner sign-off получен 2026-09-06.** F01–F05 закрыты; F03 operational ownership
+  передан начальнику; F06–F11 остаются в backlog без блокировки релиза.
+- **После sign-off:** docker cleanup разрешён только отдельным точным списком; build cache
   ~71 GB; цепочка `*-pre-*` rollback-контейнеров; удаление старых данных — отдельной задачей.
 - **Тесты на срез:** `npm test` 82/82 (18 unit + 59 db + 5 scheduler), typecheck/lint/`next build`
   clean, `npm audit` (оба app) 0/0, полный browser manifest зелёный после F01-фикса.

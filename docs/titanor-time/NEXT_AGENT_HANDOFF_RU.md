@@ -1,6 +1,6 @@
 # Titanor Time — handoff для следующего агента
 
-> ## ⚠️ ОБНОВЛЕНИЕ 2026-09-04 — читать первым
+> ## ✅ FINAL 2026-09-06 — читать первым
 >
 > Текст ниже написан на 2026-08-31 и **устарел** (schema 98, образ `e9e7c62`). Актуальное:
 >
@@ -21,13 +21,15 @@
 >   разрешения не менять; тестовых данных на prod не создавать.**
 > - **Rollback текущего образа:** `bash ops/titanor-time/r15-d7/deploy-f03-rollback.sh` → контейнер
 >   `titanor-time-prod-app-pre-fd8494c` (образ `d7f-d216482`), только откат образа, **схему не откатывать**.
-> - **Полный R15 owner sign-off НЕ получен.** Открыто (`fixroad.md`): F01 ✅ · F03 код ✅ (live) · F05 ✅
->   · **F02** реальный Android (владелец) · **F04** failed backup публичного сайта — владелец сам
->   выполняет read-only root-диагностику по `R15_F04_PUBLIC_SITE_BACKUP_RUNBOOK_RU.md` · процесс
->   разбора остальных attendance exceptions начальником продолжается.
-> - **Заморожено:** любая docker-очистка (owner: «Очистку Docker пока не выполнять»), удаление старых
->   данных/backup/rollback-контейнеров. Новые деструктивные/деплой-действия — только с отдельного
->   разрешения владельца.
+> - **R15 owner sign-off получен 2026-09-06 — PASS.** F02 закрыт реальной Android-эксплуатацией
+>   (10 установок / 7 работников / 21 Check In / 19 Check Out / 40 accepted sync / 0 conflicts) и
+>   подтверждением владельца. F04 восстановлен: public-site backup service SUCCESS,
+>   `auto-20260906T071132Z` on-box+off-box, SHA-256 + restore `/api/health` и `/en` → 200.
+>   Очередь attendance exceptions — штатная обязанность начальника; Meyer-флаг включается им при
+>   необходимости. F06–F11 — принятый residual backlog.
+> - **Cleanup после sign-off:** только по отдельному точному списку; не удалять production volumes,
+>   актуальные backups и ближайший rollback-контейнер. Новые destructive/deploy-действия — только
+>   с отдельного разрешения владельца.
 > - **Читать по порядку:** `R15_OBSERVATION_RU.md` → `fixroad.md` → `IMPLEMENTATION_STATUS.md` →
 >   `project_titanor_time_d7_lifecycle` (память).
 > - **Правило Caddy** (инцидент 2026-08-31): только `caddy validate`/`adapt`, никогда

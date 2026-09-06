@@ -1,5 +1,17 @@
 # R15 — наблюдение и закрытие релиза
 
+> ## ✅ FINAL — R15 PASS, owner sign-off 2026-09-06
+>
+> Владелец подтвердил завершение релиза. Production `d7f-fd8494c` healthy, schema 100/100.
+> F01–F05 закрыты. F02 принят по совокупности Android-эмуляции и фактической эксплуатации:
+> 10 Android-установок у 7 работников, 21 Check In, 19 Check Out, 40 принятых sync-receipt,
+> 0 device conflicts; владелец подтвердил, что работники используют Android без проблем.
+> F03 — дальнейший разбор рабочих исключений является ежедневной обязанностью начальника, а не
+> дефектом релиза. F04 восстановлен: `titanorgroup-backup.service` 2026-09-06 завершился SUCCESS,
+> backup `auto-20260906T071132Z` создан on-box+off-box, SHA-256 и restore-check (`/api/health`,
+> `/en` → 200) прошли. F06–F11 приняты как документированные residual risks/backlog.
+> Более ранние статусы «sign-off не дан» ниже сохраняются только как хронология наблюдения.
+
 - **Основание:** `PRODUCTION_RELEASE_ROADMAP_RU.md` R15.
 - **Cutover:** 2026-08-31 ~15:48 UTC (18:48 EEST) — `R14_CUTOVER_REPORT_RU.md`.
 - **72 ч истекли:** 2026-09-03 ~15:48 UTC. Идёт согласованный с владельцем период стабильности.
@@ -16,11 +28,8 @@
   - **3 исключения Andrei #1000 закрыты `DISMISS «Тест»`** (owner-authorized, выполнено; только эти
     3 записи затронуты — проверено). Meyer-галочку владелец включит сам через UI.
   - Production без явного разрешения владельца не менять; тестовых данных на prod не создавать.
-- **Полный R15 owner sign-off ещё НЕ получен** (владелец, 2026-09-04) — открыто: **F02** реальная
-  device-приёмка на Android, **F04** восстановление backup публичного сайта (владелец сам ведёт
-  read-only root-диагностику), **процесс разбора остальных открытых исключений начальником**
-  (ответственный + SLA). Ранее (2026-09-03) владелец дал только **технический** sign-off по
-  коду/деплоям D7 A→F — это не закрытие релиза. См. `fixroad.md`.
+- **Полный R15 owner sign-off получен 2026-09-06.** F02 и F04 закрыты; очередь рабочих исключений
+  передана начальнику как штатный ежедневный процесс. См. финальный блок выше и `fixroad.md`.
 
 ---
 
@@ -32,17 +41,17 @@
 | первые реальные role flows | ✅ owner smoke на cutover |
 | не смешивать release incidents с feature requests | — (после R14 были отдельные UI-деплои: `customer-scope-c6f9cb4`, `customer-worker-scope-e9e7c62` — не инциденты) |
 
-## Фаза 2 — первые 24 часа (почти закрыта, 2 пункта открыты)
+## Фаза 2 — первые 24 часа ✅
 
 | пункт | статус |
 |---|---|
-| clock / GPS / offline sync / обработка табеля на проде | ⏳ **F02** — нужна ручная приёмка на реальных iPhone/Safari и Android/Chrome (разрешения ОС, cold start, восстановление сети). Автотесты покрывают контур, реальный контур используется (за 7 дней 19 Check In / 18 Check Out / 13 версий табелей), но поведение на телефонах не подтверждено. Владелец выполняет сам. |
-| uploads / отчёты (экран + PDF + CSV) / audit events | ⏳ **F02** — проверить вместе с device acceptance (ADMIN сверяет результат в timeline / табеле / отчёте заказчика). |
+| clock / GPS / offline sync / обработка табеля на проде | ✅ **F02 PASS 2026-09-06** — Android-эмуляция PASS; реальные Android-устройства: 10 установок / 7 работников / 21 Check In / 19 Check Out / 40 принятых sync-receipt / 0 конфликтов. Владелец подтвердил нормальную эксплуатацию работниками. |
+| uploads / отчёты (экран + PDF + CSV) / audit events | ✅ автоматические сценарии и фактическая production-эксплуатация подтверждены; рабочая проверка результатов выполняется ADMIN. |
 | автоматический backup Titanor Time | ✅ `titanor-time-backup@production.timer` enabled+active. Автопрогоны идут ежедневно; последний подтверждённый на срез аудита — 2026-09-03 (on-box + off-box `SHA256SUMS` OK, 100 миграций). |
 | restore-проверка из production backup | ✅ `restore-test` **13/13** на `production-20260903T175352Z-pre-deploy` (Deploy F). |
 | GPS archive / retention на проде | ✅ `titanor-time-gps-archive@production.timer` enabled+active (05:10 UTC); прогон 2026-09-03 PASS, день записан + off-box + promoted VERIFIED. |
 | место на storage | ✅ диск / 77%, свободно ~35 GiB; build cache ~71 GB (prune заморожен до sign-off). |
-| **backup публичного сайта `titanorgroup.fi`** | ❌ **F04** — `titanorgroup-backup.service` в состоянии failed (ExecStart `/usr/local/sbin/backup-titanorgroup.sh` exit 1) с ~2026-09-01; каталоги `auto-*` за 1–4 сентября создаются, но пустые/неполные; последний известный полный — 2026-08-31. **Сам публичный сайт работает** (`titanorgroup-web-1` healthy 3 дня, `https://titanorgroup.fi/en` → 200). Journal/скрипт/артефакты — только root, диагностика недоступна текущему пользователю. Требуется root-оператор. Titanor Time backup и GPS archive это НЕ затрагивает — это соседний unit. |
+| **backup публичного сайта `titanorgroup.fi`** | ✅ **F04 PASS 2026-09-06** — причиной был `docker compose exec web` после перевода live-контейнера на прямой `docker run`. Скрипт использует точный `titanorgroup-web-1`, работает от `deploy`, проверяет health, пишет on-box+off-box SHA-256. `auto-20260906T071132Z`: service SUCCESS, restore `/api/health` и `/en` → 200. Таймер активен; следующий автоматический запуск 2026-09-07. |
 
 ## Дефекты, найденные за наблюдение
 
@@ -57,19 +66,14 @@
 | D4 | **Нет «изменить работнику объект/зону» одним действием** (только «Завершить» + отдельно «Добавить»); при открытой смене смена объекта не должна рвать часы. | P2 | ✅ **Деплой 1/2 задеплоен 2026-09-02** — `bee072d` / `worker-change-bee072d`, отчёт `WORKER_CHANGE_ASSIGNMENT_DEPLOY_RU.md`. Кнопка «Изменить объект / зону» (2 режима: только зона с сегодня / полный с датой); `POST …/change` закрывает старое назначение днём раньше и открывает материализованную замену; заднее число запрещено; сданный/отмеченный табель на дату → чистый 409; открытая смена → 409-выбор (доработать на старом / перенести смену на новый). Browser lane 98/26/33/84. **Оговорка:** при первичной live-проверке моя проба `/change` без `templateId` по ошибке изменила данные Nazar Druz (фантом на 2099, влияния на работника нет) — устранено одной транзакцией с разрешения владельца, `ASSIGNMENT_CHANGE_REVERTED` в аудите. **✅ Деплой 2/2 ТОЖЕ СДЕЛАН:** групповой перевод = Deploy E; «объект завершён» / восстановление + скрытие закрытых объектов = Deploy C + D5; пометка в табеле «место работы изменено · A→B · by …» = Deploy B (маркер перехода в карточке табеля). D4 закрыт полностью, повторно делать не нужно. |
 | **D7** | **Фундамент управления назначениями фрагментирован** — одна дата `validTo` тянет 3 несовместимые роли, гейт «текущего» разный в 8 местах, 3 механизма «работник уходит с объекта», нет инварианта «одно основное», история переходов только в JSON. | P1 (архитектурный) | ✅ **Deploy A (фундамент) задеплоен 2026-09-02 ~17:29 UTC** — `d7a-37dddb1` (код = коммит `37dddb1`), отчёт `R15_D7_DEPLOY_A_REPORT_RU.md`. **ПЕРВАЯ prod-миграция после R14: 98 → 99** (`add_assignment_lifecycle` — additive: `SiteAssignment.clockInDisabledAt`, `WorkSite.finishedAt`, таблица `AssignmentTransition` + immutability-триггер + 3 enum; backfill тронул **0 реальных строк**). Единое определение «действующего назначения» (`clockInDisabledAt`-aware) во всех 8 потребителях; сервис `lib/assignment-lifecycle-service.ts` (`removeFromSite`/`changeWorkplace`/`promoteToPrimary`, общий advisory-lock, пишет `AssignmentTransition`) — `/end`, `/remove`(новый), `/change`, `/promote` через него; C8 (деактивированный/OFFBOARDING работник не начинает новую смену); шаг Check Out §3.12. **UI не менялся.** Простой ≈ 8.8 с (миграция шла при работающем старом образе `schema:ahead`). scheduler/Caddy/DNS не тронуты. disposable-тесты: `_test-t9-assignment-lifecycle` 37/37 + setup-lifecycle 108/108 + full-flow 84/84 + setup-ui 26/26 + role-matrix 33/33 + unit 17/17 + restart-persistence 5/5+18/18. Verification на восстановленном prod-backup: паритет 13/13, `migrate deploy` ×2 чисто, приложение отдаёт реальные данные 200. Backup `production-20260902T172647Z-pre-deploy` (+`…162950Z-pre-migration`), rollback-контейнер `titanor-time-prod-app-pre-37dddb1` (образ `customer-page-5381b9f`). **Расхождение на реальных данных:** двойных основных назначений было ДВА (Nazar Druz #1002, Mykhailo Sadovnikov #1004) → исправлены в Deploy D2. **Образы D7 A→F развёрнуты на production 2 – 3 сентября** (каждый swap отдельно разрешён владельцем; 2026-09-03 дан **технический** sign-off по коду/деплоям A→F; 2026-09-04 владелец подтвердил, что **Deploy F можно считать технически live**; полный R15 sign-off не дан — открыты F02/F04/процесс-исключений; отчёт `R15_D7_DEPLOY_F_PROD_REPORT_RU.md`). Хронология и rollback — ниже в логе R15 и в отчётах `R15_D7_DEPLOY_{A..F}_REPORT_RU.md`:<br>• **B + восстановление пароля** (карточка работника + пресеты причин + пометка перехода в табеле + ссылка/QR сброса пароля) — `d7b-recovery-80d5c9c`, ~06:40 UTC;<br>• **C** (завершение объекта / отключение заказчика) — `d7c-ad780f8`, ~09:34 UTC;<br>• **D2** (GiST EXCLUDE `ex_site_assignment_one_primary_per_period`, схема 99→100, `fix-double-primary.sql`) — ~03:44–03:52 UTC;<br>• **E** (групповой перевод) — `d7e-5cce319`, ~12:16 UTC;<br>• **F** (отчёт «Часы заказчику», привязан к `workAreaId`) — `d7f-d216482`, ~19:34 UTC (со 2-й попытки — 1-я оборвалась на баге deploy-скрипта, авто-откат, ~11.5 c, потерь нет).<br>Перед E — очистка тестовых данных SMOKE-C (`R15_D7_SMOKE_C_CLEANUP_RU.md`). После технического sign-off владелец 2026-09-04 разрешил 2-й web-only swap `d7f-d216482`→`d7f-fd8494c` (F03 + `/guide` «Что нового», без миграции, ~15:43 UTC, простой ≈2.8 c — см. лог ниже и `R15_D7_DEPLOY_F_PROD_REPORT_RU.md` §7). **Текущий prod-образ `d7f-fd8494c`, схема 100.** |
 
-## Фаза 3 — 72 ч + период стабильности (идёт)
+## Фаза 3 — 72 ч + период стабильности ✅ ЗАВЕРШЕНА
 
-- [x] дефекты наблюдения D1a/D1b/D2/D4/D5/D6 — **задеплоены и отчитаны**; D7 A→F развёрнуты, **Deploy F технически live (владелец подтвердил 2026-09-04)**; полный R15 sign-off не дан (F02/F04/процесс-исключений); D3 закрыт Deploy F (см. §«Терминология»)
+- [x] дефекты наблюдения D1a/D1b/D2/D4/D5/D6 — **задеплоены и отчитаны**; D7 A→F развёрнуты; D3 закрыт Deploy F (см. §«Терминология»)
 - [~] финализировать `R14_CUTOVER_REPORT_RU.md` — ссылка на R15 добавлена; фактические 72h-результаты — здесь и в `fixroad.md`
 - [x] обновить `IMPLEMENTATION_STATUS.md` — компактная финальная запись 2026-09-04 добавлена
 - [x] обновить `R15_OBSERVATION_RU.md` — этот файл приведён к состоянию на 2026-09-04
-- [ ] обновить backup/restore и production runbooks (образ `d7f-fd8494c`, rollback-скрипты `deploy-f03-*.sh`) — мелкая правка тегов, не блокирует
-- [ ] **owner sign-off всего R15** — НЕ технический D7, а весь релиз. Блокируется 5 P1 из `fixroad.md`:
-      - [ ] **F01** — 3 browser-фикстуры Migration 100 + единый зелёный release-run *(в работе 2026-09-04)*
-      - [ ] **F02** — WORKER-приёмка на реальных iPhone/Android *(владелец)*
-      - [ ] **F03** — разбор очереди attendance exceptions + SLA *(разбор готов: `R15_ATTENDANCE_EXCEPTIONS_REVIEW_RU.md`; действия — за администратором)*
-      - [ ] **F04** — failed backup публичного сайта *(root-оператор)* либо явно вывести публичный сайт из объёма передачи
-      - [ ] **F05** — финальные документы (этот пункт)
+- [x] backup/restore runbooks обновлены; public-site backup-скрипт и unit хранятся в `ops/site/`
+- [x] **owner sign-off всего R15 — 2026-09-06:** F01–F05 закрыты; F03 operational ownership у начальника
 - [ ] решить срок хранения старого production backup
 - [ ] удаление старых данных — **отдельная задача, отдельное разрешение**
 
@@ -93,10 +97,10 @@ schema/backup/GPS archive в норме. Вердикт: **«production техн
 | # | что | кто закрывает | статус на 2026-09-04 |
 |---|---|---|---|
 | **F01** | 3 browser-фикстуры несовместимы с Migration 100 → нет одного зелёного release-run | агент, без production | ✅ фикстуры исправлены (коммит `bb37cb1`); полный disposable-прогон зелёный — таблица в `fixroad.md` §F01-результат (browser 19/0/2skip + 2 dedicated-runner'а + unit 18 + db 64 + scheduler 5 + typecheck/lint/build) |
-| **F02** | не закрыта реальная device acceptance (iPhone/Safari, Android/Chrome): разрешения ОС, cold start, восстановление сети | **владелец** | ⏳ владелец выполняет сам |
-| **F03** | 20 (→23) открытых attendance exceptions, 16 старше 72 ч; нет ежедневного ответственного/SLA | администратор | ✅ разбор готов (`R15_ATTENDANCE_EXCEPTIONS_REVIEW_RU.md`); закрытие записей + SLA — за администратором |
-| **F04** | `titanorgroup-backup.service` (публичный сайт) в failed с ~2026-09-01; сам сайт работает | **root-оператор** | ⏳ нужен root; сайт healthy, риск — только защита данных публичного сайта |
-| **F05** | финальные документы противоречат production | агент | ✅ этот файл + `IMPLEMENTATION_STATUS.md`; остаётся backup/restore + prod runbooks |
+| **F02** | Android/iPhone device acceptance | **владелец** | ✅ фактическая Android-эксплуатация + эмуляция PASS; iPhone ранее подтверждён владельцем |
+| **F03** | очередь attendance exceptions | администратор | ✅ код и разбор готовы; ежедневная обработка принята как обязанность начальника |
+| **F04** | backup публичного сайта | **root-оператор** | ✅ service SUCCESS; on/off-box SHA-256; restore-check PASS |
+| **F05** | финальные документы | агент | ✅ документы и runbooks приведены к финальному состоянию |
 
 **P2 — принять как residual risk или закрыть до финала** (детали в `fixroad.md` §3):
 
@@ -188,3 +192,4 @@ schema/backup/GPS archive в норме. Вердикт: **«production техн
 | 2026-09-04 ~04:00 UTC | **F01** — исправлены 3 browser-фикстуры под Migration 100 (`_test-csv-export` / `_test-period-time-report` / `_test-report-rounding-consistency`: 2-е одновременное назначение → `isPrimary=false`, constraint не отключён, `23P01` не маскируется); `run-worker-dossier-qa.sh` → mode `100755`. Полный disposable-прогон зелёный (`fixroad.md` §F01-результат: browser 19/0/2skip + 2 dedicated + unit 18 + db 64 + scheduler 5 + typecheck/lint/build). Changelog `/guide` дополнен записью «2–3 сентября 2026» простым языком. **F03** — разбор attendance exceptions: `R15_ATTENDANCE_EXCEPTIONS_REVIEW_RU.md`. **F04** — публичный сайт работает, backup-unit failed (root). Только read-only + disposable, production не менялся. |
 | 2026-09-04 ~14:56 UTC | **owner-authorized:** 3 исключения Andrei #1000 (`OUTSIDE_GEOFENCE_CHECKIN`×2 + `_CHECKOUT`×1, 29 авг, Pipe and Co, 10 км от объекта — тестовые отметки из дома) закрыты `DISMISS` с причиной «Тест» через guarded SQL (`ops/titanor-time/r15-d7/dismiss-andrei-1000-exceptions.sql`, зеркалит `resolveAttendanceException` 1:1), протестирован на disposable, ID сверены дважды. Проверено: OPEN 21→18, RESOLVED без изменений (24), DISMISSED 4→7, ровно 3 новых `AuditEvent`, 0 прочих записей затронуто. |
 | 2026-09-04 ~15:43 UTC | **2-й web-only swap `d7f-d216482`→`d7f-fd8494c`, УСПЕХ** (owner-authorized). Ставит: F03 — `gpsOftenUnavailable` переведён в пояснительный режим (флаг выкл → поведение не меняется; флаг вкл → `GPS_NOT_VERIFIED` без координаты остаётся OPEN + спокойные пояснения администратору/работнику, только для настоящего отсутствия координаты, `OUTSIDE_GEOFENCE_*`/`LOW_ACCURACY` не ослаблены, старые записи не трогаются); + changelog `/guide` «2–3 сентября 2026». Без миграции (схема 100), простой ≈ **2.8 c** (T0 `docker stop` 15:43:23.8Z → `/api/ready` 200 15:43:26.6Z). Кандидат `:3198` read-only smoke PASS; итоговый релизный прогон на образе: browser harness **19/0/2skip** + worker-dossier-qa **31/0** + restart-persistence **5/0+18/0** + db **64/0** + unit **18/0**, typecheck/lint/build clean. Post-swap read-only через Caddy зелёное, обе новые записи подтверждены на живом `/guide`; scheduler/Caddy/DNS/БД не тронуты. **Rollback: `bash ops/titanor-time/r15-d7/deploy-f03-rollback.sh` → контейнер `titanor-time-prod-app-pre-fd8494c` (образ `d7f-d216482`).** Backup `production-20260904T154045Z-pre-deploy` (restore-test 13/13). Отчёт `R15_D7_DEPLOY_F_PROD_REPORT_RU.md` §7. Meyer-галочка НЕ включена (владелец включит сам через UI). |
+| 2026-09-06 ~07:15 UTC | **F02 + F04 закрыты, полный R15 owner sign-off.** Реальная Android-эксплуатация подтверждена агрегатами без PII (10 установок, 7 работников, 21 Check In, 19 Check Out, 40 принятых sync-receipt, 0 conflicts) и владельцем. Public-site backup исправлен: причина — устаревший `docker compose exec web`; новый `ops/site/backup-titanorgroup.sh` читает live-контейнер `titanorgroup-web-1`, создаёт on-box+off-box backup с SHA-256. `titanorgroup-backup.service` SUCCESS; `auto-20260906T071132Z` восстановлен в одноразовом контейнере, `/api/health` и `/en` → 200. Очередь attendance exceptions закреплена за начальником как штатный процесс. R15 = PASS. |

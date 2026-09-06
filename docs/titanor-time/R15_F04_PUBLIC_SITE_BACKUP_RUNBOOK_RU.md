@@ -1,5 +1,15 @@
 # Root-runbook: восстановление `titanorgroup-backup.service` (backup ПУБЛИЧНОГО сайта)
 
+> ## ✅ F04 PASS — 2026-09-06
+>
+> Причина: после R14 сайт работает в напрямую запущенном `titanorgroup-web-1`, а старый скрипт
+> продолжал выполнять `docker compose exec -T web`. Исправление хранится в
+> `ops/site/backup-titanorgroup.sh` и `ops/site/systemd/titanorgroup-backup.service`.
+> Unit запущен вручную и завершился `status=0/SUCCESS`; backup `auto-20260906T071132Z` создан
+> on-box+off-box, SHA-256 проверен. Restore-check в одноразовом контейнере: `/api/health` 200,
+> `/en` 200, 4 data-файла и 7 upload-файлов. Production volumes не изменялись. Таймер активен,
+> следующий запуск 2026-09-07. Разделы ниже сохраняются как runbook диагностики/восстановления.
+
 **Основание:** `fixroad.md` F04. **Это backup публичного сайта `titanorgroup.fi`, НЕ Titanor Time.**
 Titanor Time backup (`titanor-time-backup@production.timer`) и GPS-archive работают и копируются
 off-box — их этот runbook не касается.
@@ -11,18 +21,18 @@ off-box — их этот runbook не касается.
 
 ---
 
-## 0. Что известно (read-only, без root, срез 2026-09-04 ~12:00 UTC)
+## 0. Текущее состояние (срез 2026-09-06 ~07:15 UTC)
 
 | | |
 |---|---|
-| Unit | `/etc/systemd/system/titanorgroup-backup.service` — `Type=oneshot`, `User=root`, `ExecStart=/usr/local/sbin/backup-titanorgroup.sh` |
-| Скрипт | `/usr/local/sbin/backup-titanorgroup.sh` — `-rwx------ root root`, 1356 байт, дата 2026-07-09 (не читается без root) |
+| Unit | `/etc/systemd/system/titanorgroup-backup.service` — `Type=oneshot`, `User=deploy`, `SupplementaryGroups=docker`, `TimeoutStartSec=10min` |
+| Скрипт | `/usr/local/sbin/backup-titanorgroup.sh` установлен из `ops/site/backup-titanorgroup.sh`, root:root 0755 |
 | Таймер | `titanorgroup-backup.timer` — `OnCalendar=*-*-* 03:30`, `Persistent=true`, `RandomizedDelaySec=10m`. Активен, следующий запуск ~03:32. |
-| Последний прогон | **failed**, `code=exited, status=1/FAILURE`, `Fri 2026-09-04 03:37:07 CEST`. CPU 278 ms — **упал быстро** (похоже на конфиг / путь / права / отсутствующую команду, не на долгий сбой копирования). |
-| Последний успешный артефакт on-box | `/home/deploy/backups/titanorgroup/pre-r14-20260831T155601Z/` (2026-08-31). Ежедневных снапшотов после 31 августа нет. |
-| Off-box mirror | `/mnt/250gb/titanorgroup/backups/` — последняя папка тоже `…20260831T155601Z`. |
+| Последний прогон | **SUCCESS**, 2026-09-06 09:15:20 CEST; `BACKUP OK` |
+| Последний успешный артефакт on-box | `/home/deploy/backups/titanorgroup/auto-20260906T071132Z/` |
+| Off-box mirror | `/mnt/250gb/titanorgroup/backups/auto-20260906T071132Z/`, `COMPLETE` + SHA256SUMS OK |
 | Что бэкапится | 2 docker-volume публичного сайта: `titanorgroup_titanorgroup_data` (`/app/data`), `titanorgroup_titanorgroup_uploads` (`/app/public/uploads`). Контейнер `titanorgroup-web-1` — healthy, up 3 дня. |
-| Диск `/` | 76 %, свободно ~35 GiB — **не причина**. |
+| Restore | disposable-контейнер: `/api/health` 200, `/en` 200; 4 data-файла, 7 uploads |
 
 ---
 
@@ -148,13 +158,13 @@ sudo systemctl list-timers titanorgroup-backup.timer --no-pager
 
 ## 5. Приёмка F04 (совпадает с `fixroad.md` F04)
 
-- [ ] `systemctl is-failed titanorgroup-backup.service` **не** возвращает `failed`;
-- [ ] есть свежий on-box артефакт с сегодняшней датой (data + uploads);
-- [ ] off-box копия совпадает (diff / SHA256SUMS);
-- [ ] restore-check PASS (временный контейнер отдаёт `/en` → 200), рабочие volume не тронуты;
-- [ ] следующий таймерный прогон тоже PASS;
-- [ ] причина сбоя записана (что именно было сломано и какой минимальной правкой исправлено);
-- [ ] изменённые файлы (`backup-titanorgroup.sh` / юнит) — с датированной `.bak` копией в `/root`.
+- [x] service завершился `status=0/SUCCESS`;
+- [x] есть свежий on-box артефакт с data + uploads;
+- [x] off-box копия записана и сверена по SHA256SUMS;
+- [x] restore-check PASS (`/api/health` и `/en` → 200), рабочие volume не тронуты;
+- [ ] следующий плановый timer-run 2026-09-07 — routine monitoring, не блокирует закрытие F04;
+- [x] причина сбоя и минимальная правка записаны;
+- [x] исходные root-файлы сохранены с датированной `.bak` копией в `/root`.
 
 Если публичный сайт решено **не** включать в передачу заказчика — это записать явно (в `fixroad.md`
 и `IMPLEMENTATION_STATUS.md`) и назначить владельца, а не оставлять failed-unit молча.

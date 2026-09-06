@@ -8,7 +8,12 @@
 > restart-persistence 5/0+18/0 + db 64/0 + unit 18/0, typecheck/lint/build clean. Полный отчёт:
 > `R15_D7_DEPLOY_F_PROD_REPORT_RU.md` §7. Rollback: `deploy-f03-rollback.sh` → `d7f-d216482`.
 > Также выполнено (owner-authorized): 3 исключения Andrei #1000 закрыты DISMISS «Тест».
-> Meyer-галочку владелец включит сам через UI. F04 — владелец сам выполняет root-диагностику.
+> Meyer-галочку владелец/начальник при необходимости включит сам через UI.
+>
+> **✅ FINAL 2026-09-06 — R15 PASS.** F02 закрыт фактической эксплуатацией Android (10 установок,
+> 7 работников, 21 Check In, 19 Check Out, 40 принятых sync-receipt, 0 conflicts) и подтверждением
+> владельца. F04 восстановлен: service SUCCESS, on-box+off-box SHA-256, restore `/api/health` и
+> `/en` → 200. F03-очередь — штатная обязанность начальника. F06–F11 приняты как residual backlog.
 
 - **Срез аудита:** 2026-09-03 21:54 UTC.
 - **Git:** `feature/titanor-time-foundation` @ `6e6dc12`, до создания этого документа рабочее дерево было чистым, `origin` совпадал.
@@ -22,9 +27,9 @@
 | gate | статус | детали |
 |---|---|---|
 | **F01** | ✅ **закрыт** | 3 фикстуры исправлены (`_test-csv-export`, `_test-period-time-report`, `_test-report-rounding-consistency` — 2-е одновременное назначение работника → `isPrimary=false`; constraint не отключён, `23P01` не маскируется). `run-worker-dossier-qa.sh` → mode `100755`. Полный disposable-прогон на `d7f-d216482` — см. §F01-результат ниже. Production не менялся. |
-| **F02** | 🟡 частично · ⏳ владелец | Codex проверил Android/планшет через browser-эмуляцию на live production **без создания часов** — адаптивность, маршруты, PWA manifest **PASS**. Остаётся **минимальная ручная приёмка на реальном Android** (владелец): install PWA · Check In/Out в реальную смену · закрыть/открыть приложение · авиарежим → открыть offline → вернуть сеть → sync без дубля. **Тестовых часов на production не создавать** — только реальная смена или согласованный тестовый аккаунт с документированной нейтрализацией. |
-| **F03** | ✅ **код выпущен на prod** (`d7f-fd8494c`) · ⏳ Meyer-галочка | `R15_ATTENDANCE_EXCEPTIONS_REVIEW_RU.md` — полный разбор 23 открытых записей. Переключатель «часто нет GPS» в пояснительном режиме — live. **3 исключения Andrei #1000 закрыты `DISMISS «Тест»`** (owner-authorized, выполнено). Галочка «часто нет GPS» на Meyer Turku Shipyard **подготовлена, НЕ применена** (`R15_MEYER_GPS_FLAG_RU.md` — владелец включит сам через UI); прочие открытые записи — назначение SLA за администратором. |
-| **F04** | ⏳ root-оператор · runbook готов | `titanorgroup-backup.service` failed с 2026-09-04 03:37 (exit 1, быстрый выход). **Публичный сайт работает** (`titanorgroup-web-1` healthy, `https://titanorgroup.fi/en` → 200). Root-runbook с точными командами (диагностика → причина → правка → ручной запуск → on/off-box + restore-check → приёмка): **`R15_F04_PUBLIC_SITE_BACKUP_RUNBOOK_RU.md`**. Ничего под root не менялось. Titanor Time backup + GPS archive НЕ затронуты. |
+| **F02** | ✅ **закрыт 2026-09-06** | Android-эмуляция PASS + реальные production-агрегаты без PII: 10 установок / 7 работников / 21 Check In / 19 Check Out / 40 принятых sync-receipt / 0 conflicts. Владелец подтвердил нормальную эксплуатацию работниками; iPhone ранее подтверждён владельцем. |
+| **F03** | ✅ **закрыт как release-gate** | Код live (`d7f-fd8494c`), 3 тестовых исключения Andrei закрыты. Meyer-галочку начальник включает сам при необходимости; разбор очереди — его штатная обязанность, не дефект приложения. |
+| **F04** | ✅ **закрыт 2026-09-06** | Причина: backup продолжал вызывать `docker compose exec web`, хотя live-сайт запущен прямым контейнером. Новый скрипт+unit в `ops/site/`; service SUCCESS, on/off-box SHA-256, restore-check `/api/health` и `/en` → 200. |
 | **F05** | ✅ **закрыт** | обновлены `R15_OBSERVATION_RU.md`, `IMPLEMENTATION_STATUS.md`, `R14_CUTOVER_REPORT_RU.md`, `NEXT_AGENT_HANDOFF_RU.md`; терминология D3/D4 зафиксирована; changelog `/guide` дополнен. Остаётся: backup/restore + production runbooks (мелкое обновление образа/rollback). |
 | **F06–F11 (P2)** | принято как residual risk | зафиксированы в `R15_OBSERVATION_RU.md` §«Финальный аудит». F06 → потенциальная `R15-F1` по запросу заказчика. F07 (`capturedOffline`), F08 (deploy-скрипт-тест), F09 (алертинг), F10 (guard-роуты), F11 (список исключённых функций) — до финала либо явно принять. |
 
@@ -60,15 +65,12 @@ PASS, Migration 100 не отключалась, итоговые команды
 можно считать технически live.** Запись «Что нового» `/guide` (`c76d439`) и правка F03 — в
 работающем образе `d7f-d216482` их нет, поедут следующим деплоем.
 
-Но **полный R15 owner sign-off и безусловную передачу заказчику пока давать рано** (владелец,
-2026-09-04). До этого остаётся закрыть:
+**Полный R15 owner sign-off получен 2026-09-06.** Все release-gates закрыты:
 
 1. **F01 ✅** — три browser-фикстуры исправлены, полный зелёный disposable release-run получен.
-2. **F02** — реальный Android/Chrome (WORKER-путь) в production; browser-эмуляция Codex уже PASS.
-3. **F03** — процесс разбора очереди attendance exceptions начальником: ежедневный ответственный + SLA
-   (переключатель-пояснение по объектам готов в коде, ждёт следующего деплоя; #1000 Andrei → DISMISS «Тест»).
-4. **F04** — восстановить backup публичного сайта (`titanorgroup-backup.service`) либо явно вывести
-   его из объёма передачи. Разрешён только read-only root-этап диагностики.
+2. **F02 ✅** — Android подтверждён реальной эксплуатацией и production-агрегатами без PII.
+3. **F03 ✅** — техническая часть live; рабочая очередь закреплена за начальником.
+4. **F04 ✅** — public-site backup восстановлен и проверен полным restore-smoke.
 5. **F05 ✅** — финальные документы и runbooks приведены к единому состоянию.
 
 Моё мнение по спорным пунктам D3/D4:
@@ -164,7 +166,13 @@ PASS, Migration 100 не отключалась, итоговые команды
 оба отдельно PASS; никакого отключения Migration 100; итоговая команда имеет ненулевой exit при
 любом падении.
 
-#### F02. Не закрыта реальная device acceptance
+#### F02. Реальная device acceptance — ✅ закрыта 2026-09-06
+
+Финальная приёмка основана на Android-эмуляции, автоматических offline/PWA-тестах и фактической
+production-эксплуатации: 10 Android-установок у 7 работников, 21 Check In, 19 Check Out,
+40 принятых `DeviceEventReceipt`, 0 `ClockEventIdConflict`. Владелец подтвердил, что работники
+используют Android без проблем; iPhone ранее принят владельцем. Протокол ниже сохраняется как
+рекомендация для будущих крупных изменений PWA, а не как блокер R15.
 
 Автотесты хорошо покрывают IndexedDB, offline shell, replay, GPS contracts и PWA, но не доказывают
 поведение разрешений ОС, cold start и восстановление сети на реальном iOS/Android.
@@ -201,7 +209,19 @@ orphan checkout, missing checkout и auto-close. Это может быть но
 **Приёмка:** нет необъяснённых OPEN старше принятого SLA; каждое оставшееся исключение имеет
 владельца/причину; инструкция входит в ежедневный runbook.
 
-#### F04. Failed backup публичного сайта
+#### F04. Backup публичного сайта — ✅ восстановлен 2026-09-06
+
+Корневая причина: старый `/usr/local/sbin/backup-titanorgroup.sh` вызывал
+`docker compose exec -T web`, но после R14 live-сайт работает в напрямую запущенном контейнере
+`titanorgroup-web-1` без Compose labels. Исправленный `ops/site/backup-titanorgroup.sh` проверяет
+контейнер и health, архивирует `/app/data` и `/app/public/uploads`, сверяет SHA-256 и копирует
+только данные/manifest/checksums на off-box S3 (секретный `.env.production` остаётся on-box).
+Unit работает от `deploy`, имеет доступ к Docker и S3 mount, timeout 10 минут.
+
+Проверка: `titanorgroup-backup.service` SUCCESS; backup `auto-20260906T071132Z` on-box+off-box;
+SHA-256 PASS; restore в отдельном контейнере — `/api/health` 200, `/en` 200, 4 data-файла и
+7 upload-файлов. Следующий timer-run назначен на 2026-09-07; его результат — обычный мониторинг,
+не блокер sign-off.
 
 **Факт:** `titanorgroup-backup.service` находится в состоянии failed с 2026-09-03 03:31 CEST;
 последний найденный полный артефакт публичного сайта датирован 2026-08-31. Titanor Time backup и GPS
