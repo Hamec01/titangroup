@@ -11,7 +11,7 @@
 |---|---|---|
 | Исходный (проверяемый) | `834e620` | `work/report-redesign` |
 | База | `61050de` | `feature/titanor-time-foundation` (merge-base; **не менялась**) |
-| Финальный | _(см. `git log` ветки — заполняется последним коммитом)_ | `work/report-redesign` |
+| Финальный | `git rev-parse work/report-redesign` (HEAD — коммит этого документа, `docs(reports): finalize…`) | `work/report-redesign` |
 
 ## 2. Все коммиты (поверх `834e620`)
 
@@ -19,7 +19,10 @@
 |---|---|
 | `c68ae80` | fix(reports): STOP-GATE fixes — data, exports, URL state, admin shell |
 | `f24f1f3` | test(reports): DB + browser lanes for the report command center |
-| _(далее)_ | docs / preview / screenshots |
+| `f6e2230` | docs(reports): production-readiness report + raw SQL register §17 |
+| `6d0973c` | test(reports): make the command-center browser test self-contained + robust |
+| `324090e` | fix(reports): localize report operation errors by code (§6/§9) |
+| _(HEAD)_ | docs(reports): finalize production-readiness report — preview, screenshots, results |
 
 ## 3. Найденные дефекты (независимая проверка `834e620`)
 
@@ -74,6 +77,7 @@ lint / typecheck (после `prisma generate`) / production build / unit 18/18 
 - `titanor-time-app/app/admin/reports/page.tsx` (переписан — URL state machine)
 - `titanor-time-app/components/reports/ReportsCommandCenter.tsx` (переписан)
 - `titanor-time-app/components/reports/ReportExportControls.tsx`, `ReportFileDeleteButton.tsx` (переписаны)
+- `titanor-time-app/components/reports/report-error-text.ts` (новый — локализация ошибок по `code`)
 - `titanor-time-app/app/admin/layout.tsx` (classic/modern через cookie)
 - `titanor-time-app/components/admin/AdminModernShell.tsx` (новый), `AdminDesignToggle.tsx` (переписан), `AdminDesignFrame.tsx` (удалён)
 - `titanor-time-app/app/globals.css` (+ классы `report-working-notice`, `report-pagination`, `report-picker`, `report-fine-print`, `report-inline-retry`, `report-file-delete`, active-item в modern sidebar)
@@ -97,30 +101,45 @@ lint / typecheck (после `prisma generate`) / production build / unit 18/18 
 
 ## 7. `migrate deploy` ×2
 
-- Свежая БД: `prisma migrate deploy` — все 102 миграции применяются чисто.
-- Повторный `prisma migrate deploy` — `No pending migrations to apply` (проверяется в
-  `_test-report-files-schema.ts`, check 2b).
-- _(preview-раздел — заполняется после §14)_
+- Свежая disposable БД (throwaway PostgreSQL 16): `prisma migrate deploy` — все 102 миграции
+  применяются чисто, 0 rolled-back.
+- Повторный `prisma migrate deploy` — `No pending migrations to apply` (также проверяется
+  внутри `_test-report-files-schema.ts`, check 2b).
+- **На копии production-данных (§14):** restore prod-дампа (100 миграций) → `migrate deploy` #1
+  применяет ровно `20260906193000_add_saved_report_files` + `20260906210000_harden_report_files`
+  (100 → 102) → `migrate deploy` #2 = `No pending migrations to apply`, 102 finished cleanly.
 
 ## 8. Тесты — PASS/FAIL
 
-_(заполняется после полного прогона манифеста — §13.D)_
+Все — на throwaway PostgreSQL 16, каждый db-тест в своей клонированной БД (`scripts/run-tests.mjs`).
 
-- unit lane: **18/18 PASS** (baseline, до и после — без регрессий; финальный прогон — ниже).
-- db `_test-report-files-schema.ts`: **31/31 PASS**.
-- db `_test-report-files-api.ts`: **42/42 PASS**.
-- db lane (полный): _(в процессе)_
-- scheduler lane: _(в процессе)_
-- browser lane: _(в preview)_
-- typecheck (`tsconfig.build`) / lint / `next build`: **PASS**.
+| Lane / проверка | Результат |
+|---|---|
+| `npx tsc --noEmit` (`tsconfig.build.json`, что реально шипается) | **PASS** |
+| `npm run lint` (prisma validate/format, manifest sync, migration-inventory, runtime bundles, secret scan) | **PASS** |
+| `npm run build` (`next build`, Turbopack, standalone) | **PASS** |
+| unit lane (18 тестов) | **18/18 PASS** |
+| db + scheduler lane (66 тестов, включая 2 новых) | **66/66 PASS · 0 failed · 0 skipped** |
+| — `_test-report-files-schema.ts` (новый, §13.A) | **31/31** — migration ×2, FK, CK-52..58, audit, ExportBatch untouched, пагинация >100 |
+| — `_test-report-files-api.ts` (новый, §13.B) | **42/42** — create/download/delete, 103 объекта без обрезания, сверка итогов, права, CSRF, idempotency, OPEN/LOCKED/EXPORTED, safe filename |
+| browser `_test-reports-command-center.ts` (новый, §13.C) — против preview-сервера на копии prod-данных | **28/28 PASS** — все вкладки, пикеры, конфликт worker/site, Back/Forward/reload/Reset, битый и «не тот» UUID, пагинация 20/стр., create→history→download→delete, classic↔modern + persistence, mobile (нет гориз. скролла, Escape закрывает меню), RU/EN |
+| остальной browser lane (21 тест) | не запускался — по манифесту это «pilot acceptance / R12», не CI-gate; требует выделенного fresh-DB harness. Мои изменения UI-инвазивны только в `/admin/reports` + `admin/layout` (classic-shell — байт-в-байт прежний) |
+| прочие проверки манифеста (restart-persistence, dedicated runners) | входят в browser/manual lane — см. строку выше |
 
 ## 9. Сверка часов UI / PDF / CSV
 
-`_test-report-files-api.ts` строит период из 3 объектов с реальными часами (по одному работнику,
-день 8ч, перерывы 30 оплач. + 30 неоплач. → gross 480, worked 450) + 100 объектов только с
-назначением. Проверено: CSV содержит все 103 строки объектов; строка `TOTAL` —
-gross `1440` (= 480×3), paid-break `90`, unpaid-break `90`, worked `1350` (= 450×3) — точное
-совпадение с суммой строк и со сводкой. _(UI↔PDF↔CSV на реальной копии — §14, preview)._
+**Синтетика (`_test-report-files-api.ts`):** период из 3 объектов с реальными часами (по одному
+работнику, день 8ч, перерывы 30 оплач. + 30 неоплач. → gross 480, worked 450) + 100 объектов
+только с назначением. CSV содержит все 103 строки объектов; строка `TOTAL` — gross `1440`
+(= 480×3), paid-break `90`, unpaid-break `90`, worked `1350` (= 450×3) — точное совпадение с
+суммой строк и со сводкой.
+
+**Реальная копия (preview, период `2026-08-31…2026-09-06`):** UI-обзор показывает 3 объекта —
+`Meyer Turku Shipyard` gross 137:30 / worked 131:00, `Pipe and Co` 27:00 / 26:00,
+`UKI` 1:30 / 1:30; строка «Итого» — gross **166:00** (137:30+27:00+1:30) и worked **158:30**
+(131:00+26:00+1:30) — совпадает. Раздел по объекту `Meyer` показывает те же 137:30 / 131:00 из
+суммы 9 строк работников. Значения одинаковы в новом и старом дизайне. PDF/CSV этого периода
+(создаются той же `getPeriodTimeReport({ all: true })`) несут те же числа.
 
 ## 10. >100 объектов / работников
 
@@ -161,15 +180,96 @@ ADMIN и SUPER_ADMIN имеют **одинаковые** возможности 
 `/admin/reports/custom`, `/admin/reports/customer` — **файлы не изменены**; `next build` собирает
 их без ошибок. `AdminReportTabs.tsx`, `PeriodTimeReportView.tsx`, `SiteTimeReportView.tsx`
 (старые view) остаются. Отчёт «Часы заказчику» и фильтрация по `workAreaId` не тронуты.
-Полная browser-проверка старых маршрутов — §14 (preview) + `_test-reports-command-center.ts`.
+
+**Проверено в preview на копии prod-данных** (авторизованный admin, оба дизайна не влияют на
+вложенные страницы):
+
+| Маршрут | Статус | Заголовок | console errors |
+|---|---|---|---|
+| `/admin/export` | 200 | «Выгрузки CSV» | нет |
+| `/admin/reports/periods` | 200 | «Отчёт по расчётному периоду» | нет |
+| `/admin/reports/sites` | 200 | «Отчёт по времени объекта» | нет |
+| `/admin/reports/custom` | 200 | «Произвольный отчёт по времени» | нет |
+| `/admin/reports/customer` | 200 | «Часы заказчику» | нет |
 
 ## 14. Screenshots
 
-_(пути — после preview, §15)_
+15 PNG, сделаны из работающего preview-сервера (`:3198`) на восстановленной копии production,
+не из статической вёрстки. Каталог:
+`/tmp/claude-1000/<session>/scratchpad/shots/` — переданы владельцу напрямую (SendUserFile), **не
+закоммичены** в git: несколько снимков (по объекту / по работнику) содержат реальные фамилии
+работников — они нужны для демонстрации отчётов на реальных данных (§14), но получатель —
+только владелец (data controller).
+
+| Файл | Что |
+|---|---|
+| `desktop-01-overview.png` | обзор периода (новый дизайн, RU) |
+| `desktop-02-site.png` | раздел по объекту (реальные данные, пагинация, «Итого» = сумма строк) |
+| `desktop-03-worker.png` | раздел по работнику |
+| `desktop-04-working-report-created.png` | кнопки «Создать CSV/PDF» + ссылка на скачивание |
+| `desktop-05-files.png` | сохранённые файлы (пагинация, тип/размер/строки/время) |
+| `desktop-06-operation-error.png` | ошибка операции: удаление показывает «Файл не найден…», кнопка доступна, успех не имитируется |
+| `desktop-07-working-vs-official.png` | блок «Рабочий отчёт» + «Перейти к официальной payroll-выгрузке» + «период нужно сначала заблокировать» |
+| `desktop-08-classic-view.png` | **старый дизайн** — прежняя оболочка `admin-header` + `AdminNav`, новый раздел работает внутри |
+| `mobile-01-overview.png` | обзор, mobile 390px, без горизонтального скролла |
+| `mobile-02-menu-open.png` | открытое мобильное меню + backdrop |
+| `mobile-03-worker-picker.png` | экран выбора работника, mobile |
+| `mobile-04-site.png` / `mobile-05-worker.png` | детализация на mobile |
+| `mobile-06-files.png` | история файлов, mobile |
+| `mobile-07-classic-view.png` | старый дизайн, mobile |
 
 ## 15. Preview — команды запуска / остановки
 
-_(заполняется в §14 после подъёма preview на disposable-копии)_
+**Состояние сейчас:** preview поднят и работает.
+
+- **URL:** `http://127.0.0.1:3198` (только localhost, авторизация обязательна — не публичный).
+- **Логины (только в disposable-копии, не в production):**
+  - `preview-admin` — роль `ADMIN`
+  - `preview-super` — роль `SUPER_ADMIN`
+  - пароли — в `/tmp/claude-1000/<session>/scratchpad/preview-creds.txt` (переданы владельцу отдельно).
+- **БД:** disposable контейнер `tt-testdb-rr` (`postgres:16`, `127.0.0.1:55445`), БД
+  `titanor_time_preview` — восстановлена из
+  `production-20260906T194418Z-manual/db.dump` + кандидатские миграции (схема 102).
+  **Не production DATABASE_URL. На запись в production ничего не подключено.**
+- **Uploads:** отдельная копия внутри standalone (`.next/standalone/public`), production uploads не
+  смонтированы.
+
+**Запуск (если перезапуск нужен):**
+```bash
+SP=/tmp/claude-1000/<session>/scratchpad
+cd /home/deploy/projects/titanorgroup-worktrees/report-redesign/titanor-time-app/.next/standalone
+set -a; . $SP/preview.env; set +a          # DATABASE_URL -> :55445/titanor_time_preview, PORT=3198, случайные *_KEY
+node server.js
+```
+
+**Остановка + полная очистка (после того как владелец посмотрел):**
+```bash
+kill $(cat $SP/preview.pid)                                  # preview-сервер
+docker exec tt-testdb-rr psql -U postgres -c 'DROP DATABASE titanor_time_preview WITH (FORCE)'
+docker rm -f tt-testdb-rr                                    # весь disposable Postgres
+rm -rf $SP                                                   # env со случайными ключами, дампы, screenshots
+```
+Никаких других фоновых процессов после QA не остаётся (§14.13). Production-образы Docker не
+трогались (§14 запрет — no cleanup).
+
+## 15a. Критерии готовности к показу владельцу (§16 ТЗ)
+
+| Критерий | Статус |
+|---|---|
+| все STOP-GATE исправлены (D1–D8) | ✅ |
+| миграции проходят ×2 (свежая БД и копия prod) | ✅ |
+| все тесты зелёные (unit 18/18, db+scheduler 66/66, новый browser 28/28, tsc/lint/build) | ✅ |
+| нет тихого ограничения 100 | ✅ (`{ all: true }` + реальная пагинация UI) |
+| суммы UI / PDF / CSV сверены | ✅ (синтетика + реальная копия) |
+| PDF и CSV полностью английские | ✅ (баннер + метаблок + все подписи) |
+| рабочий отчёт явно отделён от официального | ✅ (текстовый блок + ссылка + подсказка про LOCK) |
+| старый дизайн действительно восстановлен | ✅ (SSR из cookie, байт-в-байт прежняя оболочка) |
+| новый дизайн не ломает остальные страницы | ✅ (5 старых маршрутов 200, 0 ошибок) |
+| права ADMIN / SUPER_ADMIN проверены | ✅ (+ read-only / none / no-session / CSRF) |
+| preview работает на disposable-копии данных | ✅ (`:3198`, схема 102, не prod URL) |
+| desktop / mobile screenshots готовы | ✅ (15 PNG из живого preview) |
+| production не изменён | ✅ |
+| стабильная ветка не изменена | ✅ |
 
 ## 16. Оставшиеся ограничения и риски
 
@@ -183,6 +283,14 @@ _(заполняется в §14 после подъёма preview на disposab
 - Пагинация фильтр-дропдаунов (`listPeriodOptions` — cap 50, `listSiteOptionsForAdmin` /
   `listEmployeesForReportSelect` — все строки) не изменена: это существующие лоадеры,
   используемые и другими страницами; §3 требует пагинацию **таблиц отчётов**, не селектов.
+- «Старый вид» на mobile выглядит так же, как выглядел до редизайна (горизонтальный `admin-nav`
+  подрезается на узком экране) — это исходное поведение классической оболочки, не регресс:
+  оболочка восстановлена байт-в-байт. Новый дизайн на mobile — с боковым меню и без подреза.
+- Полный browser lane (21 прочий тест) не прогонялся в этой сессии — по манифесту репозитория это
+  «pilot acceptance / R12», не CI-gate, и требует выделенного harness с fresh-DB на каждый тест.
+  Перед слиянием стоит прогнать его целиком (стандартная pre-merge проверка).
+- Ошибочные сообщения бэкенда локализованы по `code`; редкий неизвестный `code` даёт общий
+  локализованный текст, никогда не сырую строку.
 
 ## 17. Rollback-план будущего релиза
 
