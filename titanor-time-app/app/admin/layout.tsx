@@ -10,6 +10,8 @@ import { AdminNav } from '@/components/admin/AdminNav';
 import { LogoutButton } from '@/components/admin/LogoutButton';
 import { NotificationCenter } from '@/components/admin/NotificationCenter';
 import { ReviewQueueIndicator } from '@/components/admin/ReviewQueueIndicator';
+import { AdminDesignFrame } from '@/components/admin/AdminDesignFrame';
+import { AdminDesignToggle } from '@/components/admin/AdminDesignToggle';
 
 export default async function AdminLayout({ children }: Readonly<{ children: ReactNode }>) {
   const [session, locale] = await Promise.all([resolveServerSession(), resolveAppLocale()]);
@@ -29,32 +31,27 @@ export default async function AdminLayout({ children }: Readonly<{ children: Rea
     );
   }
 
+  const header = (
+    <>
+      <Link className="admin-brand" href="/admin">Titanor Time</Link>
+      <span className="admin-identity">{session.user.username} · {session.user.roles.join(', ')}</span>
+      <div className="admin-header-actions">
+        <AdminDesignToggle />
+        <Link href="/admin/profile" className="admin-guide-link">{t.profileLink}</Link>
+        <Link href="/guide" className="admin-guide-link">{t.guideLink}</Link>
+        <ReviewQueueIndicator locale={locale} />
+        <NotificationCenter strings={t} locale={locale} />
+        <LanguageSwitcher compact />
+        <LogoutButton signOut={t.signOut} signingOut={t.signingOut} error={t.signOutError} />
+      </div>
+    </>
+  );
+
   return (
     <AppLocaleProvider locale={locale}>
-    <div className="admin-shell">
-      <header className="admin-header">
-        <Link className="admin-brand" href="/admin">
-          Titanor Time
-        </Link>
-        <span className="admin-identity">
-          {session.user.username} · {session.user.roles.join(', ')}
-        </span>
-        <div className="admin-header-actions">
-          <Link href="/admin/profile" className="admin-guide-link">
-            {t.profileLink}
-          </Link>
-          <Link href="/guide" className="admin-guide-link">
-            {t.guideLink}
-          </Link>
-          <ReviewQueueIndicator locale={locale} />
-          <NotificationCenter strings={t} locale={locale} />
-          <LanguageSwitcher compact />
-          <LogoutButton signOut={t.signOut} signingOut={t.signingOut} error={t.signOutError} />
-        </div>
-      </header>
-      <AdminNav strings={ADMIN_NAV[locale]} ariaLabel={t.adminNavigation} />
-      <div className="admin-content">{children}</div>
-    </div>
+      <AdminDesignFrame header={header} legacyNav={<AdminNav strings={ADMIN_NAV[locale]} ariaLabel={t.adminNavigation} />} nav={ADMIN_NAV[locale]} locale={locale}>
+        {children}
+      </AdminDesignFrame>
     </AppLocaleProvider>
   );
 }
