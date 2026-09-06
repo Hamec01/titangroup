@@ -2056,3 +2056,46 @@ the `WHERE`):
   concurrent create; it is otherwise upsert-shaped ("ensure before every read", same pattern as
   `lib/timesheet-approval-notifications.ts`). No CHECK, trigger or extension is introduced.
   Dismissal is per `User` (`WorkerNotificationDismissal_notificationId_userId_key`).
+
+## 17. Report redesign — ReportFile hardening
+
+Migration `20260906210000_harden_report_files` (additive follow-up to
+`20260906193000_add_saved_report_files`, which is left untouched — same convention as
+`20260819170000_fix_export_item_worked_minutes_bounds`). Design:
+`docs/titanor-time/REPORT_REDESIGN_PRODUCTION_READINESS_RU.md` §7.
+
+Two plain foreign keys:
+
+| Ref | Column | Target | ON DELETE | Rationale |
+|---|---|---|---|---|
+| FK-18 | `ReportFile.periodId` | `PayrollPeriod(id)` | `SET NULL` | analytics snapshot must outlive its period row, like `PayrollPeriod.lockedByUser`; `PayrollPeriod` is never hard-deleted anywhere, so this is defensive |
+| FK-19 | `ReportFile.createdByUserId` | `User(id)` | `RESTRICT` | identical to `AuditEvent.actor` / `PayrollPeriod.openedByUser`; users are archived (status), never row-deleted, so RESTRICT adds no new breakage to user archiving |
+
+Plus `ReportFile_createdByUserId_idx` (Postgres does not auto-index the referencing side of a FK).
+
+Seven CHECK constraints (CK-52 .. CK-58):
+
+- CK-52 `ck_report_file_format` — `format IN ('PDF','CSV')`.
+- CK-53 `ck_report_file_type` — `reportType IN ('PERIOD_SUMMARY','SITE_DETAIL','WORKER_DETAIL')`.
+- CK-54 `ck_report_file_hash_format` — `fileHash ~ '^[0-9a-f]{64}$'` (same rule as CK-39 on `ExportBatch`).
+- CK-55 `ck_report_file_size_matches_content` — `fileSizeBytes = octet_length(content)` **and**
+  `0 <= fileSizeBytes <= 26214400` (25 MiB documented single-file ceiling, §7.7; also enforced
+  app-side by `REPORT_FILE_MAX_BYTES` in `lib/report-files.ts`).
+- CK-56 `ck_report_file_row_count` — `rowCount IS NULL OR rowCount >= 0`.
+- CK-57 `ck_report_file_mime_matches_format` — `(format='PDF' AND mimeType='application/pdf') OR
+  (format='CSV' AND mimeType='text/csv; charset=utf-8')`.
+- CK-58 `ck_report_file_name_safe` — `fileName ~ '^[A-Za-z0-9._ -]{1,255}$'` — no CR/LF/quote/path
+  separator can reach `Content-Disposition`, so a stored file name can never inject a response
+  header (§7 download safety); the second, transport-level guard is
+  `lib/reporting/content-disposition.ts`.
+
+No trigger, no PostgreSQL extension, no new permission code (the command centre reuses
+`period.read.all` / `site.read.all` / `worker.read.all` / `timesheet.read.all` / `export.read` +
+`export.create`, same "for permission of REQUIRED_PERMISSIONS" pattern as T8.1-T8.3 and the Custom
+Report — §2.10a of `02_ROLE_PERMISSION_MATRIX.md`).
+
+Disposable-PostgreSQL proof: `scripts/_test-report-files-schema.ts` (31 checks) — migration recorded
++ `migrate deploy` no-op ×2, every FK + CK above rejected with the expected identifier, the
+`lib/report-files.ts` audit path (`REPORT_FILE_CREATED` / `REPORT_FILE_DELETED` in-transaction),
+real pagination past 100 rows, and `ExportBatch` / `ExportItem` constraints + immutability trigger
+still present and unchanged.
