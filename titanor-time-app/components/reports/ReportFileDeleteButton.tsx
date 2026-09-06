@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAppLocale } from '@/components/i18n/AppLocaleProvider';
+import { reportErrorText } from '@/components/reports/report-error-text';
 
 // docs/titanor-time/REPORT_REDESIGN_PRODUCTION_READINESS_RU.md §9. The old button ignored the HTTP
 // status and always refreshed — a 403/404/500 looked like a successful delete. This one checks
@@ -31,11 +32,11 @@ export function ReportFileDeleteButton({ fileId }: { fileId: string }) {
       }
       const data = await response.json().catch(() => null);
       if (!response.ok || !data?.deleted) {
-        throw new Error(data?.error?.message ?? (ru ? 'Не удалось удалить файл.' : 'Could not delete the file.'));
+        throw new Error(reportErrorText(data?.error?.code, ru, 'delete'));
       }
       router.refresh();
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : ru ? 'Не удалось удалить файл.' : 'Could not delete the file.');
+      setError(cause instanceof Error ? cause.message : reportErrorText(undefined, ru, 'delete'));
     } finally {
       setBusy(false);
     }

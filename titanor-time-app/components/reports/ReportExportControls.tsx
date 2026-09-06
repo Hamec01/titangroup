@@ -4,6 +4,7 @@ import { useRef, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useAppLocale } from '@/components/i18n/AppLocaleProvider';
+import { reportErrorText } from '@/components/reports/report-error-text';
 
 type Format = 'CSV' | 'PDF';
 type ReportType = 'PERIOD_SUMMARY' | 'SITE_DETAIL' | 'WORKER_DETAIL';
@@ -52,13 +53,13 @@ export function ReportExportControls({ periodId, reportType, siteId, employeeId 
       });
       const data = await response.json().catch(() => null);
       if (!response.ok || !data?.file) {
-        throw new Error(data?.error?.message ?? (ru ? 'Не удалось создать файл.' : 'Could not create the file.'));
+        throw new Error(reportErrorText(data?.error?.code, ru, 'create'));
       }
       delete keyRef.current[format];
       setFile(data.file as CreatedFile);
       router.refresh();
     } catch (cause) {
-      setError({ format, message: cause instanceof Error ? cause.message : ru ? 'Не удалось создать файл.' : 'Could not create the file.' });
+      setError({ format, message: cause instanceof Error ? cause.message : reportErrorText(undefined, ru, 'create') });
     } finally {
       setBusy(null);
     }
