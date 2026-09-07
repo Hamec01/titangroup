@@ -83,6 +83,7 @@ async function main() {
   const finished = await employee('Boris', 'Finished');
   const notStarted = await employee('Carla', 'Waiting');
   await employee('Inactive', 'Hidden', false);
+  await prisma.employeeProfile.create({ data: { employeeId: working.id, photoPath: `${working.id}/photo/test.jpg` } });
 
   await prisma.siteAssignment.create({
     data: { employeeId: working.id, siteId: alpha.id, workAreaId: northHall.id, isPrimary: true, validFrom: new Date('2020-01-01T00:00:00Z'), assignedByUserId: admin.id }
@@ -128,6 +129,7 @@ async function main() {
   const finishedItem = result.items.find((item) => item.employee.id === finished.id)!;
   check(workingItem.todayWorkedMinutes >= 36 && workingItem.todayWorkedMinutes <= 38, 'open shift contributes live minutes');
   check(workingItem.currentAssignments[0]?.workArea?.name === 'North Hall', 'current work area is present');
+  check(workingItem.employee.hasPhoto, 'profile-photo availability is present without exposing its storage path');
   check(finishedItem.todayWorkedMinutes === 60, 'all finished shifts today are summed');
   check(finishedItem.needsAttention && finishedItem.openExceptionCount === 1, 'worker issue is visible');
 
@@ -152,9 +154,13 @@ async function main() {
   check(pagedSearch.totalItems === 1 && pagedSearch.items[0]?.employee.id === notStarted.id, 'search runs before pagination');
 
   const serialized = JSON.stringify(result);
-  for (const forbidden of ['latitude', 'longitude', 'payloadHash', 'requestId', 'deviceInstallationId', 'password']) {
+  for (const forbidden of ['latitude', 'longitude', 'payloadHash', 'requestId', 'deviceInstallationId', 'password', '/photo/test.jpg']) {
     check(!serialized.includes(forbidden), `response excludes ${forbidden}`);
   }
+
+  // Do not leave a deliberately non-existent test photo behind for later browser lanes that
+  // reuse the same disposable database.
+  await prisma.employeeProfile.delete({ where: { employeeId: working.id } });
 
   console.log(`PASS ${checks}/${checks}: owner Today dashboard service`);
 }

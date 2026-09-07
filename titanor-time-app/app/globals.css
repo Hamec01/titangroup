@@ -4081,13 +4081,13 @@ a.ov-summary-card:focus-visible {
 .owner-worker-columns,
 .owner-worker-row {
   display: grid;
-  grid-template-columns: minmax(160px, 1.35fr) minmax(105px, 0.85fr) minmax(145px, 1.15fr) 76px 76px 88px minmax(90px, 0.8fr) 58px;
-  gap: 12px;
+  grid-template-columns: minmax(190px, 1.35fr) minmax(100px, 0.8fr) minmax(140px, 1.1fr) 68px 68px 78px minmax(86px, 0.75fr) minmax(72px, max-content);
+  gap: 9px;
   align-items: center;
 }
 
 .owner-worker-columns {
-  padding: 0 14px 7px;
+  padding: 7px 11px;
   color: var(--text-soft);
   font-size: 0.7rem;
   font-weight: 700;
@@ -4097,7 +4097,7 @@ a.ov-summary-card:focus-visible {
 
 .owner-worker-list {
   display: grid;
-  gap: 7px;
+  gap: 5px;
   margin: 0;
   padding: 0;
   list-style: none;
@@ -4105,7 +4105,7 @@ a.ov-summary-card:focus-visible {
 
 .owner-worker-row {
   min-width: 0;
-  padding: 6px 8px;
+  padding: 4px 7px;
   border: 1px solid var(--border);
   border-radius: 9px;
   background: rgba(5, 12, 22, 0.4);
@@ -4114,12 +4114,13 @@ a.ov-summary-card:focus-visible {
 
 .owner-cell-link {
   min-width: 0;
-  padding: 7px 6px;
+  padding: 5px;
   border-radius: 6px;
   color: var(--text);
   text-decoration: none;
   display: grid;
   gap: 3px;
+  font-size: 0.82rem;
 }
 
 .owner-cell-link:hover,
@@ -4143,6 +4144,44 @@ a.ov-summary-card:focus-visible {
 .owner-worker-row > :nth-child(2) {
   display: grid;
   gap: 3px;
+}
+
+.owner-worker-identity {
+  grid-template-columns: 36px minmax(0, 1fr);
+  align-items: center;
+  gap: 9px;
+}
+
+.owner-worker-avatar {
+  position: relative;
+  width: 36px;
+  height: 36px;
+  overflow: hidden;
+  display: grid;
+  place-items: center;
+  flex: none;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  background: var(--surface-strong);
+  color: var(--text-soft);
+  font-size: 0.69rem;
+  font-weight: 750;
+  letter-spacing: 0.02em;
+}
+
+.owner-worker-avatar img {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  display: block;
+  object-fit: cover;
+}
+
+.owner-worker-identity-copy {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
 }
 
 .owner-worker-identity strong,
@@ -4195,6 +4234,8 @@ a.ov-summary-card:focus-visible {
 
 .owner-worker-open {
   color: var(--accent-light);
+  justify-self: end;
+  font-size: 0.78rem;
   font-weight: 650;
   text-align: right;
   white-space: nowrap;
@@ -4254,6 +4295,10 @@ a.ov-summary-card:focus-visible {
   .owner-worker-row {
     grid-template-columns: minmax(0, 1fr) auto;
     gap: 10px 14px;
+  }
+
+  .owner-worker-identity {
+    grid-template-columns: 36px minmax(0, 1fr);
   }
 
   .owner-worker-row > * {
@@ -5364,9 +5409,50 @@ a.ov-summary-card:focus-visible {
   box-shadow: 0 2px 8px rgba(25, 53, 81, 0.035);
 }
 
+.admin-modern-content .owner-worker-scroll {
+  max-height: clamp(340px, 45vh, 480px);
+  overflow-y: auto;
+  overscroll-behavior-y: contain;
+  scrollbar-gutter: stable;
+  touch-action: pan-y;
+  padding-right: 5px;
+  border-radius: 10px;
+}
+
+.admin-modern-content .owner-worker-scroll:focus-visible {
+  outline: 2px solid #70b9e7;
+  outline-offset: 3px;
+}
+
+.admin-modern-content .owner-worker-columns {
+  position: sticky;
+  z-index: 2;
+  top: 0;
+  background: #f4f8fc;
+  box-shadow: 0 1px 0 #dfe7ef;
+}
+
+.admin-modern-content .owner-worker-scroll {
+  scrollbar-color: #9db3c7 #edf2f6;
+  scrollbar-width: thin;
+}
+
+.admin-modern-content .owner-worker-avatar {
+  border-color: #d4e1eb;
+  background: #eaf4fb;
+  color: #176fa7;
+}
+
 .admin-modern-content .owner-worker-row:hover {
   border-color: #b9d8ec;
   background: #f8fcff;
+}
+
+@media (max-width: 760px) {
+  .admin-modern-content .owner-worker-scroll {
+    max-height: 62dvh;
+    padding-right: 3px;
+  }
 }
 
 .admin-modern-content .owner-cell-link:hover,

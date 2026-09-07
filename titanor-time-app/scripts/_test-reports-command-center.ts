@@ -210,6 +210,27 @@ async function main() {
     dashboardAppearance
   );
   check('new view: Today uses the available workspace width', dashboardAppearance.widthRatio > 0.88, dashboardAppearance);
+  const workerScrollAppearance = await page.locator('.owner-worker-scroll').evaluate((region) => ({
+    overflowY: getComputedStyle(region).overflowY,
+    overscrollY: getComputedStyle(region).overscrollBehaviorY,
+    clientHeight: region.clientHeight,
+    scrollHeight: region.scrollHeight
+  }));
+  check(
+    'new view: worker rows have their own contained vertical scroll',
+    workerScrollAppearance.overflowY === 'auto' &&
+      workerScrollAppearance.overscrollY === 'contain' &&
+      workerScrollAppearance.scrollHeight > workerScrollAppearance.clientHeight,
+    workerScrollAppearance
+  );
+  const firstWorkerLinks = await page.locator('.owner-worker-row').first().locator('a').evaluateAll((links) => links.map((link) => link.getAttribute('href')));
+  check(
+    'new view: compact worker rows preserve profile, timeline and issue links',
+    firstWorkerLinks.some((href) => href?.includes('/admin/workers/') && href.endsWith('#worker-profile')) &&
+      firstWorkerLinks.some((href) => href?.endsWith('/timeline')) &&
+      firstWorkerLinks.some((href) => href?.startsWith('/admin/attendance/exceptions?employeeId=')),
+    firstWorkerLinks
+  );
   const notificationButton = page.locator('.notif-bell-button').last();
   await notificationButton.click();
   const notificationAppearance = await page.locator('.notif-drawer').evaluate((drawer) => ({

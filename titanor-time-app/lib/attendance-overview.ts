@@ -238,7 +238,7 @@ export interface OverviewDiff {
 }
 
 export interface OverviewWorkerItem {
-  employee: { id: string; name: string; employeeNumber: string };
+  employee: { id: string; name: string; employeeNumber: string; hasPhoto: boolean };
   todayStatus: 'WORKING' | 'FINISHED' | 'NOT_STARTED';
   todayWorkedMinutes: number;
   needsAttention: boolean;
@@ -377,7 +377,16 @@ export async function buildOperationalOverview(tx: Prisma.TransactionClient, fil
 
   // ---- 2. Bulk fetch everything, bounded by employeeIds.length (never per-row awaits) --------
   const [employees, currentAssignments, openShifts, finishedShiftsRaw, openExceptions, timesheets] = await Promise.all([
-    tx.employee.findMany({ where: { id: { in: employeeIds } }, select: { id: true, employeeNumber: true, firstName: true, lastName: true } }),
+    tx.employee.findMany({
+      where: { id: { in: employeeIds } },
+      select: {
+        id: true,
+        employeeNumber: true,
+        firstName: true,
+        lastName: true,
+        profile: { select: { photoPath: true } }
+      }
+    }),
     tx.siteAssignment.findMany({
       where: {
         employeeId: { in: employeeIds },
@@ -600,7 +609,12 @@ export async function buildOperationalOverview(tx: Prisma.TransactionClient, fil
     const myAssignments = assignmentsByEmployee.get(employeeId) ?? [];
 
     const item: OverviewWorkerItem = {
-      employee: { id: employee.id, name: `${employee.firstName} ${employee.lastName}`, employeeNumber: employee.employeeNumber },
+      employee: {
+        id: employee.id,
+        name: `${employee.firstName} ${employee.lastName}`,
+        employeeNumber: employee.employeeNumber,
+        hasPhoto: Boolean(employee.profile?.photoPath)
+      },
       todayStatus,
       todayWorkedMinutes,
       needsAttention,

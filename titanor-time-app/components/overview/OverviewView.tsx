@@ -1,5 +1,6 @@
 'use client';
 
+import Image from 'next/image';
 import Link from 'next/link';
 import type { OverviewResult, OverviewSummary, OverviewWorkerItem, OverviewConflicts, OperationalState } from '@/lib/attendance-overview';
 import { OPERATIONAL_STATE_VALUES } from '@/lib/attendance-overview';
@@ -308,12 +309,28 @@ function OwnerWorkerList({ items, totalItems, asOf }: { items: OverviewWorkerIte
   return (
     <section className="owner-workers" aria-labelledby="owner-workers-title">
       <div className="owner-workers-heading"><h2 id="owner-workers-title">{ru ? 'Работники сегодня' : 'Workers today'}</h2><span>{totalItems}</span></div>
-      <div className="owner-worker-columns" aria-hidden="true"><span>{ru ? 'Работник' : 'Worker'}</span><span>{ru ? 'Статус' : 'Status'}</span><span>{ru ? 'Объект' : 'Site'}</span><span>{ru ? 'Приход' : 'Check In'}</span><span>{ru ? 'Уход' : 'Check Out'}</span><span>{ru ? 'Сегодня' : 'Today'}</span><span>{ru ? 'Проблемы' : 'Issues'}</span><span /></div>
-      <ul className="owner-worker-list">
-        {items.map((item) => <OwnerWorkerRow key={item.employee.id} item={item} asOf={asOf} />)}
-      </ul>
+      <div
+        className="owner-worker-scroll"
+        role="region"
+        aria-label={ru ? 'Прокручиваемый список работников' : 'Scrollable worker list'}
+        tabIndex={0}
+      >
+        <div className="owner-worker-columns" aria-hidden="true"><span>{ru ? 'Работник' : 'Worker'}</span><span>{ru ? 'Статус' : 'Status'}</span><span>{ru ? 'Объект' : 'Site'}</span><span>{ru ? 'Приход' : 'Check In'}</span><span>{ru ? 'Уход' : 'Check Out'}</span><span>{ru ? 'Сегодня' : 'Today'}</span><span>{ru ? 'Проблемы' : 'Issues'}</span><span /></div>
+        <ul className="owner-worker-list">
+          {items.map((item) => <OwnerWorkerRow key={item.employee.id} item={item} asOf={asOf} />)}
+        </ul>
+      </div>
     </section>
   );
+}
+
+function workerInitials(name: string): string {
+  return name
+    .split(/\s+/)
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((part) => part[0]?.toLocaleUpperCase() ?? '')
+    .join('');
 }
 
 function OwnerWorkerRow({ item, asOf }: { item: OverviewWorkerItem; asOf: string }) {
@@ -336,8 +353,24 @@ function OwnerWorkerRow({ item, asOf }: { item: OverviewWorkerItem; asOf: string
     <li>
       <div className="owner-worker-row" aria-label={`Open ${item.employee.name}`}>
         <Link href={profileEditHref} className="owner-cell-link owner-worker-identity" aria-label={ru ? `Редактировать профиль ${item.employee.name}` : `Edit profile ${item.employee.name}`}>
-          <strong>{item.employee.name}</strong>
-          <small>#{item.employee.employeeNumber}</small>
+          <span className="owner-worker-avatar" aria-hidden="true">
+            {item.employee.hasPhoto ? (
+              <Image
+                src={`/api/admin/workers/${item.employee.id}/profile/photo`}
+                alt=""
+                width={36}
+                height={36}
+                sizes="36px"
+                unoptimized
+              />
+            ) : (
+              <span>{workerInitials(item.employee.name)}</span>
+            )}
+          </span>
+          <span className="owner-worker-identity-copy">
+            <strong>{item.employee.name}</strong>
+            <small>#{item.employee.employeeNumber}</small>
+          </span>
         </Link>
         <Link href={statusHref} className="owner-cell-link" aria-label={ru ? `Проверить статус ${item.employee.name}` : `Check status for ${item.employee.name}`}>
           <span className={`owner-status ${statusClass}`}>{statusLabel}</span>
