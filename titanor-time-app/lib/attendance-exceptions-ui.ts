@@ -168,6 +168,7 @@ const DETAIL_KEY_LABELS: Record<string, { en: string; ru: string }> = {
   distanceToSiteMeters: { en: 'Distance to site centre (m)', ru: 'Расстояние до центра объекта (м)' },
   geofenceRadiusMeters: { en: 'Site geofence radius (m)', ru: 'Радиус геозоны объекта (м)' },
   pointInsideGeofence: { en: 'Point inside geofence (ignoring accuracy)', ru: 'Точка внутри геозоны (без учёта точности)' },
+  boundaryUncertain: { en: 'GPS accuracy crosses the site boundary', ru: 'Погрешность GPS пересекает границу объекта' },
   reason: { en: 'Reason', ru: 'Причина' },
   clockSkewMs: { en: 'Clock skew (ms)', ru: 'Расхождение времени (мс)' },
   assumedSiteId: { en: 'Assumed site', ru: 'Предполагаемый объект' },

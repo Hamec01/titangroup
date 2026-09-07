@@ -11,7 +11,9 @@ export interface StatusMessage {
 }
 
 export type GpsUiState = 'IDLE' | 'CHECKING' | 'READY' | 'PERMISSION' | 'UNAVAILABLE';
-export type ZoneStatus = 'UNKNOWN' | 'CHECKING' | 'INSIDE' | 'OUTSIDE' | 'LOW_ACCURACY' | 'NO_GEOFENCE' | 'UNAVAILABLE';
+// GPS confidence zone (2026-09-07) — NEAR_BOUNDARY is the new state for "precise enough, but the
+// GPS error circle straddles the geofence edge" (evaluateZoneProximity's fourth outcome).
+export type ZoneStatus = 'UNKNOWN' | 'CHECKING' | 'INSIDE' | 'OUTSIDE' | 'NEAR_BOUNDARY' | 'LOW_ACCURACY' | 'NO_GEOFENCE' | 'UNAVAILABLE';
 
 // docs/titanor-time/T7A_1_ATTENDANCE_CLOCK_DESIGN.md Addendum "T7A.10C.1" §C — the narrow
 // structural subset this component actually reads off an assignment. Both the server-side

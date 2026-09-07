@@ -11,9 +11,12 @@ import {
   stopGpsWatch,
   currentBestFix,
   hasFreshGoodFix,
+  hasConfidentInsideFix,
   isGeoOnboarded,
   markGeoOnboarded,
   clearGeoOnboarded,
+  MAX_ACCEPTABLE_ACCURACY_METERS,
+  MAX_AUTO_VERIFY_ACCURACY_METERS,
   type GpsSnapshot,
   type GeolocationPermissionState
 } from '@/lib/worker-gps';
@@ -503,9 +506,12 @@ export function WorkerClockPanel({ initialClockState, assignments, workerName, t
   // no prompt. Otherwise show the "finding your location" countdown; `captureGpsSnapshot` waits up
   // to GPS_WAIT_SECONDS and the worker can press "clock in anyway" (skipGpsWait) to abort early and
   // take whatever cached / last-good point is available.
-  async function runGpsCapture(): Promise<GpsSnapshot> {
-    if (hasFreshGoodFix()) {
-      return captureGpsSnapshot({ maxWaitMs: GPS_WAIT_SECONDS * 1000 });
+  async function runGpsCapture(zone?: { latitude: number; longitude: number; radiusMeters: number } | null): Promise<GpsSnapshot> {
+    // GPS confidence zone (2026-09-07) — skip the "finding your location" wait entirely when the
+    // fix on hand is either genuinely accurate OR already places the worker confidently inside the
+    // site geofence by the circle-vs-radius test. `zone` is the target site's cached geofence.
+    if (hasFreshGoodFix() || hasConfidentInsideFix(zone)) {
+      return captureGpsSnapshot({ maxWaitMs: GPS_WAIT_SECONDS * 1000, zone });
     }
     const abort = new AbortController();
     gpsWaitAbortRef.current = abort;
@@ -515,7 +521,7 @@ export function WorkerClockPanel({ initialClockState, assignments, workerName, t
       setGpsWaitSecondsLeft(Math.max(0, GPS_WAIT_SECONDS - Math.floor((Date.now() - startedAt) / 1000)));
     }, 250);
     try {
-      return await captureGpsSnapshot({ maxWaitMs: GPS_WAIT_SECONDS * 1000, signal: abort.signal });
+      return await captureGpsSnapshot({ maxWaitMs: GPS_WAIT_SECONDS * 1000, signal: abort.signal, zone });
     } finally {
       window.clearInterval(ticker);
       setGpsWaitSecondsLeft(null);
@@ -562,7 +568,7 @@ export function WorkerClockPanel({ initialClockState, assignments, workerName, t
     setGpsStatus('CHECKING');
     setStatusMessage({ kind: 'info', text: t.gettingLocation });
     try {
-      const gpsSnapshot: GpsSnapshot = await runGpsCapture();
+      const gpsSnapshot: GpsSnapshot = await runGpsCapture(cachedGeofenceFor(assignment.siteId));
       setGpsStatus(resolveGpsUiState(gpsSnapshot));
       setLocating(false);
       if (!(await confirmOutsideZone(assignment.siteName, gpsSnapshot, assignment.siteId))) {
@@ -599,7 +605,7 @@ export function WorkerClockPanel({ initialClockState, assignments, workerName, t
     setGpsStatus('CHECKING');
     setStatusMessage({ kind: 'info', text: t.gettingLocation });
     try {
-      const gpsSnapshot: GpsSnapshot = await runGpsCapture();
+      const gpsSnapshot: GpsSnapshot = await runGpsCapture(projected.siteId ? cachedGeofenceFor(projected.siteId) : null);
       setGpsStatus(resolveGpsUiState(gpsSnapshot));
       setLocating(false);
       // §5.4 — Check Out is never blocked by a missing/failed GPS reading.
@@ -653,7 +659,7 @@ export function WorkerClockPanel({ initialClockState, assignments, workerName, t
     setGpsStatus('CHECKING');
     setStatusMessage({ kind: 'info', text: t.gettingLocation });
     try {
-      const gpsSnapshot: GpsSnapshot = await runGpsCapture();
+      const gpsSnapshot: GpsSnapshot = await runGpsCapture(cachedGeofenceFor(target.siteId));
       setGpsStatus(resolveGpsUiState(gpsSnapshot));
       setLocating(false);
       if (!(await confirmOutsideZone(target.siteName, gpsSnapshot, target.siteId))) {
@@ -763,9 +769,11 @@ export function WorkerClockPanel({ initialClockState, assignments, workerName, t
       ? t.statusZoneInside
       : zoneStatus === 'OUTSIDE'
         ? t.statusZoneOutside
-        : zoneStatus === 'LOW_ACCURACY'
-          ? t.statusZoneLowAccuracy
-          : t.statusZoneUnavailable;
+        : zoneStatus === 'NEAR_BOUNDARY'
+          ? t.statusZoneNearBoundary
+          : zoneStatus === 'LOW_ACCURACY'
+            ? t.statusZoneLowAccuracy
+            : t.statusZoneUnavailable;
   // Hidden when there's nothing to check yet (no site selected) or the site has no geofence
   // configured — a badge with nothing meaningful to report would just be noise.
   const showZoneStatus = zoneStatus !== 'UNKNOWN' && zoneStatus !== 'NO_GEOFENCE';
@@ -836,12 +844,17 @@ export function WorkerClockPanel({ initialClockState, assignments, workerName, t
 
       {(gpsPermission === 'granted' || gpsPermission === 'unsupported' || gpsPermission === null) && (
         <p className="wk-gps-accuracy">
+          {/* GPS confidence zone (2026-09-07) — a fix is "good" up to 75 m, still "usable" up to the
+              250 m auto-verify ceiling, and only a weak signal (→ manual review) beyond that. The
+              "Improve" affordance only appears once the fix is actually weak. */}
           {bestAccuracyM === null
             ? t.gpsAccuracyUnknown
-            : bestAccuracyM <= 75
+            : bestAccuracyM <= MAX_ACCEPTABLE_ACCURACY_METERS
               ? t.gpsAccuracyGood(Math.round(bestAccuracyM))
-              : t.gpsAccuracyPoor(Math.round(bestAccuracyM))}
-          {bestAccuracyM !== null && bestAccuracyM > 75 ? (
+              : bestAccuracyM <= MAX_AUTO_VERIFY_ACCURACY_METERS
+                ? t.gpsAccuracyModerate(Math.round(bestAccuracyM))
+                : t.gpsAccuracyPoor(Math.round(bestAccuracyM))}
+          {bestAccuracyM !== null && bestAccuracyM > MAX_AUTO_VERIFY_ACCURACY_METERS ? (
             <button type="button" className="wk-inline-secondary" onClick={() => void handleRefineGps()} disabled={refiningGps}>
               {refiningGps ? t.gpsRefining : t.gpsRefine}
             </button>

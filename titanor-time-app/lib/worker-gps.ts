@@ -1,5 +1,12 @@
 // docs/titanor-time/T7A_1_ATTENDANCE_CLOCK_DESIGN.md §5.1/§9 (GPS UX) + T11_GPS_IMPROVEMENTS_DESIGN.md
-// (2026-08-28, GPS steps 2+3). Browser-only helper used by app/worker/WorkerClockPanel.tsx.
+// (2026-08-28, GPS steps 2+3) + docs/titanor-time/GPS_CONFIDENCE_ZONE_250_RU.md (2026-09-07).
+// Browser-only helper used by app/worker/WorkerClockPanel.tsx.
+//
+// GPS confidence zone (2026-09-07): the client's usable-accuracy ceiling is 250 m
+// (MAX_AUTO_VERIFY_ACCURACY_METERS), aligned with the server. A fix worse than the old 75 m is no
+// longer treated as "unacceptable" and the worker is not made to wait for a better one when the
+// circle-vs-radius test already places them on site. `evaluateZoneProximity` returns the four
+// confidence states INSIDE / OUTSIDE / NEAR_BOUNDARY / LOW_ACCURACY.
 //
 // GPS steps 2+3 changed the capture model, at the owner's explicit request:
 //   - one long-lived `watchPosition` (startGpsWatch/stopGpsWatch) owned by the clock panel while
@@ -26,9 +33,17 @@
 export type ClientGpsUnavailableReason = 'PERMISSION_DENIED' | 'TIMEOUT' | 'POSITION_UNAVAILABLE';
 
 const EARTH_RADIUS_METERS = 6371000;
-// Mirrors lib/attendance-clock.ts's MAX_ACCEPTABLE_ACCURACY_METERS — a fix at or under this is
-// "good enough" to stop waiting for a better one and to render the client "in zone" badge.
+// Mirrors lib/attendance-clock.ts's MAX_ACCEPTABLE_ACCURACY_METERS — a fix at or under this is a
+// genuinely good one: stop waiting for a better fix, persist it as this device's last-good point,
+// and show the green "GPS accuracy — good" readout.
 export const MAX_ACCEPTABLE_ACCURACY_METERS = 75;
+// GPS confidence zone (2026-09-07) — mirrors lib/attendance-clock.ts's MAX_AUTO_VERIFY_ACCURACY_METERS.
+// The client's upper bound for treating a fix as usable at all: a reading up to this imprecise can
+// still put the worker confidently inside/outside the geofence by the circle-vs-radius test, so the
+// clock screen must NOT call it "unacceptable" or keep the worker waiting. Above this it is a weak
+// signal ("your check-in will be reviewed"). The server (single source of truth) re-decides every
+// event with min(companyPolicy, 250); this constant only drives the advisory client UI.
+export const MAX_AUTO_VERIFY_ACCURACY_METERS = 250;
 
 export function haversineDistanceMeters(lat1: number, lon1: number, lat2: number, lon2: number): number {
   const toRad = (deg: number): number => (deg * Math.PI) / 180;
@@ -39,17 +54,31 @@ export function haversineDistanceMeters(lat1: number, lon1: number, lat2: number
   return EARTH_RADIUS_METERS * c;
 }
 
-export type ZoneProximity = 'INSIDE' | 'OUTSIDE' | 'LOW_ACCURACY';
+export type ZoneProximity = 'INSIDE' | 'OUTSIDE' | 'NEAR_BOUNDARY' | 'LOW_ACCURACY';
 
+/**
+ * GPS confidence zone (2026-09-07) — the advisory client mirror of the server's evaluateGpsReading.
+ * Same geometry, same 250 m ceiling: only report INSIDE / OUTSIDE when the whole error circle is on
+ * one side of the geofence edge; a circle that straddles the edge is NEAR_BOUNDARY ("будет
+ * проверено"), and a fix worse than 250 m is LOW_ACCURACY. This never gates a clock action — the
+ * server re-decides every event — it only drives the "On site" / "Near the boundary" / "Off site"
+ * badge and the "you are already on site, no need to wait" capture short-circuit.
+ */
 export function evaluateZoneProximity(
   location: { latitude: number; longitude: number; accuracyMeters: number },
   geofence: { latitude: number; longitude: number; radiusMeters: number }
 ): ZoneProximity {
-  if (location.accuracyMeters > MAX_ACCEPTABLE_ACCURACY_METERS) {
+  if (location.accuracyMeters > MAX_AUTO_VERIFY_ACCURACY_METERS) {
     return 'LOW_ACCURACY';
   }
   const distanceMeters = haversineDistanceMeters(location.latitude, location.longitude, geofence.latitude, geofence.longitude);
-  return distanceMeters <= geofence.radiusMeters + location.accuracyMeters ? 'INSIDE' : 'OUTSIDE';
+  if (distanceMeters + location.accuracyMeters <= geofence.radiusMeters) {
+    return 'INSIDE';
+  }
+  if (distanceMeters - location.accuracyMeters > geofence.radiusMeters) {
+    return 'OUTSIDE';
+  }
+  return 'NEAR_BOUNDARY';
 }
 
 export interface GpsLocation {
@@ -237,7 +266,10 @@ function pushFix(loc: GpsLocation): void {
   const cutoff = now - FIX_BUFFER_MS;
   recentFixes = recentFixes.filter((f) => f.at >= cutoff).slice(-FIX_BUFFER_MAX);
   // T14 — remember the best fix on the device so an offline/indoor capture later has something.
-  if (loc.accuracyMeters <= MAX_ACCEPTABLE_ACCURACY_METERS) {
+  // GPS confidence zone — a fix up to 250 m is still worth keeping as a last-good point (it is only
+  // ever replayed as an APPROXIMATE, never-auto-verified coordinate); persistFix keeps its own 300 m
+  // hard cap on top.
+  if (loc.accuracyMeters <= MAX_AUTO_VERIFY_ACCURACY_METERS) {
     persistFix(loc);
   }
 }
@@ -316,6 +348,21 @@ export function hasFreshGoodFix(): boolean {
   return !!f && f.accuracyMeters <= MAX_ACCEPTABLE_ACCURACY_METERS;
 }
 
+export interface ZoneShape {
+  latitude: number;
+  longitude: number;
+  radiusMeters: number;
+}
+
+/** GPS confidence zone (2026-09-07) — true when the best fix on hand right now already places the
+ *  whole error circle inside `zone` (evaluateZoneProximity === 'INSIDE'). The panel uses this so a
+ *  worker who is provably on site is never made to wait ~25 s for a "better" fix. */
+export function hasConfidentInsideFix(zone: ZoneShape | null | undefined): boolean {
+  if (!zone) return false;
+  const f = bestRecentFix(60_000);
+  return !!f && evaluateZoneProximity(f, zone) === 'INSIDE';
+}
+
 function getCurrentPositionCached(maxAgeMs: number, timeoutMs: number): Promise<{ location: GpsLocation | null; reason: ClientGpsUnavailableReason | null }> {
   return new Promise((resolve) => {
     navigator.geolocation.getCurrentPosition(
@@ -332,18 +379,27 @@ function getCurrentPositionCached(maxAgeMs: number, timeoutMs: number): Promise<
 
 /**
  * Best-effort GPS reading for a Check In/Out/Switch:
- *   1. a recent (<=60 s) fix already good enough (<= MAX_ACCEPTABLE_ACCURACY_METERS) — use it;
+ *   1. a recent (<=60 s) fix already good enough (<= MAX_ACCEPTABLE_ACCURACY_METERS), OR one that
+ *      already places the worker confidently inside `opts.zone` — use it, no waiting;
  *   2. otherwise run the watch, seed a getCurrentPosition, and poll the buffer up to `maxWaitMs`
  *      (default CAPTURE_WAIT_MS; the panel passes a shorter value and an AbortSignal so the worker
- *      can press "check in anyway");
+ *      can press "check in anyway") — the poll also stops early as soon as a buffered fix is
+ *      confidently inside `opts.zone`;
  *   3. the best fresh-ish fix in the buffer, even if inaccurate — still `approximate: false`;
  *   4. an OS-cached fix up to 15 min old — `approximate: true`;
  *   5. the device's persisted last-good fix (<= 30 min) — `approximate: true`;
  *   6. nothing — { location: null, reason }.
+ *
+ * `opts.zone` is the selected site's cached geofence (centre + radius). It is advisory only — a
+ * shortcut to avoid a pointless wait when the worker is provably on site; the server still
+ * re-evaluates every event against the authoritative geofence.
  */
-export async function captureGpsSnapshot(opts: { maxWaitMs?: number; signal?: AbortSignal } = {}): Promise<GpsSnapshot> {
+export async function captureGpsSnapshot(opts: { maxWaitMs?: number; signal?: AbortSignal; zone?: ZoneShape | null } = {}): Promise<GpsSnapshot> {
   const maxWaitMs = opts.maxWaitMs ?? CAPTURE_WAIT_MS;
   const aborted = () => opts.signal?.aborted ?? false;
+  const zone = opts.zone ?? null;
+  const goodEnough = (loc: GpsLocation): boolean =>
+    loc.accuracyMeters <= MAX_ACCEPTABLE_ACCURACY_METERS || (zone !== null && evaluateZoneProximity(loc, zone) === 'INSIDE');
 
   const finishWithBestAvailable = async (lastError: ClientGpsUnavailableReason | null): Promise<GpsSnapshot> => {
     const buffered = bestRecentFix(maxWaitMs + 10_000);
@@ -373,7 +429,7 @@ export async function captureGpsSnapshot(opts: { maxWaitMs?: number; signal?: Ab
   }
 
   const alreadyGood = bestRecentFix(60_000);
-  if (alreadyGood && alreadyGood.accuracyMeters <= MAX_ACCEPTABLE_ACCURACY_METERS) {
+  if (alreadyGood && goodEnough(alreadyGood)) {
     return { location: alreadyGood, gpsUnavailableReason: null, ...FRESH };
   }
   if (aborted()) return finishWithBestAvailable(null);
@@ -398,7 +454,7 @@ export async function captureGpsSnapshot(opts: { maxWaitMs?: number; signal?: Ab
   const deadline = Date.now() + maxWaitMs;
   while (Date.now() < deadline && !aborted()) {
     const candidate = bestRecentFix(maxWaitMs + 5000);
-    if (candidate && candidate.accuracyMeters <= MAX_ACCEPTABLE_ACCURACY_METERS) {
+    if (candidate && goodEnough(candidate)) {
       return { location: candidate, gpsUnavailableReason: null, ...FRESH };
     }
     await sleep(CAPTURE_POLL_MS);

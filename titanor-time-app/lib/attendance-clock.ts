@@ -26,6 +26,14 @@ import { acquireEmployeeLifecycleLock } from '@/lib/assignment-lock';
 // admin attendance overview.
 
 const MAX_ACCEPTABLE_ACCURACY_METERS = 75;
+// GPS confidence zone (2026-09-07) — the ABSOLUTE ceiling for any automatic GPS decision. A reading
+// less precise than this is never auto-verified, whatever CompanyAttendancePolicy.maxGpsAccuracyMeters
+// says: the "is the whole error circle inside / outside the geofence?" geometry below is only
+// meaningful when the error radius is small enough to place the worker with certainty. The company
+// policy value still applies on top of this (a site left at 75 keeps 75) — evaluateGpsReading uses
+// min(policy, 250). Target company value is 250; changing production 75 -> 250 is a separate,
+// separately-authorised admin-API rollout (docs/titanor-time/GPS_CONFIDENCE_ZONE_250_RU.md §rollout).
+const MAX_AUTO_VERIFY_ACCURACY_METERS = 250;
 const EARTH_RADIUS_METERS = 6371000;
 const LATITUDE_MIN = -90;
 const LATITUDE_MAX = 90;
@@ -48,7 +56,8 @@ const SKEW_TOLERANCE_MS = BigInt(5 * 60000); // §5.5 rules 2/3
 const CHRONOLOGY_CLAMP_MS = 1;
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
-export const ATTENDANCE_CLOCK_CONSTANTS = { MAX_ACCEPTABLE_ACCURACY_METERS };
+export const ATTENDANCE_CLOCK_CONSTANTS = { MAX_ACCEPTABLE_ACCURACY_METERS, MAX_AUTO_VERIFY_ACCURACY_METERS };
+export { MAX_AUTO_VERIFY_ACCURACY_METERS };
 
 // ---------------------------------------------------------------------------------------------
 // 1. GPS evaluation (§5.2) — pure function, Haversine, no PostGIS.
@@ -83,6 +92,12 @@ export interface GpsEvaluation {
   gpsAccuracyMeters: number | null;
   distanceMeters: number | null;
   location: { latitude: number; longitude: number } | null;
+  /** GPS confidence zone (2026-09-07) — true only for the NOT_VERIFIED sub-case where the reading
+   *  is precise enough (accuracy <= the effective gate <= 250 m) but its error circle straddles the
+   *  geofence boundary, so neither "inside" nor "outside" can be asserted. `gpsUnavailableReason`
+   *  stays the wire-compatible `LOW_ACCURACY`; this flag lets the admin exception detail explain
+   *  "the GPS accuracy circle crosses the site boundary" rather than "accuracy too low". */
+  boundaryUncertain: boolean;
 }
 
 function haversineDistanceMeters(lat1: number, lon1: number, lat2: number, lon2: number): number {
@@ -95,39 +110,62 @@ function haversineDistanceMeters(lat1: number, lon1: number, lat2: number, lon2:
 }
 
 /**
- * §5.2 — evaluates one GPS reading against a site's current geofence (or its absence). Never
- * trusts a geofence version supplied by the client — `geofence` here must always be the caller's
- * own fresh, server-side lookup of the site's authoritative currentGeofenceVersionId.
+ * §5.2 + GPS confidence zone (2026-09-07) — evaluates one GPS reading against a site's current
+ * geofence (or its absence). Never trusts a geofence version supplied by the client — `geofence`
+ * here must always be the caller's own fresh, server-side lookup of the site's authoritative
+ * currentGeofenceVersionId. This function is the SINGLE source of the accept/flag decision: the
+ * online clock paths (check-in / check-out / switch), the offline /sync path, and every idempotent
+ * replay all route through it, so the classification is identical across all of them.
+ *
+ * Given `distance` (phone -> geofence centre), `accuracy` (the phone's ± error) and `radius`:
+ *   - accuracy > the effective gate (= min(policy, 250))  -> NOT_VERIFIED / LOW_ACCURACY  (manual)
+ *   - no geofence configured                              -> NOT_VERIFIED                  (manual)
+ *   - distance + accuracy <= radius   (whole circle in)   -> VERIFIED_INSIDE               (no flag)
+ *   - distance - accuracy >  radius   (whole circle out)  -> VERIFIED_OUTSIDE   (violation handling
+ *                                                            unchanged from before)
+ *   - otherwise (circle straddles the boundary)           -> NOT_VERIFIED / LOW_ACCURACY, with
+ *                                                            boundaryUncertain=true          (manual)
+ * A missing coordinate (TIMEOUT / POSITION_UNAVAILABLE / PERMISSION_DENIED) and an APPROXIMATE /
+ * cached point (which arrives as `location: null` — see validateApproximateGpsPayload) both stay
+ * NOT_VERIFIED here and are never auto-confirmed, exactly as before.
+ *
+ * VERIFIED_OUTSIDE is byte-for-byte the pre-existing definition (`distance - accuracy > radius` is
+ * the same predicate as the old `!(distance <= radius + accuracy)`), so genuine OUTSIDE_GEOFENCE
+ * handling is not weakened. Only the INSIDE half is tightened: the old code auto-verified any point
+ * with `distance <= radius + accuracy` (i.e. the centre could sit up to one accuracy-radius OUTSIDE
+ * the fence); that band is now the NEAR_BOUNDARY / manual-check zone.
  */
 export function evaluateGpsReading(
   reading: ClockGpsReading,
   geofence: ClockGeofence | null,
-  // GPS step 4 (T11) — the accuracy gate is now CompanyAttendancePolicy.maxGpsAccuracyMeters,
-  // loaded by the caller (loadMaxGpsAccuracyMeters). Defaults to the historic hard-coded 75 so
-  // every pure/test caller that doesn't pass one keeps the old behaviour.
+  // GPS step 4 (T11) — the accuracy gate is CompanyAttendancePolicy.maxGpsAccuracyMeters, loaded by
+  // the caller (loadMaxGpsAccuracyMeters). Defaults to the historic hard-coded 75 so every pure/test
+  // caller that doesn't pass one keeps the old behaviour. It is clamped to the absolute
+  // MAX_AUTO_VERIFY_ACCURACY_METERS (250) ceiling below, so a policy value above 250 never widens
+  // auto-verification, and a policy still at 75 is still honoured (never silently ignored).
   maxAccuracyMeters: number = MAX_ACCEPTABLE_ACCURACY_METERS
 ): GpsEvaluation {
   if (!reading.location) {
-    return { gpsVerification: 'NOT_VERIFIED', gpsUnavailableReason: reading.gpsUnavailableReason, geofenceVersionId: null, gpsAccuracyMeters: null, distanceMeters: null, location: null };
+    return { gpsVerification: 'NOT_VERIFIED', gpsUnavailableReason: reading.gpsUnavailableReason, geofenceVersionId: null, gpsAccuracyMeters: null, distanceMeters: null, location: null, boundaryUncertain: false };
   }
   const { latitude, longitude, accuracyMeters } = reading.location;
-  if (accuracyMeters > maxAccuracyMeters) {
-    return { gpsVerification: 'NOT_VERIFIED', gpsUnavailableReason: 'LOW_ACCURACY', geofenceVersionId: null, gpsAccuracyMeters: accuracyMeters, distanceMeters: null, location: { latitude, longitude } };
+  const effectiveMaxAccuracy = Math.min(maxAccuracyMeters, MAX_AUTO_VERIFY_ACCURACY_METERS);
+  if (accuracyMeters > effectiveMaxAccuracy) {
+    return { gpsVerification: 'NOT_VERIFIED', gpsUnavailableReason: 'LOW_ACCURACY', geofenceVersionId: null, gpsAccuracyMeters: accuracyMeters, distanceMeters: null, location: { latitude, longitude }, boundaryUncertain: false };
   }
   if (!geofence) {
-    return { gpsVerification: 'NOT_VERIFIED', gpsUnavailableReason: null, geofenceVersionId: null, gpsAccuracyMeters: accuracyMeters, distanceMeters: null, location: { latitude, longitude } };
+    return { gpsVerification: 'NOT_VERIFIED', gpsUnavailableReason: null, geofenceVersionId: null, gpsAccuracyMeters: accuracyMeters, distanceMeters: null, location: { latitude, longitude }, boundaryUncertain: false };
   }
   const distanceMeters = haversineDistanceMeters(latitude, longitude, geofence.latitude, geofence.longitude);
-  const effectiveRadius = geofence.radiusMeters + accuracyMeters;
-  const inside = distanceMeters <= effectiveRadius;
-  return {
-    gpsVerification: inside ? 'VERIFIED_INSIDE' : 'VERIFIED_OUTSIDE',
-    gpsUnavailableReason: null,
-    geofenceVersionId: geofence.geofenceVersionId,
-    gpsAccuracyMeters: accuracyMeters,
-    distanceMeters,
-    location: { latitude, longitude }
-  };
+  if (distanceMeters + accuracyMeters <= geofence.radiusMeters) {
+    return { gpsVerification: 'VERIFIED_INSIDE', gpsUnavailableReason: null, geofenceVersionId: geofence.geofenceVersionId, gpsAccuracyMeters: accuracyMeters, distanceMeters, location: { latitude, longitude }, boundaryUncertain: false };
+  }
+  if (distanceMeters - accuracyMeters > geofence.radiusMeters) {
+    return { gpsVerification: 'VERIFIED_OUTSIDE', gpsUnavailableReason: null, geofenceVersionId: geofence.geofenceVersionId, gpsAccuracyMeters: accuracyMeters, distanceMeters, location: { latitude, longitude }, boundaryUncertain: false };
+  }
+  // Precise enough, but the error circle crosses the boundary — a manual admin check, kept on the
+  // wire-compatible LOW_ACCURACY reason so ClockEvent.gpsUnavailableReason needs no schema change.
+  return { gpsVerification: 'NOT_VERIFIED', gpsUnavailableReason: 'LOW_ACCURACY', geofenceVersionId: null, gpsAccuracyMeters: accuracyMeters, distanceMeters, location: { latitude, longitude }, boundaryUncertain: true };
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -745,6 +783,12 @@ export function exceptionDetailForGps(evaluation: GpsEvaluation, geofence: Clock
       base.distanceToSiteMeters = distanceToSiteMeters;
       base.geofenceRadiusMeters = geofence.radiusMeters;
       base.pointInsideGeofence = distanceToSiteMeters <= geofence.radiusMeters;
+    }
+    // GPS confidence zone (2026-09-07) — the reading was precise enough (accuracy within the gate)
+    // but its error circle straddled the geofence edge. Marks the exception so the admin sees
+    // "GPS accuracy circle crosses the site boundary" instead of a plain "accuracy too low".
+    if (evaluation.boundaryUncertain) {
+      base.boundaryUncertain = true;
     }
     return base as Prisma.InputJsonValue;
   }

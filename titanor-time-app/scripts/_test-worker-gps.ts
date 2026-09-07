@@ -9,6 +9,7 @@ import {
   captureGpsSnapshot,
   currentBestFix,
   hasFreshGoodFix,
+  hasConfidentInsideFix,
   loadPersistedFix,
   clearPersistedFix,
   isGeoOnboarded,
@@ -17,7 +18,8 @@ import {
   __resetGpsForTest,
   __pushFixForTest,
   __setPersistedFixForTest,
-  MAX_ACCEPTABLE_ACCURACY_METERS
+  MAX_ACCEPTABLE_ACCURACY_METERS,
+  MAX_AUTO_VERIFY_ACCURACY_METERS
 } from '../lib/worker-gps';
 
 let pass = 0;
@@ -51,6 +53,25 @@ async function main() {
   check('accuracy over the gate -> LOW_ACCURACY', evaluateZoneProximity({ latitude: 60.4440, longitude: 22.2085, accuracyMeters: 2000 }, geo) === 'LOW_ACCURACY');
   check('MAX_ACCEPTABLE_ACCURACY_METERS is 75', MAX_ACCEPTABLE_ACCURACY_METERS === 75);
 
+  // --- GPS confidence zone (2026-09-07): evaluateZoneProximity mirrors the server model ---
+  check('MAX_AUTO_VERIFY_ACCURACY_METERS is 250', MAX_AUTO_VERIFY_ACCURACY_METERS === 250);
+  {
+    // radiusMeters 900, centre far enough that a point 550 m away sits inside with margin.
+    // Use a synthetic geofence + a point at a known distance by moving purely along latitude.
+    const c = { latitude: 60.0, longitude: 24.0, radiusMeters: 900 };
+    const atMetresNorth = (m: number) => ({ latitude: 60.0 + m / 111_320, longitude: 24.0 });
+    // 1. real reported case: distance 550, accuracy 128.9 -> whole circle inside -> INSIDE
+    check('confidence: d=550 acc=128.9 r=900 -> INSIDE', evaluateZoneProximity({ ...atMetresNorth(550), accuracyMeters: 128.9 }, c) === 'INSIDE');
+    // 2. boundary equality: distance + accuracy == radius -> still INSIDE
+    check('confidence: d+acc == r -> INSIDE', evaluateZoneProximity({ ...atMetresNorth(771.1), accuracyMeters: 128.9 }, c) === 'INSIDE');
+    // 3. straddles the edge -> NEAR_BOUNDARY
+    check('confidence: d=820 acc=128.9 r=900 -> NEAR_BOUNDARY', evaluateZoneProximity({ ...atMetresNorth(820), accuracyMeters: 128.9 }, c) === 'NEAR_BOUNDARY');
+    // 4. whole circle outside -> OUTSIDE
+    check('confidence: d=1100 acc=128.9 r=900 -> OUTSIDE', evaluateZoneProximity({ ...atMetresNorth(1100), accuracyMeters: 128.9 }, c) === 'OUTSIDE');
+    // 5. precise but > 250 m -> LOW_ACCURACY even if geometrically inside
+    check('confidence: acc=260 inside geometry -> LOW_ACCURACY', evaluateZoneProximity({ ...atMetresNorth(100), accuracyMeters: 260 }, c) === 'LOW_ACCURACY');
+  }
+
   // --- haversine sanity ---
   const d = haversineDistanceMeters(60.4436, 22.2079, 60.4536, 22.2079);
   check('haversine ~1.11 km for 0.01 deg lat', d > 1050 && d < 1160, d);
@@ -65,6 +86,31 @@ async function main() {
   __pushFixForTest({ latitude: 60.44, longitude: 22.2, accuracyMeters: 1800 });
   __pushFixForTest({ latitude: 60.441, longitude: 22.201, accuracyMeters: 30 });
   check('currentBestFix returns the pushed best (30 m)', currentBestFix(60_000)?.accuracyMeters === 30, currentBestFix(60_000));
+
+  // --- GPS confidence zone: hasConfidentInsideFix + captureGpsSnapshot short-circuit ---
+  {
+    const zoneCentre = { latitude: 60.0, longitude: 24.0, radiusMeters: 900 };
+    check('hasConfidentInsideFix -> false with no zone', hasConfidentInsideFix(null) === false);
+    __resetGpsForTest();
+    // a moderately-imprecise (130 m) but confidently-inside fix — 550 m from centre, r 900
+    __pushFixForTest({ latitude: 60.0 + 550 / 111_320, longitude: 24.0, accuracyMeters: 130 });
+    check('hasConfidentInsideFix -> true for a 130 m fix whose circle is fully inside', hasConfidentInsideFix(zoneCentre) === true);
+    check('hasFreshGoodFix -> false for the same 130 m fix (not "good", just "inside")', hasFreshGoodFix() === false);
+
+    // captureGpsSnapshot must return that fix immediately (no wait, no watch polling) when the zone
+    // is supplied — proves the "don't make the worker wait 25 s if already inside" rule. A dead
+    // geolocation is mocked so the ONLY way it returns fast is the confidently-inside short-circuit.
+    const deadGeo: Record<string, unknown> = {
+      getCurrentPosition: (_ok: unknown, err: (e: unknown) => void) => setTimeout(() => err({ code: 3, TIMEOUT: 3, PERMISSION_DENIED: 1, POSITION_UNAVAILABLE: 2 }), 15_000),
+      watchPosition: () => 11,
+      clearWatch: () => {}
+    };
+    Object.defineProperty(globalThis, 'navigator', { value: { geolocation: deadGeo }, configurable: true, writable: true });
+    const started = Date.now();
+    const snap = await captureGpsSnapshot({ maxWaitMs: 20_000, zone: zoneCentre });
+    check('captureGpsSnapshot with a confidently-inside fix returns at once', snap.location?.accuracyMeters === 130 && snap.approximate === false && Date.now() - started < 1000, { snap, ms: Date.now() - started });
+    Object.defineProperty(globalThis, 'navigator', { value: undefined, configurable: true, writable: true });
+  }
 
   // --- captureGpsSnapshot with a mocked geolocation that improves over time ---
   __resetGpsForTest();

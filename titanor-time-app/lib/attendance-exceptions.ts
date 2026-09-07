@@ -29,6 +29,8 @@ const EXCEPTION_DETAIL_ALLOWED_KEYS = new Set([
   'distanceToSiteMeters',
   'geofenceRadiusMeters',
   'pointInsideGeofence',
+  // GPS confidence zone (2026-09-07) — boolean flag: the accuracy circle straddles the geofence edge.
+  'boundaryUncertain',
   'reason',
   'clockSkewMs',
   'assumedSiteId',
@@ -86,7 +88,9 @@ export function actorDisplayName(u: { username: string; employee: { firstName: s
 function summaryForException(type: string, detail: Record<string, unknown> | null): string {
   switch (type) {
     case 'GPS_NOT_VERIFIED':
-      return 'GPS location could not be verified';
+      return detail?.boundaryUncertain === true
+        ? 'GPS accuracy circle crosses the site boundary — manual check needed'
+        : 'GPS location could not be verified';
     case 'OUTSIDE_GEOFENCE_CHECKIN':
       return typeof detail?.distanceMeters === 'number' ? `Checked in ${detail.distanceMeters}m outside the site geofence` : 'Checked in outside the site geofence';
     case 'OUTSIDE_GEOFENCE_CHECKOUT':

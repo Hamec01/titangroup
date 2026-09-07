@@ -66,6 +66,9 @@ export interface WorkerStrings {
   gpsDeniedBody: string;
   gpsAccuracyUnknown: string;
   gpsAccuracyGood: (m: number) => string;
+  // GPS confidence zone (2026-09-07) — accuracy is between "good" and the 250 m ceiling: still
+  // usable, no alarm.
+  gpsAccuracyModerate: (m: number) => string;
   gpsAccuracyPoor: (m: number) => string;
   gpsRefine: string;
   gpsRefining: string;
@@ -85,6 +88,8 @@ export interface WorkerStrings {
   statusZoneChecking: string;
   statusZoneInside: string;
   statusZoneOutside: string;
+  // GPS confidence zone (2026-09-07)
+  statusZoneNearBoundary: string;
   statusZoneLowAccuracy: string;
   statusZoneUnavailable: string;
   workStatus: string;
@@ -351,7 +356,8 @@ export const WORKER_STRINGS: Record<AppLocale, WorkerStrings> = {
     gpsDeniedBody: 'Open your phone settings → this app / browser → Location, and set it to "While using". Then reopen this screen.',
     gpsAccuracyUnknown: 'Getting GPS signal…',
     gpsAccuracyGood: (m: number) => `GPS accuracy ±${m} m — good`,
-    gpsAccuracyPoor: (m: number) => `GPS accuracy ±${m} m — weak signal`,
+    gpsAccuracyModerate: (m: number) => `GPS accuracy ±${m} m — usable`,
+    gpsAccuracyPoor: (m: number) => `GPS accuracy ±${m} m — weak signal, your check-in will be reviewed`,
     gpsRefine: 'Improve',
     gpsRefining: 'Improving…',
     gpsWaitTitle: 'Finding your location',
@@ -368,7 +374,8 @@ export const WORKER_STRINGS: Record<AppLocale, WorkerStrings> = {
     statusZoneChecking: 'Checking…',
     statusZoneInside: 'On site',
     statusZoneOutside: 'Off site',
-    statusZoneLowAccuracy: 'Location too imprecise',
+    statusZoneNearBoundary: 'Near the boundary — will be reviewed',
+    statusZoneLowAccuracy: 'Weak GPS signal — will be reviewed',
     statusZoneUnavailable: 'Unavailable',
     workStatus: 'Work status',
     clockStateLabel: 'Clock state',
@@ -621,7 +628,8 @@ export const WORKER_STRINGS: Record<AppLocale, WorkerStrings> = {
     gpsDeniedBody: 'Откройте настройки телефона → это приложение / браузер → Геолокация, и выберите «При использовании». Затем снова откройте этот экран.',
     gpsAccuracyUnknown: 'Получаем сигнал GPS…',
     gpsAccuracyGood: (m: number) => `Точность GPS ±${m} м — хорошая`,
-    gpsAccuracyPoor: (m: number) => `Точность GPS ±${m} м — слабый сигнал`,
+    gpsAccuracyModerate: (m: number) => `Точность GPS ±${m} м — приемлемая`,
+    gpsAccuracyPoor: (m: number) => `Точность GPS ±${m} м — слабый сигнал, отметку проверит администратор`,
     gpsRefine: 'Уточнить',
     gpsRefining: 'Уточняем…',
     gpsWaitTitle: 'Определяем ваше местоположение',
@@ -638,7 +646,8 @@ export const WORKER_STRINGS: Record<AppLocale, WorkerStrings> = {
     statusZoneChecking: 'Проверяем…',
     statusZoneInside: 'На объекте',
     statusZoneOutside: 'Вне объекта',
-    statusZoneLowAccuracy: 'Слишком неточно',
+    statusZoneNearBoundary: 'Около границы — отметка будет проверена',
+    statusZoneLowAccuracy: 'Слабый сигнал GPS — отметка будет проверена',
     statusZoneUnavailable: 'Недоступно',
     workStatus: 'Статус работы',
     clockStateLabel: 'Состояние',

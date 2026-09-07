@@ -335,7 +335,7 @@ export function PolicyForm({ initialPolicy, canUpdate }: { initialPolicy: Policy
         </div>
 
         <div className="policy-field">
-          <label htmlFor="policy-max-gps-accuracy">{ru ? 'Максимальная точность GPS для подтверждения геозоны (метры)' : 'Max GPS accuracy for geofence verification (metres)'}</label>
+          <label htmlFor="policy-max-gps-accuracy">{ru ? 'Максимальная точность GPS для автоматической проверки геозоны (метры)' : 'Max GPS accuracy for automatic geofence verification (metres)'}</label>
           <input
             id="policy-max-gps-accuracy"
             name="maxGpsAccuracyMeters"
@@ -349,8 +349,8 @@ export function PolicyForm({ initialPolicy, canUpdate }: { initialPolicy: Policy
           />
           <p className="policy-readonly-note">
             {ru
-              ? 'Отметка прихода/ухода с точностью хуже этого значения помечается «GPS не подтверждён» и уходит администратору на проверку. По умолчанию 75 м; повысьте, если на объекте стабильно слабый сигнал (например, внутри цеха).'
-              : 'A clock-in/out with accuracy worse than this is flagged “GPS not verified” for admin review. Default 75 m; raise it for a site with chronically weak signal (e.g. inside a workshop).'}
+              ? 'Отметка автоматически подтверждается, только если весь круг погрешности GPS целиком внутри геозоны (расстояние + погрешность ≤ радиус) или целиком снаружи. Если круг погрешности пересекает границу объекта или точность хуже этого значения — отметка помечается «GPS не подтверждён» и уходит администратору на проверку. Рекомендуемое значение — 250 м; система в любом случае не подтверждает автоматически отметки с погрешностью больше 250 м. Значение 75 (прежнее) всё ещё соблюдается, если оно здесь стоит.'
+              : 'A clock-in/out is auto-verified only when the whole GPS error circle is entirely inside the geofence (distance + accuracy ≤ radius) or entirely outside it. If the error circle straddles the site boundary, or accuracy is worse than this value, the event is flagged “GPS not verified” for admin review. Recommended value: 250 m; the system never auto-verifies a reading worse than 250 m regardless. A value of 75 (the former default) is still honoured while it is set here.'}
           </p>
           <FieldError fieldErrors={fieldErrors} field="maxGpsAccuracyMeters" />
         </div>

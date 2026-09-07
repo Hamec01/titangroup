@@ -74,7 +74,7 @@ export function WorkerStatusCard({
         </p>
         {showZoneStatus && (
           <p>
-            <span className={`wk-status-dot ${zoneStatus === 'INSIDE' ? 'online' : zoneStatus === 'OUTSIDE' ? 'warn' : zoneStatus === 'CHECKING' ? 'amber' : 'offline'}`} aria-hidden="true" />
+            <span className={`wk-status-dot ${zoneStatus === 'INSIDE' ? 'online' : zoneStatus === 'OUTSIDE' ? 'warn' : zoneStatus === 'CHECKING' ? 'amber' : zoneStatus === 'NEAR_BOUNDARY' ? 'amber' : 'offline'}`} aria-hidden="true" />
             <span>{t.statusZone}</span>
             <strong>{zoneSummary}</strong>
           </p>
