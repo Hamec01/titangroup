@@ -348,16 +348,37 @@ Standalone/контейнер candidate-образа на disposable PG. 24 фа
 | `admin-{RU,EN}-policy` + `admin-policy-{classic-light,modern-titan-dark,modern-graphite,modern-ocean}` | поле «…(метры, 10–250)» = 250, пояснение про «весь круг внутри/снаружи», «10–250 м», «больше 250 ввести нельзя»; читаемо во всех 4 темах, оба дизайна |
 | `admin-{RU,EN}-exception-boundary` | «GPS не подтверждён / GPS not verified», summary *«GPS accuracy circle crosses the site boundary — manual check needed»*, деталь **«Погрешность GPS пересекает границу объекта: Да / GPS accuracy crosses the site boundary: Yes»**, кнопки «Подтвердить как верное / Acknowledge as valid» — ручная проверка сохранена; мини-карта: круг погрешности на границе геозоны |
 
-## 12. Rollback
+## 12. PRODUCTION DEPLOY — LIVE 2026-09-07 ~21:58 UTC (owner GO)
 
-- **Rollback кода:** вернуть предыдущий образ `titanor-time-app:redesign-4c282ba` тем же web-swap
-  (`docker stop -t 30 titanor-time-prod-app` → `docker rename … titanor-time-prod-app-gps-conf-failed`
-  → `docker rename titanor-time-prod-app-pre-<sha> titanor-time-prod-app` → `docker start` →
-  `curl :3199/api/ready`); **не** `docker rm -f`; схему **не** откатывать; контейнер
-  `titanor-time-prod-app-pre-4c282ba` — не трогать.
-- **Rollback настройки policy 250 → 75** (отдельно, если её уже меняли):
-  `PATCH /api/admin/attendance/policy {"maxGpsAccuracyMeters":75}` (тот же путь, что и rollout) →
-  аудит `ATTENDANCE_POLICY_UPDATED` (before 250 / after 75). Данные не трогает — меняется
-  классификация только последующих событий. Старые события/часы/исключения не пересчитываются.
+| | |
+|---|---|
+| Backup перед деплоем | `production-20260907T215418Z-pre-deploy` — on-box + off-box (идентичны), `SHA256SUMS` 9/9 OK, **restore-test 13/13 PASS** (вкл. all-data fingerprint), dump 675929 байт / 3169 строк / 102 миграции |
+| Git-проверка | source SHA `ed36f734707ac5ae36ef6304c031db0cf022172e`; `origin/fix/gps-confidence-zone-250` **содержит** этот SHA (`merge-base --is-ancestor` = true); ветка `fix/gps-confidence-zone-250` (одинарный `fix/`, не переименовывалась) |
+| Candidate smoke на `:3198` (prod DB, read-only, uploads `:ro`) | `/api/ready` 200 `schema:current 102/102`; login 200, reset-password 200, guide 200; worker/admin/policy → 307; context без сессии → 401 (до записи); логи чистые. **Проверено после: все 76 таблиц prod — счётчик строк идентичен backup; 0 новых Audit/Clock/Exception** |
+| Deployed image | **`titanor-time-app:gps-conf-ed36f73`** · `org.opencontainers.image.revision` = `ed36f734707ac5ae36ef6304c031db0cf022172e` (сверено) |
+| Deployed code SHA | `ed36f734707ac5ae36ef6304c031db0cf022172e` |
+| Тип | web-only swap `redesign-4c282ba` → `gps-conf-ed36f73`, идентичная конфигурация (network `titanor-time-prod-net`, port `127.0.0.1:3199:3000`, `--env-file …/app.env`, uploads bind RW, healthcheck, `--restart unless-stopped`), авто-rollback trap |
+| **Миграции** | **НЕ запускались. Схема 102/102.** |
+| Downtime | `docker stop` **21:58:27.562Z** → new started 21:58:28.938Z → `/api/ready` 200 **21:58:30.879Z** = **≈ 3,3 с** (сервис недоступен ≈ 2,6 с) |
+| Post-swap health | `/api/ready` 200 local + через Caddy (`schema:current 102/102`); login/reset-password/guide 200; worker/admin 307; app+scheduler+db healthy; логи app без Error/Exception/Prisma/SQL; scheduler (`r14-release-1416503`, **не тронут**) тикает `runnerOutcome:ok failed:0` |
+| Данные не изменены | prod `AttendanceException` md5 `1d0a29c53d0e3a08b1caf52aa8f4c777` и `AuditEvent` md5 `563b8999b0bc705ae4d8c5785d0e852f` — **байт-в-байт как до свопа**; все счётчики строк без изменений; **0 строк создано** после T0; `ATTENDANCE_POLICY_UPDATED` count = 0; никаких тестовых GPS-событий |
+| **Policy `maxGpsAccuracyMeters`** | **остаётся 75** — шаг 8 (flip 75→250) требует аутентифицированной admin-сессии; создать prod-сессию через прямой DML нельзя (auto-mode классификатор блокирует запись в prod — верно). **Владелец делает flip сам через `/admin/attendance/policy` (он залогинен как `pilot-owner`/`oleksandr`).** До этого GPS ведёт себя ровно как до деплоя (`min(75,250)=75`). |
+| Rollback-контейнер | **`titanor-time-prod-app-pre-ed36f73`** (image `titanor-time-app:redesign-4c282ba`, status exited) — не `rm`. Все старые `-pre-*` заморожены. |
 
-**Развёртывание — только после отдельного письменного GO владельца.** После полной проверки — остановка.
+### 12a. Rollback
+
+**Код** (вернуть `redesign-4c282ba`):
+```bash
+docker stop -t 30 titanor-time-prod-app
+docker rename titanor-time-prod-app titanor-time-prod-app-gps-conf-failed
+docker rename titanor-time-prod-app-pre-ed36f73 titanor-time-prod-app
+docker start titanor-time-prod-app
+curl -s http://127.0.0.1:3199/api/ready        # -> status:ready, schema:current 102/102
+```
+**НЕ** `docker rm -f`. Схему **НЕ** откатывать. Backup поверх БД **НЕ** восстанавливать. `titanor-time-prod-app-pre-4c282ba` (rollback-цель предыдущего релиза) не трогать.
+
+**Настройка policy 250 → 75** (отдельно, если её уже переключили на 250): `PATCH /api/admin/attendance/policy {"maxGpsAccuracyMeters":75}` с новым `Idempotency-Key` — аудит `ATTENDANCE_POLICY_UPDATED` (before 250 / after 75). Данные не трогает; старые события/часы/исключения не пересчитываются. **Порядок при сбое (по ТЗ):** сначала policy 250→75 через API, потом image-rollback на `redesign-4c282ba`, схему не откатывать, backup не восстанавливать.
+
+### 12b. Осталось
+1. **Владелец:** `/admin/attendance/policy` → «Максимальная точность GPS…» `75` → `250` → Сохранить (новый Idempotency-Key автоматически).
+2. Проверка (шаг 9 ТЗ): `GET policy` = 250; ровно один `ATTENDANCE_POLICY_UPDATED` c before=75 / after=250; остальные поля policy не изменены; старые GPS-события/исключения не изменены; `/api/ready` 200 `current 102/102`; app+scheduler healthy; логи чистые.
