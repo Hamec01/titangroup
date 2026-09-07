@@ -105,7 +105,8 @@ effGate = min(policy.maxGpsAccuracyMeters, 250)     // абсолютный по
 | `titanor-time-app/app/worker/clock-panel/format.ts` | `ZoneStatus` += `NEAR_BOUNDARY` |
 | `titanor-time-app/app/worker/clock-panel/WorkerStatusCard.tsx` | цвет индикатора для `NEAR_BOUNDARY` (янтарный) |
 | `titanor-time-app/app/worker/WorkerClockPanel.tsx` | сводка зоны += `NEAR_BOUNDARY`; шкала точности 3-уровневая (хорошая ≤75 / приемлемая ≤250 / слабая >250); `runGpsCapture(zone)` не ждёт 25 с, если работник уже на объекте |
-| `titanor-time-app/lib/i18n/worker.ts` | `statusZoneNearBoundary`, `gpsAccuracyModerate`, тексты «отметка будет проверена» (EN + RU) |
+| `titanor-time-app/lib/i18n/worker.ts` | `statusZoneNearBoundary` («Около границы — на проверке»), `gpsAccuracyModerate` («±N м — приемлемая»), `gpsAccuracyPoor`/`statusZoneLowAccuracy` → «…проверит администратор / на проверке» (EN + RU) |
+| `titanor-time-app/app/globals.css` | `.wk-status-grid p` — колонки `auto auto minmax(0,1fr)` + `strong { text-align:right; overflow-wrap:anywhere }`, чтобы длинная строка зоны не наезжала на подпись «Зона» |
 | `titanor-time-app/components/attendance-policy/PolicyForm.tsx` | пояснение в «Правилах учёта»: модель «весь круг внутри/снаружи», рекомендуемое 250, потолок 250, «75 соблюдается, пока стоит» (EN/RU) |
 
 ### Тесты
@@ -138,21 +139,55 @@ effGate = min(policy.maxGpsAccuracyMeters, 250)     // абсолютный по
 
 ---
 
-## 6. Результаты регрессии (disposable-БД)
+## 6. Результаты регрессии (disposable-БД, 2026-09-07)
 
-_Заполняется по завершении прогонов._
+| Проверка | Итог |
+|---|---|
+| `npm run typecheck` | **PASS** |
+| `npm run lint` (prisma validate / format / manifest / migration-inventory / bundles / secret-scan) | **PASS** |
+| `next build` (standalone) | **PASS** — компилируется, `.next/standalone` собран |
+| unit lane | **19/19 PASS** — вкл. новый `_test-gps-confidence-zone.ts` 22/22, `_test-worker-gps.ts` 41/41, `_test-worker-clock-panel.ts` 55/55 |
+| db + scheduler lane | **67/67 PASS** (`node scripts/run-tests.mjs db`, disposable PG16, шаблон мигрирован до 102, каждому тесту свой клон) |
+| ↳ новый `_test-gps-confidence-zone-sync.ts` | **PASS** — online (`performCheckIn` route) == offline (`/sync`) для INSIDE/NEAR_BOUNDARY/OUTSIDE; идемпотентный ре-sync без дублей ClockEvent/AttendanceException |
+| ↳ существующие GPS/geofence | **PASS** — `_test-gps-accuracy-threshold`, `_test-gps-exception-detail`, `_test-gps-approximate-sync`, `_test-checkin-never-blocked`, `_test-attendance-presence`, `_test-bulk-ack-gps`, `_test-site-gps-flag`, `_test-map-gps`, `_test-gps-offline-resilience-schema` |
+| ↳ Check In/Out/Switch | **PASS** — `_test-pilot-pair-orphan` (offline pair/orphan), `_test-checkin-never-blocked` (T17 outside-geofence), `_test-abandoned-shift-auto-close` |
+| ↳ scheduler | **PASS** — `_test-scheduler-lease`, `_test-scheduler-diagnostics`, `_test-scheduler-health` (unit) |
+| ↳ ADMIN/SUPER_ADMIN политика | **PASS** — `_test-gps-confidence-zone-sync` меняет `maxGpsAccuracyMeters` через `updateCompanyAttendancePolicy` (SUPER_ADMIN), аудит `ATTENDANCE_POLICY_UPDATED`; `_test-gps-accuracy-threshold` (диапазон + DB CHECK + аудит) |
+| мобильные скриншоты Android (393×851) + iPhone (390×844) | **сделаны** — worker clock (INSIDE / NEAR_BOUNDARY / weak), admin policy, admin exception detail — см. §6a |
+| полный browser manifest (Chromium) · offline/PWA · restart-persistence | **не запускался в этой сессии** — см. §6b |
 
-- typecheck: **PASS**
-- lint: _—_
-- `next build`: _—_
-- unit: **19/19 PASS** (в т.ч. новый `_test-gps-confidence-zone.ts` 22/22, `_test-worker-gps.ts` 41/41, `_test-worker-clock-panel.ts` 55/55)
-- db: _—_
-- scheduler: _—_
-- browser manifest: _—_
-- offline / PWA / restart-persistence: _—_
-- существующие GPS/geofence: `_test-gps-accuracy-threshold`, `_test-gps-exception-detail`, `_test-gps-approximate-sync`, `_test-checkin-never-blocked`, `_test-attendance-presence`, `_test-bulk-ack-gps` — _—_
-- ADMIN/SUPER_ADMIN проверка политики: `_test-*policy*` — _—_
-- мобильные скриншоты Android / iPhone — _—_
+### 6a. Скриншоты (превью на копии данных, схема 102, `maxGpsAccuracyMeters = 250`)
+
+Поднят standalone-сервер на disposable-БД (`gcz_preview` на throwaway PG16, 102 миграции), засеян
+1 SUPER_ADMIN + 1 WORKER + объект с геозоной 900 м + пограничное исключение (d≈819 м, acc 128,9).
+
+- **`worker-android-inside` / `worker-iphone-inside`** — точка 550 м / ±129 м: зона **«На объекте»**
+  (зелёный), точность **«±129 м — приемлемая»**. Раньше это была «слабый сигнал» + ждать 25 с +
+  исключение `LOW_ACCURACY`.
+- **`worker-android-near-boundary` / `worker-iphone-near-boundary`** — точка 820 м / ±129 м: зона
+  **«Около границы — на проверке»** (янтарный), точность «±129 м — приемлемая».
+- **`worker-android-weak` / `worker-iphone-weak`** — ±320 м: зона **«Слабый сигнал GPS — на
+  проверке»**, точность «±320 м — слабый сигнал, отметку проверит администратор», кнопка «Уточнить».
+- **`admin-policy`** — поле «Максимальная точность GPS для автоматической проверки геозоны» = 250 +
+  новое пояснение про «весь круг внутри/снаружи».
+- **`admin-exception-boundary`** — заголовок «GPS не подтверждён», summary *«GPS accuracy circle
+  crosses the site boundary — manual check needed»*, в «Дополнительных сведениях» — **«Погрешность
+  GPS пересекает границу объекта: Да»**, кнопки «Подтвердить как верное» / «Снять сигнал» (ручная
+  проверка сохранена). Мини-карта: круг погрешности пересекает границу геозоны.
+
+### 6b. Что осталось до deploy
+
+**Полный контейнерный browser-acceptance (`ops/titanor-time/run-browser-acceptance.sh`,
+per-test-изоляция) + `run-restart-persistence.sh` в этой сессии не запускались** — они требуют
+собранного release-образа Docker, а сборка образа (`npm ci` + `next build` в контейнере) на этом
+хосте при живом production и ~0.9 ГБ свободной RAM — неоправданный риск (см. память
+`feedback_shared_host_memory_pressure`). Это тот же порядок, что и при релизе дизайна: браузерный
+lane гоняется против **candidate-образа**, который собирается отдельным разрешённым шагом.
+
+Риск там низкий: изменения не трогают offline-outbox, service worker, `sync-runner`, IndexedDB-схему
+и материализацию — только чистую классификацию GPS и клиентские подсказки. Плечо Check In/Out/Switch
++ online/offline-паритет уже покрыто db-lane (`_test-pilot-pair-orphan`, `_test-checkin-never-blocked`,
+`_test-gps-confidence-zone-sync`).
 
 ---
 
@@ -208,11 +243,18 @@ singleton создан при первом деплое, не менялся).
 
 ## 9. Развёртывание кода
 
-- **Commit SHA:** _<заполнить после коммита>_
-- **Candidate image:** _<titanor-time-app:gps-conf-… — собрать при отдельном разрешении>_
-- **Тип:** web-only swap, **без миграции** (схема 102 неизменна).
-- **Rollback:** вернуть предыдущий образ (`titanor-time-app:redesign-4c282ba`) тем же web-swap;
-  схему не трогать; настройку `maxGpsAccuracyMeters` откатывать отдельно (раздел 8.6), если её уже
-  меняли. Контейнер `titanor-time-prod-app-pre-4c282ba` — как есть.
+- **Ветка:** `fix/gps-confidence-zone-250` · **worktree:** `/home/deploy/projects/titanorgroup-worktrees/gps-confidence-zone`
+- **Commit SHA:** `6256424` (`feat(gps): confidence-zone geofence check…`) + докстроки/скриншот-фиксы следующим коммитом.
+- **Candidate image:** ещё не собран. Собрать `titanor-time-app:gps-conf-<sha>` из этой ветки
+  **отдельным разрешённым шагом** (сборка образа = риск для RAM живого хоста), затем прогнать против
+  него полный browser-lane + restart-persistence (§6b).
+- **Тип развёртывания:** web-only swap, **без миграции** (схема 102 неизменна, schema.prisma не тронут).
+- **Порог `maxGpsAccuracyMeters`:** на production остаётся **75** до отдельного rollout-действия
+  (раздел 8). Код при 75 ведёт себя честно (`min(75, 250) = 75`).
+- **Rollback кода:** вернуть предыдущий образ (`titanor-time-app:redesign-4c282ba`) тем же web-swap
+  (`docker stop -t 30` + `rename`, не `rm -f`); схему не откатывать; контейнер
+  `titanor-time-prod-app-pre-4c282ba` — как есть. Если порог уже меняли на 250 — откатывать его
+  отдельно PATCH-запросом (раздел 8.6); это не трогает данные.
 
-**Развёртывание — только после отдельного письменного подтверждения владельца.**
+**Развёртывание — только после отдельного письменного подтверждения владельца.** После разработки
+и disposable-проверки — остановка.

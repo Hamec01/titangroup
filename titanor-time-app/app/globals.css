@@ -4611,7 +4611,11 @@ a.ov-summary-card:focus-visible {
   margin: 0;
   min-height: 30px;
   display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto;
+  /* dot · label (natural width) · value (fills the rest, wraps in its own column).
+     GPS confidence zone (2026-09-07) — the zone value can be a short sentence
+     ("Около границы — отметка будет проверена"); giving it the flexible column
+     keeps it off the label instead of squeezing "Зона" to nothing. */
+  grid-template-columns: auto auto minmax(0, 1fr);
   align-items: center;
   gap: 8px;
   font-size: 0.86rem;
@@ -4620,6 +4624,8 @@ a.ov-summary-card:focus-visible {
 .wk-status-grid strong {
   color: #edf7ff;
   font-weight: 700;
+  text-align: right;
+  overflow-wrap: anywhere;
 }
 
 .wk-status-dot {
