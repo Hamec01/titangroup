@@ -126,14 +126,24 @@ function describeErrorCode(code: string | undefined, fallback: string | undefine
   }
 }
 
-function FieldError({ fieldErrors, field }: { fieldErrors: Record<string, string[]>; field: string }) {
+// GPS confidence zone (2026-09-07) — a few fields get a localised message instead of the raw
+// English server text, so the visible range/format hint is bilingual (ТЗ STOP-GATE №1).
+const LOCALISED_FIELD_ERRORS: Record<string, { en: string; ru: string }> = {
+  maxGpsAccuracyMeters: {
+    en: 'Enter a whole number from 10 to 250.',
+    ru: 'Введите целое число от 10 до 250.'
+  }
+};
+
+function FieldError({ fieldErrors, field, ru }: { fieldErrors: Record<string, string[]>; field: string; ru: boolean }) {
   const messages = fieldErrors[field];
   if (!messages || messages.length === 0) {
     return null;
   }
+  const localised = LOCALISED_FIELD_ERRORS[field];
   return (
     <p className="policy-field-error" role="alert">
-      {messages.join('; ')}
+      {localised ? (ru ? localised.ru : localised.en) : messages.join('; ')}
     </p>
   );
 }
@@ -285,7 +295,7 @@ export function PolicyForm({ initialPolicy, canUpdate }: { initialPolicy: Policy
             onChange={(e) => onFieldChange('cutoffDaysAfterPeriodEnd', e.target.value)}
             disabled={fieldsDisabled}
           />
-          <FieldError fieldErrors={fieldErrors} field="cutoffDaysAfterPeriodEnd" />
+          <FieldError fieldErrors={fieldErrors} field="cutoffDaysAfterPeriodEnd" ru={ru} />
         </div>
 
         <div className="policy-field">
@@ -299,7 +309,7 @@ export function PolicyForm({ initialPolicy, canUpdate }: { initialPolicy: Policy
             onChange={(e) => onFieldChange('cutoffTime', e.target.value)}
             disabled={fieldsDisabled}
           />
-          <FieldError fieldErrors={fieldErrors} field="cutoffTime" />
+          <FieldError fieldErrors={fieldErrors} field="cutoffTime" ru={ru} />
         </div>
 
         <div className="policy-field">
@@ -315,7 +325,7 @@ export function PolicyForm({ initialPolicy, canUpdate }: { initialPolicy: Policy
             onChange={(e) => onFieldChange('systemReopenDebounceMinutes', e.target.value)}
             disabled={fieldsDisabled}
           />
-          <FieldError fieldErrors={fieldErrors} field="systemReopenDebounceMinutes" />
+          <FieldError fieldErrors={fieldErrors} field="systemReopenDebounceMinutes" ru={ru} />
         </div>
 
         <div className="policy-field">
@@ -331,17 +341,17 @@ export function PolicyForm({ initialPolicy, canUpdate }: { initialPolicy: Policy
             onChange={(e) => onFieldChange('maxShiftDurationHours', e.target.value)}
             disabled={fieldsDisabled}
           />
-          <FieldError fieldErrors={fieldErrors} field="maxShiftDurationHours" />
+          <FieldError fieldErrors={fieldErrors} field="maxShiftDurationHours" ru={ru} />
         </div>
 
         <div className="policy-field">
-          <label htmlFor="policy-max-gps-accuracy">{ru ? 'Максимальная точность GPS для автоматической проверки геозоны (метры)' : 'Max GPS accuracy for automatic geofence verification (metres)'}</label>
+          <label htmlFor="policy-max-gps-accuracy">{ru ? 'Максимальная точность GPS для автоматической проверки геозоны (метры, 10–250)' : 'Max GPS accuracy for automatic geofence verification (metres, 10–250)'}</label>
           <input
             id="policy-max-gps-accuracy"
             name="maxGpsAccuracyMeters"
             type="number"
             min={10}
-            max={5000}
+            max={250}
             step={5}
             value={form.maxGpsAccuracyMeters}
             onChange={(e) => onFieldChange('maxGpsAccuracyMeters', e.target.value)}
@@ -349,10 +359,10 @@ export function PolicyForm({ initialPolicy, canUpdate }: { initialPolicy: Policy
           />
           <p className="policy-readonly-note">
             {ru
-              ? 'Отметка автоматически подтверждается, только если весь круг погрешности GPS целиком внутри геозоны (расстояние + погрешность ≤ радиус) или целиком снаружи. Если круг погрешности пересекает границу объекта или точность хуже этого значения — отметка помечается «GPS не подтверждён» и уходит администратору на проверку. Рекомендуемое значение — 250 м; система в любом случае не подтверждает автоматически отметки с погрешностью больше 250 м. Значение 75 (прежнее) всё ещё соблюдается, если оно здесь стоит.'
-              : 'A clock-in/out is auto-verified only when the whole GPS error circle is entirely inside the geofence (distance + accuracy ≤ radius) or entirely outside it. If the error circle straddles the site boundary, or accuracy is worse than this value, the event is flagged “GPS not verified” for admin review. Recommended value: 250 m; the system never auto-verifies a reading worse than 250 m regardless. A value of 75 (the former default) is still honoured while it is set here.'}
+              ? 'Допустимо 10–250 м. Отметка автоматически подтверждается, только если весь круг погрешности GPS целиком внутри геозоны (расстояние + погрешность ≤ радиус) или целиком снаружи. Если круг погрешности пересекает границу объекта или точность хуже этого значения — отметка помечается «GPS не подтверждён» и уходит администратору на проверку. Рекомендуемое значение — 250 м; отметки с погрешностью больше 250 м система не подтверждает автоматически ни при каких условиях, поэтому больше 250 ввести нельзя. Значение 75 (прежнее) всё ещё соблюдается, если оно здесь стоит.'
+              : 'Allowed range 10–250 m. A clock-in/out is auto-verified only when the whole GPS error circle is entirely inside the geofence (distance + accuracy ≤ radius) or entirely outside it. If the error circle straddles the site boundary, or accuracy is worse than this value, the event is flagged “GPS not verified” for admin review. Recommended value: 250 m; a reading worse than 250 m is never auto-verified under any policy, so values above 250 cannot be entered. A value of 75 (the former default) is still honoured while it is set here.'}
           </p>
-          <FieldError fieldErrors={fieldErrors} field="maxGpsAccuracyMeters" />
+          <FieldError fieldErrors={fieldErrors} field="maxGpsAccuracyMeters" ru={ru} />
         </div>
 
         <div className="policy-field">
@@ -373,7 +383,7 @@ export function PolicyForm({ initialPolicy, canUpdate }: { initialPolicy: Policy
               ? 'Если работник отработал за день не меньше этого времени и не отметил перерыв, из оплачиваемых часов автоматически вычитается плановый обед. По умолчанию 360 мин (6 ч) — финская норма. 0 — вычитать всегда.'
               : 'If a worker logs at least this much on a day and records no break, the planned lunch is auto-deducted from paid hours. Default 360 min (6 h) — the Finnish norm. 0 = always deduct.'}
           </p>
-          <FieldError fieldErrors={fieldErrors} field="autoUnpaidBreakThresholdMinutes" />
+          <FieldError fieldErrors={fieldErrors} field="autoUnpaidBreakThresholdMinutes" ru={ru} />
         </div>
 
         <div className="policy-field">
@@ -394,7 +404,7 @@ export function PolicyForm({ initialPolicy, canUpdate }: { initialPolicy: Policy
               ? 'Страховка: применяется, когда у смены нет своего перерыва (например, объект без шаблона графика). Шаблон со своим перерывом или галочкой «обед оплачивается» всегда важнее. По умолчанию 30 мин; 0 — отключить страховку.'
               : 'Safety net: used when a shift has no break of its own (e.g. an assignment with no schedule template). A template with its own break or the “lunch is paid” flag always wins. Default 30 min; 0 disables the fallback.'}
           </p>
-          <FieldError fieldErrors={fieldErrors} field="autoUnpaidBreakMinutes" />
+          <FieldError fieldErrors={fieldErrors} field="autoUnpaidBreakMinutes" ru={ru} />
         </div>
 
         <div className="policy-field">
@@ -415,10 +425,10 @@ export function PolicyForm({ initialPolicy, canUpdate }: { initialPolicy: Policy
               ? 'Если работник не сделал уход и смена висит дольше «максимальной длительности смены», планировщик закрывает её плановым временем окончания из графика. Когда планового окончания нет (нет шаблона или это выходной) — берётся приход + столько часов. По умолчанию 8. Реальный уход, пришедший до авто-закрытия, всё равно закрывает смену обычным образом.'
               : 'If a worker never checks out and the shift stays open past “maximum shift duration”, the scheduler closes it at the day’s planned end from the schedule. When there is no planned end (no template, or a day off) it uses check-in + this many hours. Default 8. A real check-out arriving before the auto-close still closes the shift normally.'}
           </p>
-          <FieldError fieldErrors={fieldErrors} field="autoCloseShiftFallbackHours" />
+          <FieldError fieldErrors={fieldErrors} field="autoCloseShiftFallbackHours" ru={ru} />
         </div>
 
-        {fieldErrors.body && <FieldError fieldErrors={fieldErrors} field="body" />}
+        {fieldErrors.body && <FieldError fieldErrors={fieldErrors} field="body" ru={ru} />}
 
         {errorMessage && (status === 'validation-error' || status === 'server-error') && (
           <p className="policy-error-banner" role="alert">

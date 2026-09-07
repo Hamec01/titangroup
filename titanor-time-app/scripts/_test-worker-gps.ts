@@ -18,8 +18,10 @@ import {
   __resetGpsForTest,
   __pushFixForTest,
   __setPersistedFixForTest,
+  effectiveGpsGate,
   MAX_ACCEPTABLE_ACCURACY_METERS,
-  MAX_AUTO_VERIFY_ACCURACY_METERS
+  MAX_AUTO_VERIFY_ACCURACY_METERS,
+  GPS_GATE_FALLBACK_METERS
 } from '../lib/worker-gps';
 
 let pass = 0;
@@ -55,21 +57,39 @@ async function main() {
 
   // --- GPS confidence zone (2026-09-07): evaluateZoneProximity mirrors the server model ---
   check('MAX_AUTO_VERIFY_ACCURACY_METERS is 250', MAX_AUTO_VERIFY_ACCURACY_METERS === 250);
+  check('GPS_GATE_FALLBACK_METERS is 75', GPS_GATE_FALLBACK_METERS === 75);
+  // effectiveGpsGate — the client mirror of the server's min(policy, 250), fallback 75.
+  check('effectiveGpsGate(250) -> 250', effectiveGpsGate(250) === 250);
+  check('effectiveGpsGate(75) -> 75', effectiveGpsGate(75) === 75);
+  check('effectiveGpsGate(5000) -> 250 (ceiling)', effectiveGpsGate(5000) === 250);
+  check('effectiveGpsGate(undefined) -> 75 (fallback)', effectiveGpsGate(undefined) === 75);
+  check('effectiveGpsGate(null) -> 75 (fallback)', effectiveGpsGate(null) === 75);
+  check('effectiveGpsGate(0) -> 75 (guard)', effectiveGpsGate(0) === 75);
   {
     // radiusMeters 900, centre far enough that a point 550 m away sits inside with margin.
     // Use a synthetic geofence + a point at a known distance by moving purely along latitude.
     const c = { latitude: 60.0, longitude: 24.0, radiusMeters: 900 };
     const atMetresNorth = (m: number) => ({ latitude: 60.0 + m / 111_320, longitude: 24.0 });
-    // 1. real reported case: distance 550, accuracy 128.9 -> whole circle inside -> INSIDE
-    check('confidence: d=550 acc=128.9 r=900 -> INSIDE', evaluateZoneProximity({ ...atMetresNorth(550), accuracyMeters: 128.9 }, c) === 'INSIDE');
-    // 2. boundary equality: distance + accuracy == radius -> still INSIDE
-    check('confidence: d+acc == r -> INSIDE', evaluateZoneProximity({ ...atMetresNorth(771.1), accuracyMeters: 128.9 }, c) === 'INSIDE');
-    // 3. straddles the edge -> NEAR_BOUNDARY
-    check('confidence: d=820 acc=128.9 r=900 -> NEAR_BOUNDARY', evaluateZoneProximity({ ...atMetresNorth(820), accuracyMeters: 128.9 }, c) === 'NEAR_BOUNDARY');
-    // 4. whole circle outside -> OUTSIDE
-    check('confidence: d=1100 acc=128.9 r=900 -> OUTSIDE', evaluateZoneProximity({ ...atMetresNorth(1100), accuracyMeters: 128.9 }, c) === 'OUTSIDE');
-    // 5. precise but > 250 m -> LOW_ACCURACY even if geometrically inside
-    check('confidence: acc=260 inside geometry -> LOW_ACCURACY', evaluateZoneProximity({ ...atMetresNorth(100), accuracyMeters: 260 }, c) === 'LOW_ACCURACY');
+    const G250 = effectiveGpsGate(250);
+    const G75 = effectiveGpsGate(75);
+    // 1. real reported case at policy 250: distance 550, accuracy 128.9 -> whole circle inside -> INSIDE
+    check('confidence(gate 250): d=550 acc=128.9 r=900 -> INSIDE', evaluateZoneProximity({ ...atMetresNorth(550), accuracyMeters: 128.9 }, c, G250) === 'INSIDE');
+    // Case 2 (ТЗ): the SAME point at policy 75 -> LOW_ACCURACY (client must NOT show green)
+    check('confidence(gate 75): d=550 acc=128.9 -> LOW_ACCURACY', evaluateZoneProximity({ ...atMetresNorth(550), accuracyMeters: 128.9 }, c, G75) === 'LOW_ACCURACY');
+    // Case 10 (ТЗ): policy missing in cached context -> fallback 75 -> LOW_ACCURACY, not green
+    check('confidence(gate from missing policy): d=550 acc=128.9 -> LOW_ACCURACY', evaluateZoneProximity({ ...atMetresNorth(550), accuracyMeters: 128.9 }, c, effectiveGpsGate(undefined)) === 'LOW_ACCURACY');
+    // 5/6 boundary equality: distance + accuracy == radius -> still INSIDE
+    check('confidence(gate 250): d+acc == r -> INSIDE', evaluateZoneProximity({ ...atMetresNorth(771.1), accuracyMeters: 128.9 }, c, G250) === 'INSIDE');
+    // 4/7 straddles the edge -> NEAR_BOUNDARY
+    check('confidence(gate 250): d=820 acc=128.9 r=900 -> NEAR_BOUNDARY', evaluateZoneProximity({ ...atMetresNorth(820), accuracyMeters: 128.9 }, c, G250) === 'NEAR_BOUNDARY');
+    // whole circle outside -> OUTSIDE, at BOTH gates (a real miss stays a miss)
+    check('confidence(gate 250): d=1100 acc=128.9 r=900 -> OUTSIDE', evaluateZoneProximity({ ...atMetresNorth(1100), accuracyMeters: 128.9 }, c, G250) === 'OUTSIDE');
+    // precise but > gate -> LOW_ACCURACY even if geometrically inside
+    check('confidence(gate 250): acc=260 inside geometry -> LOW_ACCURACY', evaluateZoneProximity({ ...atMetresNorth(100), accuracyMeters: 260 }, c, G250) === 'LOW_ACCURACY');
+    // a gate value above 250 is clamped down inside evaluateZoneProximity
+    check('confidence(gate 5000 clamped): acc=260 -> LOW_ACCURACY', evaluateZoneProximity({ ...atMetresNorth(100), accuracyMeters: 260 }, c, 5000) === 'LOW_ACCURACY');
+    // a genuine out-of-zone at policy 75 is still OUTSIDE (case 3 spirit)
+    check('confidence(gate 75): d=730 acc=3.2 r=650 -> OUTSIDE', evaluateZoneProximity({ ...atMetresNorth(730), accuracyMeters: 3.2 }, { ...c, radiusMeters: 650 }, G75) === 'OUTSIDE');
   }
 
   // --- haversine sanity ---

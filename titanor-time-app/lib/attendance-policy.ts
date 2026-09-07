@@ -7,6 +7,13 @@ import { createAuditEvent } from '@/lib/audit';
 // other lib/*.ts in this project.
 
 const TIME_PATTERN = /^([01]\d|2[0-3]):[0-5]\d:[0-5]\d$/;
+// GPS confidence zone (2026-09-07) — the app enforces a STRICTER business range than the DB CHECK
+// (10..5000, kept for backward compatibility, migration 20260828050000). A reading less precise
+// than 250 m is never auto-verified anyway (evaluateGpsReading clamps its gate to
+// MAX_AUTO_VERIFY_ACCURACY_METERS), so a policy value above 250 would be silently ineffective — the
+// PATCH endpoint and PolicyForm both reject it instead. docs/titanor-time/GPS_CONFIDENCE_ZONE_250_RU.md.
+export const MAX_GPS_ACCURACY_POLICY_MIN = 10;
+export const MAX_GPS_ACCURACY_POLICY_MAX = 250;
 const ALLOWED_PATCH_FIELDS = new Set([
   'cutoffDaysAfterPeriodEnd',
   'cutoffTime',
@@ -165,8 +172,8 @@ export function validatePolicyPatchInput(body: Record<string, unknown>): Validat
 
   if ('maxGpsAccuracyMeters' in body) {
     const v = body.maxGpsAccuracyMeters;
-    if (typeof v !== 'number' || !Number.isInteger(v) || v < 10 || v > 5000) {
-      fieldErrors.maxGpsAccuracyMeters = ['must be an integer between 10 and 5000'];
+    if (typeof v !== 'number' || !Number.isInteger(v) || v < MAX_GPS_ACCURACY_POLICY_MIN || v > MAX_GPS_ACCURACY_POLICY_MAX) {
+      fieldErrors.maxGpsAccuracyMeters = [`must be an integer between ${MAX_GPS_ACCURACY_POLICY_MIN} and ${MAX_GPS_ACCURACY_POLICY_MAX}`];
     } else {
       value.maxGpsAccuracyMeters = v;
     }

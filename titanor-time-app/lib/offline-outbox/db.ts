@@ -116,6 +116,12 @@ export interface DeviceStateRecord {
    * the two together close the "B logs in on A's device before B's first bootstrap" race. Optional
    * for the same legacy-row reason as ownerUserId. */
   lastAuthenticatedUserId?: string | null;
+  /** GPS confidence zone (2026-09-07) — the CompanyAttendancePolicy.maxGpsAccuracyMeters from the
+   * last successful GET /attendance/context. The clock screen uses min(this, 250) as its advisory
+   * gate so its "on site / near boundary / weak" badge matches the server decision; offline it
+   * keeps using the last value it saw. Optional so a row cached before this field existed reads as
+   * `undefined` — the panel then falls back to 75 (the safe historic gate). */
+  maxGpsAccuracyMeters?: number | null;
 }
 
 // Single row, keyPath "singleton" — UX-only projection of "where am I right now", NEVER read as

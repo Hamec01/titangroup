@@ -2,11 +2,14 @@
 // (2026-08-28, GPS steps 2+3) + docs/titanor-time/GPS_CONFIDENCE_ZONE_250_RU.md (2026-09-07).
 // Browser-only helper used by app/worker/WorkerClockPanel.tsx.
 //
-// GPS confidence zone (2026-09-07): the client's usable-accuracy ceiling is 250 m
-// (MAX_AUTO_VERIFY_ACCURACY_METERS), aligned with the server. A fix worse than the old 75 m is no
-// longer treated as "unacceptable" and the worker is not made to wait for a better one when the
-// circle-vs-radius test already places them on site. `evaluateZoneProximity` returns the four
-// confidence states INSIDE / OUTSIDE / NEAR_BOUNDARY / LOW_ACCURACY.
+// GPS confidence zone (2026-09-07): the client uses the SAME effective accuracy gate as the server
+// — min(CompanyAttendancePolicy.maxGpsAccuracyMeters, 250), delivered in the worker context and
+// cached on the device (falls back to 75 when a cached context predates the field). `effectiveGpsGate`
+// computes it; `evaluateZoneProximity` / `captureGpsSnapshot` / `hasConfidentInsideFix` take it as a
+// parameter. A fix worse than the old 75 m is no longer automatically "unacceptable" (it is when the
+// policy is still 75), and the worker is not made to wait for a better fix when the circle-vs-radius
+// test already places them on site. `evaluateZoneProximity` returns the four confidence states
+// INSIDE / OUTSIDE / NEAR_BOUNDARY / LOW_ACCURACY. The server remains the sole decision authority.
 //
 // GPS steps 2+3 changed the capture model, at the owner's explicit request:
 //   - one long-lived `watchPosition` (startGpsWatch/stopGpsWatch) owned by the clock panel while
@@ -44,6 +47,18 @@ export const MAX_ACCEPTABLE_ACCURACY_METERS = 75;
 // signal ("your check-in will be reviewed"). The server (single source of truth) re-decides every
 // event with min(companyPolicy, 250); this constant only drives the advisory client UI.
 export const MAX_AUTO_VERIFY_ACCURACY_METERS = 250;
+// The gate to fall back to when the worker context has no policy value yet (a context cached
+// before the field existed, or the very first offline start) — the historic hard-coded value, so
+// the client is never MORE lenient than the server would have been.
+export const GPS_GATE_FALLBACK_METERS = 75;
+
+/** GPS confidence zone (2026-09-07) — the effective client-side accuracy gate: the company policy
+ *  value (from the worker context), never above the absolute 250 m auto-verify ceiling, and 75 m
+ *  when the policy value is missing. Mirrors the server's `min(policy, 250)`. */
+export function effectiveGpsGate(policyValue: number | null | undefined): number {
+  const base = typeof policyValue === 'number' && Number.isFinite(policyValue) && policyValue > 0 ? policyValue : GPS_GATE_FALLBACK_METERS;
+  return Math.min(base, MAX_AUTO_VERIFY_ACCURACY_METERS);
+}
 
 export function haversineDistanceMeters(lat1: number, lon1: number, lat2: number, lon2: number): number {
   const toRad = (deg: number): number => (deg * Math.PI) / 180;
@@ -58,17 +73,21 @@ export type ZoneProximity = 'INSIDE' | 'OUTSIDE' | 'NEAR_BOUNDARY' | 'LOW_ACCURA
 
 /**
  * GPS confidence zone (2026-09-07) — the advisory client mirror of the server's evaluateGpsReading.
- * Same geometry, same 250 m ceiling: only report INSIDE / OUTSIDE when the whole error circle is on
- * one side of the geofence edge; a circle that straddles the edge is NEAR_BOUNDARY ("будет
- * проверено"), and a fix worse than 250 m is LOW_ACCURACY. This never gates a clock action — the
+ * Same geometry, same gate: only report INSIDE / OUTSIDE when the whole error circle is on one side
+ * of the geofence edge; a circle that straddles the edge is NEAR_BOUNDARY, and a fix worse than the
+ * effective gate is LOW_ACCURACY. `gateMeters` is the SAME effective gate the server uses
+ * (min(companyPolicy, 250)) — pass `effectiveGpsGate(context.maxGpsAccuracyMeters)`; it defaults to
+ * the 250 ceiling only for callers with no policy value. This never gates a clock action — the
  * server re-decides every event — it only drives the "On site" / "Near the boundary" / "Off site"
  * badge and the "you are already on site, no need to wait" capture short-circuit.
  */
 export function evaluateZoneProximity(
   location: { latitude: number; longitude: number; accuracyMeters: number },
-  geofence: { latitude: number; longitude: number; radiusMeters: number }
+  geofence: { latitude: number; longitude: number; radiusMeters: number },
+  gateMeters: number = MAX_AUTO_VERIFY_ACCURACY_METERS
 ): ZoneProximity {
-  if (location.accuracyMeters > MAX_AUTO_VERIFY_ACCURACY_METERS) {
+  const gate = Math.min(gateMeters, MAX_AUTO_VERIFY_ACCURACY_METERS);
+  if (location.accuracyMeters > gate) {
     return 'LOW_ACCURACY';
   }
   const distanceMeters = haversineDistanceMeters(location.latitude, location.longitude, geofence.latitude, geofence.longitude);
@@ -355,12 +374,13 @@ export interface ZoneShape {
 }
 
 /** GPS confidence zone (2026-09-07) — true when the best fix on hand right now already places the
- *  whole error circle inside `zone` (evaluateZoneProximity === 'INSIDE'). The panel uses this so a
- *  worker who is provably on site is never made to wait ~25 s for a "better" fix. */
-export function hasConfidentInsideFix(zone: ZoneShape | null | undefined): boolean {
+ *  whole error circle inside `zone` (evaluateZoneProximity === 'INSIDE') at the effective gate. The
+ *  panel uses this so a worker who is provably on site is never made to wait ~25 s for a "better"
+ *  fix. */
+export function hasConfidentInsideFix(zone: ZoneShape | null | undefined, gateMeters: number = MAX_AUTO_VERIFY_ACCURACY_METERS): boolean {
   if (!zone) return false;
   const f = bestRecentFix(60_000);
-  return !!f && evaluateZoneProximity(f, zone) === 'INSIDE';
+  return !!f && evaluateZoneProximity(f, zone, gateMeters) === 'INSIDE';
 }
 
 function getCurrentPositionCached(maxAgeMs: number, timeoutMs: number): Promise<{ location: GpsLocation | null; reason: ClientGpsUnavailableReason | null }> {
@@ -390,16 +410,18 @@ function getCurrentPositionCached(maxAgeMs: number, timeoutMs: number): Promise<
  *   5. the device's persisted last-good fix (<= 30 min) — `approximate: true`;
  *   6. nothing — { location: null, reason }.
  *
- * `opts.zone` is the selected site's cached geofence (centre + radius). It is advisory only — a
- * shortcut to avoid a pointless wait when the worker is provably on site; the server still
- * re-evaluates every event against the authoritative geofence.
+ * `opts.zone` is the selected site's cached geofence (centre + radius) and `opts.gateMeters` the
+ * effective accuracy gate (min(companyPolicy, 250)). Both are advisory only — a shortcut to avoid a
+ * pointless wait when the worker is provably on site; the server still re-evaluates every event
+ * against the authoritative geofence and policy.
  */
-export async function captureGpsSnapshot(opts: { maxWaitMs?: number; signal?: AbortSignal; zone?: ZoneShape | null } = {}): Promise<GpsSnapshot> {
+export async function captureGpsSnapshot(opts: { maxWaitMs?: number; signal?: AbortSignal; zone?: ZoneShape | null; gateMeters?: number } = {}): Promise<GpsSnapshot> {
   const maxWaitMs = opts.maxWaitMs ?? CAPTURE_WAIT_MS;
   const aborted = () => opts.signal?.aborted ?? false;
   const zone = opts.zone ?? null;
+  const gateMeters = opts.gateMeters ?? MAX_AUTO_VERIFY_ACCURACY_METERS;
   const goodEnough = (loc: GpsLocation): boolean =>
-    loc.accuracyMeters <= MAX_ACCEPTABLE_ACCURACY_METERS || (zone !== null && evaluateZoneProximity(loc, zone) === 'INSIDE');
+    loc.accuracyMeters <= MAX_ACCEPTABLE_ACCURACY_METERS || (zone !== null && evaluateZoneProximity(loc, zone, gateMeters) === 'INSIDE');
 
   const finishWithBestAvailable = async (lastError: ClientGpsUnavailableReason | null): Promise<GpsSnapshot> => {
     const buffered = bestRecentFix(maxWaitMs + 10_000);

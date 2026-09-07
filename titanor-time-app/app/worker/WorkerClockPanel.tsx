@@ -15,8 +15,8 @@ import {
   isGeoOnboarded,
   markGeoOnboarded,
   clearGeoOnboarded,
+  effectiveGpsGate,
   MAX_ACCEPTABLE_ACCURACY_METERS,
-  MAX_AUTO_VERIFY_ACCURACY_METERS,
   type GpsSnapshot,
   type GeolocationPermissionState
 } from '@/lib/worker-gps';
@@ -371,6 +371,10 @@ export function WorkerClockPanel({ initialClockState, assignments, workerName, t
   const pendingSorted = useMemo(() => outboxRecords.filter((r) => r.state === 'PENDING' || r.state === 'SENDING').sort((a, b) => a.deviceSequence - b.deviceSequence), [outboxRecords]);
 
   const cachedAssignments: CachedAssignment[] = bootstrap && bootstrap.kind === 'READY' ? (bootstrap.deviceState.contextAssignments ?? []) : [];
+  // GPS confidence zone (2026-09-07) — the effective accuracy gate, identical to the server's
+  // min(companyPolicy, 250). Comes from the last GET /attendance/context (cached on the device);
+  // falls back to 75 before the first bootstrap or for a context cached before this field existed.
+  const effectiveGpsGateM = effectiveGpsGate(bootstrap && bootstrap.kind === 'READY' ? bootstrap.deviceState.maxGpsAccuracyMeters : null);
   const nameLookups = useMemo(() => {
     const siteNames = new Map<string, string>();
     const workAreaNames = new Map<string, string>();
@@ -485,7 +489,7 @@ export function WorkerClockPanel({ initialClockState, assignments, workerName, t
       if (cancelled) {
         return;
       }
-      setZoneStatus(fix ? evaluateZoneProximity(fix, geofence!) : 'CHECKING');
+      setZoneStatus(fix ? evaluateZoneProximity(fix, geofence!, effectiveGpsGateM) : 'CHECKING');
     }
     check();
     const interval = window.setInterval(() => {
@@ -498,7 +502,7 @@ export function WorkerClockPanel({ initialClockState, assignments, workerName, t
       window.clearInterval(interval);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [zoneCheckSiteId, cachedAssignments]);
+  }, [zoneCheckSiteId, cachedAssignments, effectiveGpsGateM]);
 
   const deviceReady = bootstrap?.kind === 'READY';
 
@@ -510,8 +514,8 @@ export function WorkerClockPanel({ initialClockState, assignments, workerName, t
     // GPS confidence zone (2026-09-07) — skip the "finding your location" wait entirely when the
     // fix on hand is either genuinely accurate OR already places the worker confidently inside the
     // site geofence by the circle-vs-radius test. `zone` is the target site's cached geofence.
-    if (hasFreshGoodFix() || hasConfidentInsideFix(zone)) {
-      return captureGpsSnapshot({ maxWaitMs: GPS_WAIT_SECONDS * 1000, zone });
+    if (hasFreshGoodFix() || hasConfidentInsideFix(zone, effectiveGpsGateM)) {
+      return captureGpsSnapshot({ maxWaitMs: GPS_WAIT_SECONDS * 1000, zone, gateMeters: effectiveGpsGateM });
     }
     const abort = new AbortController();
     gpsWaitAbortRef.current = abort;
@@ -521,7 +525,7 @@ export function WorkerClockPanel({ initialClockState, assignments, workerName, t
       setGpsWaitSecondsLeft(Math.max(0, GPS_WAIT_SECONDS - Math.floor((Date.now() - startedAt) / 1000)));
     }, 250);
     try {
-      return await captureGpsSnapshot({ maxWaitMs: GPS_WAIT_SECONDS * 1000, signal: abort.signal, zone });
+      return await captureGpsSnapshot({ maxWaitMs: GPS_WAIT_SECONDS * 1000, signal: abort.signal, zone, gateMeters: effectiveGpsGateM });
     } finally {
       window.clearInterval(ticker);
       setGpsWaitSecondsLeft(null);
@@ -542,7 +546,7 @@ export function WorkerClockPanel({ initialClockState, assignments, workerName, t
       return Promise.resolve(true); // no reliable fix -> nothing to warn about, just proceed
     }
     const geofence = cachedGeofenceFor(siteId);
-    if (!geofence || evaluateZoneProximity(snapshot.location, geofence) !== 'OUTSIDE') {
+    if (!geofence || evaluateZoneProximity(snapshot.location, geofence, effectiveGpsGateM) !== 'OUTSIDE') {
       return Promise.resolve(true);
     }
     return new Promise<boolean>((resolve) => {
@@ -844,17 +848,18 @@ export function WorkerClockPanel({ initialClockState, assignments, workerName, t
 
       {(gpsPermission === 'granted' || gpsPermission === 'unsupported' || gpsPermission === null) && (
         <p className="wk-gps-accuracy">
-          {/* GPS confidence zone (2026-09-07) — a fix is "good" up to 75 m, still "usable" up to the
-              250 m auto-verify ceiling, and only a weak signal (→ manual review) beyond that. The
-              "Improve" affordance only appears once the fix is actually weak. */}
+          {/* GPS confidence zone (2026-09-07) — "good" up to 75 m, still "usable" up to the effective
+              company gate (min(policy, 250)), and only a weak signal (→ manual review) beyond that.
+              With the policy still at 75 the "usable" band is empty and anything over 75 reads as
+              weak — matching what the server would do. "Improve" appears once the fix is weak. */}
           {bestAccuracyM === null
             ? t.gpsAccuracyUnknown
             : bestAccuracyM <= MAX_ACCEPTABLE_ACCURACY_METERS
               ? t.gpsAccuracyGood(Math.round(bestAccuracyM))
-              : bestAccuracyM <= MAX_AUTO_VERIFY_ACCURACY_METERS
+              : bestAccuracyM <= effectiveGpsGateM
                 ? t.gpsAccuracyModerate(Math.round(bestAccuracyM))
                 : t.gpsAccuracyPoor(Math.round(bestAccuracyM))}
-          {bestAccuracyM !== null && bestAccuracyM > MAX_AUTO_VERIFY_ACCURACY_METERS ? (
+          {bestAccuracyM !== null && bestAccuracyM > effectiveGpsGateM ? (
             <button type="button" className="wk-inline-secondary" onClick={() => void handleRefineGps()} disabled={refiningGps}>
               {refiningGps ? t.gpsRefining : t.gpsRefine}
             </button>

@@ -1382,10 +1382,17 @@ export interface AttendanceContextView {
    * client confirm/record deviceState.ownerUserId. Not a new permission, discloses nothing the
    * session didn't already establish. */
   userId: string;
+  /** GPS confidence zone (2026-09-07) — the live CompanyAttendancePolicy.maxGpsAccuracyMeters, so
+   * the worker's clock screen shows the SAME "on site / near boundary / weak" state the server will
+   * decide. Additive; the client uses min(this, 250) and falls back to 75 when a cached context
+   * predates this field. The server still re-evaluates every event against its own fresh policy —
+   * this value is an advisory hint only, never trusted as a decision. */
+  maxGpsAccuracyMeters: number;
 }
 
 /** Only the site's CURRENT geofence snapshot — never historical versions (§2 task requirement). */
 export async function buildAttendanceContext(employeeId: string, today: Date, deviceInstallationId: string, lastProcessedSequence: bigint, userId: string): Promise<AttendanceContextView> {
+  const policy = await prisma.companyAttendancePolicy.findFirst({ select: { maxGpsAccuracyMeters: true } });
   const assignments = await prisma.siteAssignment.findMany({
     // R15-D7 — operationally-live only (clockInDisabledAt-aware), same gate as every consumer.
     where: { employeeId, ...liveAssignmentWhere(new Date(), today) },
@@ -1405,6 +1412,7 @@ export async function buildAttendanceContext(employeeId: string, today: Date, de
     deviceInstallationId,
     lastProcessedSequence: lastProcessedSequence.toString(),
     userId,
+    maxGpsAccuracyMeters: policy?.maxGpsAccuracyMeters ?? 75,
     assignments: assignments.map((a) => ({
       id: a.id,
       siteId: a.siteId,

@@ -26,6 +26,9 @@ interface ContextResponseWire {
   /** docs/titanor-time/T8_PWA_DESIGN.md §F.3 (T8.8) — additive field, the caller's own session
    * user id (never from a query/body param server-side). Confirms deviceState.ownerUserId. */
   userId: string;
+  /** GPS confidence zone (2026-09-07) — the live CompanyAttendancePolicy.maxGpsAccuracyMeters.
+   * Additive; absent on a response from an older server build. */
+  maxGpsAccuracyMeters?: number;
 }
 
 export type BootstrapOutcome =
@@ -210,7 +213,10 @@ async function applyContextResponse(deviceState: DeviceStateRecord, wire: Contex
     paused: null,
     // docs/titanor-time/T8_PWA_DESIGN.md §F.2/§F.3 — server-confirmed owner binding, set only on a
     // genuine 200 from /attendance/context. Never derived from anything the client already had.
-    ownerUserId: wire.userId
+    ownerUserId: wire.userId,
+    // GPS confidence zone (2026-09-07) — keep the last policy value we saw; an older server that
+    // doesn't send it leaves whatever was cached (or undefined -> panel falls back to 75).
+    maxGpsAccuracyMeters: typeof wire.maxGpsAccuracyMeters === 'number' ? wire.maxGpsAccuracyMeters : deviceState.maxGpsAccuracyMeters
   };
   await persistDeviceState(updated);
   return { kind: 'READY', deviceState: updated };

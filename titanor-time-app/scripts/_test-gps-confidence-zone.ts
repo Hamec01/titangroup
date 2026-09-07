@@ -9,6 +9,7 @@ import {
   MAX_AUTO_VERIFY_ACCURACY_METERS,
   type ClockGeofence
 } from '../lib/attendance-clock';
+import { evaluateZoneProximity, effectiveGpsGate, type ZoneProximity } from '../lib/worker-gps';
 
 let pass = 0;
 let fail = 0;
@@ -125,6 +126,38 @@ function main() {
   {
     const r = evaluateGpsReading(reading(CENTRE, 10), null, GATE_250);
     check('11: no geofence -> NOT_VERIFIED, reason null, not boundary', r.gpsVerification === 'NOT_VERIFIED' && r.gpsUnavailableReason === null && r.boundaryUncertain === false, r);
+  }
+
+  // 12. CLIENT (evaluateZoneProximity) and SERVER (evaluateGpsReading) agree, at BOTH gates
+  //     (ТЗ STOP-GATE №2: client and server use the same effective gate; ТЗ case 1/2/10).
+  {
+    const clientToServer: Record<ZoneProximity, string> = {
+      INSIDE: 'VERIFIED_INSIDE',
+      OUTSIDE: 'VERIFIED_OUTSIDE',
+      NEAR_BOUNDARY: 'NOT_VERIFIED',
+      LOW_ACCURACY: 'NOT_VERIFIED'
+    };
+    const scenarios: Array<{ tag: string; d: number; r: number; acc: number; gate: number; client: ZoneProximity }> = [
+      { tag: 'ТЗ-1 real case, policy 250', d: 550, r: 900, acc: 128.9, gate: effectiveGpsGate(250), client: 'INSIDE' },
+      { tag: 'ТЗ-2 same point, policy 75', d: 550, r: 900, acc: 128.9, gate: effectiveGpsGate(75), client: 'LOW_ACCURACY' },
+      { tag: 'ТЗ-10 policy missing -> 75', d: 550, r: 900, acc: 128.9, gate: effectiveGpsGate(undefined), client: 'LOW_ACCURACY' },
+      { tag: 'ТЗ-3 real miss, policy 250', d: 730, r: 650, acc: 3.2, gate: effectiveGpsGate(250), client: 'OUTSIDE' },
+      { tag: 'ТЗ-3 real miss, policy 75', d: 730, r: 650, acc: 3.2, gate: effectiveGpsGate(75), client: 'OUTSIDE' },
+      { tag: 'ТЗ-4 boundary, policy 250', d: 820, r: 900, acc: 128.9, gate: effectiveGpsGate(250), client: 'NEAR_BOUNDARY' },
+      { tag: 'ТЗ-5 too imprecise, policy 250', d: 100, r: 900, acc: 251, gate: effectiveGpsGate(250), client: 'LOW_ACCURACY' }
+    ];
+    for (const s of scenarios) {
+      const cz = evaluateZoneProximity({ ...northOf(s.d), accuracyMeters: s.acc }, geo(s.r), s.gate);
+      const sv = evaluateGpsReading(reading(northOf(s.d), s.acc), geo(s.r), s.gate);
+      check(`12 [${s.tag}]: client == ${s.client}`, cz === s.client, cz);
+      check(`12 [${s.tag}]: server maps to ${clientToServer[s.client]}`, sv.gpsVerification === clientToServer[s.client], sv.gpsVerification);
+      if (s.client === 'NEAR_BOUNDARY') {
+        check(`12 [${s.tag}]: server boundaryUncertain=true`, sv.boundaryUncertain === true, sv);
+      }
+      if (s.client === 'INSIDE') {
+        check(`12 [${s.tag}]: server does NOT flag (no exception)`, exceptionDetailForGps(sv, geo(s.r)) === undefined);
+      }
+    }
   }
 
   console.log(JSON.stringify({ pass, fail }));

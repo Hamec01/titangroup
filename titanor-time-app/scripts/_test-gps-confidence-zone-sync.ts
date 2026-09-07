@@ -75,6 +75,20 @@ async function main() {
     return { employee, token };
   }
 
+  // ---- the worker context carries the live policy value (ТЗ STOP-GATE №2, case 10) ----
+  {
+    const ctxWorker = await makeWorker('ctx');
+    const ctxDevice = randomUUID();
+    const ctxRes = await contextRoute(req(`http://localhost/api/worker/attendance/context?deviceInstallationId=${ctxDevice}&platform=iOS`, ctxWorker.token));
+    const ctxJson = await ctxRes.json();
+    check('context: 200 + maxGpsAccuracyMeters = 250 (current policy)', ctxRes.status === 200 && ctxJson.maxGpsAccuracyMeters === 250, ctxJson);
+    // lower the policy, refetch — the context reflects it immediately (server = source of truth)
+    await updateCompanyAttendancePolicy(admin.id, randomUUID(), { maxGpsAccuracyMeters: 75 });
+    const ctxRes2 = await contextRoute(req(`http://localhost/api/worker/attendance/context?deviceInstallationId=${ctxDevice}&platform=iOS`, ctxWorker.token));
+    check('context: maxGpsAccuracyMeters follows the policy (-> 75)', (await ctxRes2.json()).maxGpsAccuracyMeters === 75);
+    await updateCompanyAttendancePolicy(admin.id, randomUUID(), { maxGpsAccuracyMeters: 250 });
+  }
+
   // ---- online path (performCheckIn via the real route) ----
   const online = await makeWorker('online');
   const onlineEvents: Record<string, string> = {};
@@ -174,8 +188,26 @@ async function main() {
   check('idempotent re-sync -> no new ClockEvent', (await prisma.clockEvent.count({ where: { employeeId: offline.employee.id } })) === beforeEvents);
   check('idempotent re-sync -> no new AttendanceException', (await prisma.attendanceException.count({ where: { employeeId: offline.employee.id } })) === beforeExc);
 
-  // restore the policy for other tests sharing this DB
+  // ---- ТЗ case 2: the reported real point (550 m / ±130) at policy 75 -> NOT_VERIFIED both paths ----
   await updateCompanyAttendancePolicy(admin.id, randomUUID(), { maxGpsAccuracyMeters: 75 });
+  {
+    const p75on = await makeWorker('p75on');
+    const p75off = await makeWorker('p75off');
+    const p75dev = randomUUID();
+    await contextRoute(req(`http://localhost/api/worker/attendance/context?deviceInstallationId=${p75dev}&platform=iOS`, p75off.token));
+    const pt = northOf(550); // the INSIDE geometry — but accuracy 130 > gate 75
+    const onId = randomUUID();
+    await checkInRoute(req('http://localhost/api/worker/attendance/check-in', p75on.token, { clientEventId: onId, siteId: site.id, workAreaId: null, clientCapturedAt: T(9), location: { latitude: pt.latitude, longitude: pt.longitude, accuracyMeters: 130 }, gpsUnavailableReason: null }));
+    const offId = randomUUID();
+    await syncRoute(req('http://localhost/api/worker/attendance/sync', p75off.token, { deviceInstallationId: p75dev, events: [{ clientEventId: offId, deviceSequence: 1, groupId: null, operationType: 'CHECK_IN', siteId: site.id, assumedSiteId: null, workAreaId: null, clientCapturedAt: T(9), capturedOffline: true, cachedGeofenceVersionId: gv.id, gps: { latitude: pt.latitude, longitude: pt.longitude, accuracyMeters: 130 }, gpsUnavailableReason: null }] }));
+    const onEv = await prisma.clockEvent.findUniqueOrThrow({ where: { id: onId }, select: { gpsVerification: true, gpsUnavailableReason: true } });
+    const offEv = await prisma.clockEvent.findUniqueOrThrow({ where: { id: offId }, select: { gpsVerification: true, gpsUnavailableReason: true } });
+    check('case2 (policy 75): online -> NOT_VERIFIED / LOW_ACCURACY', onEv.gpsVerification === 'NOT_VERIFIED' && onEv.gpsUnavailableReason === 'LOW_ACCURACY', onEv);
+    check('case2 (policy 75): offline == online', offEv.gpsVerification === onEv.gpsVerification && offEv.gpsUnavailableReason === onEv.gpsUnavailableReason, offEv);
+    check('case2 (policy 75): NOT a boundary case (accuracy over gate)', (await prisma.attendanceException.findFirstOrThrow({ where: { clockEventId: onId, type: 'GPS_NOT_VERIFIED' } }).then((e) => (e.detail as Record<string, unknown>)?.boundaryUncertain)) === undefined);
+    // the context this offline worker cached says 75 -> the client would also show LOW_ACCURACY,
+    // never green (asserted purely in _test-gps-confidence-zone.ts case 12 / _test-worker-gps.ts).
+  }
 
   console.log(JSON.stringify({ pass, fail }));
   await prisma.$disconnect();
