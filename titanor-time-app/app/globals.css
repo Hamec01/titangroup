@@ -6286,3 +6286,27 @@ a.ov-summary-card:focus-visible {
     width: min(260px, calc(100vw - 20px));
   }
 }
+
+/* Skip-to-content link — first Tab stop in the admin shell (both classic and modern), visually
+   hidden until it receives keyboard focus (WCAG 2.4.1). */
+.admin-skip-link {
+  position: fixed;
+  top: 8px;
+  left: 8px;
+  z-index: 200;
+  padding: 10px 16px;
+  border-radius: 8px;
+  background: #0f2740;
+  color: #fff;
+  font-size: 0.82rem;
+  font-weight: 700;
+  text-decoration: none;
+  transform: translateY(-160%);
+  transition: transform 120ms ease;
+}
+.admin-skip-link:focus,
+.admin-skip-link:focus-visible {
+  transform: translateY(0);
+  outline: 3px solid #7cc4f5;
+  outline-offset: 2px;
+}

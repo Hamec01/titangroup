@@ -204,7 +204,9 @@ export function AdminModernShell({
           </div>
           <div className="admin-modern-header-content">{header}</div>
         </header>
-        <main className="admin-modern-content">{children}</main>
+        <main className="admin-modern-content" id="admin-main">
+          {children}
+        </main>
       </div>
     </div>
   );

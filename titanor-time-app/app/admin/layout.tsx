@@ -37,6 +37,14 @@ export default async function AdminLayout({ children }: Readonly<{ children: Rea
     );
   }
 
+  // Keyboard users land here first and can jump straight past the navigation to the page content
+  // (WCAG 2.4.1). Visually hidden until focused (.admin-skip-link).
+  const skipLink = (
+    <a href="#admin-main" className="admin-skip-link">
+      {locale === 'RU' ? 'Перейти к содержимому' : 'Skip to content'}
+    </a>
+  );
+
   // Shared header actions — identical content in both shells, only the surrounding chrome differs.
   const headerActions = (
     <div className="admin-header-actions">
@@ -60,6 +68,7 @@ export default async function AdminLayout({ children }: Readonly<{ children: Rea
     // actions, then AdminNav, then admin-content) plus the design toggle inside the actions.
     return (
       <AppLocaleProvider locale={locale}>
+        {skipLink}
         <div className="admin-shell">
           <header className="admin-header">
             <Link className="admin-brand" href="/admin">
@@ -71,7 +80,9 @@ export default async function AdminLayout({ children }: Readonly<{ children: Rea
             {headerActions}
           </header>
           <AdminNav strings={ADMIN_NAV[locale]} ariaLabel={t.adminNavigation} />
-          <div className="admin-content">{children}</div>
+          <div className="admin-content" id="admin-main">
+            {children}
+          </div>
         </div>
       </AppLocaleProvider>
     );
@@ -91,6 +102,7 @@ export default async function AdminLayout({ children }: Readonly<{ children: Rea
 
   return (
     <AppLocaleProvider locale={locale}>
+      {skipLink}
       <AdminModernShell header={modernHeader} nav={ADMIN_NAV[locale]} locale={locale} theme={adminTheme}>
         {children}
       </AdminModernShell>

@@ -42,11 +42,23 @@ export default async function AdminReportsPage({ searchParams }: RouteParams) {
 
   const sp = await searchParams;
   const rawView = one(sp.view);
-  const view: ReportsView = VIEWS.includes(rawView as ReportsView) ? (rawView as ReportsView) : 'overview';
+  const employeeIdParam = one(sp.employeeId);
+  const siteIdParam = one(sp.siteId);
+  // The URL is the source of truth (§2): an explicit `view` always wins. When it is absent —
+  // e.g. a link saved before the redesign (`?employeeId=…&periodId=…`) — infer the view from
+  // which subject id is present so those links still land on the right report. A worker id wins
+  // over a site id so the two subjects can never conflict (§2.7).
+  const view: ReportsView = VIEWS.includes(rawView as ReportsView)
+    ? (rawView as ReportsView)
+    : employeeIdParam
+      ? 'worker'
+      : siteIdParam
+        ? 'site'
+        : 'overview';
   const rawPeriodId = one(sp.periodId);
   // view scopes which subject id is honoured — the other is dropped entirely (§2.7).
-  const rawEmployeeId = view === 'worker' ? one(sp.employeeId) : null;
-  const rawSiteId = view === 'site' ? one(sp.siteId) : null;
+  const rawEmployeeId = view === 'worker' ? employeeIdParam : null;
+  const rawSiteId = view === 'site' ? siteIdParam : null;
   const pageParsed = parsePeriodReportQuery({ page: one(sp.page), pageSize: null });
   const detailPage = pageParsed.ok ? pageParsed.page : 1;
   const detailPageSize = pageParsed.ok ? pageParsed.pageSize : 20;
