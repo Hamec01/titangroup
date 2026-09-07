@@ -5780,3 +5780,509 @@ a.ov-summary-card:focus-visible {
     border-radius: 12px;
   }
 }
+
+/* Modern workspace palettes. Every palette supplies the complete semantic set used below;
+   changing a theme therefore updates canvas, text, controls, tables, overlays and statuses as
+   one coherent system rather than recolouring only the page background. */
+.admin-modern-shell {
+  --theme-canvas: #f4f7fb;
+  --theme-sidebar: #ffffff;
+  --theme-header: rgba(255, 255, 255, 0.94);
+  --theme-surface: #ffffff;
+  --theme-surface-raised: #ffffff;
+  --theme-surface-subtle: #f8fbfd;
+  --theme-surface-hover: #edf7fd;
+  --theme-border: #dfe7ef;
+  --theme-border-strong: #b9d8ec;
+  --theme-text: #16263a;
+  --theme-muted: #52667a;
+  --theme-link: #0b6eae;
+  --theme-accent: #0b6eae;
+  --theme-accent-strong: #174f73;
+  --theme-accent-soft: #eaf6ff;
+  --theme-on-accent: #ffffff;
+  --theme-input: #ffffff;
+  --theme-shadow: rgba(25, 53, 81, 0.09);
+  --theme-success: #14774c;
+  --theme-success-soft: #e3f7ed;
+  --theme-warning: #94620b;
+  --theme-warning-soft: #fff7df;
+  --theme-danger: #a63d49;
+  --theme-danger-soft: #fff0f2;
+  --theme-scroll-thumb: #9db3c7;
+  --theme-scroll-track: #edf2f6;
+}
+
+.admin-modern-shell[data-theme='titan-dark'] {
+  color-scheme: dark;
+  --theme-canvas: #05070b;
+  --theme-sidebar: #080e17;
+  --theme-header: rgba(8, 14, 23, 0.96);
+  --theme-surface: #0f1824;
+  --theme-surface-raised: #131f2e;
+  --theme-surface-subtle: #0b1420;
+  --theme-surface-hover: #17283a;
+  --theme-border: #26384a;
+  --theme-border-strong: #45647e;
+  --theme-text: #eef4f8;
+  --theme-muted: #a9b8c6;
+  --theme-link: #83c9f1;
+  --theme-accent: #3c6f96;
+  --theme-accent-strong: #315f83;
+  --theme-accent-soft: #173049;
+  --theme-on-accent: #ffffff;
+  --theme-input: #09121d;
+  --theme-shadow: rgba(0, 0, 0, 0.42);
+  --theme-success: #79d9aa;
+  --theme-success-soft: #123629;
+  --theme-warning: #f4c76f;
+  --theme-warning-soft: #3b2d13;
+  --theme-danger: #ff9eaa;
+  --theme-danger-soft: #3d1d25;
+  --theme-scroll-thumb: #51697e;
+  --theme-scroll-track: #0a121c;
+}
+
+.admin-modern-shell[data-theme='graphite'] {
+  color-scheme: dark;
+  --theme-canvas: #15171b;
+  --theme-sidebar: #1b1e23;
+  --theme-header: rgba(27, 30, 35, 0.96);
+  --theme-surface: #22262c;
+  --theme-surface-raised: #282d34;
+  --theme-surface-subtle: #1c2026;
+  --theme-surface-hover: #303740;
+  --theme-border: #3b434e;
+  --theme-border-strong: #5b6877;
+  --theme-text: #f3f5f7;
+  --theme-muted: #b2bdc9;
+  --theme-link: #91c5ff;
+  --theme-accent: #356fae;
+  --theme-accent-strong: #326ba9;
+  --theme-accent-soft: #253b55;
+  --theme-on-accent: #ffffff;
+  --theme-input: #181b20;
+  --theme-shadow: rgba(0, 0, 0, 0.34);
+  --theme-success: #78d6a5;
+  --theme-success-soft: #203a2e;
+  --theme-warning: #f1c46a;
+  --theme-warning-soft: #40351f;
+  --theme-danger: #ff9ca9;
+  --theme-danger-soft: #47252c;
+  --theme-scroll-thumb: #66717f;
+  --theme-scroll-track: #1b1e23;
+}
+
+.admin-modern-shell[data-theme='ocean'] {
+  color-scheme: dark;
+  --theme-canvas: #061820;
+  --theme-sidebar: #08212c;
+  --theme-header: rgba(8, 33, 44, 0.96);
+  --theme-surface: #0d2a37;
+  --theme-surface-raised: #103441;
+  --theme-surface-subtle: #09232e;
+  --theme-surface-hover: #164556;
+  --theme-border: #285468;
+  --theme-border-strong: #3f7d93;
+  --theme-text: #eaf8fb;
+  --theme-muted: #abcbd3;
+  --theme-link: #72d8ef;
+  --theme-accent: #0d728c;
+  --theme-accent-strong: #0d738d;
+  --theme-accent-soft: #124052;
+  --theme-on-accent: #ffffff;
+  --theme-input: #071e28;
+  --theme-shadow: rgba(0, 5, 9, 0.4);
+  --theme-success: #78ddb3;
+  --theme-success-soft: #123f34;
+  --theme-warning: #f3ca72;
+  --theme-warning-soft: #40361b;
+  --theme-danger: #ff9eaa;
+  --theme-danger-soft: #48232c;
+  --theme-scroll-thumb: #3f7081;
+  --theme-scroll-track: #08212c;
+}
+
+.admin-modern-shell[data-theme] {
+  background: var(--theme-canvas);
+  color: var(--theme-text);
+  --bg: var(--theme-canvas);
+  --card: var(--theme-surface);
+  --border: var(--theme-border);
+  --text: var(--theme-text);
+  --text-soft: var(--theme-muted);
+  --accent: var(--theme-accent);
+  --accent-light: var(--theme-link);
+  --error: var(--theme-danger);
+  --modern-ink: var(--theme-text);
+  --modern-muted: var(--theme-muted);
+  --modern-line: var(--theme-border);
+  --modern-blue: var(--theme-link);
+}
+
+.admin-modern-shell[data-theme] .admin-modern-sidebar {
+  background: var(--theme-sidebar);
+  border-color: var(--theme-border);
+}
+
+.admin-modern-shell[data-theme] .admin-modern-header {
+  background: var(--theme-header);
+  border-color: var(--theme-border);
+}
+
+.admin-modern-shell[data-theme] :where(.admin-modern-label, .admin-modern-sidebar-foot, .admin-modern-group-toggle, .admin-modern-group-caret, .admin-modern-sub-links a, .admin-modern-context, .admin-modern-header .admin-identity, .admin-menu-button, .admin-sidebar-close) {
+  color: var(--theme-muted);
+}
+
+.admin-modern-shell[data-theme] .admin-modern-group {
+  border-color: var(--theme-border);
+}
+
+.admin-modern-shell[data-theme] :where(.admin-modern-today, .admin-modern-group-toggle:hover, .admin-modern-group-toggle:focus-visible, .admin-modern-sub-links a:hover, .admin-modern-sub-links a:focus-visible, .admin-modern-sub-links a.is-current) {
+  color: var(--theme-link);
+  background: var(--theme-accent-soft);
+}
+
+.admin-modern-shell[data-theme] .admin-modern-today.is-current {
+  box-shadow: inset 0 0 0 1px var(--theme-border-strong);
+}
+
+.admin-modern-shell[data-theme] .admin-modern-content {
+  color: var(--theme-text);
+}
+
+.admin-modern-shell[data-theme] .admin-modern-content :where(.setup-card, .account-settings, .setup-item, .template-day-row, .scope-mode, .scope-panel, .scope-summary, .qual-matrix-row, .exc-row, .exc-action-form-wrap, .exc-candidate-option, .exc-pair-named, .ov-summary-card, .ov-conflicts, .ov-worker-card, .policy-notice, .owner-search, .owner-secondary-panel, .owner-quick-stats li, .owner-worker-row, .exp-create-section, .wk-period-item, .wk-assignment-item, .wk-return-reason-item, .wk-day-item, .wk-day-item-readonly, .wk-segment-card, .wk-assignment-option, .wk-switch-panel, .wk-offline-bar, .wk-recent-activity, .wk-card, .qual-chip-popover) {
+  border-color: var(--theme-border);
+  background: var(--theme-surface);
+  color: var(--theme-text);
+  box-shadow: 0 6px 22px var(--theme-shadow);
+}
+
+.admin-modern-shell[data-theme] .admin-modern-content :where(.scope-row, .exc-action-tab, .owner-search, .wk-secondary-button, .wk-remove-button) {
+  border-color: var(--theme-border);
+  background: var(--theme-surface-subtle);
+  color: var(--theme-text);
+}
+
+.admin-modern-shell[data-theme] .admin-modern-content :where(.scope-row.is-selected, .exc-action-tab-active, .ov-summary-card-active) {
+  border-color: var(--theme-border-strong);
+  background: var(--theme-accent-soft);
+}
+
+.admin-modern-shell[data-theme] .admin-modern-content :where(input:not([type='checkbox']):not([type='radio']):not([type='submit']):not([type='button']), select, textarea) {
+  border-color: var(--theme-border);
+  background: var(--theme-input);
+  color: var(--theme-text);
+}
+
+.admin-modern-shell[data-theme] .admin-modern-content :where(input, textarea)::placeholder {
+  color: var(--theme-muted);
+  opacity: 0.82;
+}
+
+.admin-modern-shell[data-theme] .admin-modern-content :where(a:not(.exc-apply-button), .report-table a, .report-filter-reset) {
+  color: var(--theme-link);
+}
+
+.admin-modern-shell[data-theme] .admin-modern-content :where(.worker-table th, .worker-table td, .ov-legacy, .ov-filters, .exc-filters, .exc-detail-section, .ov-worker-head, .wk-break-row) {
+  border-color: var(--theme-border);
+}
+
+.admin-modern-shell[data-theme] .admin-modern-content :where(.owner-cell-link:hover, .owner-cell-link:focus-visible, .owner-worker-row:hover, .ov-doc-attention li a:hover, .ov-doc-attention li a:focus-visible) {
+  border-color: var(--theme-border-strong);
+  background: var(--theme-surface-hover);
+}
+
+.admin-modern-shell[data-theme] .admin-modern-content .owner-worker-columns {
+  background: var(--theme-surface-subtle);
+  box-shadow: 0 1px 0 var(--theme-border);
+}
+
+.admin-modern-shell[data-theme] .admin-modern-content .owner-worker-scroll {
+  scrollbar-color: var(--theme-scroll-thumb) var(--theme-scroll-track);
+}
+
+.admin-modern-shell[data-theme] .admin-modern-content :where(.owner-worker-avatar, .owner-workers-heading > span, .owner-status-not-started, .ov-badge-neutral, .report-pagination-disabled) {
+  border-color: var(--theme-border);
+  background: var(--theme-surface-subtle);
+  color: var(--theme-muted);
+}
+
+.admin-modern-shell[data-theme] .admin-modern-content :where(.setup-status-done, .qual-badge-valid, .qual-verify-badge-verified, .ov-badge-positive, .owner-stat-working strong, .owner-status-working, .ov-live-duration, .ov-delta-positive, .exp-create-success, .exc-badge-resolved, .wk-status-submitted, .wk-status-foreman_approved, .wk-status-final_approved) {
+  color: var(--theme-success);
+  background-color: var(--theme-success-soft);
+}
+
+.admin-modern-shell[data-theme] .admin-modern-content :where(.owner-stat-working strong, .ov-live-duration, .ov-delta-positive) {
+  background: transparent;
+}
+
+.admin-modern-shell[data-theme] .admin-modern-content .owner-stat-finished strong {
+  color: var(--theme-link);
+}
+
+.admin-modern-shell[data-theme] .admin-modern-content .owner-status-finished {
+  color: var(--theme-link);
+  background: var(--theme-accent-soft);
+}
+
+.admin-modern-shell[data-theme] .admin-modern-content :where(.owner-stat-working) {
+  border-color: var(--theme-success) !important;
+  background: var(--theme-success-soft) !important;
+}
+
+.admin-modern-shell[data-theme] .admin-modern-content :where(.qual-badge-expiring, .ov-badge-issue, .exc-badge-open, .ov-warning, .policy-notice-warning, .policy-network-unknown, .exp-network-unknown, .exc-warning, .owner-stat-attention) {
+  color: var(--theme-warning);
+  border-color: var(--theme-warning) !important;
+  background: var(--theme-warning-soft) !important;
+}
+
+.admin-modern-shell[data-theme] .admin-modern-content :where(.owner-stat-attention strong, .owner-issue) {
+  color: var(--theme-warning);
+}
+
+.admin-modern-shell[data-theme] .admin-modern-content :where(.qual-badge-expired, .exc-action-error) {
+  color: var(--theme-danger);
+  background: var(--theme-danger-soft);
+}
+
+/* Reports use the same theme tokens as the rest of the modern workspace. */
+.admin-modern-shell[data-theme] .report-center :where(h1, .report-panel h2, .report-panel h3, .report-period-strip strong, .report-kpi-value, .report-status-row span:last-child, .report-file-main strong) {
+  color: var(--theme-text);
+}
+
+.admin-modern-shell[data-theme] .report-center :where(.report-center-lead, .report-filter-field label, .report-period-strip span, .report-kpi-label, .report-kpi-note, .report-panel-heading p, .report-table th, .report-muted, .report-detail-head p, .report-empty, .report-file-main span, .report-pagination-info, .report-fine-print, .report-tab, .report-status-row) {
+  color: var(--theme-muted);
+}
+
+.admin-modern-shell[data-theme] .report-center :where(.report-button, .report-filter-bar, .report-kpi, .report-panel, .report-file-row, .report-file-actions a, .report-file-actions button, .report-inline-retry) {
+  border-color: var(--theme-border);
+  background: var(--theme-surface);
+  color: var(--theme-text);
+  box-shadow: 0 5px 18px var(--theme-shadow);
+}
+
+.admin-modern-shell[data-theme] .report-center :where(.report-filter-field select, .report-filter-field input, .report-picker-form select) {
+  border-color: var(--theme-border);
+  background: var(--theme-input);
+  color: var(--theme-text);
+}
+
+.admin-modern-shell[data-theme] .report-center :where(.report-period-strip, .report-table tfoot td, .report-pagination-disabled) {
+  border-color: var(--theme-border);
+  background: var(--theme-surface-subtle);
+  color: var(--theme-text);
+}
+
+.admin-modern-shell[data-theme] .report-center :where(.report-table th, .report-table td, .report-pagination) {
+  border-color: var(--theme-border);
+}
+
+.admin-modern-shell[data-theme] .report-center .report-table td {
+  color: var(--theme-text);
+}
+
+.admin-modern-shell[data-theme] .report-center .report-table tbody tr:hover {
+  background: var(--theme-surface-hover);
+}
+
+.admin-modern-shell[data-theme] .report-center .report-status {
+  color: var(--theme-success);
+  background: var(--theme-success-soft);
+}
+
+.admin-modern-shell[data-theme] .report-center .report-status-open {
+  color: var(--theme-warning);
+  background: var(--theme-warning-soft);
+}
+
+.admin-modern-shell[data-theme] .report-center :where(.report-eyebrow, .report-table a, .report-filter-reset, .report-tab:hover, .report-tab:focus-visible, .report-tab-active, .report-quick-link:hover, .report-quick-link:focus-visible) {
+  color: var(--theme-link);
+}
+
+.admin-modern-shell[data-theme] .report-center :where(.report-tab-active, .report-quick-link:hover, .report-quick-link:focus-visible) {
+  border-color: var(--theme-border-strong);
+  background: var(--theme-accent-soft);
+}
+
+.admin-modern-shell[data-theme] .report-center .report-button-primary,
+.admin-modern-shell[data-theme] .report-center .report-filter-submit {
+  border-color: var(--theme-accent);
+  background: linear-gradient(135deg, var(--theme-accent), var(--theme-accent-strong));
+  color: var(--theme-on-accent);
+}
+
+.admin-modern-shell[data-theme] .report-center :where(.report-working-notice, .report-create-note) {
+  border-color: var(--theme-warning);
+  background: var(--theme-warning-soft);
+  color: var(--theme-warning);
+}
+
+.admin-modern-shell[data-theme] .report-center .report-alert {
+  background: var(--theme-danger-soft);
+  color: var(--theme-danger);
+}
+
+.admin-modern-shell[data-theme] .report-center .report-progress-track {
+  background: var(--theme-border);
+}
+
+.admin-modern-shell[data-theme] .report-center .report-quick-link {
+  border-color: var(--theme-border);
+  color: var(--theme-text);
+}
+
+/* Header actions, notifications and the colour picker live outside the content element. */
+.admin-modern-shell[data-theme] :where(.admin-design-toggle, .admin-theme-trigger, .notif-bell-button, .admin-logout-button, .language-switcher button) {
+  border-color: var(--theme-border);
+  background: var(--theme-surface-subtle);
+  color: var(--theme-text);
+}
+
+.admin-modern-shell[data-theme] :where(.admin-design-toggle, .admin-theme-trigger, .notif-bell-button, .admin-logout-button, .language-switcher button):hover,
+.admin-modern-shell[data-theme] :where(.admin-design-toggle, .admin-theme-trigger, .notif-bell-button, .admin-logout-button, .language-switcher button):focus-visible {
+  border-color: var(--theme-border-strong);
+  background: var(--theme-surface-hover);
+  color: var(--theme-link);
+  outline: none;
+}
+
+.admin-modern-shell[data-theme] .language-switcher button[aria-pressed='true'] {
+  border-color: var(--theme-border-strong);
+  background: var(--theme-accent-soft);
+  color: var(--theme-link);
+}
+
+.admin-modern-shell[data-theme] :where(.notif-drawer, .notif-toast, .notif-drawer-item, .admin-theme-menu) {
+  border-color: var(--theme-border);
+  background: var(--theme-surface-raised);
+  color: var(--theme-text);
+  box-shadow: 0 16px 42px var(--theme-shadow);
+}
+
+.admin-modern-shell[data-theme] :where(.notif-drawer-close, .notif-drawer-item-dismiss, .notif-drawer-item-hide) {
+  color: var(--theme-muted);
+}
+
+.admin-modern-shell[data-theme] :where(.notif-drawer-item-link, .notif-toast-actions button) {
+  color: var(--theme-link);
+}
+
+.admin-theme-picker {
+  position: relative;
+  flex: none;
+}
+
+.admin-theme-trigger {
+  min-height: 32px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 10px;
+  border: 1px solid var(--theme-border);
+  border-radius: 8px;
+  font-size: 0.72rem;
+  white-space: nowrap;
+}
+
+.admin-theme-trigger-icon {
+  color: var(--theme-link);
+  font-size: 0.9rem;
+}
+
+.admin-theme-trigger-caret {
+  color: var(--theme-muted);
+}
+
+.admin-theme-menu {
+  position: absolute;
+  z-index: 90;
+  top: calc(100% + 8px);
+  right: 0;
+  width: 224px;
+  padding: 9px;
+  border: 1px solid var(--theme-border);
+  border-radius: 12px;
+}
+
+.admin-theme-menu > p {
+  margin: 2px 7px 8px;
+  color: var(--theme-muted);
+  font-size: 0.68rem;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.admin-theme-option {
+  width: 100%;
+  display: grid;
+  grid-template-columns: 46px minmax(0, 1fr) 18px;
+  align-items: center;
+  gap: 9px;
+  padding: 9px 8px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--theme-text);
+  font-size: 0.78rem;
+  text-align: left;
+}
+
+.admin-theme-option:hover,
+.admin-theme-option:focus-visible,
+.admin-theme-option.is-selected {
+  border-color: var(--theme-border);
+  background: var(--theme-surface-hover);
+  outline: none;
+}
+
+.admin-theme-check {
+  color: var(--theme-link);
+  font-weight: 800;
+  text-align: center;
+}
+
+.admin-theme-swatches {
+  height: 22px;
+  overflow: hidden;
+  display: grid;
+  grid-template-columns: 1.2fr 1fr 0.8fr;
+  border: 1px solid rgba(127, 146, 164, 0.45);
+  border-radius: 6px;
+}
+
+.admin-theme-swatches i { display: block; }
+.admin-theme-swatches-light i:nth-child(1) { background: #f4f7fb; }
+.admin-theme-swatches-light i:nth-child(2) { background: #ffffff; }
+.admin-theme-swatches-light i:nth-child(3) { background: #0b6eae; }
+.admin-theme-swatches-titan-dark i:nth-child(1) { background: #05070b; }
+.admin-theme-swatches-titan-dark i:nth-child(2) { background: #131f2e; }
+.admin-theme-swatches-titan-dark i:nth-child(3) { background: #5282a8; }
+.admin-theme-swatches-graphite i:nth-child(1) { background: #15171b; }
+.admin-theme-swatches-graphite i:nth-child(2) { background: #282d34; }
+.admin-theme-swatches-graphite i:nth-child(3) { background: #4f8fd9; }
+.admin-theme-swatches-ocean i:nth-child(1) { background: #061820; }
+.admin-theme-swatches-ocean i:nth-child(2) { background: #103441; }
+.admin-theme-swatches-ocean i:nth-child(3) { background: #169fbd; }
+
+@media (max-width: 760px) {
+  .admin-modern-header .admin-theme-trigger-label,
+  .admin-modern-header .admin-theme-trigger-caret {
+    display: none;
+  }
+
+  .admin-modern-header .admin-theme-trigger {
+    width: 34px;
+    min-height: 34px;
+    justify-content: center;
+    padding: 6px;
+  }
+
+  .admin-theme-menu {
+    position: fixed;
+    top: 62px;
+    right: 10px;
+    width: min(260px, calc(100vw - 20px));
+  }
+}

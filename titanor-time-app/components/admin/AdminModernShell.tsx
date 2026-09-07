@@ -5,6 +5,7 @@ import { usePathname } from 'next/navigation';
 import { useEffect, useId, useRef, useState, type ReactNode } from 'react';
 import type { AdminNavStrings } from '@/lib/i18n/admin';
 import type { AppLocale } from '@/lib/i18n/locale';
+import type { AdminTheme } from '@/lib/admin-theme';
 
 const NAV_GROUPS_STORAGE_KEY = 'titanor-admin-nav-groups-v1';
 
@@ -27,12 +28,14 @@ export function AdminModernShell({
   children,
   header,
   nav,
-  locale
+  locale,
+  theme
 }: {
   children: ReactNode;
   header: ReactNode;
   nav: AdminNavStrings;
   locale: AppLocale;
+  theme: AdminTheme;
 }) {
   const ru = locale === 'RU';
   const pathname = usePathname();
@@ -99,7 +102,7 @@ export function AdminModernShell({
   }
 
   return (
-    <div className="admin-modern-shell" data-mobile-open={mobileOpen ? 'true' : undefined}>
+    <div className="admin-modern-shell" data-theme={theme} data-mobile-open={mobileOpen ? 'true' : undefined}>
       <aside
         id={sidebarId}
         className={mobileOpen ? 'admin-modern-sidebar is-open' : 'admin-modern-sidebar'}

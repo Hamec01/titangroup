@@ -23,6 +23,22 @@ const check = (name: string, cond: boolean, extra?: unknown) => {
   }
 };
 
+function contrastRatio(foreground: string, background: string): number {
+  const luminance = (value: string) => {
+    const rgb = /^#[0-9a-f]{6}$/i.test(value)
+      ? [value.slice(1, 3), value.slice(3, 5), value.slice(5, 7)].map((channel) => Number.parseInt(channel, 16))
+      : value.match(/[\d.]+/g)?.slice(0, 3).map(Number) ?? [0, 0, 0];
+    const channels = rgb.map((channel) => {
+      const normalized = channel / 255;
+      return normalized <= 0.04045 ? normalized / 12.92 : ((normalized + 0.055) / 1.055) ** 2.4;
+    });
+    return 0.2126 * channels[0] + 0.7152 * channels[1] + 0.0722 * channels[2];
+  };
+  const a = luminance(foreground);
+  const b = luminance(background);
+  return (Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05);
+}
+
 async function login(page: Page, username: string, password: string) {
   await page.goto(`${BASE}/login`, { waitUntil: 'networkidle' });
   await page.locator('#identifier').fill(username);
@@ -239,7 +255,7 @@ async function main() {
   }));
   check(
     'new view: notification drawer uses a readable light surface',
-    notificationAppearance.background === 'rgb(255, 255, 255)' && notificationAppearance.color === 'rgb(34, 55, 77)',
+    notificationAppearance.background === 'rgb(255, 255, 255)' && notificationAppearance.color === 'rgb(22, 38, 58)',
     notificationAppearance
   );
   await page.locator('.notif-drawer-close').click();
@@ -261,6 +277,55 @@ async function main() {
   await page.setViewportSize(DESKTOP);
   await page.goto(REPORTS, { waitUntil: 'networkidle' });
 
+  // ── four complete colour palettes ───────────────────────────────────────────────────────────
+  await page.locator('.admin-theme-trigger').click();
+  check('theme picker: exposes exactly four labelled palettes', await page.locator('.admin-theme-option').count() === 4);
+  await page.keyboard.press('Escape');
+  check('theme picker: Escape closes the palette menu', !(await page.locator('.admin-theme-menu').isVisible()));
+
+  for (const theme of ['light', 'titan-dark', 'graphite', 'ocean']) {
+    await page.locator('.admin-theme-trigger').click();
+    await page.locator(`[data-theme-option="${theme}"]`).click();
+    await page.waitForFunction((value) => document.querySelector('.admin-modern-shell')?.getAttribute('data-theme') === value, theme);
+    const appearance = await page.evaluate(() => {
+      const shell = document.querySelector<HTMLElement>('.admin-modern-shell')!;
+      const panel = document.querySelector<HTMLElement>('.report-panel')!;
+      const input = document.querySelector<HTMLElement>('.report-filter-field select')!;
+      const primary = document.querySelector<HTMLElement>('.report-button-primary')!;
+      return {
+        theme: shell.dataset.theme,
+        shellColor: getComputedStyle(shell).color,
+        shellBackground: getComputedStyle(shell).backgroundColor,
+        panelColor: getComputedStyle(panel).color,
+        panelBackground: getComputedStyle(panel).backgroundColor,
+        inputColor: getComputedStyle(input).color,
+        inputBackground: getComputedStyle(input).backgroundColor,
+        primaryColor: getComputedStyle(primary).color,
+        primaryBackground: getComputedStyle(shell).getPropertyValue('--theme-accent').trim()
+      };
+    });
+    const contrast = {
+      shell: contrastRatio(appearance.shellColor, appearance.shellBackground),
+      panel: contrastRatio(appearance.panelColor, appearance.panelBackground),
+      input: contrastRatio(appearance.inputColor, appearance.inputBackground),
+      primary: contrastRatio(appearance.primaryColor, appearance.primaryBackground)
+    };
+    check(
+      `theme picker: ${theme} recolours the full workspace with readable text`,
+      appearance.theme === theme &&
+        contrast.shell >= 4.5 &&
+        contrast.panel >= 4.5 &&
+        contrast.input >= 4.5 &&
+        contrast.primary >= 4.5,
+      { appearance, contrast }
+    );
+  }
+  await page.reload({ waitUntil: 'networkidle' });
+  check('theme picker: selected palette persists across reload without a shell flash', await page.locator('.admin-modern-shell').getAttribute('data-theme') === 'ocean');
+  await page.locator('.admin-theme-trigger').click();
+  await page.locator('[data-theme-option="light"]').click();
+  await page.waitForFunction(() => document.querySelector('.admin-modern-shell')?.getAttribute('data-theme') === 'light');
+
   // ── mobile ──────────────────────────────────────────────────────────────────────────────────
   const mctx = await browser.newContext({ viewport: MOBILE });
   const mpage = await mctx.newPage();
@@ -268,6 +333,12 @@ async function main() {
   await mpage.goto(`${BASE}/admin/reports?periodId=${period.id}`, { waitUntil: 'networkidle' });
   const bodyScrollW = await mpage.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1);
   check('mobile: page body does not scroll horizontally', bodyScrollW);
+  await mpage.locator('.admin-theme-trigger').click();
+  const mobileThemeMenu = await mpage.locator('.admin-theme-menu').boundingBox();
+  check('mobile: four-theme menu opens fully inside the viewport', !!mobileThemeMenu && mobileThemeMenu.x >= 0 && mobileThemeMenu.x + mobileThemeMenu.width <= MOBILE.width);
+  await mpage.locator('[data-theme-option="ocean"]').click();
+  await mpage.waitForFunction(() => document.querySelector('.admin-modern-shell')?.getAttribute('data-theme') === 'ocean');
+  check('mobile: palette changes without introducing horizontal scroll', await mpage.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1));
   await mpage.locator('.admin-menu-button').click();
   check('mobile: the menu opens', await mpage.locator('.admin-modern-sidebar.is-open').isVisible());
   await mpage.keyboard.press('Escape');

@@ -6,6 +6,7 @@ import { resolveServerSession } from '@/lib/server-session';
 import { resolveAppLocale } from '@/lib/i18n/server';
 import { ADMIN_STRINGS, ADMIN_NAV } from '@/lib/i18n/admin';
 import { ADMIN_DESIGN_COOKIE, normalizeAdminDesignMode } from '@/lib/admin-design';
+import { ADMIN_THEME_COOKIE, normalizeAdminTheme } from '@/lib/admin-theme';
 import { AppLocaleProvider } from '@/components/i18n/AppLocaleProvider';
 import { LanguageSwitcher } from '@/components/i18n/LanguageSwitcher';
 import { AdminNav } from '@/components/admin/AdminNav';
@@ -14,10 +15,12 @@ import { NotificationCenter } from '@/components/admin/NotificationCenter';
 import { ReviewQueueIndicator } from '@/components/admin/ReviewQueueIndicator';
 import { AdminModernShell } from '@/components/admin/AdminModernShell';
 import { AdminDesignToggle } from '@/components/admin/AdminDesignToggle';
+import { AdminThemePicker } from '@/components/admin/AdminThemePicker';
 
 export default async function AdminLayout({ children }: Readonly<{ children: ReactNode }>) {
   const [session, locale, cookieStore] = await Promise.all([resolveServerSession(), resolveAppLocale(), cookies()]);
   const designMode = normalizeAdminDesignMode(cookieStore.get(ADMIN_DESIGN_COOKIE)?.value);
+  const adminTheme = normalizeAdminTheme(cookieStore.get(ADMIN_THEME_COOKIE)?.value);
   const t = ADMIN_STRINGS[locale];
   if (!session) {
     redirect('/login');
@@ -38,6 +41,7 @@ export default async function AdminLayout({ children }: Readonly<{ children: Rea
   const headerActions = (
     <div className="admin-header-actions">
       <AdminDesignToggle mode={designMode} />
+      {designMode === 'modern' ? <AdminThemePicker theme={adminTheme} /> : null}
       <Link href="/admin/profile" className="admin-guide-link">
         {t.profileLink}
       </Link>
@@ -87,7 +91,7 @@ export default async function AdminLayout({ children }: Readonly<{ children: Rea
 
   return (
     <AppLocaleProvider locale={locale}>
-      <AdminModernShell header={modernHeader} nav={ADMIN_NAV[locale]} locale={locale}>
+      <AdminModernShell header={modernHeader} nav={ADMIN_NAV[locale]} locale={locale} theme={adminTheme}>
         {children}
       </AdminModernShell>
     </AppLocaleProvider>
