@@ -1,9 +1,10 @@
 # GPS: зона уверенности и допустимая погрешность 250 м
 
-**Ветка:** `fix/gps-confidence-zone-250` · **база:** `feature/titanor-time-foundation` @ `2ef21b1`
-**Статус:** разработка + проверка на disposable-БД + candidate-регрессия завершены. **Production не менялся, миграций нет.** Развёртывание — только по отдельному письменному подтверждению владельца.
+**Ветка:** `fix/gps-confidence-zone-250` (запушена) · **база:** `feature/titanor-time-foundation` @ `2ef21b1`
+**Финальный SHA:** `ed36f73` · **Candidate:** `titanor-time-app:gps-conf-ed36f73`
+**Статус:** разработка + disposable-регрессия + candidate-регрессия завершены. **Production не менялся, миграций нет, ретроактивных изменений нет.** Развёртывание — только по отдельному письменному GO владельца.
 
-**История коммитов:** `6256424` (логика + тесты) → `3ce3d37` (UI/CSS/отчёт) → STOP-GATE-коммит (см. §9).
+**История коммитов:** `6256424` (confidence-zone логика) → `3ce3d37` (UI/CSS/отчёт часть 1) → `ed36f73` (STOP-GATE №1 + №2) → docs-only коммит с результатами candidate-регрессии.
 
 ## 0. STOP-GATE №1 и №2 (по ТЗ-продолжению)
 
@@ -215,13 +216,15 @@ SUPER_ADMIN ✅, WORKER ✅ 403, ADMIN — по текущей матрице (�
 | unit lane (`run-tests.mjs unit`) | **19/19 PASS** — вкл. `_test-gps-confidence-zone.ts` **38/38**, `_test-worker-gps.ts` **52/52**, `_test-worker-clock-panel.ts` **55/55**, `_test-offline-idb-invariants.ts` (новое optional-поле deviceState) |
 | db + scheduler lane (`run-tests.mjs db`, disposable PG16, шаблон 102, клон на тест) | **67/67 PASS · 0 fail** — вкл. `_test-gps-confidence-zone-sync.ts`, `_test-gps-accuracy-threshold.ts` (диапазон 10..250 + route PATCH + RBAC), `_test-gps-exception-detail`, `_test-gps-approximate-sync`, `_test-checkin-never-blocked`, `_test-pilot-pair-orphan`, `_test-attendance-presence`, `_test-bulk-ack-gps`, `_test-site-gps-flag`, `_test-map-gps`, `_test-abandoned-shift-auto-close` |
 
-### 6.2 Полная регрессия на candidate-образе
+### 6.2 Полная регрессия на candidate `titanor-time-app:gps-conf-ed36f73` — **все PASS**
 
-_см. §10 — candidate `titanor-time-app:gps-conf-<sha>`._
+browser manifest **20/0/2skip** · restart-persistence **PASS** · worker-dossier QA **31/0** · candidate
+smoke **PASS**. Детали и разбивка — **§10**.
 
-### 6.3 Скриншоты
+### 6.3 Скриншоты — **24 файла, layout-проблем нет**
 
-_см. §11 — Android 393×851 + iPhone 390×844, RU + EN, 4 состояния worker + admin policy + admin exception._
+Android 393×851 + iPhone 390×844, RU + EN, 4 состояния worker + admin policy (+ 4 темы) + admin
+exception. Автопроверки: нет горизонтального скролла, статус не перекрывает Check In/Out. Детали — **§11**.
 
 ---
 
@@ -229,11 +232,32 @@ _см. §11 — Android 393×851 + iPhone 390×844, RU + EN, 4 состояни�
 
 - **Настоящий `OUTSIDE_GEOFENCE` сохранён.** Предикат `VERIFIED_OUTSIDE` (`distance − accuracy >
   radius`) тождественен прежнему. `OUTSIDE_GEOFENCE_CHECKIN` / `OUTSIDE_GEOFENCE_CHECKOUT` и их
-  обработка не тронуты (`_test-checkin-never-blocked.ts`, `_test-gps-confidence-zone-sync.ts` OUTSIDE).
+  обработка не тронуты (`_test-checkin-never-blocked.ts`, `_test-gps-confidence-zone-sync.ts` OUTSIDE,
+  `_test-gps-confidence-zone.ts` case 12 при policy 75 и 250).
+- **Client/server parity при policy 75 и 250.** `_test-gps-confidence-zone.ts` case 12 прогоняет 7
+  сценариев ТЗ через `evaluateZoneProximity` (клиент) и `evaluateGpsReading` (сервер) с одним
+  `effectiveGpsGate` и проверяет совпадение классификации. Ключевой кейс: policy 75, точка 550 м /
+  ±128,9 → **и клиент, и сервер → LOW_ACCURACY** (зелёный статус не показывается). policy 250 → оба →
+  INSIDE. `_test-gps-confidence-zone-sync.ts` подтверждает это через реальные роуты (online +
+  offline).
+- **API-ограничение 10..250.** `_test-gps-accuracy-threshold.ts`: `validatePolicyPatchInput` и роут
+  `PATCH /api/admin/attendance/policy` принимают `10/75/150/250`, отклоняют `251/5000/9/100.5/строка/
+  null` c `400 VALIDATION_ERROR` + `fieldErrors.maxGpsAccuracyMeters` (сообщение содержит «250»).
+  Отклонённый PATCH **не меняет строку** и **не пишет audit**; успешный — пишет ровно один
+  `ATTENDANCE_POLICY_UPDATED`. UI: `min=10 max=250 step=5`, значение выше 250 ввести/сохранить нельзя.
+- **Права.** `_test-gps-accuracy-threshold.ts` + browser `_test-t9-role-matrix` (33/0): SUPER_ADMIN
+  меняет policy (200), WORKER → 403, без сессии → 401; матрица ролей не ослаблена. (ADMIN сохраняет
+  своё существующее право `attendance.policy.update` — см. сноску к §5.)
 - **Ретроактивных изменений нет.** Меняется только классификация **новых** событий. Ни один старый
-  `ClockEvent`, `AttendanceException`, `ClockShift`, час, табель или назначение не читается и не
-  пишется. Исключение со скриншота не трогается — код нигде не закрывает существующие исключения.
-- **Схема БД без изменений**, миграций нет, `prisma migrate status` на шаблоне чистый.
+  `ClockEvent`, `AttendanceException`, `ClockShift`, час, табель, назначение или геозона не читается и
+  не пишется задним числом. Исключение со скриншота не трогается — код нигде не закрывает и не
+  переклассифицирует существующие исключения. `_test-t9-full-flow` (84/0) подтверждает: расчёт
+  часов/табеля не изменился.
+- **Схема БД без изменений**, миграций нет; `prisma migrate deploy` на шаблоне применяет ровно 102,
+  `/api/ready` candidate → `schema:current 102/102`.
+- **Production не изменялся.** Все прогоны — disposable PG + контейнеры из candidate-образа;
+  production URL и production `DATABASE_URL` в фикстурах не использовались; `titanor-time-prod-*` не
+  перезапускались.
 
 ---
 
@@ -277,18 +301,63 @@ singleton создан при первом деплое, не менялся).
 
 ## 9. Развёртывание кода
 
-- **Ветка:** `fix/gps-confidence-zone-250` · **worktree:** `/home/deploy/projects/titanorgroup-worktrees/gps-confidence-zone`
-- **Commit SHA:** `6256424` (`feat(gps): confidence-zone geofence check…`) + докстроки/скриншот-фиксы следующим коммитом.
-- **Candidate image:** ещё не собран. Собрать `titanor-time-app:gps-conf-<sha>` из этой ветки
-  **отдельным разрешённым шагом** (сборка образа = риск для RAM живого хоста), затем прогнать против
-  него полный browser-lane + restart-persistence (§6b).
+- **Ветка:** `fix/gps-confidence-zone-250` (запушена, `git push` без force) · **worktree:**
+  `/home/deploy/projects/titanorgroup-worktrees/gps-confidence-zone`
+- **Финальный commit SHA:** **`ed36f734707ac5ae36ef6304c031db0cf022172e`** (`ed36f73`).
+  Коммиты: `6256424` (confidence-zone логика) → `3ce3d37` (UI/CSS/отчёт) → `ed36f73` (STOP-GATE №1 + №2).
+  Отдельный docs-only коммит записывает результаты candidate-регрессии (не влияет на код образа).
+- **Candidate image:** **`titanor-time-app:gps-conf-ed36f73`** (794 МБ).
+  `org.opencontainers.image.revision` = `ed36f734707ac5ae36ef6304c031db0cf022172e` (полный SHA, сверено),
+  `ref.name` = `fix/gps-confidence-zone-250`, `GIT_SHA` env = полный SHA.
 - **Тип развёртывания:** web-only swap, **без миграции** (схема 102 неизменна, schema.prisma не тронут).
 - **Порог `maxGpsAccuracyMeters`:** на production остаётся **75** до отдельного rollout-действия
-  (раздел 8). Код при 75 ведёт себя честно (`min(75, 250) = 75`).
-- **Rollback кода:** вернуть предыдущий образ (`titanor-time-app:redesign-4c282ba`) тем же web-swap
-  (`docker stop -t 30` + `rename`, не `rm -f`); схему не откатывать; контейнер
-  `titanor-time-prod-app-pre-4c282ba` — как есть. Если порог уже меняли на 250 — откатывать его
-  отдельно PATCH-запросом (раздел 8.6); это не трогает данные.
+  (раздел 8). Код при 75 ведёт себя честно и на сервере, и на клиенте (`min(75, 250) = 75`).
 
-**Развёртывание — только после отдельного письменного подтверждения владельца.** После разработки
-и disposable-проверки — остановка.
+## 10. Полная регрессия на candidate `titanor-time-app:gps-conf-ed36f73`
+
+Все прогоны — на disposable PG16 (схема 102) + контейнерах из candidate-образа. Production URL и
+production DATABASE_URL не использовались. Последовательно, с проверкой RAM перед каждым шагом.
+
+| Шаг | Итог |
+|---|---|
+| Docker-сборка образа | **OK** — `next build` compiled 31.6s, TypeScript 45s, без ошибок; RAM guard не срабатывал |
+| Candidate read-only smoke (disposable PG 102) | **PASS** — `/api/ready` 200 `schema:current 102/102`; `/login` 200, `/worker`+`/admin` → 307, `/api/worker/attendance/context` без сессии → 401; логи app без error/exception/prisma/SQL |
+| Полный browser manifest (`ops/titanor-time/run-browser-acceptance.sh`, per-test-изоляция, 22 теста) | **20 pass / 0 fail / 2 skip-harness** — skip'ы (`_test-t9-restart-persistence`, `_test-worker-dossier-browser-qa`) гоняются своими скриптами ниже |
+| ↳ offline / PWA | **PASS** — `_test-offline-cold-restart` 6/0, `_test-offline-shell-locale` 12/0, `_test-offline-views` **71/0**, `_test-pwa-install` 59/0 |
+| ↳ Check In/Out/Switch + assignment lifecycle | **PASS** — `_test-t9-full-flow` **84/0** (полный e2e через UI), `_test-t9-assignment-lifecycle` 118/0, `_test-t9-group-transfer` 16/0, `_test-t9-site-lifecycle` 38/0 |
+| ↳ ADMIN/SUPER_ADMIN role matrix | **PASS** — `_test-t9-role-matrix` **33/0** (не ослаблена), `_test-t9-setup-ui` 26/0, `_test-t9-setup-lifecycle` 113/0 |
+| ↳ дизайн/отчёты | **PASS** — `_test-reports-command-center` 47/0, `_test-export-ui` 87/0, `_test-t9-worker-card-b` 34/0, `_test-customer-report-scope-ui`, `_test-qualifications-browser-qa` |
+| `ops/titanor-time/run-restart-persistence.sh` | **PASS** — seed `_test-t9-full-flow` 84/0 → PHASE=prepare 5/0 → `docker restart tt-rp-app` (БД+том живут) → PHASE=verify **18/0** (byte-identical snapshot + стек принимает аутентифицированную ADMIN-запись) |
+| `ops/titanor-time/run-worker-dossier-qa.sh` | **PASS** — seed (`_qa-seed-worker-dossier`) ok → `_test-worker-dossier-browser-qa` **31/0** |
+| console errors / HTTP 500 / Prisma / SQL / дубли событий / изменения логики табелей | нет — browser-lane тесты содержат console-assertions; ни одного FAIL; `_test-t9-full-flow` проверяет расчёт часов/табеля |
+
+**RAM во время build/test:** пик расхода на `next build` внутри Docker; минимум `available` за все прогоны ≈ **2.5 ГиБ** (порог STOP — 2 ГиБ, не достигнут); RAM-guard (alert < 400 МБ `free`) не срабатывал. `run-browser-acceptance` (~30 мин) держал `available` ≈ 3.1–3.6 ГиБ.
+
+## 11. Скриншоты (candidate `gps-conf-ed36f73`, схема 102, policy 250)
+
+Standalone/контейнер candidate-образа на disposable PG. 24 файла в `scratchpad/shots2/`:
+**Android 393×851 + iPhone 390×844 · RU + EN · 4 состояния worker + admin policy + admin exception + 4 темы.**
+Автопроверки: **горизонтального скролла нет; статус-карта не перекрывает Check In/Out** (все 20 worker-кадров).
+
+| Кадр | Что видно |
+|---|---|
+| `worker-{RU,EN}-{android,iphone}-inside` | точка 550 м / ±129: зона **«На объекте» / «On site»** (зелёный), точность «±129 м — приемлемая / usable». Раньше — «слабый сигнал» + 25 с + `LOW_ACCURACY` |
+| `…-near-boundary` | 820 м / ±129: зона **«Около границы — отметка будет проверена» / «Near the boundary — the event will be reviewed»** (янтарный) |
+| `…-low-accuracy` | ±320 (> 250): зона **«Слабый сигнал GPS — отметка будет проверена» / «Weak GPS signal — the event will be reviewed»**, точность «слабый сигнал, отметку проверит администратор», кнопка «Уточнить / Improve» |
+| `…-outside` | 1400 м / ±12: зона **«Вы вне объекта» / «You are outside the site»** (красный) |
+| `admin-{RU,EN}-policy` + `admin-policy-{classic-light,modern-titan-dark,modern-graphite,modern-ocean}` | поле «…(метры, 10–250)» = 250, пояснение про «весь круг внутри/снаружи», «10–250 м», «больше 250 ввести нельзя»; читаемо во всех 4 темах, оба дизайна |
+| `admin-{RU,EN}-exception-boundary` | «GPS не подтверждён / GPS not verified», summary *«GPS accuracy circle crosses the site boundary — manual check needed»*, деталь **«Погрешность GPS пересекает границу объекта: Да / GPS accuracy crosses the site boundary: Yes»**, кнопки «Подтвердить как верное / Acknowledge as valid» — ручная проверка сохранена; мини-карта: круг погрешности на границе геозоны |
+
+## 12. Rollback
+
+- **Rollback кода:** вернуть предыдущий образ `titanor-time-app:redesign-4c282ba` тем же web-swap
+  (`docker stop -t 30 titanor-time-prod-app` → `docker rename … titanor-time-prod-app-gps-conf-failed`
+  → `docker rename titanor-time-prod-app-pre-<sha> titanor-time-prod-app` → `docker start` →
+  `curl :3199/api/ready`); **не** `docker rm -f`; схему **не** откатывать; контейнер
+  `titanor-time-prod-app-pre-4c282ba` — не трогать.
+- **Rollback настройки policy 250 → 75** (отдельно, если её уже меняли):
+  `PATCH /api/admin/attendance/policy {"maxGpsAccuracyMeters":75}` (тот же путь, что и rollout) →
+  аудит `ATTENDANCE_POLICY_UPDATED` (before 250 / after 75). Данные не трогает — меняется
+  классификация только последующих событий. Старые события/часы/исключения не пересчитываются.
+
+**Развёртывание — только после отдельного письменного GO владельца.** После полной проверки — остановка.
