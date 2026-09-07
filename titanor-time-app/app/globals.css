@@ -5025,10 +5025,19 @@ a.ov-summary-card:focus-visible {
   display: flex;
   background: #f4f7fb;
   color: #16263a;
+  color-scheme: light;
+  --bg: #f4f7fb;
+  --card: #ffffff;
+  --border: #dfe7ef;
+  --text: #16263a;
+  --text-soft: #52667a;
+  --accent: #0b6eae;
+  --accent-light: #174f73;
+  --error: #b23d4b;
   --modern-ink: #16263a;
-  --modern-muted: #718096;
+  --modern-muted: #52667a;
   --modern-line: #e2e9f1;
-  --modern-blue: #168ee8;
+  --modern-blue: #0b6eae;
 }
 .admin-modern-sidebar {
   width: 248px;
@@ -5046,17 +5055,22 @@ a.ov-summary-card:focus-visible {
 .admin-modern-brand small { display: block; margin-top: 2px; color: var(--modern-muted); font-size: 0.67rem; letter-spacing: 0.08em; text-transform: uppercase; }
 .admin-brand-mark { width: 36px; height: 36px; display: grid; place-items: center; border-radius: 11px; color: #fff; background: linear-gradient(135deg, #1b9cf0, #116dc5); font-size: 1.2rem; font-weight: 800; box-shadow: 0 8px 16px rgba(22, 142, 232, 0.24); }
 .admin-modern-today { display: flex; align-items: center; gap: 10px; padding: 11px 12px; border-radius: 10px; color: var(--modern-blue); background: #eaf5ff; font-size: 0.86rem; font-weight: 700; text-decoration: none; }
-.admin-modern-label { margin: 26px 12px 8px; color: #a4b0bf; font-size: 0.68rem; font-weight: 800; letter-spacing: 0.11em; text-transform: uppercase; }
+.admin-modern-label { margin: 26px 12px 8px; color: #5d7084; font-size: 0.68rem; font-weight: 800; letter-spacing: 0.11em; text-transform: uppercase; }
 .admin-modern-links { display: grid; gap: 7px; overflow-y: auto; }
-.admin-modern-group { padding: 7px 0 8px; border-bottom: 1px solid #f0f3f7; }
+.admin-modern-group { padding: 4px 0; border-bottom: 1px solid #f0f3f7; }
 .admin-modern-group:last-child { border-bottom: 0; }
-.admin-modern-group-title { display: flex; align-items: center; gap: 10px; margin: 0 11px 4px; color: #617084; font-size: 0.76rem; font-weight: 800; }
-.admin-modern-group-title.is-report { color: var(--modern-blue); }
+.admin-modern-group-toggle { width: 100%; display: grid; grid-template-columns: 18px minmax(0, 1fr) 18px; align-items: center; gap: 10px; margin: 0; padding: 9px 11px; border: 0; border-radius: 8px; background: transparent; color: #617084; font-size: 0.76rem; font-weight: 800; text-align: left; }
+.admin-modern-group-toggle:hover, .admin-modern-group-toggle:focus-visible { color: var(--modern-blue); background: #f2f8fd; outline: none; }
+.admin-modern-group-toggle.is-report, .admin-modern-group.is-active .admin-modern-group-toggle { color: var(--modern-blue); }
+.admin-modern-group-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.admin-modern-group-caret { color: #66788b; font-size: 0.9rem; line-height: 1; text-align: center; transform: rotate(-90deg); transition: transform 160ms ease; }
+.admin-modern-group-toggle[aria-expanded='true'] .admin-modern-group-caret { transform: rotate(0deg); }
 .admin-nav-icon { width: 18px; text-align: center; font-size: 1rem; font-weight: 700; }
-.admin-modern-sub-links { display: grid; gap: 2px; padding-left: 39px; }
+.admin-modern-sub-links { display: grid; gap: 2px; padding: 1px 0 4px 39px; }
+.admin-modern-sub-links[hidden] { display: none; }
 .admin-modern-sub-links a { padding: 7px 8px; border-radius: 7px; color: #526175; font-size: 0.78rem; text-decoration: none; }
 .admin-modern-sub-links a:hover, .admin-modern-sub-links a:focus-visible { color: var(--modern-blue); background: #f2f8fd; outline: none; }
-.admin-modern-sidebar-foot { margin-top: auto; padding: 16px 12px 0; color: #a4b0bf; font-size: 0.68rem; line-height: 1.45; }
+.admin-modern-sidebar-foot { margin-top: auto; padding: 16px 12px 0; color: #5d7084; font-size: 0.68rem; line-height: 1.45; }
 .admin-modern-main { min-width: 0; flex: 1; }
 .admin-modern-header { min-height: 68px; display: flex; align-items: center; justify-content: space-between; gap: 22px; padding: 12px 34px; background: rgba(255,255,255,0.92); border-bottom: 1px solid var(--modern-line); }
 .admin-modern-header-left { display: flex; align-items: center; gap: 14px; }
@@ -5065,7 +5079,7 @@ a.ov-summary-card:focus-visible {
 .admin-menu-button { display: none; padding: 6px; }
 .admin-modern-header-content { display: flex; align-items: center; gap: 18px; }
 .admin-modern-header .admin-brand { display: none; }
-.admin-modern-header .admin-identity { order: 1; color: #6f7d8e; font-size: 0.74rem; }
+.admin-modern-header .admin-identity { order: 1; color: #52667a; font-size: 0.74rem; }
 .admin-modern-header .admin-header-actions { order: 2; gap: 10px; }
 .admin-design-toggle { display: inline-flex; align-items: center; gap: 6px; padding: 7px 10px; border: 1px solid #dce7f1; border-radius: 8px; background: #f7fbff; color: #55708b; font-size: 0.72rem; }
 .admin-design-toggle:hover, .admin-design-toggle:focus-visible { border-color: #8fc7ee; color: var(--modern-blue); outline: none; }
@@ -5171,5 +5185,512 @@ a.ov-summary-card:focus-visible {
 .report-inline-retry:hover:not(:disabled) { background: #fff0f1; }
 .report-file-delete { display: inline-flex; flex-direction: column; align-items: flex-end; gap: 4px; }
 .report-file-delete .report-alert { margin: 0; padding: 6px 8px; font-size: 0.7rem; }
-.admin-modern-sub-links a.is-current { color: #087bcf; background: #eaf6ff; font-weight: 750; }
+.admin-modern-sub-links a.is-current { color: #0b6eae; background: #eaf6ff; font-weight: 750; }
 .admin-modern-today.is-current { box-shadow: inset 0 0 0 1px #b7def7; }
+
+/* Modern admin compatibility layer. Older admin screens intentionally keep their stable markup,
+   but inside the modern shell they share one light workspace instead of rendering as dark islands.
+   The worker/foreman applications and the classic admin design remain untouched. */
+.admin-modern-content {
+  width: 100%;
+}
+
+.admin-modern-content > .setup-page {
+  width: 100%;
+  min-height: 0;
+  justify-content: stretch;
+  padding: 0;
+}
+
+.admin-modern-content .setup-card {
+  max-width: 1440px;
+  margin: 0 auto;
+  border-color: #dfe7ef;
+  border-radius: 14px;
+  background: #ffffff;
+  color: #16263a;
+  box-shadow: 0 8px 28px rgba(25, 53, 81, 0.06);
+}
+
+.admin-modern-content .ov-card {
+  max-width: none;
+  margin: 0;
+}
+
+.admin-modern-content :where(.setup-card, .scope-panel, .owner-search) :where(
+  input:not([type='checkbox']):not([type='radio']):not([type='submit']):not([type='button']),
+  select,
+  textarea
+) {
+  border-color: #d7e2ec;
+  background: #ffffff;
+  color: #22374d;
+}
+
+.admin-modern-content :where(.setup-card, .scope-panel, .owner-search) :where(
+  input:not([type='checkbox']):not([type='radio']):not([type='submit']):not([type='button']),
+  select,
+  textarea
+):focus-visible {
+  border-color: #4aa9e9;
+  outline: 3px solid rgba(74, 169, 233, 0.15);
+  box-shadow: none;
+}
+
+.admin-modern-content :where(.setup-card, .scope-panel, .owner-search) :where(input, textarea)::placeholder {
+  color: #9aa8b7;
+}
+
+.admin-modern-content :where(
+  .account-settings,
+  .setup-item,
+  .template-day-row,
+  .scope-mode,
+  .scope-panel,
+  .scope-summary,
+  .qual-matrix-row,
+  .exc-row,
+  .exc-action-form-wrap,
+  .exc-candidate-option,
+  .exc-pair-named,
+  .ov-summary-card,
+  .ov-conflicts,
+  .ov-worker-card,
+  .policy-notice,
+  .owner-search,
+  .owner-secondary-panel
+) {
+  border-color: #dfe7ef;
+  background: #ffffff;
+  color: #22374d;
+}
+
+.admin-modern-content :where(.setup-item, .template-day-row, .scope-row, .exc-row, .ov-worker-card) {
+  box-shadow: 0 2px 8px rgba(25, 53, 81, 0.035);
+}
+
+.admin-modern-content :where(.scope-row, .exc-action-tab) {
+  border-color: #dfe7ef;
+  background: #f8fafc;
+  color: #314b63;
+}
+
+.admin-modern-content :where(.scope-row.is-selected, .exc-action-tab-active, .ov-summary-card-active) {
+  border-color: #82c5ef;
+  background: #edf8ff;
+}
+
+.admin-modern-content :where(.setup-card, .account-settings, .scope-panel, .exc-row, .ov-worker-card) a:not(.exc-apply-button) {
+  color: #0b6eae;
+}
+
+.admin-modern-content .worker-table :where(th, td),
+.admin-modern-content :where(.ov-legacy, .ov-filters, .exc-filters, .exc-detail-section, .ov-worker-head) {
+  border-color: #e4ebf2;
+}
+
+.admin-modern-content :where(.setup-status-done, .qual-badge-valid, .qual-verify-badge-verified, .ov-badge-positive) {
+  color: #13754a;
+  background: #e3f7ed;
+}
+
+.admin-modern-content :where(.setup-status-pending, .qual-verify-badge-self, .ov-badge, .ov-badge-neutral, .exc-badge-dismissed) {
+  color: #52667a;
+  background: #eef2f6;
+}
+
+.admin-modern-content :where(.qual-badge-expiring, .ov-badge-issue, .exc-badge-open, .ov-warning, .policy-notice-warning) {
+  color: #94620b;
+  border-color: #efd28f;
+  background: #fff7df;
+}
+
+.admin-modern-content :where(.qual-badge-critical) {
+  color: #a94e12;
+  background: #fff0e4;
+}
+
+.admin-modern-content :where(.qual-badge-expired, .exc-action-error) {
+  color: #a63d49;
+  background: #fff0f2;
+}
+
+.admin-modern-content .qual-chip-popover {
+  border-color: #dce6ef;
+  background: #ffffff;
+  box-shadow: 0 14px 34px rgba(25, 53, 81, 0.18);
+}
+
+.admin-modern-content .qual-chip-popover-title,
+.admin-modern-content .qual-matrix-name {
+  color: #16263a !important;
+}
+
+/* Today dashboard: full-width operational table and restrained light cards. */
+.admin-modern-content .owner-search {
+  background: #f8fbfd;
+}
+
+.admin-modern-content .owner-search .exc-filter-field :where(input, select),
+.admin-modern-content .ov-filter-field select,
+.admin-modern-content .exc-filter-field :where(input, select, textarea),
+.admin-modern-content .policy-field input,
+.admin-modern-content .assignment-end-form :where(input, select),
+.admin-modern-content .template-day-row :where(input, select),
+.admin-modern-content .scope-search {
+  border-color: #d7e2ec;
+  background: #ffffff;
+  color: #22374d;
+}
+
+/* The legacy template controls use attribute selectors, which outrank the generic light-form
+   rule above. Keep the controls explicit so native time/number inputs never retain dark fills. */
+.admin-modern-content .template-day-row input[type='time'],
+.admin-modern-content .template-day-row input[type='number'] {
+  border-color: #d7e2ec;
+  background: #ffffff;
+  color: #22374d;
+}
+
+.admin-modern-content .owner-quick-stats li {
+  border-color: #dfe7ef;
+  background: #ffffff;
+  box-shadow: 0 4px 14px rgba(25, 53, 81, 0.045);
+}
+
+.admin-modern-content .owner-worker-row {
+  border-color: #dfe7ef;
+  background: #ffffff;
+  box-shadow: 0 2px 8px rgba(25, 53, 81, 0.035);
+}
+
+.admin-modern-content .owner-worker-row:hover {
+  border-color: #b9d8ec;
+  background: #f8fcff;
+}
+
+.admin-modern-content .owner-cell-link:hover,
+.admin-modern-content .owner-cell-link:focus-visible,
+.admin-modern-content .ov-doc-attention li a:hover,
+.admin-modern-content .ov-doc-attention li a:focus-visible {
+  background: #edf7fd;
+}
+
+.admin-modern-content .owner-workers-heading > span {
+  background: #edf2f6;
+}
+
+.admin-modern-content .owner-stat-working {
+  border-color: #8ed7b5 !important;
+  background: #edf9f3 !important;
+}
+
+.admin-modern-content .owner-stat-working strong,
+.admin-modern-content .owner-status-working,
+.admin-modern-content .ov-live-duration,
+.admin-modern-content .ov-delta-positive {
+  color: #14774c;
+}
+
+.admin-modern-content .owner-status-working {
+  background: #def5e9;
+}
+
+.admin-modern-content .owner-stat-finished strong,
+.admin-modern-content .owner-status-finished {
+  color: #176fa7;
+}
+
+.admin-modern-content .owner-status-finished {
+  background: #e5f3fb;
+}
+
+.admin-modern-content .owner-status-not-started {
+  color: #52667a;
+  background: #edf1f5;
+}
+
+.admin-modern-content .owner-stat-attention {
+  border-color: #edcf84 !important;
+  background: #fff8e5 !important;
+}
+
+.admin-modern-content .owner-stat-attention strong,
+.admin-modern-content .owner-issue {
+  color: #9a6508;
+}
+
+/* Secondary admin surfaces and status colours must remain readable on the light canvas too. */
+.admin-modern-content :where(
+  .exp-create-section,
+  .wk-period-item,
+  .wk-assignment-item,
+  .wk-return-reason-item,
+  .wk-day-item,
+  .wk-day-item-readonly,
+  .wk-segment-card,
+  .wk-assignment-option,
+  .wk-switch-panel,
+  .wk-offline-bar,
+  .wk-recent-activity
+) {
+  border-color: #dfe7ef;
+  background: #f8fbfd;
+  color: #22374d;
+}
+
+/* A correction-day editor reuses worker mobile components inside the admin shell. In the modern
+   workspace it must behave like an admin form, not like a dark phone screen dropped onto white. */
+.admin-modern-content > .wk-page {
+  min-height: auto;
+  justify-content: flex-start;
+  padding: 0;
+}
+
+.admin-modern-content .wk-card {
+  max-width: 1100px;
+  border-color: #dfe7ef;
+  border-radius: 14px;
+  background: #ffffff;
+  color: #22374d;
+  box-shadow: 0 10px 30px rgba(25, 53, 81, 0.08);
+}
+
+.admin-modern-content .wk-segment-card select,
+.admin-modern-content .wk-time-row input[type='time'],
+.admin-modern-content .wk-break-row input[type='time'] {
+  border-color: #d7e2ec;
+  background: #ffffff;
+  color: #22374d;
+}
+
+.admin-modern-content .wk-break-row {
+  border-left-color: #dfe7ef;
+}
+
+.admin-modern-content :where(.wk-secondary-button, .wk-remove-button) {
+  background: #f8fbfd;
+}
+
+.admin-modern-content :where(.policy-network-unknown, .exp-network-unknown, .exc-warning) {
+  color: #94620b;
+  border-color: #efd28f;
+  background: #fff7df;
+}
+
+.admin-modern-content :where(.exp-create-success, .exc-badge-resolved, .wk-status-submitted, .wk-status-foreman_approved, .wk-status-final_approved) {
+  color: #13754a;
+  background: #e3f7ed;
+}
+
+.admin-modern-content .setup-status-optional {
+  color: #176fa7;
+  background: #e5f3fb;
+}
+
+.admin-modern-content .qual-chip-button {
+  background: #ffffff;
+}
+
+.admin-modern-content .ov-badge-neutral {
+  color: #52667a;
+}
+
+.admin-modern-content .login-field :where(input, select, textarea) {
+  border-color: #d7e2ec;
+  background: #ffffff;
+  color: #22374d;
+}
+
+.admin-modern-content .login-locale-switch button {
+  border-color: #d7e2ec;
+  background: #f5f8fb;
+  color: #40576d;
+}
+
+.admin-modern-content .login-locale-switch button[aria-pressed='true'] {
+  border-color: #69aeda;
+  background: #dceffc;
+  color: #125f94;
+}
+
+.admin-modern-content .wk-menu-language {
+  color: #314b63;
+}
+
+.admin-modern-content .wk-inline-secondary {
+  border-color: #8fbad5;
+  background: #f1f7fb;
+  color: #174f73;
+}
+
+.admin-modern-content .wk-inline-secondary:hover,
+.admin-modern-content .wk-inline-secondary:focus-visible {
+  border-color: #579bc7;
+  background: #e5f2fa;
+  outline: none;
+}
+
+.admin-modern-content .qual-chip-green {
+  color: #13754a;
+  border-color: #8ed7b5;
+}
+
+.admin-modern-content .qual-chip-yellow {
+  color: #94620b;
+  border-color: #e2c369;
+}
+
+.admin-modern-content .qual-chip-orange {
+  color: #a94e12;
+  border-color: #e7a879;
+}
+
+.admin-modern-content :where(.qual-chip-red, .qual-chip-missing) {
+  color: #a63d49;
+  border-color: #dda2a9;
+}
+
+/* Header overlays belong to the modern shell but live outside .admin-modern-content. */
+.admin-modern-shell :where(.notif-bell-button, .admin-logout-button) {
+  border-color: #d9e3ec;
+  background: #f5f8fb;
+  color: #52677b;
+}
+
+.admin-modern-shell :where(.notif-bell-button, .admin-logout-button):hover,
+.admin-modern-shell :where(.notif-bell-button, .admin-logout-button):focus-visible {
+  border-color: #83bfe7;
+  background: #edf7fd;
+  color: #126fae;
+}
+
+.admin-modern-shell .language-switcher button {
+  border-color: #d9e3ec;
+  background: #ffffff;
+  color: #40576d;
+}
+
+.admin-modern-shell .language-switcher button[aria-pressed='true'] {
+  border-color: #8fc7ee;
+  background: #dceffc;
+  color: #125f94;
+}
+
+.admin-modern-shell :where(.notif-drawer, .notif-toast) {
+  border-color: #dbe5ee;
+  background: #ffffff;
+  color: #22374d;
+  box-shadow: 0 16px 42px rgba(25, 53, 81, 0.2);
+}
+
+.admin-modern-shell .notif-drawer-item {
+  border: 1px solid #e2e9f0;
+  border-left-width: 3px;
+  background: #f8fafc;
+}
+
+.admin-modern-shell .notif-drawer-item-warning {
+  border-left-color: #d69b19;
+}
+
+.admin-modern-shell .notif-drawer-item-critical {
+  border-left-color: #d95565;
+}
+
+.admin-modern-shell :where(.notif-drawer-close, .notif-drawer-item-dismiss) {
+  color: #52667a;
+}
+
+.admin-modern-shell :where(.notif-drawer-close, .notif-drawer-item-dismiss):hover,
+.admin-modern-shell :where(.notif-drawer-close, .notif-drawer-item-dismiss):focus-visible {
+  color: #16263a;
+}
+
+.admin-modern-shell :where(.notif-drawer-item-link, .notif-toast-actions button) {
+  color: #0b6eae;
+}
+
+.admin-modern-shell :where(.notif-drawer-item-link, .notif-toast-actions button):hover,
+.admin-modern-shell :where(.notif-drawer-item-link, .notif-toast-actions button):focus-visible {
+  color: #0c5d95;
+}
+
+.admin-modern-shell .notif-drawer-item-hide {
+  border-color: #bdcfdd;
+  color: #315b78;
+}
+
+.admin-modern-shell .notif-drawer-item-hide:hover,
+.admin-modern-shell .notif-drawer-item-hide:focus-visible {
+  border-color: #69aeda;
+  color: #0c659f;
+}
+
+.admin-modern-shell .notif-toast-icon {
+  color: #8b5c07;
+  background: #fff1c8;
+}
+
+/* Small report captions are operational data, not decorative fine print. Keep them at WCAG AA
+   contrast without changing the report layout the owner already approved. */
+.admin-modern-content .report-center :where(
+  .report-center-lead,
+  .report-filter-field label,
+  .report-period-strip span,
+  .report-kpi-label,
+  .report-kpi-note,
+  .report-panel-heading p,
+  .report-table th,
+  .report-muted,
+  .report-detail-head p,
+  .report-empty,
+  .report-file-main span,
+  .report-pagination-info,
+  .report-fine-print
+) {
+  color: #52667a;
+}
+
+.admin-modern-content .report-center :where(
+  .report-eyebrow,
+  .report-table a,
+  .report-filter-reset,
+  .report-tab:hover,
+  .report-tab:focus-visible,
+  .report-tab-active
+) {
+  color: #0b6eae;
+}
+
+.admin-modern-content .report-tab {
+  color: #52667a;
+}
+
+.admin-modern-content .report-tab-active {
+  color: #0b6eae;
+}
+
+.admin-modern-content .report-pagination-disabled {
+  border-color: #dfe6ed;
+  background: #f8fafc;
+  color: #5b6e82;
+}
+
+.admin-modern-content .report-button-primary {
+  border-color: #0b6eae;
+  background: linear-gradient(135deg, #0b6eae, #174f73);
+}
+
+@media (min-width: 1500px) {
+  .admin-modern-content {
+    padding-inline: 40px;
+  }
+}
+
+@media (max-width: 760px) {
+  .admin-modern-content .setup-card {
+    padding: 20px 16px;
+    border-radius: 12px;
+  }
+}

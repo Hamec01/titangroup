@@ -6,6 +6,8 @@ import { useEffect, useId, useRef, useState, type ReactNode } from 'react';
 import type { AdminNavStrings } from '@/lib/i18n/admin';
 import type { AppLocale } from '@/lib/i18n/locale';
 
+const NAV_GROUPS_STORAGE_KEY = 'titanor-admin-nav-groups-v1';
+
 // docs/titanor-time/REPORT_REDESIGN_PRODUCTION_READINESS_RU.md §4. The MODERN admin shell only —
 // the classic shell is server-rendered directly in app/admin/layout.tsx from the design cookie,
 // so there is no client flash and no dependency of the classic layout on this component.
@@ -34,12 +36,42 @@ export function AdminModernShell({
 }) {
   const ru = locale === 'RU';
   const pathname = usePathname();
+  const isActive = (href: string): boolean => pathname === href || pathname.startsWith(`${href}/`);
+  const activeGroupKey = nav.groups.find((group) => group.items.some((item) => isActive(item.href)))?.key ?? null;
   const [mobileOpen, setMobileOpen] = useState(false);
+  const [openGroups, setOpenGroups] = useState<Record<string, boolean>>(() =>
+    Object.fromEntries(nav.groups.map((group) => [group.key, group.key === activeGroupKey]))
+  );
   const triggerRef = useRef<HTMLButtonElement>(null);
   const sidebarId = useId();
 
   // Close on navigation.
   useEffect(() => setMobileOpen(false), [pathname]);
+
+  // Restore the operator's compact/expanded menu choices. The group containing the current page
+  // always opens so navigation never leaves the active location hidden.
+  useEffect(() => {
+    try {
+      const saved = JSON.parse(window.localStorage.getItem(NAV_GROUPS_STORAGE_KEY) ?? '{}') as unknown;
+      if (!saved || typeof saved !== 'object' || Array.isArray(saved)) return;
+      setOpenGroups((current) => {
+        const restored = { ...current };
+        for (const group of nav.groups) {
+          const value = (saved as Record<string, unknown>)[group.key];
+          if (typeof value === 'boolean') restored[group.key] = value;
+        }
+        if (activeGroupKey) restored[activeGroupKey] = true;
+        return restored;
+      });
+    } catch {
+      // Restricted/corrupt local storage must not affect access to admin navigation.
+    }
+  }, [activeGroupKey, nav.groups]);
+
+  useEffect(() => {
+    if (!activeGroupKey) return;
+    setOpenGroups((current) => current[activeGroupKey] ? current : { ...current, [activeGroupKey]: true });
+  }, [activeGroupKey]);
 
   // Escape closes the mobile menu and returns focus to the trigger (§4.8).
   useEffect(() => {
@@ -54,7 +86,17 @@ export function AdminModernShell({
     return () => document.removeEventListener('keydown', onKey);
   }, [mobileOpen]);
 
-  const isActive = (href: string): boolean => pathname === href || pathname.startsWith(`${href}/`);
+  function toggleGroup(groupKey: string) {
+    setOpenGroups((current) => {
+      const next = { ...current, [groupKey]: !current[groupKey] };
+      try {
+        window.localStorage.setItem(NAV_GROUPS_STORAGE_KEY, JSON.stringify(next));
+      } catch {
+        // The menu still works for this page load when storage is unavailable.
+      }
+      return next;
+    });
+  }
 
   return (
     <div className="admin-modern-shell" data-mobile-open={mobileOpen ? 'true' : undefined}>
@@ -91,26 +133,40 @@ export function AdminModernShell({
         </Link>
         <p className="admin-modern-label">{ru ? 'Рабочие разделы' : 'Workspace'}</p>
         <div className="admin-modern-links">
-          {nav.groups.map((group) => (
-            <div className="admin-modern-group" key={group.key}>
-              <p className={group.key === 'reports' ? 'admin-modern-group-title is-report' : 'admin-modern-group-title'}>
-                <span className="admin-nav-icon">{iconForGroup(group.key)}</span>
-                {group.label}
-              </p>
-              <div className="admin-modern-sub-links">
-                {group.items.map((item) => (
-                  <Link
-                    key={item.href}
-                    href={item.href}
-                    className={isActive(item.href) ? 'is-current' : undefined}
-                    aria-current={isActive(item.href) ? 'page' : undefined}
-                  >
-                    {item.label}
-                  </Link>
-                ))}
-              </div>
-            </div>
-          ))}
+          {nav.groups.map((group) => {
+            const expanded = openGroups[group.key] ?? false;
+            const panelId = `${sidebarId}-${group.key}`;
+            return (
+              <section
+                className={activeGroupKey === group.key ? 'admin-modern-group is-active' : 'admin-modern-group'}
+                key={group.key}
+              >
+                <button
+                  type="button"
+                  className={group.key === 'reports' ? 'admin-modern-group-toggle is-report' : 'admin-modern-group-toggle'}
+                  onClick={() => toggleGroup(group.key)}
+                  aria-expanded={expanded}
+                  aria-controls={panelId}
+                >
+                  <span className="admin-nav-icon">{iconForGroup(group.key)}</span>
+                  <span className="admin-modern-group-label">{group.label}</span>
+                  <span className="admin-modern-group-caret" aria-hidden="true">⌄</span>
+                </button>
+                <div id={panelId} className="admin-modern-sub-links" hidden={!expanded}>
+                  {group.items.map((item) => (
+                    <Link
+                      key={item.href}
+                      href={item.href}
+                      className={isActive(item.href) ? 'is-current' : undefined}
+                      aria-current={isActive(item.href) ? 'page' : undefined}
+                    >
+                      {item.label}
+                    </Link>
+                  ))}
+                </div>
+              </section>
+            );
+          })}
         </div>
         <div className="admin-modern-sidebar-foot">{ru ? 'Все данные защищены правами доступа' : 'All data is permission protected'}</div>
       </aside>

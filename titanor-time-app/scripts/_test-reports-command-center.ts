@@ -179,6 +179,67 @@ async function main() {
   await Promise.all([page.waitForSelector('.admin-modern-shell', { timeout: 15000 }), page.locator('.admin-design-toggle').click()]);
   check('new view: modern sidebar shell restored', (await page.locator('.admin-modern-shell').count()) === 1);
 
+  const firstNavGroup = page.locator('.admin-modern-group-toggle').first();
+  check('new view: inactive sidebar groups start collapsed', await firstNavGroup.getAttribute('aria-expanded') === 'false');
+  await firstNavGroup.click();
+  check('new view: a sidebar group can be expanded', await firstNavGroup.getAttribute('aria-expanded') === 'true');
+  await page.reload({ waitUntil: 'networkidle' });
+  check('new view: sidebar group choice persists across reload', await page.locator('.admin-modern-group-toggle').first().getAttribute('aria-expanded') === 'true');
+
+  await page.setViewportSize({ width: 1920, height: 1000 });
+  await page.goto(`${BASE}/admin`, { waitUntil: 'networkidle' });
+  const dashboardAppearance = await page.locator('.ov-card').evaluate((card) => {
+    const content = document.querySelector('.admin-modern-content');
+    const cardStyle = getComputedStyle(card);
+    const row = card.querySelector('.owner-worker-row');
+    const select = card.querySelector('.owner-search select');
+    return {
+      cardBackground: cardStyle.backgroundColor,
+      cardColor: cardStyle.color,
+      rowBackground: row ? getComputedStyle(row).backgroundColor : null,
+      selectBackground: select ? getComputedStyle(select).backgroundColor : null,
+      widthRatio: content ? card.getBoundingClientRect().width / content.getBoundingClientRect().width : 0
+    };
+  });
+  check(
+    'new view: Today uses light surfaces instead of the legacy dark card',
+    dashboardAppearance.cardBackground === 'rgb(255, 255, 255)' &&
+      dashboardAppearance.cardColor === 'rgb(22, 38, 58)' &&
+      dashboardAppearance.rowBackground === 'rgb(255, 255, 255)' &&
+      dashboardAppearance.selectBackground === 'rgb(255, 255, 255)',
+    dashboardAppearance
+  );
+  check('new view: Today uses the available workspace width', dashboardAppearance.widthRatio > 0.88, dashboardAppearance);
+  const notificationButton = page.locator('.notif-bell-button').last();
+  await notificationButton.click();
+  const notificationAppearance = await page.locator('.notif-drawer').evaluate((drawer) => ({
+    background: getComputedStyle(drawer).backgroundColor,
+    color: getComputedStyle(drawer).color
+  }));
+  check(
+    'new view: notification drawer uses a readable light surface',
+    notificationAppearance.background === 'rgb(255, 255, 255)' && notificationAppearance.color === 'rgb(34, 55, 77)',
+    notificationAppearance
+  );
+  await page.locator('.notif-drawer-close').click();
+  await page.goto(`${BASE}/admin/templates/new`, { waitUntil: 'networkidle' });
+  check(
+    'new view: schedule template controls use light inputs',
+    await page.locator('.template-day-row input[type=time]').first().evaluate((input) => getComputedStyle(input).backgroundColor === 'rgb(255, 255, 255)')
+  );
+  await page.goto(`${BASE}/admin/users/new`, { waitUntil: 'networkidle' });
+  const accountModeAppearance = await page.locator('.login-locale-switch button').first().evaluate((button) => ({
+    background: getComputedStyle(button).backgroundColor,
+    color: getComputedStyle(button).color
+  }));
+  check(
+    'new view: account mode controls remain readable on the light form',
+    accountModeAppearance.background === 'rgb(220, 239, 252)' && accountModeAppearance.color === 'rgb(18, 95, 148)',
+    accountModeAppearance
+  );
+  await page.setViewportSize(DESKTOP);
+  await page.goto(REPORTS, { waitUntil: 'networkidle' });
+
   // ── mobile ──────────────────────────────────────────────────────────────────────────────────
   const mctx = await browser.newContext({ viewport: MOBILE });
   const mpage = await mctx.newPage();
