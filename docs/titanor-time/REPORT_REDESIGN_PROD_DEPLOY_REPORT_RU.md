@@ -1,6 +1,7 @@
 # Titanor Time — production-деплой нового дизайна админки + раздела «Отчёты»
 
 **Дата/время swap:** 2026-09-07 14:22:25–14:22:29 UTC · **простой ≈ 3.7 с**
+**Визуальная приёмка владельцем: 2026-09-07 — «визуально всё нормально». РЕЛИЗ ПРИНЯТ И ЗАКРЫТ (см. §14a).**
 **Результат:** production LIVE на `titanor-time-app:redesign-4c282ba`, schema `current 102/102`. Все реальные данные (работники, пользователи, назначения, часы, табели, объекты, заказчики, пароли, роли, uploads, история) — без потерь и без подмены.
 
 ---
@@ -175,25 +176,41 @@ Caddy, DNS, пароли, публичный сайт — не трогалис�
 
 ## 14. Точная rollback-команда
 
-**Только откат образа. Схему НЕ откатывать. `ReportFile` НЕ удалять. Backup поверх БД НЕ восстанавливать.**
+**Только откат образа. Схему НЕ откатывать. `ReportFile` НЕ удалять. Backup поверх БД НЕ восстанавливать.
+`docker rm -f` НЕ использовать — новый контейнер сохраняется под именем
+`titanor-time-prod-app-redesign-failed` для диагностики.**
 
 ```bash
-docker rm -f titanor-time-prod-app
+docker stop -t 30 titanor-time-prod-app
+docker rename titanor-time-prod-app titanor-time-prod-app-redesign-failed
 docker rename titanor-time-prod-app-pre-4c282ba titanor-time-prod-app
 docker start titanor-time-prod-app
-# проверка:
-for i in $(seq 1 30); do curl -sf -m4 http://127.0.0.1:3199/api/ready >/dev/null && break; sleep 1; done
-curl -s http://127.0.0.1:3199/api/ready    # ожидается: status:ready schema:ahead aheadBy:2 (d7f на schema 102 — это норма)
-docker inspect titanor-time-prod-app --format '{{.Config.Image}} {{.State.Health.Status}}'
+curl -s http://127.0.0.1:3199/api/ready
 ```
 
-После отката schema остаётся 102, `ReportFile` пустая и невидима для кода `d7f-fd8494c` (он её не запрашивает). Scheduler / Caddy / DNS не трогать.
+**Ожидаемый результат после rollback:** `status:ready`, `schema:ahead`, `aheadBy:2`
+(`d7f-fd8494c` на schema 102 — это норма, доказано в Этапе 3.7).
+
+После отката schema остаётся 102, `ReportFile` пустая и невидима для кода `d7f-fd8494c`
+(он её не запрашивает). Scheduler / Caddy / DNS не трогать. Контейнер
+`titanor-time-prod-app-redesign-failed` не удалять до разбора причины.
+
+## 14a. Визуальная приёмка владельцем — 2026-09-07 · РЕЛИЗ ЗАКРЫТ
+
+- **2026-09-07: владелец выполнил визуальную проверку production и подтвердил — «визуально всё нормально». Релиз принят.**
+- **Новый дизайн админки и раздел «Отчёты» — ПРИНЯТЫ в production.**
+- Production image: **`titanor-time-app:redesign-4c282ba`** (deployed code `4c282bafc9b35dbc050144cf4400a460dd1c106e`).
+- Schema: **`current 102/102`**.
+- Реальные данные (работники, пользователи, назначения, часы, табели, объекты, заказчики, пароли, роли, uploads, история) — **не изменены** (см. §6, §7).
+- Тестовые работники / объекты / табели / назначения / отчёты — **не создавались**.
+- **Релиз нового дизайна и отчётов закрыт.** Release-ветка `feature/titanor-time-foundation`
+  fast-forward'нута на `origin/work/report-redesign` (без merge-коммитов, без force-push) —
+  теперь содержит deployed commit `4c282ba` + этот отчёт.
 
 ## 15. Оставшиеся ограничения и риски
 
-- **`feature/titanor-time-foundation` НЕ fast-forward'нута** — осталась на `61050de`. Образ собран напрямую из `work/report-redesign`. Чтобы release-ветка совпала с prod: `git checkout feature/titanor-time-foundation && git merge --ff-only 4c282ba && git push origin feature/titanor-time-foundation` (ancestry чистая, `61050de` — прямой предок `4c282ba`). Отдельное решение владельца — ветка проверяется в соседнем worktree.
 - **restore-test 12/13** — «all-data fingerprint» на backup, снятом в рабочее время. Полностью разобран (§4), риска для данных/rollback нет. Для чистого 13/13 backup нужно снимать в тихое окно (вечер/ночь).
-- Финальный **визуальный обход** живого prod (4 темы в UI, переключение classic⇄modern, mobile) — за владельцем (нужен логин администратора).
+- Визуальный обход живого prod владельцем — **выполнен 2026-09-07, релиз принят** (§14a).
 - Полный browser manifest прогонялся на **кандидатском образе на копии prod-данных**, не на живом prod (write-smoke на prod запрещён).
 - **Docker cleanup НЕ выполнять** до отдельного sign-off. Сохранены: старый контейнер `titanor-time-prod-app-pre-4c282ba`, образ `d7f-fd8494c`, новый образ `redesign-4c282ba`, backups `20260907T121437Z` + `20260907T141401Z` (on-box + off-box), disposable restore-логи (`…/scratchpad/e3-*.log`, `digest-before/after.txt`, `candidate-build.log`), screenshots из preview-фазы. Disposable pg-контейнер `tt-testdb-rr` оставлен остановленным.
 
