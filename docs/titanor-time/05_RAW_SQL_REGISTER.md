@@ -2099,3 +2099,227 @@ Disposable-PostgreSQL proof: `scripts/_test-report-files-schema.ts` (31 checks) 
 `lib/report-files.ts` audit path (`REPORT_FILE_CREATED` / `REPORT_FILE_DELETED` in-transaction),
 real pagination past 100 rows, and `ExportBatch` / `ExportItem` constraints + immutability trigger
 still present and unchanged.
+
+## 18. UT2 — Customer Hours Approval schema foundation
+
+Migration `20260921120000_add_customer_hours_approval` (checkpoint UT2-A architecturally approved,
+UT2-B implements it). Design: `TITANOR_TIME_UNIFIED_TIMESHEET_UPDATE_TZ_RU.md` + checkpoints
+UT0/UT0-R1/UT0-R2/UT2-A. Two new tables (`CustomerHoursApprovalBatch`, `CustomerHoursApprovalItem`),
+two new enums (`CustomerHoursApprovalSourceKind`, `CustomerHoursApprovalState`). Purely additive —
+no existing table, column, index, trigger, or permission is touched. No API/UI/reconciliation code
+reads or writes these tables yet; that is a later, separate checkpoint. Both tables start and stay
+empty until then.
+
+### CK-59 `ck_customer_hours_approval_item_week_range`
+
+- Table: `CustomerHoursApprovalItem`
+- Predicate: `"weekEnd" = "weekStart" + 6`
+- Source: UT0-R2 §6 / UT2-A §2.
+- Documentation synchronization: SYNCED.
+- Minimum negative test: `weekEnd` set to `weekStart + 8` — `INSERT` rejected, SQLSTATE `23514`,
+  this constraint by name (`scripts/_test-customer-hours-approval-schema.ts`, check 3).
+
+### CK-60 `ck_customer_hours_approval_item_week_start_monday`
+
+- Table: `CustomerHoursApprovalItem`
+- Predicate: `EXTRACT(ISODOW FROM "weekStart") = 1`
+- Source: UT0-R2 §6 / UT2-A §2. Assumes the caller (the weekly-customer-slice builder,
+  `lib/reporting/weekly-customer-slice.ts`, UT1) already normalizes to Monday — this CHECK rejects
+  bad data, it does not itself align an arbitrary date to the nearest Monday.
+- Documentation synchronization: SYNCED.
+- Minimum negative test: `weekStart` set to a Tuesday, `weekEnd` kept at exactly `weekStart + 6` (to
+  isolate from CK-59) — rejected by name (check 4).
+
+### CK-61 `ck_customer_hours_approval_item_minutes_nonnegative`
+
+- Table: `CustomerHoursApprovalItem`
+- Predicate: `"workedMinutes" >= 0 AND "grossMinutes" >= 0 AND "breakMinutes" >= 0`
+- Source: UT0-R2 §6 / UT2-A §2 (owner correction — negative `workedMinutes` must never be
+  representable; see the UT1-fixup checkpoint's own builder-side fix for the app-layer half).
+- Documentation synchronization: SYNCED.
+- Minimum negative test: `workedMinutes = -1`, `breakMinutes = 1`, `grossMinutes = 0` (balance held,
+  to isolate from CK-62) — rejected by name (check 5).
+
+### CK-62 `ck_customer_hours_approval_item_minutes_balance`
+
+- Table: `CustomerHoursApprovalItem`
+- Predicate: `"grossMinutes" = "workedMinutes" + "breakMinutes"`
+- Source: UT0-R2 §6 / UT2-A §2.
+- Documentation synchronization: SYNCED.
+- Minimum negative test: `workedMinutes=100, breakMinutes=50, grossMinutes=200` (all individually
+  non-negative, to isolate from CK-61) — rejected by name (check 6).
+
+### CK-63 `ck_customer_hours_approval_item_source_revision_shape`
+
+- Table: `CustomerHoursApprovalItem`
+- Predicate:
+  ```sql
+  ("sourceKind" = 'DRAFT'   AND "sourceRevision" IS NOT NULL) OR
+  ("sourceKind" = 'VERSION' AND "sourceRevision" IS NULL)
+  ```
+- Source: UT0-R2 §6 / UT2-A §1 — `sourceRevision` is `TimesheetDraft.contentRevision` at read time,
+  meaningful only for `DRAFT`; a frozen `VERSION` snapshot never needs it.
+- Documentation synchronization: SYNCED.
+- Minimum negative test: `sourceKind=VERSION` with `sourceRevision` set, and separately
+  `sourceKind=DRAFT` with `sourceRevision NULL` — both rejected by name (check 7/7b).
+
+### CK-64 `ck_customer_hours_approval_item_superseded_shape`
+
+- Table: `CustomerHoursApprovalItem`
+- Predicate:
+  ```sql
+  ("approvalState" = 'CURRENT'    AND "supersededAt" IS NULL     AND "supersededBySourceId" IS NULL) OR
+  ("approvalState" = 'SUPERSEDED' AND "supersededAt" IS NOT NULL AND "supersededBySourceId" IS NOT NULL)
+  ```
+- Source: UT0-R2 §6 / UT2-A §2.
+- Documentation synchronization: SYNCED.
+- Minimum negative test: `approvalState='CURRENT'` with `supersededAt` set, constructed via a direct
+  raw `INSERT` (the only way to reach this exact shape — no ordinary create path produces it) —
+  rejected by name (check 8).
+
+### CK-65 `ck_customer_hours_approval_item_fingerprint_format`
+
+- Table: `CustomerHoursApprovalItem`
+- Predicate: `"fingerprint" ~ '^[0-9a-f]{64}$'`
+- Source: UT0-R2 §4 — same shape rule as `lib/reporting/weekly-customer-slice.ts`'s
+  `computeSliceFingerprint` output (UT1).
+- Documentation synchronization: SYNCED.
+- Minimum negative test: a non-hex, non-64-char string — rejected by name (check 9).
+
+### CK-66 `ck_customer_hours_approval_batch_counts_nonnegative`
+
+- Table: `CustomerHoursApprovalBatch`
+- Predicate: `"itemCount" >= 0 AND "workedMinutes" >= 0`
+- Source: UT0-R2 §6 / UT2-A §2.
+- Documentation synchronization: SYNCED.
+- Minimum negative test: `itemCount=-1`, and separately `workedMinutes=-1` — both rejected by name
+  (check 10/10b).
+
+### Composite foreign keys (2, Prisma-native — no register ID; `@relation(fields:[...])`)
+
+- `CustomerHoursApprovalItem.(timesheetId, employeeId) -> Timesheet(id, employeeId)` — via
+  `Timesheet.@@unique([id, employeeId])`, same pattern `TimesheetDraft`/`TimesheetVersion` already
+  use. Minimum negative test: `timesheetId` belonging to a different `employeeId` than the item's
+  own — rejected, `CustomerHoursApprovalItem_timesheetId_employeeId_fkey` (check 11).
+- `CustomerHoursApprovalItem.(siteId, workAreaId) -> WorkArea(siteId, id)` — via
+  `WorkArea.@@unique([siteId, id])`, same pattern `WorkSegment.workArea` already uses. Minimum
+  negative test: `workAreaId` belonging to a different `siteId` than the item's own — rejected,
+  `CustomerHoursApprovalItem_siteId_workAreaId_fkey` (check 12).
+
+All 6 FKs on the two new tables (the two composite ones above plus `batchId->Batch`,
+`employeeId->Employee`, `siteId->WorkSite`, `Batch.approvedByUserId->User`) are `ON DELETE RESTRICT`
+— confirmed via `pg_constraint.confdeltype='r'` introspection, not just by schema declaration
+(check 26).
+
+### UX-05 `ux_customer_hours_approval_item_active_with_customer`
+
+- Table: `CustomerHoursApprovalItem`
+- Key: `("employeeId", "timesheetId", "siteId", "workAreaId", "weekStart")`
+- Partial predicate: `WHERE "approvalState" = 'CURRENT' AND "workAreaId" IS NOT NULL`
+- SQLSTATE: `23505` (`unique_violation`); via Prisma, `P2002` with
+  `meta.target=["employeeId","timesheetId","siteId","workAreaId","weekStart"]`.
+- Source: UT0-R2 §6 — owner decision: two partial indexes, not a `COALESCE` sentinel UUID, for
+  `workAreaId IS NULL` ("Без заказчика").
+- Documentation synchronization: SYNCED.
+- Minimum negative test: a second `CURRENT` item with the identical 5-column key — rejected,
+  `P2002` (check 13). Positive: a second item at the same key but a DIFFERENT `workAreaId` inserts
+  cleanly (check 15) — the split does not over-block distinct customers.
+
+### UX-06 `ux_customer_hours_approval_item_active_no_customer`
+
+- Table: `CustomerHoursApprovalItem`
+- Key: `("employeeId", "timesheetId", "siteId", "weekStart")`
+- Partial predicate: `WHERE "approvalState" = 'CURRENT' AND "workAreaId" IS NULL`
+- SQLSTATE: `23505`; via Prisma, `P2002`.
+- Source: UT0-R2 §6 — the other half of the same owner decision as UX-05: `NULL <> NULL` under a
+  plain unique index, so this predicate alone catches two simultaneous `CURRENT` "Без заказчика"
+  rows a single 5-column index (with `workAreaId` in the key) would never see collide.
+- Documentation synchronization: SYNCED.
+- Minimum negative test: a second `CURRENT`, `workAreaId=NULL` item with the identical 4-column key
+  — rejected, `P2002` (check 14).
+
+`CustomerHoursApprovalBatch.@@unique(["approvedByUserId","idempotencyKey"])` — plain, non-partial,
+fully expressible via Prisma `@@unique`; **no register ID** (the register only tracks objects Prisma
+schema syntax cannot express). Minimum negative test: two batches, same actor, same
+`idempotencyKey` — rejected, `P2002` (check 23); same actor with a different key inserts cleanly
+(check 23b).
+
+### FN-27 `fn_customer_hours_approval_item_guard`
+
+- Table: `CustomerHoursApprovalItem`.
+- Behavior: narrow contract, not an unconditional ban. `DELETE` always rejected. `UPDATE`: if the
+  row is already `SUPERSEDED`, every `UPDATE` is rejected outright — including a second, genuinely
+  different supersede attempt (not treated as an idempotent no-op at the trigger level: the calling
+  business operation, not this trigger, is responsible for checking `approvalState` before issuing
+  the `UPDATE` if idempotent behavior is wanted). If the row is `CURRENT`, the only permitted
+  `UPDATE` sets `approvalState='SUPERSEDED'` with both `supersededAt`/`supersededBySourceId` newly
+  non-null and every other column — content, source, minutes, keys, `batchId`, `createdAt` —
+  byte-identical to the prior row. **No early return for a byte-identical no-op**: a
+  `CURRENT->CURRENT` `UPDATE` that changes nothing is rejected exactly like any other illegal
+  `UPDATE` (owner correction, UT2-B — an append-only audit trail records that a write was attempted
+  and refused, it never silently succeeds at doing nothing).
+- Stable exception identifiers: `CUSTOMER_HOURS_APPROVAL_ITEM_NO_DELETE`,
+  `CUSTOMER_HOURS_APPROVAL_ITEM_ALREADY_SUPERSEDED`, `CUSTOMER_HOURS_APPROVAL_ITEM_IMMUTABLE_FIELD_CHANGED`.
+- Row-lock contract: none needed beyond the row's own implicit `UPDATE`/`DELETE` lock — no
+  cross-row check.
+- Source: UT2-A §4 (Raw SQL), corrected by owner instruction in UT2-B (no `NEW IS NOT DISTINCT FROM
+  OLD` early return).
+- Minimum negative test: valid transition succeeds (check 16); transition that also changes a
+  content field (`workedMinutes`, `fingerprint`) is rejected,
+  `CUSTOMER_HOURS_APPROVAL_ITEM_IMMUTABLE_FIELD_CHANGED`, and the row is confirmed still `CURRENT`
+  afterward (check 17/17b/17c); `CURRENT->CURRENT` no-op rejected, same identifier (check 18);
+  `SUPERSEDED->SUPERSEDED` no-op rejected, `CUSTOMER_HOURS_APPROVAL_ITEM_ALREADY_SUPERSEDED`
+  (check 19); a second, non-identical supersede attempt on an already-`SUPERSEDED` row rejected,
+  same identifier (check 20); `DELETE` on a `CURRENT` and on a `SUPERSEDED` row both rejected,
+  `CUSTOMER_HOURS_APPROVAL_ITEM_NO_DELETE` (check 21/21b).
+
+### FN-28 `fn_customer_hours_approval_batch_immutable`
+
+- Table: `CustomerHoursApprovalBatch`.
+- Behavior: unconditional `RAISE EXCEPTION` on any `UPDATE`/`DELETE` — same shape as
+  `fn_audit_event_immutable`/`fn_clock_event_immutable`; a batch describes one already-completed
+  admin action, nothing about it is ever supposed to change.
+- Stable exception identifier: `CUSTOMER_HOURS_APPROVAL_BATCH_IMMUTABLE`.
+- Source: UT2-A §4.
+- Minimum negative test: `UPDATE` and `DELETE` both rejected by identifier (check 22/22b).
+
+### Trigger instance register (TRG-32 .. TRG-33)
+
+| ID | Table | Trigger | Function | Timing/Events |
+|---|---|---|---|---|
+| TRG-32 | `CustomerHoursApprovalItem` | `trg_customer_hours_approval_item_guard` | FN-27 | `BEFORE UPDATE OR DELETE` |
+| TRG-33 | `CustomerHoursApprovalBatch` | `trg_customer_hours_approval_batch_immutable` | FN-28 | `BEFORE UPDATE OR DELETE` |
+
+### Permission seed
+
+`timesheet.customer_hours_approve.all` — held by `ADMIN` and `SUPER_ADMIN` only, `FOREMAN` and
+`WORKER` hold neither (checks 24/24b/24c/25/25b). Idempotent seed
+(`INSERT ... ON CONFLICT ("code") DO NOTHING` / `ON CONFLICT ("roleId","permissionId") DO NOTHING`),
+same style as the T7A `system.scheduler`/`CompanyAttendancePolicy` seeds (§11.6). Not read by any
+API route yet — the permission exists ahead of the code that will check it, same relationship
+`timesheet.final_approve` had at its own introduction.
+
+### Arithmetic assertions (UT2 additions only)
+
+```text
+UT2 CUSTOMER HOURS APPROVAL SCHEMA TOTALS (additive to all prior sections)
+New tables: 2 (CustomerHoursApprovalBatch, CustomerHoursApprovalItem)
+New enums: 2 (CustomerHoursApprovalSourceKind, CustomerHoursApprovalState)
+CHECK constraints: 8 (CK-59..CK-66)
+Partial unique indexes: 2 (UX-05..UX-06)
+Composite foreign keys (Prisma-native, no register ID): 2
+Plain foreign keys: 4 (batchId->Batch, employeeId->Employee, siteId->WorkSite, approvedByUserId->User)
+Trigger functions: 2 (FN-27..FN-28)
+Trigger instances: 2 (TRG-32..TRG-33)
+New permission codes: 1 (timesheet.customer_hours_approve.all — ADMIN, SUPER_ADMIN only)
+New PostgreSQL extensions: 0
+Backfill: none — both tables start and remain empty until a later, separate checkpoint
+```
+
+Disposable-PostgreSQL proof: `scripts/_test-customer-hours-approval-schema.ts` (39 checks) —
+migration recorded cleanly, both DRAFT/VERSION shapes, all 8 CHECK constraints each isolated to its
+own violation, both composite FKs, both partial unique indexes plus the positive
+different-`workAreaId` no-conflict case, the full `CURRENT->SUPERSEDED` transition contract
+(valid transition / content-field guard / both no-op directions / repeat-supersede / DELETE ban on
+both states / Batch full immutability), Batch `(approvedByUserId,idempotencyKey)` uniqueness,
+the permission grant set, and FK `ON DELETE RESTRICT` introspection.

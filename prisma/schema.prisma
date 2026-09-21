@@ -444,6 +444,7 @@ model User {
   workerNotificationDismissals   WorkerNotificationDismissal[]
   assignmentTransitions          AssignmentTransition[]        @relation("AssignmentTransitionActor")
   createdReportFiles             ReportFile[]                  @relation("ReportFileCreatedBy")
+  customerHoursApprovalBatchesApproved CustomerHoursApprovalBatch[] @relation("CustomerHoursApprovalBatchApprovedBy")
 }
 
 model Role {
@@ -604,6 +605,7 @@ model Employee {
   shiftPresenceSamples  ShiftPresenceSample[]
   professions           EmployeeProfession[]
   assignmentTransitions AssignmentTransition[]
+  customerHoursApprovalItems CustomerHoursApprovalItem[]
 }
 
 // Worker Profile feature (2026-08-24 plan) — optional, self-service worker info plus an
@@ -934,6 +936,7 @@ model WorkSite {
   attendanceExceptions     AttendanceException[]
   exportItems              ExportItem[]
   shiftPresenceSamples     ShiftPresenceSample[]
+  customerHoursApprovalItems CustomerHoursApprovalItem[]
 
   @@index([cityId])
   @@index([active])
@@ -956,6 +959,7 @@ model WorkArea {
   employeeOpenShifts      EmployeeOpenShift[]
   clockShifts             ClockShift[]
   clockShiftFragments     ClockShiftFragment[]
+  customerHoursApprovalItems CustomerHoursApprovalItem[]
 
   @@unique([siteId, name])
   @@unique([siteId, id])
@@ -1183,6 +1187,7 @@ model Timesheet {
   autoSubmissionAttempts AutoSubmissionAttempt[]
   adminNotifications     AdminNotification[]
   workerNotifications    WorkerNotification[]
+  customerHoursApprovalItems CustomerHoursApprovalItem[]
 
   @@unique([employeeId, periodId])
   @@unique([id, employeeId])
@@ -2159,4 +2164,81 @@ model ReportFile {
   @@index([periodId, createdAt(sort: Desc), id(sort: Desc)])
   @@index([createdAt(sort: Desc), id(sort: Desc)])
   @@index([createdByUserId])
+}
+
+// UT2 (Titanor Time — единый табель и подтверждение часов по заказчику, checkpoints
+// UT0/UT0-R1/UT0-R2/UT2-A) — weekly-customer-slice approval records. Append-only:
+// CustomerHoursApprovalItem rows are never updated except the single CURRENT -> SUPERSEDED
+// transition (enforced by trg_customer_hours_approval_item_guard, raw SQL — see this migration's
+// "Section B" and docs/titanor-time/05_RAW_SQL_REGISTER.md CK-59..CK-66/UX-05..UX-06/FN-27..FN-28/
+// TRG-32..TRG-33), never deleted. CustomerHoursApprovalBatch rows are fully immutable
+// (trg_customer_hours_approval_batch_immutable). No API/UI code reads or writes these tables yet —
+// schema-only slice, the approval endpoint itself is a later, separate checkpoint.
+enum CustomerHoursApprovalSourceKind {
+  DRAFT
+  VERSION
+}
+
+enum CustomerHoursApprovalState {
+  CURRENT
+  SUPERSEDED
+}
+
+model CustomerHoursApprovalBatch {
+  id                String                       @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  approvedByUserId  String                       @db.Uuid
+  approvedAt        DateTime                     @default(now()) @db.Timestamptz(6)
+  requestId         String                       @db.Uuid
+  idempotencyKey    String                       @db.Uuid
+  selectionSnapshot Json
+  itemCount         Int
+  workedMinutes     Int
+  createdAt         DateTime                     @default(now()) @db.Timestamptz(6)
+  approvedByUser    User                         @relation("CustomerHoursApprovalBatchApprovedBy", fields: [approvedByUserId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  items             CustomerHoursApprovalItem[]
+
+  @@unique([approvedByUserId, idempotencyKey])
+  @@index([approvedAt(sort: Desc)])
+}
+
+model CustomerHoursApprovalItem {
+  id                   String                           @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  batchId              String                           @db.Uuid
+  timesheetId          String                           @db.Uuid
+  employeeId           String                           @db.Uuid
+  siteId               String                           @db.Uuid
+  workAreaId           String?                          @db.Uuid
+  weekStart            DateTime                         @db.Date
+  weekEnd              DateTime                         @db.Date
+  sourceKind           CustomerHoursApprovalSourceKind
+  // Polymorphic: TimesheetVersion.id when sourceKind=VERSION, TimesheetDraft.id when
+  // sourceKind=DRAFT — deliberately NOT a Prisma FK. A real FK would have to point at two
+  // different target tables depending on sourceKind, which one column cannot express, and either
+  // target row can legitimately be re-created (a draft is deleted/recreated on some flows)
+  // without that invalidating this historical record. Referential integrity for this field is an
+  // application-level concern for the reconciliation service (a later checkpoint), same trade-off
+  // AttendanceException already makes with several nullable same-shape FKs, just polymorphic
+  // instead of alternative-nullable.
+  sourceId             String                           @db.Uuid
+  sourceRevision       BigInt?
+  fingerprint          String                           @db.Char(64)
+  workedMinutes        Int
+  grossMinutes         Int
+  breakMinutes         Int
+  snapshot             Json
+  approvalState        CustomerHoursApprovalState       @default(CURRENT)
+  supersededAt         DateTime?                        @db.Timestamptz(6)
+  supersededBySourceId String?                          @db.Uuid
+  createdAt            DateTime                         @default(now()) @db.Timestamptz(6)
+
+  batch     CustomerHoursApprovalBatch @relation(fields: [batchId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  timesheet Timesheet                  @relation(fields: [timesheetId, employeeId], references: [id, employeeId], onDelete: Restrict, onUpdate: Cascade)
+  employee  Employee                   @relation(fields: [employeeId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  site      WorkSite                   @relation(fields: [siteId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  workArea  WorkArea?                  @relation(fields: [siteId, workAreaId], references: [siteId, id], onDelete: Restrict, onUpdate: Cascade)
+
+  @@index([timesheetId, employeeId])
+  @@index([weekStart, workAreaId, siteId])
+  @@index([batchId])
+  @@index([employeeId, siteId, workAreaId, weekStart, approvalState])
 }

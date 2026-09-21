@@ -106,13 +106,14 @@ export const MIGRATION_INVENTORY = [
   '20260902160000_add_assignment_lifecycle',
   '20260902180000_add_primary_period_exclusion',
   '20260906193000_add_saved_report_files',
-  '20260906210000_harden_report_files'
+  '20260906210000_harden_report_files',
+  '20260921120000_add_customer_hours_approval'
 ] as const;
 
-export const MIGRATION_INVENTORY_COUNT = 102;
+export const MIGRATION_INVENTORY_COUNT = 103;
 
 /** sha256 of the newline-joined sorted names — a cheap single-value schema-version fingerprint. */
-export const MIGRATION_INVENTORY_CHECKSUM = 'f34385c1c75f8550de56403ec186c67e7e7387749d4c4a0c5529b261c2dc085e';
+export const MIGRATION_INVENTORY_CHECKSUM = 'b6190a8f9184f615f9e56bed5348deca6a4184e1b5caa1c4e22c04754517839d';
 
 /** The newest migration this build knows about (informational only — comparisons use the full set). */
-export const LATEST_KNOWN_MIGRATION = '20260906210000_harden_report_files';
+export const LATEST_KNOWN_MIGRATION = '20260921120000_add_customer_hours_approval';
