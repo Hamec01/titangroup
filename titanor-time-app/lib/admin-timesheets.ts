@@ -4,7 +4,7 @@ import { reinitializeDraftFromVersion, computeSiteScopeHasExceptionBulk } from '
 import { autoCloseOpenCorrectionsForTimesheet } from '@/lib/correction-lifecycle';
 import { helsinkiToday } from '@/lib/workers';
 import { computeDayWorkedMs, msToMinutes } from '@/lib/reporting/worked-time';
-import { loadVersionPlannedUnpaidBreakByDate, loadAutoUnpaidBreakThresholdMinutes } from '@/lib/reporting/auto-break';
+import { loadVersionPlannedUnpaidBreakByDate, loadPlannedUnpaidBreakBySourceAndDate, loadAutoUnpaidBreakThresholdMinutes } from '@/lib/reporting/auto-break';
 
 // docs/titanor-time/01_SCREEN_MAP.md §2 `/admin/timesheets[/...]` — final approval / admin
 // override-return. Not detailed in 04_...§9 (that's the worker/foreman-fallback side) — contract
@@ -536,14 +536,15 @@ export async function getReviewQueue(filters: ReviewQueueFilters): Promise<Revie
   const foremanSiteIds = new Set(foremanAssignments.map((f) => f.siteId));
 
   // T10-D — automatic unpaid-lunch inputs for every queued timesheet's current version.
+  // UT1 (weekly-customer-slice) — keyed by `${versionId}:${date}`, not date alone: the queue pools
+  // MANY workers' versions in one call, and a date-only key would let one worker's planned-break
+  // minutes silently override another's on a shared calendar date (loadVersionPlannedUnpaidBreakByDate
+  // is safe only for a single versionId, as lib/reporting/auto-break.ts's own doc comment says).
   const queueVersionIds = timesheets.map((t) => t.currentVersionId).filter((id): id is string => !!id);
-  const [plannedUnpaidByVersionDate, autoBreakThresholdMinutes] = await Promise.all([
-    loadVersionPlannedUnpaidBreakByDate(queueVersionIds),
+  const [plannedUnpaidBySourceDate, autoBreakThresholdMinutes] = await Promise.all([
+    loadPlannedUnpaidBreakBySourceAndDate({ versionIds: queueVersionIds, draftIds: [] }),
     loadAutoUnpaidBreakThresholdMinutes()
   ]);
-  // loadVersionPlannedUnpaidBreakByDate keys by date only (one plan per worker/day). It pools all
-  // versions — fine here because each version belongs to a different worker and dates rarely
-  // collide; a small over-attribution only affects the queue's summary hours, never a frozen row.
 
   let rows: ReviewQueueRow[] = timesheets.map((t) => {
     const segs = t.currentVersion?.workSegments ?? [];
@@ -557,9 +558,10 @@ export async function getReviewQueue(filters: ReviewQueueFilters): Promise<Revie
     }
     let workedMinutes = 0;
     for (const [dateKey, daySegs] of byDate) {
+      const sourceDateKey = `${t.currentVersionId ?? ''}:${dateKey}`;
       const dayMs = computeDayWorkedMs(
         daySegs.map((s) => ({ startAt: s.startAt, endAt: s.endAt, breaks: s.breaks })),
-        { plannedUnpaidBreakMinutes: plannedUnpaidByVersionDate.get(dateKey) ?? 0, grossThresholdMinutes: autoBreakThresholdMinutes }
+        { plannedUnpaidBreakMinutes: plannedUnpaidBySourceDate.get(sourceDateKey) ?? 0, grossThresholdMinutes: autoBreakThresholdMinutes }
       );
       workedMinutes += msToMinutes(dayMs.workedMs);
     }

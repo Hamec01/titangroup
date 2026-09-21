@@ -67,6 +67,55 @@ async function makeSubmittedTimesheet(adminId: string, tag: string, opts: { peri
   return { timesheetId: ts.id, employeeId: emp.id, siteId: site.id, periodId: period.id, adminId };
 }
 
+// UT1-fixup — real DB regression for the getReviewQueue `${versionId}:${date}` fix
+// (lib/admin-timesheets.ts, was date-only). Same shape as makeSubmittedTimesheet but with an
+// explicit shared calendar date and a configurable break plan, so two different workers can be put
+// on the exact same date in the same getReviewQueue({}) call — the only way to actually exercise
+// loadPlannedUnpaidBreakBySourceAndDate through the real DB loader, not a hand-built Map.
+async function makeSubmittedTimesheetWithBreakPlan(
+  adminId: string,
+  tag: string,
+  day: Date,
+  planned: { plannedBreakMinutes: number; plannedBreakPaid: boolean }
+) {
+  const site = await prisma.workSite.create({ data: { name: `BAPPR ${tag} ${randomUUID().slice(0, 4)}` } });
+  const emp = await prisma.employee.create({ data: { employeeNumber: `BAPPR-${tag}-${randomUUID().slice(0, 8)}`, firstName: tag, lastName: 'Worker' } });
+  await prisma.employment.create({ data: { employeeId: emp.id, active: true, startDate: ASG_START } });
+  const asg = await prisma.siteAssignment.create({ data: { employeeId: emp.id, siteId: site.id, isPrimary: true, validFrom: ASG_START, validTo: null, assignedByUserId: adminId } });
+
+  const period = await prisma.payrollPeriod.create({ data: { startDate: day, endDate: new Date(day.getTime() + 6 * 86400000), status: 'OPEN', openedByUserId: adminId } });
+  await prisma.payrollPeriodParticipant.create({ data: { periodId: period.id, employeeId: emp.id, expected: true } });
+  const ts = await prisma.timesheet.create({ data: { employeeId: emp.id, periodId: period.id, status: 'DRAFT' } });
+  const draft = await prisma.timesheetDraft.create({ data: { timesheetId: ts.id, employeeId: emp.id } });
+
+  const startAt = new Date(day.getTime() + 7 * 3600000); // 07:00
+  const endAt = new Date(day.getTime() + 16 * 3600000); // 16:00 -> 9h span, no logged break
+  await prisma.timesheetDraftPlannedShift.create({
+    data: {
+      draftId: draft.id,
+      employeeId: emp.id,
+      date: day,
+      siteId: site.id,
+      sourceAssignmentId: asg.id,
+      plannedStartAt: startAt,
+      plannedEndAt: endAt,
+      plannedBreakMinutes: planned.plannedBreakMinutes,
+      plannedBreakPaid: planned.plannedBreakPaid
+    }
+  });
+  const dd = await prisma.timesheetDraftDay.create({ data: { draftId: draft.id, date: day, dayType: 'WORK', confirmedZero: false } });
+  await prisma.timesheetDraftSegment.create({
+    data: { draftDayId: dd.id, draftId: draft.id, employeeId: emp.id, date: day, startAt, endAt, siteId: site.id, sourceAssignmentId: asg.id }
+  });
+  await prisma.$transaction(async (tx) => {
+    await tx.$queryRaw`SELECT id FROM "Employee" WHERE id = ${emp.id}::uuid FOR UPDATE`;
+    await tx.$queryRaw`SELECT id FROM "Timesheet" WHERE id = ${ts.id}::uuid FOR UPDATE`;
+    await tx.$queryRaw`SELECT id FROM "TimesheetDraft" WHERE id = ${draft.id}::uuid FOR UPDATE`;
+    await submitWorkerTimesheetCore(tx, emp.id, ts.id, adminId, randomUUID(), SubmissionSource.MANUAL);
+  });
+  return { timesheetId: ts.id, employeeId: emp.id, siteId: site.id, periodId: period.id };
+}
+
 async function main() {
   const admin = await makeUser('ADMIN', 'a');
 
@@ -161,6 +210,21 @@ async function main() {
     const t = await makeSubmittedTimesheet(admin, 'RG');
     const r = await finalApproveTimesheet(t.timesheetId, admin, randomUUID());
     check('finalApproveTimesheet refuses a SUBMITTED timesheet', 'code' in r && r.code === 'INVALID_STATE_TRANSITION', r);
+  }
+
+  // ---- 8. UT1-fixup: getReviewQueue must not mix planned-break minutes between two different
+  //         workers sharing the same calendar date (lib/admin-timesheets.ts, sourceId+date fix) ----
+  {
+    const sameDay = new Date(Date.UTC(2022, 5, 6)); // arbitrary fixed date, shared by both fixtures below
+    const paidLunch = await makeSubmittedTimesheetWithBreakPlan(admin, 'XW1', sameDay, { plannedBreakMinutes: 30, plannedBreakPaid: true });
+    const unpaidLunch = await makeSubmittedTimesheetWithBreakPlan(admin, 'XW2', sameDay, { plannedBreakMinutes: 30, plannedBreakPaid: false });
+
+    const queue = await getReviewQueue({});
+    const rowPaid = queue.rows.find((r) => r.timesheetId === paidLunch.timesheetId);
+    const rowUnpaid = queue.rows.find((r) => r.timesheetId === unpaidLunch.timesheetId);
+    check('both same-date workers appear in the queue', !!rowPaid && !!rowUnpaid, { rowPaid, rowUnpaid });
+    check('plannedBreakPaid=true worker keeps the full 9h = 540 min (unaffected by the other worker sharing the date)', rowPaid?.workedMinutes === 540, rowPaid);
+    check('plannedBreakPaid=false, 30-min worker gets 510 min (not dragged up to 540 by the paid-lunch worker sharing the date)', rowUnpaid?.workedMinutes === 510, rowUnpaid);
   }
 
   console.log(JSON.stringify({ pass, fail }));
