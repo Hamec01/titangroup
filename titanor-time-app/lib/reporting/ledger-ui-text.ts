@@ -85,6 +85,47 @@ export function issueLabel(issue: LedgerIssue, locale: AppLocale): string {
   return issue.message;
 }
 
+// UT5-B — single weekly-customer-hours approval action text.
+export function confirmWeekButtonLabel(locale: AppLocale): string {
+  return pick(locale, 'Confirm this week', 'Подтвердить эту неделю');
+}
+export function approvedStatusNote(locale: AppLocale): string {
+  return pick(locale, 'Already confirmed.', 'Уже подтверждено.');
+}
+export function approveLoadingLabel(locale: AppLocale): string {
+  return pick(locale, 'Checking…', 'Проверяем…');
+}
+export function approveCommittingLabel(locale: AppLocale): string {
+  return pick(locale, 'Confirming…', 'Подтверждаем…');
+}
+export function approveStaleLabel(locale: AppLocale): string {
+  return pick(locale, 'The data changed — refresh this row.', 'Данные изменились — обновите строку.');
+}
+export function approveRefreshButtonLabel(locale: AppLocale): string {
+  return pick(locale, 'Refresh', 'Обновить');
+}
+export function approveWarningIntroLabel(locale: AppLocale): string {
+  return pick(locale, 'This week has notes — confirm anyway?', 'По этой неделе есть замечания — всё равно подтвердить?');
+}
+export function approveWarningConfirmButtonLabel(locale: AppLocale): string {
+  return pick(locale, 'Confirm anyway', 'Всё равно подтвердить');
+}
+export function approveErrorLabel(locale: AppLocale): string {
+  return pick(locale, 'Could not confirm this week.', 'Не удалось подтвердить неделю.');
+}
+export function approveRetryButtonLabel(locale: AppLocale): string {
+  return pick(locale, 'Try again', 'Повторить');
+}
+export function approveBlockedIntroLabel(locale: AppLocale): string {
+  return pick(locale, 'Cannot confirm yet:', 'Пока нельзя подтвердить:');
+}
+export function approveDraftWarningLabel(locale: AppLocale): string {
+  return pick(locale, 'Not submitted yet — the worker can still change these hours before you confirm.', 'Ещё не сдано — работник ещё может изменить эти часы до подтверждения.');
+}
+export function approveSuccessLabel(locale: AppLocale, result: 'APPROVED' | 'ALREADY_APPROVED'): string {
+  return result === 'ALREADY_APPROVED' ? pick(locale, 'Already confirmed — nothing to change.', 'Уже было подтверждено — менять нечего.') : pick(locale, 'Confirmed.', 'Подтверждено.');
+}
+
 export function issueCountLabel(count: number, kind: 'blocker' | 'warning', locale: AppLocale): string {
   if (kind === 'blocker') return pick(locale, `${count} blocker${count === 1 ? '' : 's'}`, `${count} ${blockerWordRu(count)}`);
   return pick(locale, `${count} warning${count === 1 ? '' : 's'}`, `${count} ${warningWordRu(count)}`);

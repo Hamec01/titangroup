@@ -8,7 +8,7 @@ import { WorkerSliceRow } from './WorkerSliceRow';
 // UT4-B point 3 — the API never returns a global total per customer group (only global summary +
 // the current page's rows), so this heading explicitly labels its number as page-scoped ("На этой
 // странице: …") rather than presenting a page subtotal as if it were the customer's full total.
-export function CustomerGroupSection({ locale, group }: { locale: AppLocale; group: CustomerGroup }) {
+export function CustomerGroupSection({ locale, group, onApproved }: { locale: AppLocale; group: CustomerGroup; onApproved: () => void }) {
   const distinctWorkers = new Set(group.rows.map((r) => r.logicalKey.employeeId)).size;
   const pageMinutes = group.rows.reduce((sum, r) => sum + r.workedMinutes, 0);
   const title = group.workAreaId === null ? noCustomerGroupLabel(locale) : `${group.workAreaName ?? group.workAreaId} · ${group.siteName}`;
@@ -22,7 +22,7 @@ export function CustomerGroupSection({ locale, group }: { locale: AppLocale; gro
       <ul className="ledger-row-list">
         {group.rows.map((row) => (
           <li key={`${row.logicalKey.timesheetId}:${row.logicalKey.siteId}:${row.logicalKey.workAreaId ?? ''}:${row.logicalKey.weekStart}`}>
-            <WorkerSliceRow locale={locale} row={row} />
+            <WorkerSliceRow locale={locale} row={row} onApproved={onApproved} />
           </li>
         ))}
       </ul>

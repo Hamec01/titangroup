@@ -295,7 +295,13 @@ export function entrySignature(entry: TimeLedgerEntry): string {
 // chunked path — never called per-row.
 // =================================================================================================
 
-interface TimesheetRow {
+// UT5-B — exported (along with several of this section's siblings below) so the new single-slice
+// approval orchestration (lib/reporting/weekly-approval.ts) reuses the EXACT same canonical-source
+// loading / blocker-warning rules the batch read pipeline already uses, rather than a second
+// diverging copy (UT5-A-R1 §10 "shared preparation service"). The batch pipeline itself
+// (buildEntriesForTimesheets, runFastPath/runChunkedPath) stays private and unchanged — only the
+// underlying rules/loaders it already calls become part of this module's public surface.
+export interface TimesheetRow {
   id: string;
   status: string;
   employeeId: string;
@@ -307,7 +313,7 @@ interface TimesheetRow {
   currentVersion: { id: string; versionNumber: number; submissionSource: string | null } | null;
 }
 
-const TIMESHEET_SELECT = {
+export const TIMESHEET_SELECT = {
   id: true,
   status: true,
   employeeId: true,
@@ -319,7 +325,7 @@ const TIMESHEET_SELECT = {
   currentVersion: { select: { id: true, versionNumber: true, submissionSource: true } }
 } satisfies Prisma.TimesheetSelect;
 
-interface CanonicalBatch {
+export interface CanonicalBatch {
   rawDaysByTimesheetId: Map<string, RawDay[]>;
   sourceIdByTimesheetId: Map<string, string>;
   /** Timesheets whose resolveCanonicalSource() call threw (missing draft/currentVersion row) —
@@ -331,7 +337,7 @@ interface CanonicalBatch {
   autoBreakThresholdMinutes: number;
 }
 
-async function loadCanonicalBatch(timesheets: TimesheetRow[], db: Prisma.TransactionClient | typeof prisma = prisma): Promise<CanonicalBatch> {
+export async function loadCanonicalBatch(timesheets: TimesheetRow[], db: Prisma.TransactionClient | typeof prisma = prisma): Promise<CanonicalBatch> {
   const draftIds: string[] = [];
   const versionIds: string[] = [];
   const sourceIdByTimesheetId = new Map<string, string>();
@@ -458,7 +464,7 @@ function buildDisplayDays(weekStart: string, weekEnd: string, allRawDaysOfEmploy
 // UT3-A-R1 §3 / UT3-A-R2 §7.
 // =================================================================================================
 
-interface ApprovalItemRow {
+export interface ApprovalItemRow {
   id: string;
   timesheetId: string;
   siteId: string;
@@ -469,7 +475,7 @@ interface ApprovalItemRow {
   batch: { approvedAt: Date; approvedByUser: { username: string; employee: { firstName: string; lastName: string } | null } };
 }
 
-async function loadApprovalItems(timesheetIds: string[], weekStarts: Date[], db: Prisma.TransactionClient | typeof prisma = prisma): Promise<Map<string, ApprovalItemRow[]>> {
+export async function loadApprovalItems(timesheetIds: string[], weekStarts: Date[], db: Prisma.TransactionClient | typeof prisma = prisma): Promise<Map<string, ApprovalItemRow[]>> {
   const byKey = new Map<string, ApprovalItemRow[]>();
   if (timesheetIds.length === 0 || weekStarts.length === 0) return byKey;
 
@@ -497,18 +503,18 @@ async function loadApprovalItems(timesheetIds: string[], weekStarts: Date[], db:
   return byKey;
 }
 
-function approverName(batch: ApprovalItemRow['batch']): string {
+export function approverName(batch: ApprovalItemRow['batch']): string {
   return batch.approvedByUser.employee ? `${batch.approvedByUser.employee.firstName} ${batch.approvedByUser.employee.lastName}`.trim() : batch.approvedByUser.username;
 }
 
-interface ApprovalMatch {
+export interface ApprovalMatch {
   approvalState: 'READY' | 'NEEDS_ATTENTION' | 'APPROVED' | 'CHANGED_AFTER_APPROVAL';
   currentApprovalItem: WeeklyCustomerSliceRow['currentApprovalItem'];
   lastHistoricalApproval: WeeklyCustomerSliceRow['lastHistoricalApproval'];
   supersededFingerprintMatch: boolean;
 }
 
-function matchApproval(slice: WeeklyCustomerSlice, items: ApprovalItemRow[]): ApprovalMatch {
+export function matchApproval(slice: WeeklyCustomerSlice, items: ApprovalItemRow[]): ApprovalMatch {
   const current = items.find((i) => i.approvalState === 'CURRENT') ?? null;
   const mostRecent = items[0] ?? null; // already ordered batch.approvedAt DESC, createdAt DESC, id DESC
 
@@ -541,7 +547,7 @@ function matchApproval(slice: WeeklyCustomerSlice, items: ApprovalItemRow[]): Ap
 // entry count).
 // =================================================================================================
 
-async function loadOpenAttendanceExceptionsByTimesheet(timesheetIds: string[], db: Db): Promise<Map<string, { id: string; type: string; occurredAt: Date }[]>> {
+export async function loadOpenAttendanceExceptionsByTimesheet(timesheetIds: string[], db: Db): Promise<Map<string, { id: string; type: string; occurredAt: Date }[]>> {
   const map = new Map<string, { id: string; type: string; occurredAt: Date }[]>();
   if (timesheetIds.length === 0) return map;
   const rows = await db.attendanceException.findMany({
@@ -559,7 +565,7 @@ async function loadOpenAttendanceExceptionsByTimesheet(timesheetIds: string[], d
 
 const OPEN_CORRECTION_STATUSES = ['PENDING', 'DRAFT_OPEN', 'SUBMITTED'] as const;
 
-async function loadOpenCorrectionRequestTimesheetIds(timesheetIds: string[], db: Db): Promise<Set<string>> {
+export async function loadOpenCorrectionRequestTimesheetIds(timesheetIds: string[], db: Db): Promise<Set<string>> {
   if (timesheetIds.length === 0) return new Set();
   const rows = await db.correctionRequest.findMany({
     where: { timesheetId: { in: timesheetIds }, status: { in: [...OPEN_CORRECTION_STATUSES] } },
@@ -568,12 +574,12 @@ async function loadOpenCorrectionRequestTimesheetIds(timesheetIds: string[], db:
   return new Set(rows.map((r) => r.timesheetId));
 }
 
-interface EditWindowPolicy {
+export interface EditWindowPolicy {
   cutoffDaysAfterPeriodEnd: number;
   cutoffTime: Date;
 }
 
-async function loadEditWindowPolicy(db: Db): Promise<EditWindowPolicy> {
+export async function loadEditWindowPolicy(db: Db): Promise<EditWindowPolicy> {
   const policy = await db.companyAttendancePolicy.findFirst({ select: { cutoffDaysAfterPeriodEnd: true, cutoffTime: true } });
   return {
     cutoffDaysAfterPeriodEnd: policy?.cutoffDaysAfterPeriodEnd ?? 1,
@@ -581,7 +587,7 @@ async function loadEditWindowPolicy(db: Db): Promise<EditWindowPolicy> {
   };
 }
 
-interface OpenShiftInfo {
+export interface OpenShiftInfo {
   siteId: string;
   workAreaId: string | null;
   openedAt: Date;
@@ -589,7 +595,7 @@ interface OpenShiftInfo {
 
 /** Point 5 — EmployeeOpenShift.employeeId is that table's own primary key (one open shift per
  *  employee at most), so one IN-list query covers the whole batch regardless of size — no N+1. */
-async function loadOpenShiftsByEmployee(employeeIds: string[], db: Db): Promise<Map<string, OpenShiftInfo>> {
+export async function loadOpenShiftsByEmployee(employeeIds: string[], db: Db): Promise<Map<string, OpenShiftInfo>> {
   const map = new Map<string, OpenShiftInfo>();
   if (employeeIds.length === 0) return map;
   const rows = await db.employeeOpenShift.findMany({
@@ -610,7 +616,7 @@ async function loadOpenShiftsByEmployee(employeeIds: string[], db: Db): Promise<
 // maxShiftDurationHours comparison — no separate threshold reimplemented here).
 // =================================================================================================
 
-interface IssueClassificationContext {
+export interface IssueClassificationContext {
   actor: LedgerActor;
   openExceptionsByTimesheetId: Map<string, { id: string; type: string; occurredAt: Date }[]>;
   openCorrectionTimesheetIds: Set<string>;
@@ -622,14 +628,14 @@ interface IssueClassificationContext {
   planActualMismatchByScope: Map<string, boolean>;
 }
 
-interface IssueClassificationResult {
+export interface IssueClassificationResult {
   blockers: LedgerIssue[];
   warnings: LedgerIssue[];
   info: LedgerIssue[];
   selfApprovalBlocked: boolean;
 }
 
-function classifyIssues(
+export function classifyIssues(
   t: TimesheetRow,
   slice: WeeklyCustomerSlice,
   submissionSource: 'MANUAL' | 'AUTO' | null,

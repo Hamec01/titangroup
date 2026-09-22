@@ -6773,6 +6773,90 @@ a.ov-summary-card:focus-visible {
   color: var(--text-soft);
   font-size: 0.82rem;
 }
+
+/* UT5-B — single weekly-customer-hours approval action. */
+.ledger-approve-draft-warning {
+  margin: 0 0 12px;
+  padding: 8px 12px;
+  border-radius: 6px;
+  border: 1px solid rgba(252, 211, 77, 0.4);
+  background: rgba(252, 211, 77, 0.08);
+  color: #fcd34d;
+  font-size: 0.82rem;
+}
+.ledger-approve-action {
+  margin-top: 12px;
+}
+.ledger-approve-button {
+  min-height: 44px;
+  padding: 8px 16px;
+  border: none;
+  border-radius: 6px;
+  background: var(--accent-light);
+  color: #0e1420;
+  font-weight: 600;
+  font-size: 0.85rem;
+}
+.ledger-approve-button:hover:not(:disabled),
+.ledger-approve-button:focus-visible {
+  filter: brightness(1.08);
+}
+.ledger-approve-button:disabled {
+  background: var(--border);
+  color: var(--text-soft);
+  cursor: not-allowed;
+}
+.ledger-approve-loading {
+  color: var(--text-soft);
+  font-size: 0.85rem;
+}
+.ledger-approve-success {
+  color: #86efac;
+  font-size: 0.85rem;
+}
+.ledger-approve-stale,
+.ledger-approve-error {
+  padding: 10px 12px;
+  border-radius: 8px;
+  border: 1px solid rgba(252, 211, 77, 0.4);
+  background: rgba(252, 211, 77, 0.08);
+  color: #fcd34d;
+  font-size: 0.85rem;
+}
+.ledger-approve-blocked {
+  padding: 10px 12px;
+  border-radius: 8px;
+  border: 1px solid rgba(253, 164, 175, 0.4);
+  background: rgba(253, 164, 175, 0.08);
+  color: var(--error);
+  font-size: 0.85rem;
+}
+.ledger-approve-blocked ul,
+.ledger-approve-warning-confirm ul {
+  margin: 6px 0 0;
+  padding-left: 20px;
+}
+.ledger-approve-warning-confirm {
+  padding: 10px 12px;
+  border-radius: 8px;
+  border: 1px solid rgba(252, 211, 77, 0.4);
+  background: rgba(252, 211, 77, 0.08);
+  color: #fcd34d;
+  font-size: 0.85rem;
+}
+.ledger-approve-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 10px;
+  flex-wrap: wrap;
+}
+.ledger-approve-stale p,
+.ledger-approve-error p,
+.ledger-approve-blocked p,
+.ledger-approve-warning-confirm p {
+  margin: 0 0 6px;
+}
+
 .ledger-diagnostics {
   margin-top: 12px;
 }

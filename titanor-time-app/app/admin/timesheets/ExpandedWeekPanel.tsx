@@ -4,7 +4,8 @@ import type { WeeklyCustomerSliceRow } from '@/lib/reporting/time-ledger';
 import { formatWorkedDuration } from '@/lib/reporting/report-format';
 import { formatHelsinkiDateTime, utcIsoToHelsinkiTime } from '@/lib/helsinki-datetime';
 import { dayTypeLabel } from '@/lib/i18n/worker';
-import { issueLabel } from '@/lib/reporting/ledger-ui-text';
+import { issueLabel, approveDraftWarningLabel } from '@/lib/reporting/ledger-ui-text';
+import { ApproveWeekAction } from './ApproveWeekAction';
 
 function formatDayHeader(dateIso: string, locale: AppLocale): string {
   const d = new Date(`${dateIso}T00:00:00.000Z`);
@@ -18,9 +19,10 @@ function formatDayHeader(dateIso: string, locale: AppLocale): string {
 // in plain language, who-approved-when, and the "changed after approval" fact. Every genuinely
 // technical field (fingerprint, canonicalSource, CURRENT/SUPERSEDED, sourceRevision) lives ONLY in
 // the trailing collapsed "Диагностика" <details> — never in the always-visible part above it.
-export function ExpandedWeekPanel({ locale, row }: { locale: AppLocale; row: WeeklyCustomerSliceRow }) {
+export function ExpandedWeekPanel({ locale, row, onApproved }: { locale: AppLocale; row: WeeklyCustomerSliceRow; onApproved: () => void }) {
   return (
     <div className="ledger-expanded">
+      {row.submissionState === 'NOT_SUBMITTED' && <p className="ledger-approve-draft-warning">{approveDraftWarningLabel(locale)}</p>}
       <table className="ledger-days-table">
         <thead>
           <tr>
@@ -107,6 +109,10 @@ export function ExpandedWeekPanel({ locale, row }: { locale: AppLocale; row: Wee
       )}
 
       <p className="ledger-approval-history">{approvalHistorySentence(row, locale)}</p>
+
+      <div className="ledger-approve-action">
+        <ApproveWeekAction locale={locale} row={row} onApproved={onApproved} />
+      </div>
 
       <details className="ledger-diagnostics">
         <summary>{localeText(locale, 'Diagnostics', 'Диагностика')}</summary>

@@ -202,7 +202,7 @@ export function TimesheetsLedgerView({
           ) : (
             <>
               {data.customerGroups.map((group) => (
-                <CustomerGroupSection key={`${group.siteId}:${group.workAreaId ?? ''}`} locale={locale} group={group} />
+                <CustomerGroupSection key={`${group.siteId}:${group.workAreaId ?? ''}`} locale={locale} group={group} onApproved={retry} />
               ))}
               {data.notSubmitted.length > 0 && <NotSubmittedSection locale={locale} rows={data.notSubmitted} />}
               {data.sourceErrors.length > 0 && <SourceErrorSection locale={locale} rows={data.sourceErrors} />}

@@ -12,7 +12,7 @@ import { ExpandedWeekPanel } from './ExpandedWeekPanel';
 // UT4-B — inline expansion, no navigation, no checkbox, no confirm button (agreed decisions). The
 // expanded/collapsed flag is PURE local component state — never written to the URL, so it can
 // never interfere with pagination or Back/Forward (explicitly verified by the browser test).
-export function WorkerSliceRow({ locale, row }: { locale: AppLocale; row: WeeklyCustomerSliceRow }) {
+export function WorkerSliceRow({ locale, row, onApproved }: { locale: AppLocale; row: WeeklyCustomerSliceRow; onApproved: () => void }) {
   const [open, setOpen] = useState(false);
   const panelId = useId();
   const issueCount = row.blockers.length + row.warnings.length;
@@ -38,7 +38,7 @@ export function WorkerSliceRow({ locale, row }: { locale: AppLocale; row: Weekly
       </button>
       {open && (
         <div id={panelId}>
-          <ExpandedWeekPanel locale={locale} row={row} />
+          <ExpandedWeekPanel locale={locale} row={row} onApproved={onApproved} />
         </div>
       )}
     </div>
