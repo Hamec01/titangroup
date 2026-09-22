@@ -113,6 +113,23 @@ export interface WeeklyCustomerSliceLogicalKey {
   weekEnd: string;
 }
 
+/** One day's totals within a slice, captured from the SAME applyPreallocatedBreak() call that
+ *  already produces the slice-level sums below (UT4-B-fixup #3) — never a second, independent
+ *  computation. `date` matches payload.days[i].date 1:1, same order. `grossMinutes =
+ *  workedMinutes + breakMinutes` holds by the same construction as the slice-level totals (see
+ *  applyPreallocatedBreak's own comment). Deliberately kept OUTSIDE CanonicalSlicePayload — like
+ *  workedMinutes/grossMinutes/breakMinutes below, it is a derived display convenience, not part of
+ *  the hashed canonical content. */
+export interface WeeklyCustomerSliceDayTotal {
+  date: string; // YYYY-MM-DD
+  grossMinutes: number;
+  breakMinutes: number;
+  workedMinutes: number;
+  /** This slice's own share of the day's auto-unpaid-break — same value as the matching
+   *  payload.days[i].autoUnpaidBreakMinutes, duplicated here so UI code needs only dayTotals. */
+  autoUnpaidBreakMinutes: number;
+}
+
 export interface WeeklyCustomerSlice {
   logicalKey: WeeklyCustomerSliceLogicalKey;
   payload: CanonicalSlicePayload;
@@ -120,6 +137,7 @@ export interface WeeklyCustomerSlice {
   workedMinutes: number;
   grossMinutes: number;
   breakMinutes: number;
+  dayTotals: WeeklyCustomerSliceDayTotal[];
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -496,11 +514,19 @@ export function buildWeeklyCustomerSlices(input: BuildSlicesInput): WeeklyCustom
     let workedMinutes = 0;
     let grossMinutes = 0;
     let breakMinutes = 0;
+    const dayTotals: WeeklyCustomerSliceDayTotal[] = [];
     for (const d of sortedDays) {
       const applied = applyPreallocatedBreak(d.group.segments, d.group.autoUnpaidBreakMinutes);
       workedMinutes += applied.workedMinutes;
       grossMinutes += applied.grossMinutes;
       breakMinutes += applied.breakMinutes;
+      dayTotals.push({
+        date: d.dateIso,
+        grossMinutes: applied.grossMinutes,
+        breakMinutes: applied.breakMinutes,
+        workedMinutes: applied.workedMinutes,
+        autoUnpaidBreakMinutes: d.group.autoUnpaidBreakMinutes
+      });
     }
 
     slices.push({
@@ -516,7 +542,8 @@ export function buildWeeklyCustomerSlices(input: BuildSlicesInput): WeeklyCustom
       fingerprint: computeSliceFingerprint(payload),
       workedMinutes,
       grossMinutes,
-      breakMinutes
+      breakMinutes,
+      dayTotals
     });
   }
 

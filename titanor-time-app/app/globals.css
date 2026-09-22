@@ -6310,3 +6310,606 @@ a.ov-summary-card:focus-visible {
   outline: 3px solid #7cc4f5;
   outline-offset: 2px;
 }
+
+/* ============================================================================================
+   UT4-B — /admin/timesheets единый табель ("ledger-*"). Reuses existing tokens (--bg/--card/
+   --border/--text/--text-soft/--accent/--accent-light/--error) and existing primitives
+   (.setup-card, .wk-empty, .login-error) rather than starting a second design system — every
+   rule below is new UI (badges, expandable row, filter drawer, skeleton) that genuinely has no
+   existing class to reuse.
+   ============================================================================================ */
+
+.ledger-card {
+  max-width: 1200px;
+}
+
+.ledger-reset-link {
+  display: inline-block;
+  margin-top: 8px;
+  color: var(--accent-light);
+}
+
+.ledger-link-button,
+.ledger-retry-button {
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--accent-light);
+  padding: 8px 12px;
+  min-height: 36px;
+  font-size: 0.85rem;
+}
+.ledger-link-button:hover,
+.ledger-retry-button:hover,
+.ledger-link-button:focus-visible,
+.ledger-retry-button:focus-visible {
+  color: var(--white);
+  border-color: var(--accent-light);
+}
+
+.ledger-error-banner {
+  margin: 12px 0;
+  padding: 12px 14px;
+  border-radius: 8px;
+  border: 1px solid rgba(253, 164, 175, 0.4);
+  background: rgba(253, 164, 175, 0.08);
+  color: var(--error);
+}
+.ledger-error-banner p {
+  margin: 0 0 8px;
+}
+.ledger-error-banner-retry {
+  border-color: rgba(252, 211, 77, 0.4);
+  background: rgba(252, 211, 77, 0.08);
+  color: #fcd34d;
+}
+
+.ledger-tabs {
+  display: flex;
+  gap: 8px;
+  margin: 12px 0 18px;
+}
+.ledger-tab {
+  display: inline-block;
+  padding: 7px 14px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  font-size: 0.88rem;
+  color: var(--accent-light);
+}
+.ledger-tab:focus-visible {
+  outline: 2px solid var(--accent-light);
+  outline-offset: 2px;
+}
+.ledger-tab.is-current {
+  color: var(--text);
+  background: var(--card);
+  border-color: var(--accent-light);
+  font-weight: 600;
+}
+
+.ledger-view {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.ledger-topbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+.ledger-topbar-range {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.ledger-range-display {
+  min-width: 160px;
+  text-align: center;
+  font-weight: 600;
+}
+.ledger-arrow-button {
+  min-width: 44px;
+  min-height: 44px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: none;
+  color: var(--text);
+  font-size: 1rem;
+}
+.ledger-arrow-button:hover:not(:disabled),
+.ledger-arrow-button:focus-visible {
+  border-color: var(--accent-light);
+}
+.ledger-pill-button {
+  min-height: 44px;
+  padding: 0 14px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: none;
+  color: var(--text);
+  font-size: 0.82rem;
+}
+.ledger-pill-button:hover:not(:disabled),
+.ledger-pill-button:focus-visible {
+  border-color: var(--accent-light);
+}
+.ledger-pill-button[data-active='true'] {
+  background: var(--card);
+  border-color: var(--accent-light);
+  font-weight: 600;
+}
+.ledger-topbar-weeks {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.ledger-filterbar {
+  position: relative;
+}
+.ledger-filters-toggle {
+  display: none;
+  align-items: center;
+  gap: 6px;
+  min-height: 44px;
+  padding: 0 14px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: none;
+  color: var(--text);
+}
+.ledger-filter-count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  border-radius: 999px;
+  background: var(--accent-light);
+  color: #0a121c;
+  font-size: 0.72rem;
+  font-weight: 700;
+}
+.ledger-filter-backdrop {
+  display: none;
+}
+.ledger-filter-fields {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: end;
+  gap: 12px;
+}
+.ledger-filter-field {
+  min-width: 190px;
+  flex: 1 1 190px;
+  position: relative;
+}
+.ledger-filter-field label {
+  display: block;
+  margin: 0 0 6px;
+  color: var(--text-soft);
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.ledger-filter-field input,
+.ledger-filter-field select {
+  width: 100%;
+  min-height: 44px;
+  padding: 0 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.03);
+  color: var(--text);
+  font-size: 0.85rem;
+}
+.ledger-filter-field input:focus-visible,
+.ledger-filter-field select:focus-visible {
+  outline: 2px solid var(--accent-light);
+  outline-offset: 1px;
+}
+.ledger-combobox-list {
+  position: absolute;
+  z-index: 20;
+  top: 100%;
+  left: 0;
+  right: 0;
+  margin: 4px 0 0;
+  padding: 4px;
+  list-style: none;
+  max-height: 260px;
+  overflow-y: auto;
+  border: 1px solid var(--accent-light);
+  border-radius: 8px;
+  background: #0e1420;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.45);
+}
+.ledger-combobox-list li button {
+  display: block;
+  width: 100%;
+  min-height: 40px;
+  padding: 6px 10px;
+  text-align: left;
+  background: none;
+  border: none;
+  border-radius: 6px;
+  color: var(--text);
+  font-size: 0.85rem;
+}
+.ledger-combobox-list li button:hover,
+.ledger-combobox-list li button:focus-visible,
+.ledger-combobox-list li button.is-active {
+  background: rgba(255, 255, 255, 0.08);
+}
+.ledger-extra-filters {
+  flex-basis: 100%;
+}
+.ledger-extra-filters summary {
+  min-height: 44px;
+  display: flex;
+  align-items: center;
+  cursor: pointer;
+  color: var(--accent-light);
+}
+.ledger-extra-filters[open] {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: end;
+}
+.ledger-checkbox-field {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 44px;
+  color: var(--text);
+  font-size: 0.85rem;
+}
+.ledger-checkbox-field input {
+  width: 20px;
+  height: 20px;
+}
+.ledger-filter-actions {
+  flex-basis: 100%;
+  display: flex;
+  justify-content: flex-end;
+}
+
+.ledger-summary-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px 18px;
+  align-items: center;
+  padding: 10px 0;
+  border-top: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+  font-size: 0.86rem;
+}
+.ledger-summary-item {
+  color: var(--text-soft);
+}
+.ledger-summary-item strong {
+  color: var(--text);
+}
+.ledger-summary-button {
+  background: none;
+  border: none;
+  padding: 4px 6px;
+  border-radius: 6px;
+  cursor: pointer;
+}
+.ledger-summary-button:hover:not(:disabled),
+.ledger-summary-button:focus-visible {
+  background: rgba(255, 255, 255, 0.06);
+}
+.ledger-summary-tone-warning strong {
+  color: #fcd34d;
+}
+.ledger-summary-tone-success strong {
+  color: #86efac;
+}
+.ledger-summary-tone-danger strong {
+  color: var(--error);
+}
+
+.ledger-loading {
+  color: var(--text-soft);
+}
+
+.ledger-group {
+  margin-top: 6px;
+}
+.ledger-group-title {
+  margin: 0;
+  font-size: 1rem;
+}
+.ledger-group-subtotal {
+  margin: 2px 0 10px;
+  color: var(--text-soft);
+  font-size: 0.78rem;
+}
+.ledger-row-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.ledger-row {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow: hidden;
+}
+.ledger-row-summary {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  min-height: 44px;
+  padding: 10px 14px;
+  background: none;
+  border: none;
+  color: var(--text);
+  text-align: left;
+}
+.ledger-row-summary:hover,
+.ledger-row-summary:focus-visible {
+  background: rgba(255, 255, 255, 0.04);
+}
+.ledger-row-name {
+  font-weight: 600;
+  min-width: 160px;
+}
+.ledger-row-week {
+  color: var(--text-soft);
+  font-size: 0.82rem;
+}
+.ledger-row-hours {
+  font-variant-numeric: tabular-nums;
+}
+.ledger-row-submission {
+  color: var(--text-soft);
+  font-size: 0.8rem;
+}
+.ledger-row-issue-count {
+  color: #fcd34d;
+  font-size: 0.8rem;
+}
+.ledger-row-toggle-label {
+  margin-left: auto;
+  color: var(--accent-light);
+  font-size: 0.82rem;
+}
+
+.ledger-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  flex-shrink: 0;
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--text-soft);
+}
+.ledger-badge-neutral {
+  color: var(--text-soft);
+  background: rgba(255, 255, 255, 0.06);
+}
+.ledger-badge-warning {
+  color: #fcd34d;
+  background: rgba(252, 211, 77, 0.14);
+}
+.ledger-badge-success {
+  color: #86efac;
+  background: rgba(134, 239, 172, 0.12);
+}
+.ledger-badge-danger {
+  color: var(--error);
+  background: rgba(253, 164, 175, 0.14);
+}
+
+.ledger-expanded {
+  padding: 12px 14px 16px;
+  border-top: 1px solid var(--border);
+  background: rgba(255, 255, 255, 0.02);
+}
+.ledger-days-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.82rem;
+}
+.ledger-days-table th,
+.ledger-days-table td {
+  padding: 7px 8px;
+  border-bottom: 1px solid var(--border);
+  text-align: left;
+  white-space: nowrap;
+}
+.ledger-days-table th {
+  color: var(--text-soft);
+  font-size: 0.68rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.ledger-day-auto-break-note {
+  margin-top: 2px;
+  color: var(--text-soft);
+  font-size: 0.72rem;
+  white-space: normal;
+}
+.ledger-issue-list {
+  list-style: none;
+  margin: 12px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 0.82rem;
+}
+.ledger-issue-blocker {
+  color: var(--error);
+}
+.ledger-issue-warning {
+  color: #fcd34d;
+}
+.ledger-issue-info {
+  color: var(--text-soft);
+}
+.ledger-approval-history {
+  margin: 12px 0 0;
+  color: var(--text-soft);
+  font-size: 0.82rem;
+}
+.ledger-diagnostics {
+  margin-top: 12px;
+}
+.ledger-diagnostics summary {
+  cursor: pointer;
+  color: var(--text-soft);
+  font-size: 0.76rem;
+  min-height: 32px;
+  display: flex;
+  align-items: center;
+}
+.ledger-diagnostics dl {
+  margin: 6px 0 0;
+  font-size: 0.74rem;
+  color: var(--text-soft);
+  word-break: break-all;
+}
+.ledger-diagnostics dt {
+  font-weight: 600;
+  margin-top: 6px;
+}
+.ledger-diagnostics dd {
+  margin: 2px 0 0;
+}
+
+.ledger-section-details {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px 14px;
+}
+.ledger-section-details summary {
+  min-height: 44px;
+  display: flex;
+  align-items: center;
+  cursor: pointer;
+  font-weight: 600;
+}
+.ledger-section-details-danger {
+  border-color: rgba(253, 164, 175, 0.4);
+}
+.ledger-plain-list {
+  list-style: none;
+  margin: 8px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 0.85rem;
+}
+.ledger-source-error-reason {
+  color: var(--error);
+}
+
+.ledger-pagination {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  padding: 10px 0;
+}
+.ledger-pagination button {
+  min-height: 44px;
+  padding: 0 14px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: none;
+  color: var(--text);
+}
+.ledger-pagination button:disabled {
+  opacity: 0.4;
+}
+
+/* Mobile — TZ §17: filters collapse into a drawer, rows already show hours/status without
+   expanding (handled in markup), 44px touch targets (already the default above), no page-level
+   horizontal scroll (day tables get their own overflow-x). */
+@media (max-width: 768px) {
+  .ledger-filters-toggle {
+    display: inline-flex;
+  }
+  .ledger-filter-backdrop {
+    display: block;
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.55);
+    z-index: 60;
+    border: none;
+    padding: 0;
+  }
+  .ledger-filter-panel {
+    display: none;
+  }
+  .ledger-filter-panel.is-open {
+    display: block;
+    position: fixed;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    width: min(340px, 88vw);
+    z-index: 70;
+    overflow-y: auto;
+    padding: 16px;
+    background: #0e1420;
+    border-left: 1px solid var(--border);
+    box-shadow: -12px 0 32px rgba(0, 0, 0, 0.45);
+  }
+  .ledger-filter-panel-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 12px;
+  }
+  .ledger-filter-panel-head h2 {
+    margin: 0;
+    font-size: 1rem;
+  }
+  .ledger-drawer-close {
+    background: none;
+    border: none;
+    color: var(--text-soft);
+    font-size: 1.4rem;
+    line-height: 1;
+    min-width: 44px;
+    min-height: 44px;
+  }
+  .ledger-filter-panel.is-open .ledger-filter-fields {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .ledger-row-summary {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 6px;
+  }
+  .ledger-row-toggle-label {
+    margin-left: 0;
+  }
+  .ledger-expanded {
+    overflow-x: auto;
+  }
+}

@@ -173,7 +173,7 @@ check('compareEntries: fully identical tuples compare equal (0)', compareEntries
 // ---------------------------------------------------------------------------------------------
 
 {
-  const withDays = sliceRow({ displayDays: [{ date: '2099-01-05', dayType: 'WORK', confirmedZero: false, segments: [{ startAt: 'x', endAt: 'y', breaks: [] }], autoUnpaidBreakMinutes: 30 }] });
+  const withDays = sliceRow({ displayDays: [{ date: '2099-01-05', dayType: 'WORK', confirmedZero: false, segments: [{ startAt: 'x', endAt: 'y', breaks: [] }], autoUnpaidBreakMinutes: 30, grossMinutes: 480, breakMinutes: 30, workedMinutes: 450 }] });
   const withoutDays = sliceRow({ displayDays: [] });
   check('entrySignature ignores displayDays entirely', entrySignature(withDays) === entrySignature(withoutDays));
 }

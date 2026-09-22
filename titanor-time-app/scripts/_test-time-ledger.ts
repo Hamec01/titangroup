@@ -491,6 +491,22 @@ async function main() {
     check('E4: no CONFIRMED_ZERO_DAY_PRESENT warning bleeds from the OTHER customer\'s confirmedZero day', !(realRow?.warnings.some((w) => w.code === 'CONFIRMED_ZERO_DAY_PRESENT') ?? true), realRow?.warnings);
   }
 
+  // E5: UT4-B-fixup #3 — displayDays now carries the same canonical grossMinutes/breakMinutes/
+  // workedMinutes as the slice, sourced from WeeklyCustomerSlice.dayTotals through
+  // buildDisplayDaysForSlice, never a second independent per-segment UI recomputation.
+  {
+    const worker = await oneWorkedWeek('E5Worker');
+    const result = await getTimeLedger(weekRangeQuery(worker.monday, { employeeSearch: 'E5Worker' }), adminActor);
+    const row = findSliceRow(allSliceRows(result), worker.employee.id);
+    const workedDay = row?.displayDays.find((d) => d.segments.length > 0);
+    check('E5: the one real day is found among the padded 7 displayDays', !!workedDay, row?.displayDays);
+    check('E5: displayDays day gross/break/worked satisfy gross = worked + break', workedDay ? workedDay.grossMinutes === workedDay.workedMinutes + workedDay.breakMinutes : false, workedDay);
+    check('E5: displayDays day matches the slice-level totals (single-day slice)', workedDay?.grossMinutes === row?.grossMinutes && workedDay?.breakMinutes === row?.breakMinutes && workedDay?.workedMinutes === row?.workedMinutes, { day: workedDay, row });
+    check('E5: displayDays day workedMinutes = 450 (07:00-15:00 minus 30 min auto lunch, same as row.workedMinutes)', workedDay?.workedMinutes === 450, workedDay);
+    const emptyDays = row?.displayDays.filter((d) => d.segments.length === 0) ?? [];
+    check('E5: every padded empty day carries zero gross/break/worked minutes', emptyDays.every((d) => d.grossMinutes === 0 && d.breakMinutes === 0 && d.workedMinutes === 0), emptyDays);
+  }
+
   // =================================================================================================
   // Block F — partial-range normalization, wide explicit range, all-time cross-chunk sort, exact
   // pre-pagination summary, and Tier-2 filters.

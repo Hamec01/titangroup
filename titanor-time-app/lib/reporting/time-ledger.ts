@@ -63,6 +63,13 @@ export interface DisplayDay {
   confirmedZero: boolean;
   segments: { startAt: string; endAt: string; breaks: { startAt: string; endAt: string; paid: boolean }[] }[];
   autoUnpaidBreakMinutes: number;
+  /** UT4-B-fixup #3 — this day's total, sourced 1:1 from WeeklyCustomerSlice.dayTotals (the SAME
+   *  applyPreallocatedBreak() pass that produces the slice-level totals above), never a second,
+   *  independent per-segment recomputation. 0/0/0 on a day this slice has no segments for (that day
+   *  is simply absent from dayTotals, same convention as payload.days). */
+  grossMinutes: number;
+  breakMinutes: number;
+  workedMinutes: number;
 }
 
 export interface WeeklyCustomerSliceRow {
@@ -433,9 +440,12 @@ function buildDisplayDays(weekStart: string, weekEnd: string, allRawDaysOfEmploy
       segments: [...ownSegments]
         .sort((a, b) => a.startAt.getTime() - b.startAt.getTime() || a.endAt.getTime() - b.endAt.getTime() || a.id.localeCompare(b.id))
         .map((s) => ({ startAt: s.startAt.toISOString(), endAt: s.endAt.toISOString(), breaks: s.breaks.map((b) => ({ startAt: b.startAt.toISOString(), endAt: b.endAt.toISOString(), paid: b.paid })) })),
-      // Filled in by the caller once the slice's own per-day auto-break allocation is known
-      // (buildWeeklyCustomerSlices already computed it — see buildEntriesForTimesheets).
-      autoUnpaidBreakMinutes: 0
+      // Filled in by the caller once the slice's own per-day totals are known (buildWeeklyCustomerSlices
+      // already computed them — see buildDisplayDaysForSlice below).
+      autoUnpaidBreakMinutes: 0,
+      grossMinutes: 0,
+      breakMinutes: 0,
+      workedMinutes: 0
     });
     cursor = new Date(cursor.getTime() + 86400000);
   }
@@ -705,7 +715,17 @@ function classifyIssues(
 function buildDisplayDaysForSlice(slice: WeeklyCustomerSlice, allRawDaysOfEmployeeWeek: RawDay[]): DisplayDay[] {
   const base = buildDisplayDays(slice.logicalKey.weekStart, slice.logicalKey.weekEnd, allRawDaysOfEmployeeWeek, slice.logicalKey.siteId, slice.logicalKey.workAreaId);
   const autoBreakByDate = new Map(slice.payload.days.map((d) => [d.date, d.autoUnpaidBreakMinutes]));
-  return base.map((d) => ({ ...d, autoUnpaidBreakMinutes: autoBreakByDate.get(d.date) ?? 0 }));
+  const totalsByDate = new Map(slice.dayTotals.map((d) => [d.date, d]));
+  return base.map((d) => {
+    const totals = totalsByDate.get(d.date);
+    return {
+      ...d,
+      autoUnpaidBreakMinutes: autoBreakByDate.get(d.date) ?? 0,
+      grossMinutes: totals?.grossMinutes ?? 0,
+      breakMinutes: totals?.breakMinutes ?? 0,
+      workedMinutes: totals?.workedMinutes ?? 0
+    };
+  });
 }
 
 function computeWeeksCoveredForPeriod(periodStart: Date, periodEnd: Date, effectiveWeekRange: { startDate: string; endDate: string } | null): string[] {

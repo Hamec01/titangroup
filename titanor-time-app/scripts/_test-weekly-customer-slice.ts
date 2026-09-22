@@ -508,5 +508,97 @@ const WA_C = 'cccccccc-cccc-cccc-cccc-cccccccccccc';
   );
 }
 
+// ---------------------------------------------------------------------------------------------
+// 25. UT4-B-fixup #3 — dayTotals: shape/consistency across the same diverse sweep as test 24.
+//     dayTotals must line up 1:1 with payload.days (same dates, same order, same length), each
+//     entry must satisfy gross = worked + break, each entry's autoUnpaidBreakMinutes must match
+//     the matching payload.days[i].autoUnpaidBreakMinutes exactly, and the sum of every
+//     dayTotals[].workedMinutes/grossMinutes/breakMinutes must equal the slice-level total —
+//     dayTotals is a breakdown of the same numbers, never a second independent calculation.
+// ---------------------------------------------------------------------------------------------
+{
+  const scenarios = [
+    ...build([mkDay('2026-09-21', [mkSeg('2026-09-21', 7, 0, 16, 0, S1, WA_A, [{ sH: 12, sM: 0, eH: 12, eM: 30, paid: false }])])]),
+    ...build([mkDay('2026-09-21', [mkSeg('2026-09-21', 7, 0, 16, 0, S1, WA_A, [{ sH: 12, sM: 0, eH: 12, eM: 30, paid: true }])])]),
+    ...build([mkDay('2026-09-21', [mkSeg('2026-09-21', 7, 0, 11, 0, S1, WA_A), mkSeg('2026-09-21', 12, 0, 16, 0, S1, WA_B)])], {
+      plannedUnpaidBreakBySourceAndDate: new Map([['ver-1:2026-09-21', 30]])
+    }),
+    ...build([mkDay('2026-09-21', [mkSeg('2026-09-21', 7, 0, 15, 0, S1, WA_A)]), mkDay('2026-09-22', [], 'SICK_LEAVE'), mkDay('2026-09-23', [mkSeg('2026-09-23', 7, 0, 15, 0, S1, WA_A)])])
+  ];
+  check('the sweep collected at least 4 slices', scenarios.length >= 4, scenarios.length);
+  check(
+    'every slice: dayTotals length matches payload.days length',
+    scenarios.every((s) => s.dayTotals.length === s.payload.days.length),
+    scenarios.map((s) => [s.dayTotals.length, s.payload.days.length])
+  );
+  check(
+    'every slice: dayTotals dates line up 1:1 with payload.days dates, same order',
+    scenarios.every((s) => s.dayTotals.every((d, i) => d.date === s.payload.days[i].date)),
+    scenarios.map((s) => [s.dayTotals.map((d) => d.date), s.payload.days.map((d) => d.date)])
+  );
+  check(
+    'every day entry: grossMinutes = workedMinutes + breakMinutes',
+    scenarios.every((s) => s.dayTotals.every((d) => d.grossMinutes === d.workedMinutes + d.breakMinutes)),
+    scenarios.map((s) => s.dayTotals)
+  );
+  check(
+    'every day entry: autoUnpaidBreakMinutes matches the matching payload.days entry exactly',
+    scenarios.every((s) => s.dayTotals.every((d, i) => d.autoUnpaidBreakMinutes === s.payload.days[i].autoUnpaidBreakMinutes)),
+    scenarios.map((s) => s.dayTotals)
+  );
+  check(
+    'every slice: sum of dayTotals.workedMinutes equals the slice-level workedMinutes',
+    scenarios.every((s) => s.dayTotals.reduce((sum, d) => sum + d.workedMinutes, 0) === s.workedMinutes),
+    scenarios.map((s) => [s.dayTotals.reduce((sum, d) => sum + d.workedMinutes, 0), s.workedMinutes])
+  );
+  check(
+    'every slice: sum of dayTotals.grossMinutes equals the slice-level grossMinutes',
+    scenarios.every((s) => s.dayTotals.reduce((sum, d) => sum + d.grossMinutes, 0) === s.grossMinutes),
+    scenarios.map((s) => [s.dayTotals.reduce((sum, d) => sum + d.grossMinutes, 0), s.grossMinutes])
+  );
+  check(
+    'every slice: sum of dayTotals.breakMinutes equals the slice-level breakMinutes',
+    scenarios.every((s) => s.dayTotals.reduce((sum, d) => sum + d.breakMinutes, 0) === s.breakMinutes),
+    scenarios.map((s) => [s.dayTotals.reduce((sum, d) => sum + d.breakMinutes, 0), s.breakMinutes])
+  );
+}
+
+// ---------------------------------------------------------------------------------------------
+// 26. UT4-B-fixup #3 — the required divergence regression: two intervals in the SAME day, SAME
+//     customer, with fractional (sub-minute) millisecond durations where rounding each interval
+//     INDEPENDENTLY and then summing gives a DIFFERENT (wrong) result than rounding the day's
+//     TOTAL gross once. Two segments of 90,500 ms (1 min 30.5 s) each: independently,
+//     round(90500/60000) = round(1.50833) = 2 min each -> naive sum = 4 min. Correctly, the whole
+//     day's gross is 181,000 ms = 3 min 1 s -> round(181000/60000) = round(3.01667) = 3 min. This
+//     is exactly the bug ExpandedWeekPanel.tsx used to have (it rounded per segment/interval); the
+//     day-level dayTotals entry must show the correct 3, proving it is NOT built by
+//     summing independently-rounded per-segment values.
+// ---------------------------------------------------------------------------------------------
+{
+  const day: RawDay = {
+    date: new Date('2026-09-21T00:00:00.000Z'),
+    dayType: 'WORK',
+    confirmedZero: false,
+    segments: [
+      { id: 'frac-1', startAt: new Date('2026-09-21T07:00:00.000Z'), endAt: new Date('2026-09-21T07:01:30.500Z'), siteId: S1, workAreaId: WA_A, breaks: [] },
+      { id: 'frac-2', startAt: new Date('2026-09-21T07:02:00.000Z'), endAt: new Date('2026-09-21T07:03:30.500Z'), siteId: S1, workAreaId: WA_A, breaks: [] }
+    ]
+  };
+  const slices = build([day]);
+  check('exactly one slice, one day', slices.length === 1 && slices[0].dayTotals.length === 1, slices);
+  const naiveIndependentSum = Math.round(90500 / 60000) + Math.round(90500 / 60000);
+  check('naive independent per-segment rounding would give 4 (the WRONG value)', naiveIndependentSum === 4, naiveIndependentSum);
+  check(
+    'day-level dayTotals.grossMinutes is the CORRECT 3 (round of the summed 181000ms), not the naive 4',
+    slices[0].dayTotals[0].grossMinutes === 3,
+    slices[0].dayTotals[0]
+  );
+  check('day-level dayTotals.grossMinutes differs from the naive independent-rounding result', slices[0].dayTotals[0].grossMinutes !== naiveIndependentSum, {
+    correct: slices[0].dayTotals[0].grossMinutes,
+    naive: naiveIndependentSum
+  });
+  check('slice-level grossMinutes matches the single day total (only one day)', slices[0].grossMinutes === slices[0].dayTotals[0].grossMinutes, slices[0]);
+}
+
 console.log(JSON.stringify({ pass, fail }));
 process.exit(fail > 0 ? 1 : 0);
