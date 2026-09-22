@@ -635,6 +635,13 @@ export interface IssueClassificationResult {
   selfApprovalBlocked: boolean;
 }
 
+// UT6-A-R1 §1 — owner decision: self-approval, an open shift, and an open correction request are no
+// longer blockers for weekly customer hours approval. The admin sees the reason and must click
+// "Всё равно подтвердить" (confirm anyway), same as any other warning; the admin explicitly accepts
+// responsibility for that decision. This function is the ONE shared classifier for both the batch
+// GET /api/admin/time-ledger pipeline and every weekly-approval preview/commit (single- and
+// mass-item) — reclassifying here changes both call sites identically, by design, rather than
+// forking a second "mass-only" policy for the exact same condition.
 export function classifyIssues(
   t: TimesheetRow,
   slice: WeeklyCustomerSlice,
@@ -648,13 +655,16 @@ export function classifyIssues(
   const warnings: LedgerIssue[] = [];
   const info: LedgerIssue[] = [];
 
+  // selfApprovalBlocked keeps its established name/shape (WeeklyCustomerSliceRow.selfApprovalBlocked
+  // is read elsewhere as a plain fact flag) even though it no longer blocks anything on its own —
+  // renaming it is not part of this decision, and the warning it now produces is the actual signal.
   const selfApprovalBlocked = ctx.actor.employeeId !== null && ctx.actor.employeeId === slice.logicalKey.employeeId;
   if (selfApprovalBlocked) {
-    blockers.push({ code: 'SELF_APPROVAL_FORBIDDEN', message: 'An admin cannot approve their own hours.' });
+    warnings.push({ code: 'SELF_APPROVAL_FORBIDDEN', message: 'An admin is approving their own hours.' });
   }
 
   if (ctx.openCorrectionTimesheetIds.has(t.id)) {
-    blockers.push({ code: 'OPEN_CORRECTION_REQUEST', message: 'This timesheet has an open or in-progress correction request.' });
+    warnings.push({ code: 'OPEN_CORRECTION_REQUEST', message: 'This timesheet has an open or in-progress correction request.' });
   }
 
   const weekStartMs = parseIsoDateUtc(slice.logicalKey.weekStart).getTime();
@@ -672,7 +682,7 @@ export function classifyIssues(
     openShift.openedAt.getTime() >= weekStartMs &&
     openShift.openedAt.getTime() < weekEndExclusiveMs
   ) {
-    blockers.push({ code: 'OPEN_SHIFT', message: 'This employee has an open (unclosed) shift for this site/customer within this week.' });
+    warnings.push({ code: 'OPEN_SHIFT', message: 'This employee has an open (unclosed) shift for this site/customer within this week.' });
   }
 
   const exceptionsInWeek = (ctx.openExceptionsByTimesheetId.get(t.id) ?? []).filter((e) => e.occurredAt.getTime() >= weekStartMs && e.occurredAt.getTime() < weekEndExclusiveMs);

@@ -4,17 +4,25 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import type { AppLocale } from '@/lib/i18n/locale';
 import { localeText } from '@/lib/i18n/locale';
-import type { TimeLedgerResult } from '@/lib/reporting/time-ledger';
+import type { CustomerGroup, TimeLedgerResult, WeeklyCustomerSliceRow } from '@/lib/reporting/time-ledger';
 import type { SiteOption } from '@/lib/attendance-overview-lookups';
 import type { CustomerWorkAreaOption } from '@/lib/reporting/customer-workarea-picker';
-import { parseTimeLedgerUiState, uiStateToHref, uiStateToApiUrl, nextUiState, type TimeLedgerUiState } from '@/lib/reporting/time-ledger-ui-query';
+import { parseTimeLedgerUiState, uiStateToHref, uiStateToApiUrl, nextUiState, MAX_PAGE_SIZE, type TimeLedgerUiState } from '@/lib/reporting/time-ledger-ui-query';
 import { LedgerTopBar } from './LedgerTopBar';
 import { LedgerFilterBar } from './LedgerFilterBar';
 import { LedgerSummaryStrip } from './LedgerSummaryStrip';
-import { CustomerGroupSection } from './CustomerGroupSection';
+import { CustomerGroupSection, rowLogicalKey, customerKeyOf } from './CustomerGroupSection';
 import { NotSubmittedSection } from './NotSubmittedSection';
 import { SourceErrorSection } from './SourceErrorSection';
 import { LedgerPagination } from './LedgerPagination';
+import { MassApproveBar, type MassSelectedItem } from './MassApproveBar';
+
+// UT6-B — mirrors lib/reporting/weekly-approval.ts's MAX_MASS_SELECTION_ITEMS (a server-only module
+// that imports Prisma and cannot be imported into a 'use client' component). A single shared integer
+// constant, not a formula — the server is the actual authority (400 SELECTION_TOO_LARGE); this is
+// only a pre-emptive client-side check so "confirm all matching" never even offers to submit a
+// selection the server would reject.
+const MAX_MASS_SELECTION_ITEMS = 200;
 
 interface FetchErrorState {
   code: string;
@@ -84,6 +92,114 @@ export function TimesheetsLedgerView({
 
   const parsedCurrent = useMemo(() => parseTimeLedgerUiState(new URLSearchParams(currentSearch), new Date()), [currentSearch]);
   const currentState: TimeLedgerUiState = parsedCurrent.ok ? parsedCurrent.state : initialState;
+
+  // UT6-B — mass-approval selection (UT6-A-R1 §7). Lives here, not inside CustomerGroupSection,
+  // specifically so it SURVIVES a customer group's own component unmounting/remounting across a page
+  // navigation of the SAME filter (data.customerGroups is replaced wholesale on every fetch). Cleared
+  // whenever the FILTER portion of the URL changes (below); page changes alone leave it untouched.
+  const [selectedItems, setSelectedItems] = useState<Map<string, MassSelectedItem>>(new Map());
+  const selectedCustomerKey = selectedItems.size > 0 ? [...selectedItems.values()][0].customerKey : null;
+  const [allMatching, setAllMatching] = useState<{ groupKey: string; busy: boolean; tooMany: { totalItems: number; max: number } | null } | null>(null);
+  // UT6-B-fixup #1 — true whenever MassApproveBar has a live preview/attempt open (any phase other
+  // than 'idle'), reported via its onActiveChange callback. Selection edits are frozen for as long as
+  // a confirmationToken is bound to the current selection, so a changed selection can never be sent
+  // against a stale token.
+  const [selectionLocked, setSelectionLocked] = useState(false);
+
+  const filterFingerprint = useMemo(() => JSON.stringify({ ...currentState, page: undefined }), [currentState]);
+  const lastFilterFingerprintRef = useRef(filterFingerprint);
+  useEffect(() => {
+    if (lastFilterFingerprintRef.current !== filterFingerprint) {
+      lastFilterFingerprintRef.current = filterFingerprint;
+      setSelectedItems(new Map());
+      setAllMatching(null);
+    }
+  }, [filterFingerprint]);
+
+  const toSelectedItem = useCallback(
+    (row: WeeklyCustomerSliceRow, group: { siteName: string; workAreaName: string | null }): MassSelectedItem => ({
+      itemKey: { timesheetId: row.logicalKey.timesheetId, siteId: row.logicalKey.siteId, workAreaId: row.logicalKey.workAreaId, weekStart: row.logicalKey.weekStart },
+      expectedFingerprint: row.currentFingerprint,
+      employeeName: row.employeeName,
+      weekEnd: row.logicalKey.weekEnd,
+      workedMinutes: row.workedMinutes,
+      customerKey: customerKeyOf(row.logicalKey.siteId, row.logicalKey.workAreaId),
+      siteName: group.siteName,
+      workAreaName: group.workAreaName
+    }),
+    []
+  );
+
+  // A single-row toggle only has the group's own CustomerGroup available via a closure per section
+  // (see the render below, which curries the group into onToggleSelect) — kept as a factory so
+  // CustomerGroupSection/WorkerSliceRow never need to know about MassSelectedItem's shape at all.
+  const toggleSelectInGroup = useCallback(
+    (row: WeeklyCustomerSliceRow, group: CustomerGroup) => {
+      setSelectedItems((prev) => {
+        const key = rowLogicalKey(row);
+        const next = new Map(prev);
+        if (next.has(key)) {
+          next.delete(key);
+        } else {
+          next.set(key, toSelectedItem(row, group));
+        }
+        return next;
+      });
+    },
+    [toSelectedItem]
+  );
+
+  const selectVisible = useCallback(
+    (group: CustomerGroup) => {
+      setSelectedItems((prev) => {
+        const next = new Map(prev);
+        for (const row of group.rows) next.set(rowLogicalKey(row), toSelectedItem(row, group));
+        return next;
+      });
+    },
+    [toSelectedItem]
+  );
+
+  const clearSelection = useCallback(() => {
+    setSelectedItems(new Map());
+    setAllMatching(null);
+  }, []);
+
+  // UT6-A-R1 §7/§10 — "confirm all matching" first resolves the FULL filtered set for this one
+  // customer via an explicit server round-trip (pageSize = MAX_PAGE_SIZE, siteId/workAreaId pinned
+  // to this group, every other filter kept as-is), then replaces the selection with it — never an
+  // implicit server-side "resolve at commit time" scope. If more rows match than
+  // MAX_MASS_SELECTION_ITEMS, nothing is selected and the admin is asked to narrow the filter instead
+  // of a silent truncation.
+  const confirmAllMatching = useCallback(
+    async (group: CustomerGroup) => {
+      if (selectionLocked) return; // defense in depth — the button is already disabled while locked
+      const groupKey = customerKeyOf(group.siteId, group.workAreaId);
+      setAllMatching({ groupKey, busy: true, tooMany: null });
+      try {
+        const state = nextUiState(currentState, { siteId: group.siteId, workAreaId: group.workAreaId, page: 1, pageSize: MAX_PAGE_SIZE });
+        const res = await fetch(uiStateToApiUrl(state), { credentials: 'same-origin' });
+        if (!res.ok) {
+          setAllMatching(null);
+          return;
+        }
+        const body = (await res.json()) as TimeLedgerResult;
+        if (body.pagination.totalItems > MAX_MASS_SELECTION_ITEMS) {
+          setAllMatching({ groupKey, busy: false, tooMany: { totalItems: body.pagination.totalItems, max: MAX_MASS_SELECTION_ITEMS } });
+          return;
+        }
+        const next = new Map<string, MassSelectedItem>();
+        for (const g of body.customerGroups) {
+          for (const row of g.rows) next.set(rowLogicalKey(row), toSelectedItem(row, g));
+        }
+        setSelectedItems(next);
+        setAllMatching(null);
+      } catch {
+        setAllMatching(null);
+      }
+    },
+    [currentState, toSelectedItem, selectionLocked]
+  );
 
   useEffect(() => {
     if (currentSearch === lastFetchedSearchRef.current) return;
@@ -201,9 +317,26 @@ export function TimesheetsLedgerView({
             </p>
           ) : (
             <>
-              {data.customerGroups.map((group) => (
-                <CustomerGroupSection key={`${group.siteId}:${group.workAreaId ?? ''}`} locale={locale} group={group} onApproved={retry} />
-              ))}
+              {data.customerGroups.map((group) => {
+                const groupKey = customerKeyOf(group.siteId, group.workAreaId);
+                const groupAllMatching = allMatching?.groupKey === groupKey ? allMatching : null;
+                return (
+                  <CustomerGroupSection
+                    key={groupKey}
+                    locale={locale}
+                    group={group}
+                    onApproved={retry}
+                    selectedKeys={new Set(selectedItems.keys())}
+                    selectedCustomerKey={selectedCustomerKey}
+                    onToggleSelect={(row) => toggleSelectInGroup(row, group)}
+                    onSelectVisible={selectVisible}
+                    onConfirmAllMatching={confirmAllMatching}
+                    allMatchingBusy={groupAllMatching?.busy ?? false}
+                    allMatchingTooMany={groupAllMatching?.tooMany ?? null}
+                    selectionLocked={selectionLocked}
+                  />
+                );
+              })}
               {data.notSubmitted.length > 0 && <NotSubmittedSection locale={locale} rows={data.notSubmitted} />}
               {data.sourceErrors.length > 0 && <SourceErrorSection locale={locale} rows={data.sourceErrors} />}
               <LedgerPagination locale={locale} pagination={data.pagination} onNavigate={navigate} />
@@ -211,6 +344,7 @@ export function TimesheetsLedgerView({
           )}
         </>
       )}
+      <MassApproveBar locale={locale} selectedItems={selectedItems} onClearSelection={clearSelection} onApproved={retry} onActiveChange={setSelectionLocked} />
     </div>
   );
 }

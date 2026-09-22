@@ -111,25 +111,25 @@ async function seed() {
   const draftMonday = nextMonday();
   const draftFx = await buildDraft(wDraft.id, site.id, wa.id, draftMonday);
 
-  // wBlocked — self-approval blocker: the ADMIN session used in this test is a DIFFERENT admin, so
-  // to get a real blocker deterministically we use an OPEN_SHIFT instead (simpler to seed than
-  // wiring a second admin-with-employeeId session just for one row).
-  const wBlocked = await mkWorker('WBlocked');
-  const blockedMonday = nextMonday();
-  const blockedDraft = await buildDraft(wBlocked.id, site.id, wa.id, blockedMonday);
-  await submitTimesheet(wBlocked.id, blockedDraft.ts.id);
+  // wOpenShift — UT6-A-R1 §1: OPEN_SHIFT is now a warning, not a blocker, so this row exercises the
+  // SAME "Всё равно подтвердить" flow as wWarn, just via a different warning code, proving the
+  // reclassification took effect in the real UI (not only in DB-lane tests).
+  const wOpenShift = await mkWorker('WOpenShift');
+  const openShiftMonday = nextMonday();
+  const openShiftDraft = await buildDraft(wOpenShift.id, site.id, wa.id, openShiftMonday);
+  await submitTimesheet(wOpenShift.id, openShiftDraft.ts.id);
   const evtId = randomUUID();
   const { createHash } = await import('node:crypto');
   await prisma.clockEvent.create({
     data: {
       id: evtId,
-      employeeId: wBlocked.id,
+      employeeId: wOpenShift.id,
       operationType: 'CHECK_IN',
       siteId: site.id,
-      clientCapturedAt: at(blockedMonday, 9),
+      clientCapturedAt: at(openShiftMonday, 9),
       capturedOffline: false,
-      serverReceivedAt: at(blockedMonday, 9),
-      effectiveAt: at(blockedMonday, 9),
+      serverReceivedAt: at(openShiftMonday, 9),
+      effectiveAt: at(openShiftMonday, 9),
       gpsVerification: 'NOT_VERIFIED',
       processingState: 'ACCEPTED',
       channel: 'ONLINE',
@@ -137,7 +137,7 @@ async function seed() {
       requestId: randomUUID()
     }
   });
-  await prisma.employeeOpenShift.create({ data: { employeeId: wBlocked.id, openedByClockEventId: evtId, siteId: site.id, workAreaId: wa.id, openedAt: at(blockedMonday, 9) } });
+  await prisma.employeeOpenShift.create({ data: { employeeId: wOpenShift.id, openedByClockEventId: evtId, siteId: site.id, workAreaId: wa.id, openedAt: at(openShiftMonday, 9) } });
 
   // wDouble — for the double-click-creates-one-item check.
   const wDouble = await mkWorker('WDouble');
@@ -153,7 +153,7 @@ async function seed() {
   const staleDraft = await buildDraft(wStale.id, site.id, wa.id, staleMonday);
   await submitTimesheet(wStale.id, staleDraft.ts.id);
 
-  return { admin, site, wa, wClean, cleanMonday, cleanTimesheetId: cleanDraft.ts.id, wWarn, warnMonday, wDraft, draftMonday, wBlocked, blockedMonday, wDouble, doubleMonday, doubleTimesheetId: doubleDraft.ts.id, wStale, staleMonday };
+  return { admin, site, wa, wClean, cleanMonday, cleanTimesheetId: cleanDraft.ts.id, wWarn, warnMonday, wDraft, draftMonday, wOpenShift, openShiftMonday, wDouble, doubleMonday, doubleTimesheetId: doubleDraft.ts.id, wStale, staleMonday };
 }
 
 async function main() {
@@ -240,20 +240,37 @@ async function main() {
   }
 
   // ---------------------------------------------------------------------------------------------
-  // 3. Blocker -> the button stays disabled with visible reasons, never allows a click-through.
+  // 3. UT6-A-R1 §1 — OPEN_SHIFT is a warning, not a blocker: the row goes through the SAME
+  //    "Всё равно подтвердить" second-click flow as block 2, proving the reclassification actually
+  //    changed real UI behavior (the button is never disabled for this condition anymore).
   // ---------------------------------------------------------------------------------------------
   {
-    const rangeQs = `startDate=${isoDate(fx.blockedMonday)}&endDate=${endOf(fx.blockedMonday)}`;
+    const rangeQs = `startDate=${isoDate(fx.openShiftMonday)}&endDate=${endOf(fx.openShiftMonday)}`;
     await page.goto(`${BASE}/admin/timesheets?${rangeQs}&workAreaId=${fx.wa.id}`, { waitUntil: 'networkidle' });
     const rows = page.locator('.ledger-row-summary');
-    const blockedIndex = await findRowIndexByText(rows, 'WBlocked');
-    await rows.nth(blockedIndex).click();
+    const openShiftIndex = await findRowIndexByText(rows, 'WOpenShift');
+    await rows.nth(openShiftIndex).click();
     await page.waitForTimeout(150);
 
-    const button = page.locator('.ledger-row').nth(blockedIndex).locator('.ledger-approve-button');
-    check('3: the button is disabled for a row with a known blocker', await button.isDisabled());
-    const panelText = await page.locator('.ledger-row').nth(blockedIndex).innerText();
-    check('3b: the open-shift blocker reason is visible in the panel', /Незакрытая смена/.test(panelText), panelText);
+    const button = page.locator('.ledger-row').nth(openShiftIndex).locator('.ledger-approve-button');
+    check('3: the button stays enabled for an OPEN_SHIFT row (warning, not a blocker)', await button.isEnabled());
+    await button.click();
+    const warningPanel = page.locator('.ledger-row').nth(openShiftIndex).locator('.ledger-approve-warning-confirm');
+    await warningPanel.waitFor({ state: 'visible', timeout: 10000 }).catch(() => {});
+    const panelText = await page.locator('.ledger-row').nth(openShiftIndex).innerText();
+    check('3b: the open-shift warning reason is visible in the confirm panel', /Незакрытая смена/.test(panelText), panelText);
+
+    await warningPanel.locator('.ledger-approve-button').click();
+    await page.waitForFunction(
+      (idx) => {
+        const rowsEl = document.querySelectorAll('.ledger-row-summary');
+        return rowsEl[idx]?.textContent?.includes('Подтверждено') ?? false;
+      },
+      openShiftIndex,
+      { timeout: 10000 }
+    ).catch(() => {});
+    const rowTextAfter = await page.locator('.ledger-row-summary').nth(openShiftIndex).innerText();
+    check('3c: confirming anyway succeeds despite the open shift', rowTextAfter.includes('Подтверждено'), rowTextAfter);
   }
 
   // ---------------------------------------------------------------------------------------------

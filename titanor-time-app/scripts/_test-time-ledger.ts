@@ -377,10 +377,14 @@ async function main() {
   }
 
   // =================================================================================================
-  // Block D — blockers.
+  // Block D — reclassified as warnings (UT6-A-R1 §1, owner decision): self-approval and an open
+  // correction request no longer block weekly customer hours approval, only warn. classifyIssues()
+  // is the ONE shared classifier for this batch pipeline AND every weekly-approval preview/commit
+  // (single- and mass-item), so this reclassification is verified once here and relied on
+  // everywhere else — never a second, diverging policy for the same condition.
   // =================================================================================================
 
-  // D1: self-approval forbidden.
+  // D1: self-approval is a warning, not a blocker.
   {
     const site = await mkSite('d1');
     const workArea = await mkWorkArea(site.id, 'd1');
@@ -394,23 +398,23 @@ async function main() {
     const selfActor: LedgerActor = { userId: selfUser.id, employeeId: emp.id };
     const result = await getTimeLedger(weekRangeQuery(monday, { employeeSearch: 'D1Worker' }), selfActor);
     const row = findSliceRow(allSliceRows(result), emp.id);
-    check('D1: self-approval blocked, blockers include SELF_APPROVAL_FORBIDDEN', row?.blockers.some((b) => b.code === 'SELF_APPROVAL_FORBIDDEN') ?? false, row?.blockers);
-    check('D1: selfApprovalBlocked = true, eligibility.canApprove = false', row?.selfApprovalBlocked === true && row?.eligibility.canApprove === false, row);
+    check('D1: self-approval -> SELF_APPROVAL_FORBIDDEN warning, never a blocker', (row?.warnings.some((w) => w.code === 'SELF_APPROVAL_FORBIDDEN') ?? false) && !(row?.blockers.some((b) => b.code === 'SELF_APPROVAL_FORBIDDEN') ?? true), { blockers: row?.blockers, warnings: row?.warnings });
+    check('D1: selfApprovalBlocked = true (fact flag), eligibility.canApprove = true (a warning never blocks)', row?.selfApprovalBlocked === true && row?.eligibility.canApprove === true, row);
 
-    // Same data, viewed by an unrelated admin -> no self-approval blocker.
+    // Same data, viewed by an unrelated admin -> no self-approval warning at all.
     const other = await getTimeLedger(weekRangeQuery(monday, { employeeSearch: 'D1Worker' }), adminActor);
     const otherRow = findSliceRow(allSliceRows(other), emp.id);
-    check('D1: a DIFFERENT admin viewing the same slice sees no self-approval blocker', otherRow?.selfApprovalBlocked === false, otherRow);
+    check('D1: a DIFFERENT admin viewing the same slice sees no self-approval signal', otherRow?.selfApprovalBlocked === false && !(otherRow?.warnings.some((w) => w.code === 'SELF_APPROVAL_FORBIDDEN') ?? false), otherRow);
   }
 
-  // D2: open correction request blocks.
+  // D2: an open correction request is a warning, not a blocker.
   {
     const worker = await oneWorkedWeek('D2Worker');
     await prisma.correctionRequest.create({ data: { timesheetId: worker.timesheetId, requestedByUserId: adminUserId, reason: 'fixture', status: 'PENDING' } });
     const result = await getTimeLedger(weekRangeQuery(worker.monday, { employeeSearch: 'D2Worker' }), adminActor);
     const row = findSliceRow(allSliceRows(result), worker.employee.id);
-    check('D2: open correction request -> OPEN_CORRECTION_REQUEST blocker', row?.blockers.some((b) => b.code === 'OPEN_CORRECTION_REQUEST') ?? false, row?.blockers);
-    check('D2: eligibility.canApprove = false', row?.eligibility.canApprove === false, row);
+    check('D2: open correction request -> OPEN_CORRECTION_REQUEST warning, never a blocker', (row?.warnings.some((w) => w.code === 'OPEN_CORRECTION_REQUEST') ?? false) && !(row?.blockers.some((b) => b.code === 'OPEN_CORRECTION_REQUEST') ?? true), { blockers: row?.blockers, warnings: row?.warnings });
+    check('D2: eligibility.canApprove = true', row?.eligibility.canApprove === true, row);
   }
 
   // =================================================================================================
@@ -663,8 +667,9 @@ async function main() {
   }
 
   // =================================================================================================
-  // Block J — OPEN_SHIFT blocker (point 5): only fires for the exact (employee, site, workArea,
-  // week) the open shift actually belongs to — never bleeds into an unrelated customer or week.
+  // Block J — OPEN_SHIFT warning (point 5, reclassified to a warning by UT6-A-R1 §1): only fires
+  // for the exact (employee, site, workArea, week) the open shift actually belongs to — never bleeds
+  // into an unrelated customer or week.
   // =================================================================================================
 
   {
@@ -692,12 +697,12 @@ async function main() {
     const rows = allSliceRows(result).filter((r) => r.logicalKey.employeeId === emp.id);
     const targetRow = rows.find((r) => r.logicalKey.workAreaId === waTarget.id);
     const otherRow = rows.find((r) => r.logicalKey.workAreaId === waOther.id);
-    check('J1: OPEN_SHIFT blocks the slice it actually belongs to (same employee/site/customer/week)', targetRow?.blockers.some((b) => b.code === 'OPEN_SHIFT') ?? false, targetRow?.blockers);
-    check('J1: eligibility.canApprove = false on the blocked slice', targetRow?.eligibility.canApprove === false, targetRow);
-    check('J1: OPEN_SHIFT does NOT bleed into a different customer slice for the same employee/week', !(otherRow?.blockers.some((b) => b.code === 'OPEN_SHIFT') ?? false), otherRow?.blockers);
+    check('J1: OPEN_SHIFT warns the slice it actually belongs to (same employee/site/customer/week), never blocks', (targetRow?.warnings.some((w) => w.code === 'OPEN_SHIFT') ?? false) && !(targetRow?.blockers.some((b) => b.code === 'OPEN_SHIFT') ?? true), { blockers: targetRow?.blockers, warnings: targetRow?.warnings });
+    check('J1: eligibility.canApprove = true on the warned slice (a warning never blocks)', targetRow?.eligibility.canApprove === true, targetRow);
+    check('J1: OPEN_SHIFT does NOT bleed into a different customer slice for the same employee/week', !(otherRow?.warnings.some((w) => w.code === 'OPEN_SHIFT') ?? false), otherRow?.warnings);
   }
 
-  // J2: an open shift OUTSIDE the slice's own week never blocks it.
+  // J2: an open shift OUTSIDE the slice's own week never warns it either.
   {
     const worker = await oneWorkedWeek('J2Worker');
     const farAway = new Date(worker.monday.getTime() + 30 * 86400000);
@@ -705,7 +710,7 @@ async function main() {
 
     const result = await getTimeLedger(weekRangeQuery(worker.monday, { employeeSearch: 'J2Worker' }), adminActor);
     const row = findSliceRow(allSliceRows(result), worker.employee.id);
-    check('J2: an open shift outside this slice\'s own week never blocks it', !(row?.blockers.some((b) => b.code === 'OPEN_SHIFT') ?? true), row?.blockers);
+    check('J2: an open shift outside this slice\'s own week never warns it', !(row?.warnings.some((w) => w.code === 'OPEN_SHIFT') ?? true), row?.warnings);
   }
 
   // =================================================================================================

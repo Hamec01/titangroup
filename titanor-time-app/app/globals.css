@@ -6910,6 +6910,95 @@ a.ov-summary-card:focus-visible {
   color: var(--error);
 }
 
+/* UT6-B — mass (bulk) weekly-customer-hours approval. */
+.ledger-row-summary-wrap {
+  display: flex;
+  align-items: center;
+}
+.ledger-row-checkbox {
+  flex-shrink: 0;
+  width: 20px;
+  height: 20px;
+  margin: 0 4px 0 12px;
+  accent-color: var(--accent-light);
+}
+.ledger-row-summary-wrap .ledger-row-summary {
+  flex: 1;
+}
+
+.ledger-group-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+}
+.ledger-group-mass-actions {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.ledger-group-mass-note {
+  margin: 4px 0 8px;
+  color: #fcd34d;
+  font-size: 0.78rem;
+}
+
+.ledger-mass-bar {
+  position: sticky;
+  bottom: 0;
+  z-index: 40;
+  margin-top: 16px;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: #0e1420;
+  box-shadow: 0 -6px 24px rgba(0, 0, 0, 0.35);
+}
+.ledger-mass-bar-summary {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+  font-size: 0.85rem;
+}
+.ledger-mass-bar-summary strong {
+  font-size: 0.9rem;
+}
+.ledger-mass-bar-actions {
+  margin-top: 10px;
+}
+
+.ledger-mass-preview {
+  margin-top: 12px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: rgba(255, 255, 255, 0.03);
+  font-size: 0.85rem;
+}
+.ledger-mass-preview-context {
+  margin: 0 0 6px;
+  font-weight: 600;
+}
+.ledger-mass-preview-already {
+  margin: 0 0 6px;
+  color: var(--text-soft);
+}
+.ledger-mass-preview-section {
+  margin-top: 10px;
+}
+.ledger-mass-preview-section ul {
+  margin: 6px 0 0;
+  padding-left: 20px;
+}
+.ledger-mass-preview-blocked {
+  color: var(--error);
+}
+.ledger-mass-preview-warnings {
+  color: #fcd34d;
+}
+
 .ledger-pagination {
   display: flex;
   align-items: center;
@@ -6995,5 +7084,18 @@ a.ov-summary-card:focus-visible {
   }
   .ledger-expanded {
     overflow-x: auto;
+  }
+  .ledger-group-head {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .ledger-group-mass-actions {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+  .ledger-mass-bar-summary {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 4px;
   }
 }

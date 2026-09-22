@@ -250,24 +250,35 @@ async function main() {
   }
 
   // ===============================================================================================
-  // 3. Self-approval — preview blocks it, no token issued.
+  // 3. Self-approval — UT6-A-R1 §1 (owner decision): a warning, never a blocker. Token IS issued,
+  //    and commit succeeds — the admin explicitly accepts responsibility for approving their own
+  //    hours. The accepted warning must be reproducible from history (buildApprovalItemSnapshotV1's
+  //    warningsAtApproval), not just visible in the live preview.
   // ===============================================================================================
   {
     const f = await oneSubmittedWeek('T3Self');
     const selfToken = await makeSession('ADMIN', f.employee.id);
     const itemKey = itemKeyOf(f);
     const preview = await realPreview(selfToken, itemKey);
-    check('3: SELF_APPROVAL_FORBIDDEN blocker present', preview.body.blockers.some((b: any) => b.code === 'SELF_APPROVAL_FORBIDDEN'), preview.body.blockers);
-    check('3b: no confirmationToken issued when blocked', preview.body.confirmationToken === undefined, preview.body);
-    check('3c: eligibility.canApprove false', preview.body.eligibility.canApprove === false, preview.body.eligibility);
+    check('3: SELF_APPROVAL_FORBIDDEN warning present, never a blocker', preview.body.warnings.some((w: any) => w.code === 'SELF_APPROVAL_FORBIDDEN') && !preview.body.blockers.some((b: any) => b.code === 'SELF_APPROVAL_FORBIDDEN'), { blockers: preview.body.blockers, warnings: preview.body.warnings });
+    check('3b: confirmationToken IS issued despite the warning', typeof preview.body.confirmationToken === 'string', preview.body);
+    check('3c: eligibility.canApprove true (a warning never blocks)', preview.body.eligibility.canApprove === true, preview.body.eligibility);
+
+    const commit = await commitJson(selfToken, itemKey, preview.body.currentFingerprint, preview.body.confirmationToken);
+    check('3d: commit succeeds despite self-approval', commit.status === 200 && commit.body.result === 'APPROVED', commit.body);
+    const item = await prisma.customerHoursApprovalItem.findUniqueOrThrow({ where: { id: commit.body.itemId } });
+    const snapshot = item.snapshot as any;
+    check('3e: warningsAtApproval on the stored snapshot records SELF_APPROVAL_FORBIDDEN', Array.isArray(snapshot.warningsAtApproval) && snapshot.warningsAtApproval.some((w: any) => w.code === 'SELF_APPROVAL_FORBIDDEN'), snapshot.warningsAtApproval);
   }
 
   // ===============================================================================================
-  // 4. Commit blocker — a fresh, valid token, but a blocker appears BEFORE commit; commit must
-  //    independently re-detect it, never trusting the token for blocker-freedom.
+  // 4. Open shift at commit time — UT6-A-R1 §1: a warning, never a blocker. A fresh, valid token
+  //    issued before the open shift existed still lets commit succeed once the open shift appears —
+  //    commit independently re-detects the condition (never trusts the token for warning-freedom)
+  //    but a warning never aborts the write, unlike a genuine technical blocker.
   // ===============================================================================================
   {
-    const f = await oneSubmittedWeek('T4Blk');
+    const f = await oneSubmittedWeek('T4Warn');
     const itemKey = itemKeyOf(f);
     const preview = await realPreview(adminToken, itemKey);
     check('4: clean preview issues a token', typeof preview.body.confirmationToken === 'string', preview.body);
@@ -275,9 +286,10 @@ async function main() {
     await mkOpenShift(f.employee.id, f.site.id, f.workArea?.id ?? null, at(f.monday, 9));
 
     const commit = await commitJson(adminToken, itemKey, preview.body.currentFingerprint, preview.body.confirmationToken);
-    check('4b: commit rejects with OPEN_SHIFT despite a valid, still-fresh token', commit.status === 409 && commit.body.error?.code === 'OPEN_SHIFT', commit.body);
-    const items = await prisma.customerHoursApprovalItem.count({ where: { timesheetId: f.timesheetId } });
-    check('4c: no item was created', items === 0, items);
+    check('4b: commit succeeds despite OPEN_SHIFT appearing after the token was issued', commit.status === 200 && commit.body.result === 'APPROVED', commit.body);
+    const item = await prisma.customerHoursApprovalItem.findUniqueOrThrow({ where: { id: commit.body.itemId } });
+    const snapshot = item.snapshot as any;
+    check('4c: warningsAtApproval on the stored snapshot records OPEN_SHIFT', Array.isArray(snapshot.warningsAtApproval) && snapshot.warningsAtApproval.some((w: any) => w.code === 'OPEN_SHIFT'), snapshot.warningsAtApproval);
   }
 
   // ===============================================================================================
@@ -669,7 +681,12 @@ async function main() {
 
     const item = await prisma.customerHoursApprovalItem.findUniqueOrThrow({ where: { id: commit.body.itemId } });
     const snapshot = item.snapshot as any;
-    check('20c: item snapshot has exactly the documented top-level keys', Object.keys(snapshot).sort().join(',') === ['schemaVersion', 'logicalKey', 'canonicalSource', 'fingerprint', 'workedMinutes', 'grossMinutes', 'breakMinutes', 'canonicalPayload', 'displayMetadata'].sort().join(','), Object.keys(snapshot));
+    check(
+      '20c: item snapshot has exactly the documented top-level keys',
+      Object.keys(snapshot).sort().join(',') ===
+        ['schemaVersion', 'logicalKey', 'canonicalSource', 'fingerprint', 'workedMinutes', 'grossMinutes', 'breakMinutes', 'canonicalPayload', 'displayMetadata', 'warningsAtApproval'].sort().join(','),
+      Object.keys(snapshot)
+    );
     check('20d: snapshot.fingerprint matches the item column', snapshot.fingerprint === item.fingerprint, { snapshot: snapshot.fingerprint, column: item.fingerprint });
     check('20e: snapshot never contains GPS/token/session fields', !JSON.stringify(snapshot).match(/gps|latitude|longitude|confirmationToken|sessionToken|passwordHash/i), snapshot);
     check('20f: snapshot.canonicalPayload has no display-name fields (structurally impossible to leak a name into the fingerprint input)', !('employeeName' in snapshot.canonicalPayload) && !('siteName' in snapshot.canonicalPayload), snapshot.canonicalPayload);

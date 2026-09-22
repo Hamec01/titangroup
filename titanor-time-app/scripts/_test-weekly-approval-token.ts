@@ -229,10 +229,15 @@ async function main() {
     check('10f: itemSnapshot.workedMinutes/grossMinutes/breakMinutes match the slice exactly', itemSnapshot.workedMinutes === 480 && itemSnapshot.grossMinutes === 510 && itemSnapshot.breakMinutes === 30, itemSnapshot);
     check(
       '10g: itemSnapshot never leaks GPS/token/session/full-User fields (only the documented keys)',
-      Object.keys(itemSnapshot).sort().join(',') === ['schemaVersion', 'logicalKey', 'canonicalSource', 'fingerprint', 'workedMinutes', 'grossMinutes', 'breakMinutes', 'canonicalPayload', 'displayMetadata'].sort().join(','),
+      Object.keys(itemSnapshot).sort().join(',') ===
+        ['schemaVersion', 'logicalKey', 'canonicalSource', 'fingerprint', 'workedMinutes', 'grossMinutes', 'breakMinutes', 'canonicalPayload', 'displayMetadata', 'warningsAtApproval'].sort().join(','),
       Object.keys(itemSnapshot)
     );
     check('10h: displayMetadata carries only name fields, no ids/secrets', Object.keys(itemSnapshot.displayMetadata).sort().join(',') === ['employeeName', 'employeeNumber', 'siteName', 'workAreaName'].sort().join(','), itemSnapshot.displayMetadata);
+    // UT6-A-R1 §1/§14 — warningsAtApproval records exactly the warnings the admin saw at the moment
+    // of approval (e.g. a self-approval or open-shift warning, now that both are reclassified as
+    // warnings rather than blockers), so a warning-based decision stays reproducible from history.
+    check('10i: warningsAtApproval is present (even empty) and matches prepared.warnings exactly', Array.isArray(itemSnapshot.warningsAtApproval) && itemSnapshot.warningsAtApproval.length === 0, itemSnapshot.warningsAtApproval);
   }
 
   console.log(`\n${pass} passed, ${fail} failed`);
