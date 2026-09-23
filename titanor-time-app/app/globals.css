@@ -6471,8 +6471,10 @@ a.ov-summary-card:focus-visible {
   height: 18px;
   padding: 0 5px;
   border-radius: 999px;
-  background: var(--accent-light);
-  color: #0a121c;
+  /* Same fix as .ledger-approve-button — --accent-light is dark-in-light-theme, so pair it with
+     --accent + white text instead of a fixed dark text color. */
+  background: var(--accent);
+  color: var(--white);
   font-size: 0.72rem;
   font-weight: 700;
 }
@@ -6528,7 +6530,10 @@ a.ov-summary-card:focus-visible {
   overflow-y: auto;
   border: 1px solid var(--accent-light);
   border-radius: 8px;
-  background: #0e1420;
+  /* Was a fixed dark navy — invisible-on-dark-text bug in the light theme (list items use
+     var(--text), which is dark navy there). var(--card) is the theme's own "raised surface"
+     token: white in the default light shell, a dark surface in every dark alternate. */
+  background: var(--card);
   box-shadow: 0 12px 32px rgba(0, 0, 0, 0.45);
 }
 .ledger-combobox-list li button {
@@ -6792,8 +6797,12 @@ a.ov-summary-card:focus-visible {
   padding: 8px 16px;
   border: none;
   border-radius: 6px;
-  background: var(--accent-light);
-  color: #0e1420;
+  /* --accent-light inverts lightness between themes (bright link-blue in the dark alternates,
+     dark navy in the default light shell) — a fixed dark text color like the old #0e1420 only
+     works in the former. --accent stays a medium-saturation blue/teal across all four theme
+     contexts, so white text reads reliably on it everywhere. */
+  background: var(--accent);
+  color: var(--white);
   font-weight: 600;
   font-size: 0.85rem;
 }
@@ -7116,7 +7125,11 @@ a.ov-summary-card:focus-visible {
   padding: 12px 14px;
   border: 1px solid var(--border);
   border-radius: 10px;
-  background: #0e1420;
+  /* Was a fixed dark navy regardless of theme — in the default light shell this sat behind
+     var(--text)'s dark-navy "Выбрано"/customer/sum text with almost no contrast. var(--card) is
+     the theme's own raised-surface token (white in light, a dark surface in every dark
+     alternate), so the bar always contrasts against whatever text color the theme picked. */
+  background: var(--card);
   box-shadow: 0 -6px 24px rgba(0, 0, 0, 0.35);
 }
 .ledger-mass-bar-summary {
@@ -7211,7 +7224,8 @@ a.ov-summary-card:focus-visible {
     z-index: 70;
     overflow-y: auto;
     padding: 16px;
-    background: #0e1420;
+    /* Same fix as .ledger-mass-bar / .ledger-combobox-list — the mobile filter drawer. */
+    background: var(--card);
     border-left: 1px solid var(--border);
     box-shadow: -12px 0 32px rgba(0, 0, 0, 0.45);
   }
@@ -7262,4 +7276,39 @@ a.ov-summary-card:focus-visible {
     align-items: flex-start;
     gap: 4px;
   }
+}
+
+/* Light-theme contrast fix — the amber/green warning-success palette above (#fcd34d/#86efac/
+   #34d399) was picked for the dark canvas and has very poor contrast against the default light
+   shell's white/near-white surfaces (same family as var(--error), which already gets its own
+   darker light-theme value at .admin-modern-shell's base declaration — these never did). Scoped to
+   [data-theme='light'] specifically, since AdminModernShell.tsx always renders a literal data-theme
+   attribute (never omits it — see lib/admin-theme.ts's normalizeAdminTheme, default 'light'), so
+   every dark alternate (titan-dark/graphite/ocean) keeps its existing, already-legible colours. */
+.admin-modern-shell[data-theme='light'] :where(
+  .ledger-summary-tone-warning strong,
+  .ledger-row-issue-count,
+  .ledger-badge-warning,
+  .ledger-issue-warning,
+  .ledger-approve-draft-warning,
+  .ledger-approve-stale,
+  .ledger-approve-error,
+  .ledger-approve-warning-confirm,
+  .ledger-diff-note,
+  .ledger-summary-stat-pending .ledger-summary-stat-value,
+  .ledger-group-mass-note,
+  .ledger-mass-preview-warnings
+) {
+  color: #92660a;
+}
+.admin-modern-shell[data-theme='light'] :where(
+  .ledger-summary-tone-success strong,
+  .ledger-badge-success,
+  .ledger-approve-success,
+  .ledger-summary-stat-confirmed .ledger-summary-stat-value
+) {
+  color: #1f7a45;
+}
+.admin-modern-shell[data-theme='light'] .ledger-summary-export-final {
+  border-color: #1f7a45;
 }
