@@ -10,6 +10,7 @@ import type { SiteOption } from '@/lib/attendance-overview-lookups';
 import type { CustomerWorkAreaOption } from '@/lib/reporting/customer-workarea-picker';
 import { parseTimeLedgerUiState, uiStateToHref, uiStateToApiUrl, uiStateToHistoricalApiUrl, nextUiState, MAX_PAGE_SIZE, type TimeLedgerUiState } from '@/lib/reporting/time-ledger-ui-query';
 import { historicalLoadErrorLabel, historicalRetryLabel, historicalTruncatedLabel } from '@/lib/reporting/ledger-ui-text';
+import { TimesheetsTabs } from './TimesheetsTabs';
 import { LedgerTopBar } from './LedgerTopBar';
 import { LedgerFilterBar } from './LedgerFilterBar';
 import { LedgerSummaryStrip } from './LedgerSummaryStrip';
@@ -388,6 +389,15 @@ export function TimesheetsLedgerView({
 
   return (
     <div className="ledger-view">
+      {/* UT8-B-fixup-5 — rendered here, from currentState, instead of server-side in
+          TimesheetsLedgerPage.tsx: navigate() above updates the URL via raw window.history.replaceState
+          (fixup #6, deliberately not router.replace() — see that comment), which never re-runs the
+          Server Component that used to render this tab bar with the ORIGINAL page-load state. A
+          server-rendered tab link here would silently go stale after any client-side filter change
+          (the customer combobox included) — see TimesheetsLedgerPage.tsx's own header comment. The
+          Сводка tab still renders its own separate, server-rendered TimesheetsTabs — its navigate()
+          uses a real router.replace(), so that instance's state is never stale to begin with. */}
+      <TimesheetsTabs locale={locale} state={currentState} />
       <LedgerTopBar locale={locale} state={currentState} onNavigate={navigate} />
       <LedgerFilterBar
         locale={locale}

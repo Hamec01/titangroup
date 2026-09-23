@@ -348,6 +348,38 @@ export function uiStateToHistoricalApiUrl(state: TimeLedgerUiState): string {
   return `/api/admin/time-ledger/historical-approvals?${p.toString()}`;
 }
 
+/** UT8-B — the filter subset GET /api/admin/time-ledger/summary and its /export sibling accept:
+ *  allTime/startDate/endDate/employeeSearch/siteId/workAreaId only — no status/onlyIssues/
+ *  onlyChangedAfterApproval/page/pageSize (the summary always aggregates the whole matching scope
+ *  with every status). allTime/an over-long range are passed through AS-IS (even when the current
+ *  UI state has them) — the server is the one that rejects them (ALL_TIME_NOT_ALLOWED/
+ *  RANGE_TOO_LARGE), which the Сводка tab then shows as an explicit "narrow the period" message,
+ *  never silently substituting a different range itself. */
+function summaryFilterParams(state: TimeLedgerUiState): URLSearchParams {
+  const p = new URLSearchParams();
+  if (state.allTime) {
+    p.set('allTime', 'true');
+  } else if (state.startDate && state.endDate) {
+    p.set('startDate', state.startDate);
+    p.set('endDate', state.endDate);
+  }
+  if (state.employeeSearch) p.set('employeeSearch', state.employeeSearch);
+  if (state.siteId) p.set('siteId', state.siteId);
+  if (state.workAreaId) p.set('workAreaId', state.workAreaId);
+  return p;
+}
+
+export function uiStateToSummaryApiUrl(state: TimeLedgerUiState): string {
+  return `/api/admin/time-ledger/summary?${summaryFilterParams(state).toString()}`;
+}
+
+export function uiStateToSummaryExportApiUrl(state: TimeLedgerUiState, format: 'csv' | 'pdf', mode: 'preview' | 'final'): string {
+  const p = summaryFilterParams(state);
+  p.set('format', format);
+  p.set('mode', mode);
+  return `/api/admin/time-ledger/summary/export?${p.toString()}`;
+}
+
 /** Applies `changes` on top of `current`. Any change other than an explicit `page` change resets
  *  pagination back to 1 (point 5 — "при изменении фильтра сбрасывать page=1"). Callers that mean
  *  to change the date range must set `allTime`+`startDate`+`endDate` together. */

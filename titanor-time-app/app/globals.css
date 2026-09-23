@@ -6983,6 +6983,97 @@ a.ov-summary-card:focus-visible {
   margin: 0;
 }
 
+/* UT8-B — «Сводка» tab. */
+.ledger-summary-tab {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  margin-top: 12px;
+}
+.ledger-summary-stat-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+.ledger-summary-stat {
+  flex: 1 1 140px;
+  min-width: 140px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: rgba(255, 255, 255, 0.03);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.ledger-summary-stat-label {
+  font-size: 0.78rem;
+  color: var(--text-soft);
+}
+.ledger-summary-stat-value {
+  font-size: 1.3rem;
+  font-weight: 700;
+}
+.ledger-summary-stat-sub {
+  font-size: 0.75rem;
+  color: var(--text-soft);
+}
+.ledger-summary-stat-confirmed .ledger-summary-stat-value {
+  color: #34d399;
+}
+.ledger-summary-stat-pending .ledger-summary-stat-value {
+  color: #fcd34d;
+}
+.ledger-summary-stat-changed .ledger-summary-stat-value,
+.ledger-summary-stat-error .ledger-summary-stat-value {
+  color: var(--error);
+}
+.ledger-summary-readiness {
+  font-weight: 600;
+}
+.ledger-summary-export-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+.ledger-summary-export-link {
+  padding: 8px 14px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  font-size: 0.85rem;
+  text-decoration: none;
+  color: inherit;
+}
+.ledger-summary-export-final {
+  border-color: #34d399;
+  font-weight: 600;
+}
+.ledger-summary-export-link.is-disabled {
+  opacity: 0.4;
+  pointer-events: none;
+}
+.ledger-summary-customer-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.85rem;
+}
+.ledger-summary-customer-table th,
+.ledger-summary-customer-table td {
+  border: 1px solid var(--border);
+  padding: 6px 8px;
+  text-align: left;
+}
+.ledger-summary-historical,
+.ledger-summary-blockers {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px 12px;
+}
+.ledger-summary-confirmed-badge-note {
+  font-size: 0.78rem;
+  color: var(--text-soft);
+}
+
 /* UT6-B — mass (bulk) weekly-customer-hours approval. */
 .ledger-row-summary-wrap {
   display: flex;

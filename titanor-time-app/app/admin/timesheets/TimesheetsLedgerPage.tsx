@@ -6,7 +6,7 @@ import { parseTimeLedgerUiState, uiStateToApiQuery, type TimeLedgerUiState } fro
 import type { AppLocale } from '@/lib/i18n/locale';
 import { localeText } from '@/lib/i18n/locale';
 import { TimesheetsTabs } from './TimesheetsTabs';
-import { SummaryTabPlaceholder } from './SummaryTabPlaceholder';
+import { SummaryTab } from './SummaryTab';
 import { TimesheetsLedgerView } from './TimesheetsLedgerView';
 
 // UT4-B — Server Component entry point for the new (flag-on) /admin/timesheets body. Resolves the
@@ -44,22 +44,24 @@ export async function TimesheetsLedgerPage({
 
   const state = parsed.state;
 
+  // UT8-B — moved above the view branch: both the table view and the new "Сводка" tab need the SAME
+  // site/customer filter option lists for their (shared-component) LedgerFilterBar.
+  const [sites, selectedCustomerOptions] = await Promise.all([
+    listSiteOptionsForAdmin(),
+    state.workAreaId && state.workAreaId !== 'none' ? resolveCustomerWorkAreaOptions([state.workAreaId]) : Promise.resolve<CustomerWorkAreaOption[]>([])
+  ]);
+
   if (state.view === 'summary') {
     return (
       <main className="setup-page">
         <div className="setup-card worker-card ledger-card">
           <h1>{localeText(locale, 'Timesheets', 'Табель')}</h1>
           <TimesheetsTabs locale={locale} state={state} />
-          <SummaryTabPlaceholder locale={locale} />
+          <SummaryTab locale={locale} initialState={state} initialSiteOptions={sites} initialSelectedCustomerOptions={selectedCustomerOptions} />
         </div>
       </main>
     );
   }
-
-  const [sites, selectedCustomerOptions] = await Promise.all([
-    listSiteOptionsForAdmin(),
-    state.workAreaId && state.workAreaId !== 'none' ? resolveCustomerWorkAreaOptions([state.workAreaId]) : Promise.resolve<CustomerWorkAreaOption[]>([])
-  ]);
 
   let initialData: TimeLedgerResult | null = null;
   let initialReadChanged = false;
@@ -94,7 +96,14 @@ export async function TimesheetsLedgerPage({
     <main className="setup-page">
       <div className="setup-card worker-card ledger-card">
         <h1>{localeText(locale, 'Timesheets', 'Табель')}</h1>
-        <TimesheetsTabs locale={locale} state={state} />
+        {/* UT8-B-fixup-5 — the tab bar for this (table) branch is now rendered INSIDE
+            TimesheetsLedgerView itself, from its own reactive currentState, not here from this
+            Server Component's one-time `state` — see TimesheetsLedgerView.tsx's own comment at its
+            TimesheetsTabs usage for why. Rendering it here too would show two tab bars whenever
+            initialData is present. The one gap: while initialReadChanged/!initialData shows the error
+            banner below INSTEAD of TimesheetsLedgerView, there is briefly no tab bar at all — an
+            existing, narrow edge case (a race while the page was loading), not a regression this
+            fixup needs to solve. */}
         {initialReadChanged || !initialData ? (
           <div className="ledger-error-banner" role="alert">
             <p>{localeText(locale, 'The underlying data changed while this page was loading.', 'Данные изменились во время загрузки страницы.')}</p>

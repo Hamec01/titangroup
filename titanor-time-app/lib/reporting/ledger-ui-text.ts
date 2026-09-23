@@ -310,3 +310,110 @@ export function historicalTruncatedLabel(locale: AppLocale): string {
 export function diffUnchangedLabel(locale: AppLocale): string {
   return pick(locale, 'Nothing actually changed.', 'На самом деле ничего не изменилось.');
 }
+
+// =================================================================================================
+// UT8-B — «Сводка» tab + customer summary/export. Owner decision (UT8-A sign-off): the new
+// per-customer/week confirmation is ALWAYS called "Подтверждено для заказчика" — never "Финально
+// одобрено" (that phrase is reserved for the OLD internal Timesheet.status payroll workflow, which
+// this feature does not use at all).
+// =================================================================================================
+
+export function summaryConfirmedForCustomerLabel(locale: AppLocale): string {
+  return pick(locale, 'Confirmed for customer', 'Подтверждено для заказчика');
+}
+export function summaryConfirmedMinutesLabel(locale: AppLocale): string {
+  return pick(locale, 'Confirmed', 'Подтверждено');
+}
+export function summaryPendingMinutesLabel(locale: AppLocale): string {
+  return pick(locale, 'Awaiting confirmation', 'Ожидает подтверждения');
+}
+export function summaryChangedMinutesLabel(locale: AppLocale): string {
+  return pick(locale, 'Changed after confirmation', 'Изменено после подтверждения');
+}
+export function summaryWarningsCountLabel(locale: AppLocale): string {
+  return pick(locale, 'Warnings', 'Предупреждения');
+}
+export function summaryTechnicalErrorsLabel(locale: AppLocale): string {
+  return pick(locale, 'Technically unavailable', 'Технически недоступно');
+}
+export function summaryHistoricalSectionTitleLabel(locale: AppLocale): string {
+  return pick(locale, 'Removed / historical hours', 'Удалённые / исторические часы');
+}
+// UT8-B-fixup-2 — a worker expected to have a timesheet for this period with NOTHING submitted at
+// all. Always shown, always a blocker for the final export — never silently omitted as if the scope
+// were fully accounted for.
+export function summaryNotSubmittedLabel(locale: AppLocale): string {
+  return pick(locale, 'Not submitted', 'Не отправлено');
+}
+export function summaryHistoricalNoteLabel(locale: AppLocale): string {
+  return pick(locale, 'Not included in the current total or in any customer export.', 'Не входит в текущую сумму и в клиентскую выгрузку.');
+}
+export function summaryWorkersLabel(locale: AppLocale): string {
+  return pick(locale, 'workers', 'работников');
+}
+export function summaryPreviewModeLabel(locale: AppLocale): string {
+  return pick(locale, 'Preview — contains unconfirmed hours', 'Предварительный просмотр — есть неподтверждённые часы');
+}
+export function summaryFinalReadyLabel(locale: AppLocale): string {
+  return pick(locale, 'Ready for the final customer document', 'Готово для финальной выгрузки заказчику');
+}
+export function summaryFinalNotReadyLabel(count: number, locale: AppLocale): string {
+  return pick(locale, `Final export is blocked — ${count} item(s) need attention first`, `Финальная выгрузка заблокирована — сначала нужно решить ${count} позици${count === 1 ? 'ю' : 'й'}`);
+}
+export function summaryExportPreviewCsvLabel(locale: AppLocale): string {
+  return pick(locale, 'Download preview (CSV)', 'Скачать предпросмотр (CSV)');
+}
+export function summaryExportPreviewPdfLabel(locale: AppLocale): string {
+  return pick(locale, 'Download preview (PDF)', 'Скачать предпросмотр (PDF)');
+}
+export function summaryExportFinalCsvLabel(locale: AppLocale): string {
+  return pick(locale, 'Download final document (CSV)', 'Скачать финальный документ (CSV)');
+}
+export function summaryExportFinalPdfLabel(locale: AppLocale): string {
+  return pick(locale, 'Download final document (PDF)', 'Скачать финальный документ (PDF)');
+}
+export function summaryAllTimeNotAllowedLabel(locale: AppLocale): string {
+  return pick(locale, 'Select a specific period — «All time» is not supported for the summary.', 'Выберите конкретный период — «За всё время» не поддерживается для сводки.');
+}
+export function summaryRangeTooLargeLabel(maxWeeks: number, locale: AppLocale): string {
+  return pick(locale, `The period is too long for the summary — narrow it to ${maxWeeks} weeks or fewer.`, `Период слишком большой для сводки — сузьте его до ${maxWeeks} недель или меньше.`);
+}
+export function summarySelectionTooLargeLabel(locale: AppLocale): string {
+  return pick(locale, 'Too many workers/weeks in this selection — narrow the customer, worker or period filter.', 'Слишком много работников/недель в этом выборе — сузьте фильтр заказчика, работника или периода.');
+}
+export function summaryLoadErrorLabel(locale: AppLocale): string {
+  return pick(locale, 'Could not load the summary.', 'Не удалось загрузить сводку.');
+}
+// UT8-B-fixup-4 #3 — workAreaId='none' ("no customer") without a siteId is refused rather than
+// silently scanning every site's no-work-area assignments company-wide; the "Без заказчика" picker
+// option always needs a site filter alongside it for the Сводка tab specifically.
+export function summaryWorkAreaNoneRequiresSiteLabel(locale: AppLocale): string {
+  return pick(
+    locale,
+    "The «no customer» scope needs a specific site as well — add a site filter to see the summary.",
+    'Для сводки «без заказчика» также нужно выбрать конкретный объект — добавьте фильтр по объекту.'
+  );
+}
+export function summaryBlockerReasonLabel(reason: 'PENDING' | 'NEEDS_ATTENTION' | 'CHANGED_AFTER_APPROVAL' | 'SOURCE_UNREADABLE' | 'HISTORICAL_INCOMPLETE' | 'NOT_SUBMITTED', locale: AppLocale): string {
+  switch (reason) {
+    case 'PENDING':
+      return pick(locale, 'not yet confirmed', 'ещё не подтверждено');
+    case 'NEEDS_ATTENTION':
+      return pick(locale, 'matches a previous confirmation — needs to be re-confirmed', 'совпадает с прошлым подтверждением — нужно подтвердить заново');
+    case 'CHANGED_AFTER_APPROVAL':
+      return pick(locale, 'changed after confirmation', 'изменено после подтверждения');
+    case 'SOURCE_UNREADABLE':
+      return pick(locale, 'technically unreadable right now', 'технически недоступно сейчас');
+    case 'NOT_SUBMITTED':
+      return pick(locale, 'no timesheet submitted for this period', 'табель за этот период не отправлен');
+    case 'HISTORICAL_INCOMPLETE':
+      return pick(
+        locale,
+        'the historical list is incomplete for this selection — narrow the filter to see everything and unblock the export',
+        'список истории для этого выбора неполный — сузьте фильтр, чтобы увидеть всё и снять блокировку выгрузки'
+      );
+  }
+}
+export function summaryBlockersHeadingLabel(locale: AppLocale): string {
+  return pick(locale, 'What is blocking the final export', 'Что мешает финальной выгрузке');
+}
