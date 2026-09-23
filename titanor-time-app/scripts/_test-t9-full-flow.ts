@@ -485,17 +485,72 @@ async function main() {
 
   // ======================= F. ADMIN — final approval =======================
   await admin2.goto(`${BASE}/admin/timesheets`, { waitUntil: 'networkidle' });
-  const finalQueueText = await admin2.locator('body').innerText();
-  check('F2: timesheet appears in the final-approval queue', finalQueueText.includes(`Flow ${workerLastName}`));
-  await admin2.locator('a', { hasText: periodRow.startDate.toISOString().slice(0, 10) }).click();
-  await waitPath(admin2, /\/admin\/timesheets\/[0-9a-f-]+/, 10000);
-  const finalDetailText = await admin2.locator('body').innerText();
-  check('F4/F5: admin sees current V2 as canonical 7h, with no blocking reasons', finalDetailText.includes('Final approve') && finalDetailText.includes('7h') && !finalDetailText.toLowerCase().includes('blocked'));
+  // Same detection convention as _test-timesheets-ledger-browser.ts's own flag-on/flag-off split:
+  // presence of the new ledger's own root class, never an env-var guess (this script's process env
+  // isn't guaranteed to mirror the server's).
+  const newLedgerActive = (await admin2.locator('.ledger-view').count()) > 0;
 
-  await admin2.locator('button', { hasText: 'Final approve' }).click();
-  // T12 unified review: Final approve returns to the review hub (/admin/review) rather than the
-  // old /admin/timesheets queue.
-  await waitPath(admin2, /\/admin\/(review|timesheets)$/, 10000);
+  if (!newLedgerActive) {
+    // flag OFF — legacy /admin/timesheets list + per-timesheet "Final approve" button, unchanged
+    // from before the unified-timesheet redesign. Kept verbatim so this path stays proven as long
+    // as the flag can be off in any environment.
+    const finalQueueText = await admin2.locator('body').innerText();
+    check('F2: timesheet appears in the final-approval queue (legacy)', finalQueueText.includes(`Flow ${workerLastName}`));
+    await admin2.locator('a', { hasText: periodRow.startDate.toISOString().slice(0, 10) }).click();
+    await waitPath(admin2, /\/admin\/timesheets\/[0-9a-f-]+/, 10000);
+    // waitPath only confirms the client-side route changed — this detail page's own data (canonical
+    // source, blocking-reason computation) still loads async after that, so reading body text right
+    // away can race a lingering "Загрузка…" placeholder. Wait for the button this check itself
+    // looks for instead of a fixed sleep.
+    await admin2.locator('button', { hasText: 'Final approve' }).waitFor({ state: 'visible', timeout: 10000 });
+    const finalDetailText = await admin2.locator('body').innerText();
+    check('F4/F5: admin sees current V2 as canonical 7h, with no blocking reasons (legacy)', finalDetailText.includes('Final approve') && finalDetailText.includes('7h') && !finalDetailText.toLowerCase().includes('blocked'), { hasFinalApprove: finalDetailText.includes('Final approve'), has7h: finalDetailText.includes('7h'), hasBlocked: finalDetailText.toLowerCase().includes('blocked'), text: finalDetailText.slice(0, 600) });
+
+    await admin2.locator('button', { hasText: 'Final approve' }).click();
+    // T12 unified review: Final approve returns to the review hub (/admin/review) rather than the
+    // old /admin/timesheets queue.
+    await waitPath(admin2, /\/admin\/(review|timesheets)$/, 10000);
+  } else {
+    // flag ON — the old list-page click-through this section used to drive is retired by the
+    // unified-timesheet redesign (UT9-B-fixup #3 removed /admin/review from the nav; the new
+    // Табель replaces this list at the same URL). Its own real-Chromium click-through — a
+    // notification landing on the exact worker/period, whole-week multi-customer confirm, Timesheet
+    // reaching FINAL_APPROVED — is already proven end-to-end by
+    // scripts/_test-ut9-finalization-browser.ts; not re-driven here to avoid duplicating that
+    // coverage. This scenario's OWN timesheet still needs to actually reach FINAL_APPROVED so F6/F7
+    // and the G/SEC report+security checks below keep exercising real data, so it gets there via the
+    // same production API route the new UI itself calls (approval-preview -> approvals) rather than
+    // a UI click.
+    console.log('  flag ON — delegating F2/F4/F5 UI click-through to _test-ut9-finalization-browser.ts (already green); finalizing via the real customer-hours-confirmation API instead of the retired list-page click.');
+    // Reuses admin2's own already-authenticated session (adminCtx2, logged in via uiLogin above)
+    // rather than a fresh login() call — the identifier-scoped login rate limit (5 per 15 min,
+    // app/api/auth/login/route.ts) is already at its ceiling from this script's other admin logins
+    // (E's repeatApprove, F7's repeatFinal, G's cookieAdmin), so one more would 429.
+    const finalizeCookie = (await adminCtx2.cookies()).find((c) => c.name === 'tt_session')!.value;
+    const ledgerRes = await jsonFetch(
+      `${BASE}/api/admin/time-ledger?employeeId=${workerEmployee.id}&startDate=${periodRow.startDate.toISOString().slice(0, 10)}&endDate=${periodRow.endDate.toISOString().slice(0, 10)}&page=1&pageSize=50`,
+      { headers: authHeaders(finalizeCookie) }
+    );
+    const ledgerRow = (ledgerRes.body?.customerGroups ?? []).flatMap((g: any) => g.rows ?? []).find((r: any) => r.logicalKey?.timesheetId === timesheetForWorker.id);
+    check('F2 (new path): the new Табель returns this scenario\'s own row', !!ledgerRow, ledgerRes.body);
+    const itemKey = { timesheetId: ledgerRow.logicalKey.timesheetId, siteId: ledgerRow.logicalKey.siteId, workAreaId: ledgerRow.logicalKey.workAreaId, weekStart: ledgerRow.logicalKey.weekStart };
+    const preview = await jsonFetch(`${BASE}/api/admin/time-ledger/approval-preview`, {
+      method: 'POST',
+      headers: authHeaders(finalizeCookie),
+      body: JSON.stringify({ itemKey, expectedFingerprint: ledgerRow.currentFingerprint })
+    });
+    check('F4/F5 (new path): preview accepts the current fingerprint and returns a confirmation token', preview.status === 200 && !!preview.body?.confirmationToken, preview.body);
+    const commit = await jsonFetch(`${BASE}/api/admin/time-ledger/approvals`, {
+      method: 'POST',
+      headers: authHeaders(finalizeCookie, { 'Idempotency-Key': randomUUID() }),
+      body: JSON.stringify({ itemKey, expectedFingerprint: ledgerRow.currentFingerprint, confirmationToken: preview.body?.confirmationToken })
+    });
+    check(
+      'F (new path): confirming this worker\'s only customer/week slice finalizes the Timesheet',
+      commit.status === 200 && (commit.body?.finalizedTimesheetIds ?? []).includes(timesheetForWorker.id),
+      commit.body
+    );
+  }
 
   const timesheetAfterFinal = await prisma.timesheet.findUniqueOrThrow({ where: { id: timesheetForWorker.id } });
   check('F6a: Timesheet.status = FINAL_APPROVED', timesheetAfterFinal.status === 'FINAL_APPROVED', timesheetAfterFinal.status);
