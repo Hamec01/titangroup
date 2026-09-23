@@ -234,3 +234,79 @@ function pluralRu(n: number, one: string, few: string, many: string): string {
   if (mod10 >= 2 && mod10 <= 4 && (mod100 < 10 || mod100 >= 20)) return few;
   return many;
 }
+
+// UT7-B — "было / стало" diff panel for a row that changed after approval.
+function shortDateLabel(iso: string): string {
+  const [, m, d] = iso.split('-');
+  return `${d}.${m}`;
+}
+export function diffLoadingLabel(locale: AppLocale): string {
+  return pick(locale, 'Loading what changed…', 'Загружаем, что изменилось…');
+}
+export function diffErrorLabel(locale: AppLocale): string {
+  return pick(locale, 'Could not load what changed.', 'Не удалось загрузить изменения.');
+}
+export function diffBeforeAfterLabel(beforeText: string, afterText: string, locale: AppLocale): string {
+  return pick(locale, `Before: ${beforeText} · After: ${afterText}`, `Было: ${beforeText} · Стало: ${afterText}`);
+}
+export function diffApprovedByLabel(approvedByUserName: string, approvedAtText: string, locale: AppLocale): string {
+  return pick(locale, `Confirmed by ${approvedByUserName}, ${approvedAtText}.`, `Подтвердил(а) ${approvedByUserName}, ${approvedAtText}.`);
+}
+export function diffDeltaLabel(deltaWorkedMinutes: number, locale: AppLocale): string {
+  const sign = deltaWorkedMinutes > 0 ? '+' : deltaWorkedMinutes < 0 ? '−' : '';
+  const abs = Math.abs(deltaWorkedMinutes);
+  const h = Math.floor(abs / 60);
+  const m = abs % 60;
+  const text = h > 0 ? `${h} ${pick(locale, 'h', 'ч')} ${m} ${pick(locale, 'min', 'мин')}` : `${m} ${pick(locale, 'min', 'мин')}`;
+  return pick(locale, `Difference: ${sign}${text}`, `Разница: ${sign}${text}`);
+}
+export function diffChangedDatesLabel(dates: string[], locale: AppLocale): string {
+  const list = dates.map(shortDateLabel).join(', ');
+  return pick(locale, `Changed days: ${list}`, `Изменившиеся дни: ${list}`);
+}
+export function diffSliceRemovedLabel(locale: AppLocale): string {
+  return pick(locale, 'These hours were removed entirely after this was confirmed.', 'Эти часы были полностью удалены после подтверждения.');
+}
+export function diffSourceUnreadableLabel(locale: AppLocale): string {
+  return pick(locale, "Current data for this week can't be read right now — a technical issue, not a real change.", 'Сейчас не удаётся прочитать текущие данные по этой неделе — техническая ошибка, не реальное изменение.');
+}
+// UT7-B-fixup #2 — historical approval rows (SLICE_REMOVED / SOURCE_UNREADABLE with approval
+// history), shown inside their customer's CustomerGroupSection so a removed/unreadable week's past
+// confirmation stays visible instead of silently disappearing from the ledger.
+export function historicalRemovedStatusLabel(locale: AppLocale): string {
+  return pick(locale, 'Hours removed after confirmation', 'Часы удалены после подтверждения');
+}
+export function historicalUnreadableStatusLabel(locale: AppLocale): string {
+  return pick(locale, "The source for these hours is currently unavailable", 'Источник часов сейчас недоступен');
+}
+export function historicalOpenLabel(locale: AppLocale, open: boolean): string {
+  if (open) return pick(locale, 'Close', 'Свернуть');
+  return pick(locale, 'Show what changed', 'Показать, что изменилось');
+}
+// UT7-B-fixup-2 #5 — shown once above a group's historical rows so they are never mistaken for
+// current hours or counted toward the page/pagination totals shown elsewhere on the same page.
+export function historicalSectionNoteLabel(locale: AppLocale): string {
+  return pick(
+    locale,
+    'History of changed or removed confirmed hours. Not included in the current total.',
+    'История изменённых или удалённых подтверждённых часов. Не входит в текущий итог.'
+  );
+}
+// UT7-B-fixup-2 #1/#2 — the historical-approvals list is an explicitly secondary, best-effort
+// diagnostic source: a failure loading it never blocks or breaks the main "Табель" view, it just
+// shows this small, non-blocking warning with its own retry.
+export function historicalLoadErrorLabel(locale: AppLocale): string {
+  return pick(locale, 'Could not load the history of changed confirmations.', 'Не удалось загрузить историю изменённых подтверждений.');
+}
+export function historicalRetryLabel(locale: AppLocale): string {
+  return pick(locale, 'Try again', 'Повторить');
+}
+// UT7-B-fixup-2 #3 — MAX_HISTORICAL_ROWS was reached: the list below is a genuine subset, not the
+// complete set, and this says so explicitly rather than silently presenting a partial list as full.
+export function historicalTruncatedLabel(locale: AppLocale): string {
+  return pick(locale, 'Not all historical rows are shown — narrow the filter.', 'Показаны не все исторические строки — сузьте фильтр.');
+}
+
+export function diffUnchangedLabel(locale: AppLocale): string {
+  return pick(locale, 'Nothing actually changed.', 'На самом деле ничего не изменилось.');
+}

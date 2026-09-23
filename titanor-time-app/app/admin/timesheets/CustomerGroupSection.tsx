@@ -1,9 +1,11 @@
 import type { AppLocale } from '@/lib/i18n/locale';
 import { localeText } from '@/lib/i18n/locale';
 import type { CustomerGroup, WeeklyCustomerSliceRow } from '@/lib/reporting/time-ledger';
+import type { HistoricalApprovalRow as HistoricalApprovalRowData } from '@/lib/reporting/customer-hours-history';
 import { formatWorkedDuration } from '@/lib/reporting/report-format';
-import { noCustomerGroupLabel, selectVisibleLabel, confirmAllMatchingLabel, massDifferentCustomerNote, massTooManyLabel, massSelectionLockedNote } from '@/lib/reporting/ledger-ui-text';
+import { noCustomerGroupLabel, selectVisibleLabel, confirmAllMatchingLabel, massDifferentCustomerNote, massTooManyLabel, massSelectionLockedNote, historicalSectionNoteLabel } from '@/lib/reporting/ledger-ui-text';
 import { WorkerSliceRow } from './WorkerSliceRow';
+import { HistoricalApprovalRow } from './HistoricalApprovalRow';
 
 export function rowLogicalKey(row: WeeklyCustomerSliceRow): string {
   return `${row.logicalKey.timesheetId}:${row.logicalKey.siteId}:${row.logicalKey.workAreaId ?? ''}:${row.logicalKey.weekStart}`;
@@ -31,7 +33,8 @@ export function CustomerGroupSection({
   onConfirmAllMatching,
   allMatchingBusy,
   allMatchingTooMany,
-  selectionLocked
+  selectionLocked,
+  historicalRows
 }: {
   locale: AppLocale;
   group: CustomerGroup;
@@ -47,6 +50,10 @@ export function CustomerGroupSection({
    *  other than 'idle'). Selection must be frozen for as long as a confirmationToken is bound to it,
    *  so every selection control in this group is disabled, exactly like a different-customer lock. */
   selectionLocked?: boolean;
+  /** UT7-B-fixup #2 — this customer's (siteId, workAreaId) historical approval-issue rows (removed
+   *  slice / unreadable source), matched by TimesheetsLedgerView. Rendered below the normal rows,
+   *  never counted in pageMinutes/distinctWorkers, never selectable for mass approval. */
+  historicalRows?: HistoricalApprovalRowData[];
 }) {
   const distinctWorkers = new Set(group.rows.map((r) => r.logicalKey.employeeId)).size;
   const pageMinutes = group.rows.reduce((sum, r) => sum + r.workedMinutes, 0);
@@ -96,6 +103,21 @@ export function CustomerGroupSection({
           );
         })}
       </ul>
+      {/* UT7-B-fixup-2 #5 — a separate list (not appended to the one above) so the explanatory note
+          can sit between the two without breaking <ul>'s "only <li> children" rule; also keeps the
+          "these do not count toward the current total" distinction visually unambiguous. */}
+      {historicalRows && historicalRows.length > 0 && (
+        <>
+          <p className="ledger-historical-note">{historicalSectionNoteLabel(locale)}</p>
+          <ul className="ledger-row-list ledger-historical-list">
+            {historicalRows.map((row) => (
+              <li key={`hist:${row.timesheetId}:${row.siteId}:${row.workAreaId ?? ''}:${row.weekStart}`}>
+                <HistoricalApprovalRow locale={locale} row={row} />
+              </li>
+            ))}
+          </ul>
+        </>
+      )}
     </section>
   );
 }

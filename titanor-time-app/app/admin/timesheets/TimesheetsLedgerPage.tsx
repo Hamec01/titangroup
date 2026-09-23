@@ -1,4 +1,5 @@
 import { getTimeLedger, TimeLedgerReadChangedError, type LedgerActor, type TimeLedgerResult } from '@/lib/reporting/time-ledger';
+import { loadHistoricalApprovalIssues, type HistoricalApprovalRow } from '@/lib/reporting/customer-hours-history';
 import { listSiteOptionsForAdmin, type SiteOption } from '@/lib/attendance-overview-lookups';
 import { resolveCustomerWorkAreaOptions, type CustomerWorkAreaOption } from '@/lib/reporting/customer-workarea-picker';
 import { parseTimeLedgerUiState, uiStateToApiQuery, type TimeLedgerUiState } from '@/lib/reporting/time-ledger-ui-query';
@@ -62,14 +63,31 @@ export async function TimesheetsLedgerPage({
 
   let initialData: TimeLedgerResult | null = null;
   let initialReadChanged = false;
-  try {
-    initialData = await getTimeLedger(uiStateToApiQuery(state), actor);
-  } catch (err) {
-    if (err instanceof TimeLedgerReadChangedError) {
-      initialReadChanged = true;
-    } else {
-      throw err;
-    }
+  let initialHistoricalRows: HistoricalApprovalRow[] = [];
+  let initialHistoricalTruncated = false;
+  let initialHistoricalError = false;
+  // UT7-B-fixup-2 #1 — the main ledger read and the historical-approvals read are resolved in
+  // PARALLEL (Promise.allSettled, not Promise.all) but their failures are handled completely
+  // independently: historical-approvals is an explicitly SECONDARY, best-effort diagnostic source
+  // (see customer-hours-history.ts's header comment), and a failure there must never take down the
+  // main "Табель" page. getTimeLedger's own result/error handling is exactly what it was before this
+  // fixup — only now it no longer shares a single try/catch (and therefore a single failure mode)
+  // with the historical read.
+  const [ledgerOutcome, historicalOutcome] = await Promise.allSettled([getTimeLedger(uiStateToApiQuery(state), actor), loadHistoricalApprovalIssues(uiStateToApiQuery(state), actor)]);
+
+  if (ledgerOutcome.status === 'fulfilled') {
+    initialData = ledgerOutcome.value;
+  } else if (ledgerOutcome.reason instanceof TimeLedgerReadChangedError) {
+    initialReadChanged = true;
+  } else {
+    throw ledgerOutcome.reason;
+  }
+
+  if (historicalOutcome.status === 'fulfilled') {
+    initialHistoricalRows = historicalOutcome.value.rows;
+    initialHistoricalTruncated = historicalOutcome.value.truncated;
+  } else {
+    initialHistoricalError = true;
   }
 
   return (
@@ -89,6 +107,9 @@ export async function TimesheetsLedgerPage({
             locale={locale}
             initialState={state}
             initialData={initialData}
+            initialHistoricalRows={initialHistoricalRows}
+            initialHistoricalTruncated={initialHistoricalTruncated}
+            initialHistoricalError={initialHistoricalError}
             initialSiteOptions={sites}
             initialSelectedCustomerOptions={selectedCustomerOptions}
           />

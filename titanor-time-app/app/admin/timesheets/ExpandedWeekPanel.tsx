@@ -6,6 +6,7 @@ import { formatHelsinkiDateTime, utcIsoToHelsinkiTime } from '@/lib/helsinki-dat
 import { dayTypeLabel } from '@/lib/i18n/worker';
 import { issueLabel, approveDraftWarningLabel } from '@/lib/reporting/ledger-ui-text';
 import { ApproveWeekAction } from './ApproveWeekAction';
+import { ApprovalDiffPanel } from './ApprovalDiffPanel';
 
 function formatDayHeader(dateIso: string, locale: AppLocale): string {
   const d = new Date(`${dateIso}T00:00:00.000Z`);
@@ -109,6 +110,14 @@ export function ExpandedWeekPanel({ locale, row, onApproved }: { locale: AppLoca
       )}
 
       <p className="ledger-approval-history">{approvalHistorySentence(row, locale)}</p>
+
+      {/* UT7-B — "было / стало" only for a row that actually has something to compare: real
+          CHANGED_AFTER_APPROVAL, or a fingerprint that coincidentally matches a now-historical
+          (SUPERSEDED) approval rather than the live CURRENT one. Never fetched for a plain
+          READY/APPROVED row — lazy, on-demand only. */}
+      {(row.approvalState === 'CHANGED_AFTER_APPROVAL' || (row.approvalState === 'NEEDS_ATTENTION' && row.supersededFingerprintMatch)) && (
+        <ApprovalDiffPanel locale={locale} logicalKey={row.logicalKey} />
+      )}
 
       <div className="ledger-approve-action">
         <ApproveWeekAction locale={locale} row={row} onApproved={onApproved} />

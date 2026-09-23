@@ -9,6 +9,7 @@ import { computeChangeType, buildClockShiftAdjustmentData } from '@/lib/clock-sh
 import { reinitializeDraftFromVersion } from '@/lib/review-scopes';
 import { autoCloseOpenCorrectionsForTimesheet } from '@/lib/correction-lifecycle';
 import { computeTimesheetEditCutoff } from '@/lib/timesheet-edit-window';
+import { reconcileCustomerHoursApprovalsForTimesheet } from '@/lib/reporting/customer-hours-reconciliation';
 
 // docs/titanor-time/04_ADMIN_FIRST_API_CONTRACTS.md §9 — read-only timesheet/draft/version views
 // (ЭТАП 7 sub-task 3a). §9's ownership rule: "сервер проверяет, что этот Timesheet.employeeId
@@ -1269,6 +1270,17 @@ export async function submitWorkerTimesheetCore(
       });
     }
   }
+
+  // UT7-B — reconciliation, atomic with this same version freeze (UT7-A-R1 §"главный архитектурный
+  // блокер": a separate post-commit step is not durable — a crash between submit's own commit and a
+  // follow-up step, a swallowed error, no retry, would leave the DB with a stale CURRENT forever, and
+  // this shares Employee/Timesheet/Draft locks the caller already holds anyway). Runs last, after
+  // the version/days/segments/breaks/review-scopes/status update/TIMESHEET_SUBMITTED audit above are
+  // already fully written — the new canonical source is completely readable by this same tx at this
+  // point. Any genuinely unexpected error here rolls back this entire submit (including the version
+  // just created); the one known, deferrable domain error is caught and logged inside that function
+  // itself, letting this submit succeed normally regardless.
+  await reconcileCustomerHoursApprovalsForTimesheet({ tx, employeeId, timesheetId, versionId: version.id, actorUserId, requestId });
 
   return { timesheetId, status: 'SUBMITTED', versionId: version.id, versionNumber };
 }

@@ -6910,6 +6910,79 @@ a.ov-summary-card:focus-visible {
   color: var(--error);
 }
 
+/* UT7-B — "было / стало" diff panel for a row that changed after approval. */
+.ledger-diff-panel {
+  margin: 10px 0 0;
+  padding: 10px 12px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: rgba(255, 255, 255, 0.03);
+  font-size: 0.82rem;
+}
+.ledger-diff-loading,
+.ledger-diff-error {
+  margin: 10px 0 0;
+  color: var(--text-soft);
+  font-size: 0.82rem;
+}
+.ledger-diff-note {
+  margin: 0 0 6px;
+  color: #fcd34d;
+}
+.ledger-diff-note-removed,
+.ledger-diff-note-unreadable {
+  color: var(--error);
+}
+.ledger-diff-before-after {
+  margin: 0 0 4px;
+  font-weight: 600;
+}
+.ledger-diff-delta,
+.ledger-diff-dates {
+  margin: 0 0 4px;
+  color: var(--text-soft);
+}
+.ledger-diff-approved-by {
+  margin: 6px 0 0;
+  color: var(--text-soft);
+}
+
+/* UT7-B-fixup #2 — historical approval rows (removed slice / unreadable source), rendered inside
+   their customer's group, visually distinct from a normal current-hours row. */
+.ledger-row-historical {
+  opacity: 0.85;
+  border-left: 2px dashed var(--border);
+  padding-left: 8px;
+}
+.ledger-historical-note {
+  margin: 10px 0 6px;
+  font-size: 0.8rem;
+  color: var(--text-soft);
+  font-style: italic;
+}
+.ledger-historical-list {
+  margin-top: 0;
+}
+
+/* UT7-B-fixup-2 #1/#2/#3 — the historical-approvals list is a secondary, best-effort diagnostic
+   source; its own load failure or truncation gets a small, non-blocking warning, never the page-level
+   ledger-error-banner used for the main ledger's own errors. */
+.ledger-historical-warning {
+  margin: 8px 0;
+  padding: 8px 12px;
+  border-radius: 8px;
+  border: 1px solid rgba(252, 211, 77, 0.4);
+  background: rgba(252, 211, 77, 0.08);
+  font-size: 0.85rem;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.ledger-historical-warning p {
+  margin: 0;
+}
+
 /* UT6-B — mass (bulk) weekly-customer-hours approval. */
 .ledger-row-summary-wrap {
   display: flex;

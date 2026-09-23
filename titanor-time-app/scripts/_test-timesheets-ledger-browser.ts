@@ -207,10 +207,20 @@ async function main() {
     await page.locator('.ledger-filter-field select').nth(1).selectOption('ready'); // 2nd select = status
     await page.waitForLoadState('networkidle');
     const newRequestsAfterFilterChange = requests.slice(requestsBeforeFilterChange);
-    const ledgerApiCallsAfterFilterChange = newRequestsAfterFilterChange.filter((r) => r.url.includes('/api/admin/time-ledger') && !r.url.includes('filter-options'));
+    // UT7-B-fixup #2 — a filter change now fires TWO parallel requests by design: the main ledger and
+    // the SEPARATE, bounded historical-approvals list (see customer-hours-history.ts's header comment
+    // for why it is deliberately its own call, never folded into the main ledger response). Each is
+    // checked for its own "exactly one, not zero, not duplicated" invariant independently.
+    const ledgerApiCallsAfterFilterChange = newRequestsAfterFilterChange.filter((r) => r.url.includes('/api/admin/time-ledger') && !r.url.includes('filter-options') && !r.url.includes('historical-approvals'));
     check(
       'filter change: exactly one /api/admin/time-ledger request fires (not zero, not duplicated)',
       ledgerApiCallsAfterFilterChange.length === 1,
+      newRequestsAfterFilterChange.map((r) => r.url)
+    );
+    const historicalApiCallsAfterFilterChange = newRequestsAfterFilterChange.filter((r) => r.url.includes('/api/admin/time-ledger/historical-approvals'));
+    check(
+      'filter change: exactly one /api/admin/time-ledger/historical-approvals request fires alongside it',
+      historicalApiCallsAfterFilterChange.length === 1,
       newRequestsAfterFilterChange.map((r) => r.url)
     );
     const pageRerenderRequestsAfterFilterChange = newRequestsAfterFilterChange.filter((r) => r.url.includes('/admin/timesheets') && !r.url.includes('/api/'));

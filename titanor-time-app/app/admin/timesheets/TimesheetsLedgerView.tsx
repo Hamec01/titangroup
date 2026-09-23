@@ -5,9 +5,11 @@ import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import type { AppLocale } from '@/lib/i18n/locale';
 import { localeText } from '@/lib/i18n/locale';
 import type { CustomerGroup, TimeLedgerResult, WeeklyCustomerSliceRow } from '@/lib/reporting/time-ledger';
+import type { HistoricalApprovalRow } from '@/lib/reporting/customer-hours-history';
 import type { SiteOption } from '@/lib/attendance-overview-lookups';
 import type { CustomerWorkAreaOption } from '@/lib/reporting/customer-workarea-picker';
-import { parseTimeLedgerUiState, uiStateToHref, uiStateToApiUrl, nextUiState, MAX_PAGE_SIZE, type TimeLedgerUiState } from '@/lib/reporting/time-ledger-ui-query';
+import { parseTimeLedgerUiState, uiStateToHref, uiStateToApiUrl, uiStateToHistoricalApiUrl, nextUiState, MAX_PAGE_SIZE, type TimeLedgerUiState } from '@/lib/reporting/time-ledger-ui-query';
+import { historicalLoadErrorLabel, historicalRetryLabel, historicalTruncatedLabel } from '@/lib/reporting/ledger-ui-text';
 import { LedgerTopBar } from './LedgerTopBar';
 import { LedgerFilterBar } from './LedgerFilterBar';
 import { LedgerSummaryStrip } from './LedgerSummaryStrip';
@@ -50,12 +52,18 @@ export function TimesheetsLedgerView({
   locale,
   initialState,
   initialData,
+  initialHistoricalRows,
+  initialHistoricalTruncated,
+  initialHistoricalError,
   initialSiteOptions,
   initialSelectedCustomerOptions
 }: {
   locale: AppLocale;
   initialState: TimeLedgerUiState;
   initialData: TimeLedgerResult;
+  initialHistoricalRows: HistoricalApprovalRow[];
+  initialHistoricalTruncated: boolean;
+  initialHistoricalError: boolean;
   initialSiteOptions: SiteOption[];
   initialSelectedCustomerOptions: CustomerWorkAreaOption[];
 }) {
@@ -68,6 +76,18 @@ export function TimesheetsLedgerView({
   const [data, setData] = useState<TimeLedgerResult>(initialData);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<FetchErrorState | null>(null);
+  // UT7-B-fixup #2 / UT7-B-fixup-2 — a separate, bounded fetch alongside the main ledger one (never
+  // embedded in its pagination — see customer-hours-history.ts). A failure here never blocks the main
+  // ledger view (historicalError just shows a small, non-blocking warning with its own retry — the
+  // main rows/filters/approve flow keep working regardless). Seeded from initialHistoricalRows/
+  // initialHistoricalTruncated/initialHistoricalError (resolved server-side by
+  // TimesheetsLedgerPage.tsx via Promise.allSettled, the SAME reason initialData exists) so the very
+  // first paint already has them — the fetch effect below only re-runs on a LATER filter/page change,
+  // exactly like the main ledger fetch, so relying on client-only empty defaults would leave this
+  // permanently empty (or permanently silent about a failure) on a fresh page load.
+  const [historicalRows, setHistoricalRows] = useState<HistoricalApprovalRow[]>(initialHistoricalRows);
+  const [historicalTruncated, setHistoricalTruncated] = useState<boolean>(initialHistoricalTruncated);
+  const [historicalError, setHistoricalError] = useState<boolean>(initialHistoricalError);
 
   // This component's own tracked "current URL search string" — written by navigate() (a raw History
   // API call) and by the popstate listener below (genuine Back/Forward). Seeded from the REAL
@@ -241,6 +261,38 @@ export function TimesheetsLedgerView({
         setLoading(false);
       });
 
+    // UT7-B-fixup-2 #2 — a new filter/page immediately clears whatever historical rows/truncated/
+    // error state belonged to the PREVIOUS filter, so a slow or failing historical fetch can never
+    // leave the previous customer/period's rows on screen under a filter they no longer match. The
+    // `seq` check below still applies to the actual response, exactly like the main ledger fetch —
+    // an in-flight request superseded by a newer filter change is simply ignored when it resolves.
+    setHistoricalRows([]);
+    setHistoricalTruncated(false);
+    setHistoricalError(false);
+
+    fetch(uiStateToHistoricalApiUrl(parsedCurrent.state), { credentials: 'same-origin', signal: controller.signal })
+      .then(async (res) => {
+        if (seq !== seqRef.current) return; // superseded by a newer filter change — ignore
+        if (!res.ok) {
+          setHistoricalError(true);
+          return;
+        }
+        const body = await res.json().catch(() => null);
+        if (seq !== seqRef.current) return;
+        if (!body) {
+          setHistoricalError(true);
+          return;
+        }
+        setHistoricalRows(body.rows as HistoricalApprovalRow[]);
+        setHistoricalTruncated(!!body.truncated);
+      })
+      .catch((err: unknown) => {
+        if (seq !== seqRef.current) return;
+        if (err instanceof DOMException && err.name === 'AbortError') return; // cleanup below, not a real error
+        setHistoricalError(true);
+      }); // a failure here (or above) only ever sets historicalError — it never surfaces as a
+    // page-level error banner and never blocks the main ledger rows/filters/approve flow.
+
     return () => controller.abort();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentSearch]);
@@ -288,10 +340,51 @@ export function TimesheetsLedgerView({
         setError({ code: 'NETWORK_ERROR', message: '' });
         setLoading(false);
       });
+    setHistoricalError(false);
+    fetch(uiStateToHistoricalApiUrl(currentState), { credentials: 'same-origin' })
+      .then(async (res) => {
+        if (seq !== seqRef.current) return;
+        if (!res.ok) {
+          setHistoricalError(true);
+          return;
+        }
+        const body = await res.json().catch(() => null);
+        if (seq !== seqRef.current) return;
+        if (!body) {
+          setHistoricalError(true);
+          return;
+        }
+        setHistoricalRows(body.rows as HistoricalApprovalRow[]);
+        setHistoricalTruncated(!!body.truncated);
+      })
+      .catch(() => {
+        if (seq !== seqRef.current) return;
+        setHistoricalError(true);
+      });
   }, [currentState, currentSearch, router]);
 
   const errorBanner = error ? renderErrorBanner(error, locale, navigate, retry) : null;
   const keepDataVisible = error ? error.code === 'TIME_LEDGER_READ_CHANGED_DURING_QUERY' || error.code === 'NETWORK_ERROR' || error.code === 'UNKNOWN' : true;
+
+  // UT7-B-fixup #2 — group historical rows by (siteId, workAreaId) so each one renders inside its
+  // matching CustomerGroupSection. A key with historical rows but no live CustomerGroup on this page
+  // (every one of that customer's approvals became historical) still needs its own minimal section —
+  // built from the historical rows' own siteId/siteName/workAreaId/workAreaName, with no mass-approve
+  // controls (onToggleSelect omitted), since it represents no live, approvable rows at all.
+  const historicalByCustomerKey = useMemo(() => {
+    const m = new Map<string, HistoricalApprovalRow[]>();
+    for (const row of historicalRows) {
+      const key = customerKeyOf(row.siteId, row.workAreaId);
+      const list = m.get(key);
+      if (list) list.push(row);
+      else m.set(key, [row]);
+    }
+    return m;
+  }, [historicalRows]);
+  const shownCustomerKeys = new Set(data.customerGroups.map((g) => customerKeyOf(g.siteId, g.workAreaId)));
+  const orphanHistoricalGroups = [...historicalByCustomerKey.entries()]
+    .filter(([key]) => !shownCustomerKeys.has(key))
+    .map(([key, rows]) => ({ key, siteId: rows[0].siteId, siteName: rows[0].siteName, workAreaId: rows[0].workAreaId, workAreaName: rows[0].workAreaName, rows }));
 
   return (
     <div className="ledger-view">
@@ -308,7 +401,20 @@ export function TimesheetsLedgerView({
       {(!error || keepDataVisible) && (
         <>
           <LedgerSummaryStrip locale={locale} summary={data.summary} state={currentState} onNavigate={navigate} />
-          {data.customerGroups.length === 0 && data.notSubmitted.length === 0 && data.sourceErrors.length === 0 ? (
+          {historicalError && (
+            <div className="ledger-historical-warning" role="alert">
+              <p>{historicalLoadErrorLabel(locale)}</p>
+              <button type="button" className="ledger-retry-button" onClick={retry}>
+                {historicalRetryLabel(locale)}
+              </button>
+            </div>
+          )}
+          {!historicalError && historicalTruncated && (
+            <div className="ledger-historical-warning" role="status">
+              <p>{historicalTruncatedLabel(locale)}</p>
+            </div>
+          )}
+          {data.customerGroups.length === 0 && data.notSubmitted.length === 0 && data.sourceErrors.length === 0 && historicalRows.length === 0 ? (
             <p className="wk-empty" role="status">
               {localeText(locale, 'No results for these filters.', 'Нет результатов по этим фильтрам.')}{' '}
               <button type="button" className="ledger-link-button" onClick={() => navigate({ ...blankFilters(), page: 1 })}>
@@ -334,9 +440,19 @@ export function TimesheetsLedgerView({
                     allMatchingBusy={groupAllMatching?.busy ?? false}
                     allMatchingTooMany={groupAllMatching?.tooMany ?? null}
                     selectionLocked={selectionLocked}
+                    historicalRows={historicalByCustomerKey.get(groupKey)}
                   />
                 );
               })}
+              {orphanHistoricalGroups.map((g) => (
+                <CustomerGroupSection
+                  key={g.key}
+                  locale={locale}
+                  group={{ siteId: g.siteId, siteName: g.siteName, workAreaId: g.workAreaId, workAreaName: g.workAreaName, rows: [] }}
+                  onApproved={retry}
+                  historicalRows={g.rows}
+                />
+              ))}
               {data.notSubmitted.length > 0 && <NotSubmittedSection locale={locale} rows={data.notSubmitted} />}
               {data.sourceErrors.length > 0 && <SourceErrorSection locale={locale} rows={data.sourceErrors} />}
               <LedgerPagination locale={locale} pagination={data.pagination} onNavigate={navigate} />

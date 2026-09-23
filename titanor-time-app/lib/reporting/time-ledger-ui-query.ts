@@ -325,6 +325,29 @@ export function uiStateToApiUrl(state: TimeLedgerUiState): string {
   return `/api/admin/time-ledger?${p.toString()}`;
 }
 
+/** UT7-B-fixup #2 / UT7-B-fixup-2 #4 — build the GET /api/admin/time-ledger/historical-approvals
+ *  fetch URL for a given state: allTime/startDate/endDate/employeeSearch/siteId/workAreaId, PLUS
+ *  status/onlyIssues/onlyChangedAfterApproval — the server needs these to decide whether historical
+ *  rows are compatible with the active filter at all (isHistoricalCompatibleFilter); omitting them
+ *  would make the server always see status='all' regardless of what the admin actually selected. No
+ *  page/pageSize — this list is its own bounded query, not paginated like the main ledger. */
+export function uiStateToHistoricalApiUrl(state: TimeLedgerUiState): string {
+  const p = new URLSearchParams();
+  if (state.allTime) {
+    p.set('allTime', 'true');
+  } else {
+    p.set('startDate', state.startDate as string);
+    p.set('endDate', state.endDate as string);
+  }
+  if (state.employeeSearch) p.set('employeeSearch', state.employeeSearch);
+  if (state.siteId) p.set('siteId', state.siteId);
+  if (state.workAreaId) p.set('workAreaId', state.workAreaId);
+  if (state.status !== 'all') p.set('status', state.status);
+  if (state.onlyIssues) p.set('onlyIssues', 'true');
+  if (state.onlyChangedAfterApproval) p.set('onlyChangedAfterApproval', 'true');
+  return `/api/admin/time-ledger/historical-approvals?${p.toString()}`;
+}
+
 /** Applies `changes` on top of `current`. Any change other than an explicit `page` change resets
  *  pagination back to 1 (point 5 — "при изменении фильтра сбрасывать page=1"). Callers that mean
  *  to change the date range must set `allTime`+`startDate`+`endDate` together. */
