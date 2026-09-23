@@ -18,12 +18,12 @@ function formatMinutes(minutes: number, ru: boolean): string {
   return ru ? `${h}ч${m ? ` ${m}м` : ''}` : `${h}h${m ? ` ${m}m` : ''}`;
 }
 
-type RouteParams = { params: Promise<{ correctionRequestId: string }> };
+type RouteParams = { params: Promise<{ correctionRequestId: string }>; searchParams: Promise<{ returnTo?: string | string[] }> };
 
 // docs/titanor-time/03_DATA_MODEL_ERD.md §4.7 T7.9 — request/draft.edit/submit/approve all folded
 // into this one page (confirmed ADMIN-only first slice), mirroring how /admin/timesheets/
 // [timesheetId] combines card+actions rather than separate routes per action.
-export default async function AdminCorrectionDetailPage({ params }: RouteParams) {
+export default async function AdminCorrectionDetailPage({ params, searchParams }: RouteParams) {
   const session = await resolveServerSession();
   if (!session) {
     redirect('/login');
@@ -43,6 +43,10 @@ export default async function AdminCorrectionDetailPage({ params }: RouteParams)
   }
 
   const { correctionRequestId } = await params;
+  const rawReturnTo = (await searchParams).returnTo;
+  const requestedReturnTo = Array.isArray(rawReturnTo) ? rawReturnTo[0] : rawReturnTo;
+  const returnTo = requestedReturnTo?.startsWith('/admin/timesheets') ? requestedReturnTo : undefined;
+  const returnQuery = returnTo ? `?returnTo=${encodeURIComponent(returnTo)}` : '';
   const correction = await getCorrectionDetail(correctionRequestId);
 
   // T12 — a REJECTED / APPROVED correction is history: its draft is a stale snapshot of whatever
@@ -131,7 +135,7 @@ export default async function AdminCorrectionDetailPage({ params }: RouteParams)
                   </td>
                   {correction.status === 'DRAFT_OPEN' ? (
                     <td>
-                      <Link href={`/admin/corrections/${correction.id}/days/${day.date}`}>{localeText(locale, 'Edit', 'Изменить')}</Link>
+                      <Link href={`/admin/corrections/${correction.id}/days/${day.date}${returnQuery}`}>{localeText(locale, 'Edit', 'Изменить')}</Link>
                     </td>
                   ) : null}
                 </tr>
@@ -147,6 +151,7 @@ export default async function AdminCorrectionDetailPage({ params }: RouteParams)
           isSuperAdmin={session.user.roles.includes('SUPER_ADMIN')}
           timesheetStatus={correction.timesheetStatus}
           directEdit={correction.directEdit}
+          returnTo={returnTo}
         />
 
         <p>

@@ -34,9 +34,10 @@ interface CorrectionActionsProps {
   timesheetStatus: string;
   /** T12 §1b — no-reason direct edit: same apply/discard flow, softer wording ("Сохранить"). */
   directEdit?: boolean;
+  returnTo?: string;
 }
 
-export function CorrectionActions({ correctionRequestId, status, isSuperAdmin, timesheetStatus, directEdit = false }: CorrectionActionsProps) {
+export function CorrectionActions({ correctionRequestId, status, isSuperAdmin, timesheetStatus, directEdit = false, returnTo }: CorrectionActionsProps) {
   const router = useRouter();
   const ru = useAppLocale() === 'RU';
   const [loading, setLoading] = useState<'open' | 'submit' | 'approve' | 'reject' | 'apply' | 'discard' | null>(null);
@@ -55,7 +56,7 @@ export function CorrectionActions({ correctionRequestId, status, isSuperAdmin, t
       setLoading(null);
       return;
     }
-    router.push('/admin/review-scopes');
+    router.push(returnTo ?? '/admin/review-scopes');
   }
 
   async function handleDiscard(): Promise<void> {
@@ -67,7 +68,7 @@ export function CorrectionActions({ correctionRequestId, status, isSuperAdmin, t
       setLoading(null);
       return;
     }
-    router.push('/admin/timesheets?status=SUBMITTED');
+    router.push(returnTo ?? '/admin/timesheets?status=SUBMITTED');
   }
 
   async function post(path: string, body?: unknown): Promise<{ ok: boolean; data: unknown }> {
@@ -145,7 +146,7 @@ export function CorrectionActions({ correctionRequestId, status, isSuperAdmin, t
                 ? 'Изменения применены. Табель вернулся в очередь на утверждение.'
                 : 'Changes applied. The timesheet is back in the review queue.'}
           </p>
-          <button className="login-submit" type="button" onClick={() => router.push('/admin/review-scopes')}>
+          <button className="login-submit" type="button" onClick={() => router.push(returnTo ?? '/admin/review-scopes')}>
             {ru ? 'К очереди проверки' : 'To the review queue'}
           </button>
         </div>

@@ -27,7 +27,8 @@ export function WorkerSliceRow({
   onToggleSelect,
   onSelectWholeWeek,
   wholeWeekBusy = false,
-  wholeWeekTooMany
+  wholeWeekTooMany,
+  editReturnTo
 }: {
   locale: AppLocale;
   row: WeeklyCustomerSliceRow;
@@ -39,6 +40,7 @@ export function WorkerSliceRow({
   onSelectWholeWeek?: (row: WeeklyCustomerSliceRow) => void;
   wholeWeekBusy?: boolean;
   wholeWeekTooMany?: { totalItems: number; max: number } | null;
+  editReturnTo?: string;
 }) {
   const [open, setOpen] = useState(false);
   const panelId = useId();
@@ -85,6 +87,7 @@ export function WorkerSliceRow({
             onSelectWholeWeek={onSelectWholeWeek ? () => onSelectWholeWeek(row) : undefined}
             wholeWeekBusy={wholeWeekBusy}
             wholeWeekTooMany={wholeWeekTooMany}
+            editReturnTo={editReturnTo}
           />
         </div>
       )}

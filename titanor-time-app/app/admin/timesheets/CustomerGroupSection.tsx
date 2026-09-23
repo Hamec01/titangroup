@@ -35,6 +35,7 @@ export function CustomerGroupSection({
   allMatchingTooMany,
   selectionLocked,
   historicalRows,
+  editReturnTo,
   onSelectWholeWeek,
   wholeWeekBusyKey,
   wholeWeekTooMany
@@ -57,6 +58,8 @@ export function CustomerGroupSection({
    *  slice / unreadable source), matched by TimesheetsLedgerView. Rendered below the normal rows,
    *  never counted in pageMinutes/distinctWorkers, never selectable for mass approval. */
   historicalRows?: HistoricalApprovalRowData[];
+  /** Exact reactive ledger URL to return to after using the existing correction editor. */
+  editReturnTo?: string;
   /** UT9-B — "Принять всю неделю" (ExpandedWeekPanel's own button, threaded down here just to reach
    *  WorkerSliceRow). Undefined for the orphan-historical render (no live rows to select from). */
   onSelectWholeWeek?: (row: WeeklyCustomerSliceRow) => void;
@@ -110,6 +113,7 @@ export function CustomerGroupSection({
                 onSelectWholeWeek={onSelectWholeWeek}
                 wholeWeekBusy={wholeWeekBusyKey === key}
                 wholeWeekTooMany={wholeWeekTooMany?.rowKey === key ? wholeWeekTooMany : null}
+                editReturnTo={editReturnTo}
               />
             </li>
           );

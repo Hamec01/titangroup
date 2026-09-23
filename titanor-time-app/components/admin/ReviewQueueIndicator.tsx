@@ -29,7 +29,8 @@ function formatWeek(startDate: string, endDate: string, ru: boolean): string {
 
 // Task B + T12 §1a — the "часы на утверждении" indicator next to the notification bell. Same poll
 // cadence as NotificationCenter. Clicking opens a small drawer with the per-week (per open period)
-// breakdown; each row and the footer open /admin/review.
+// breakdown. The legacy /admin/review route remains available as a fallback, but this global entry
+// point now opens the unified ledger; a week row carries its exact range into the ledger URL.
 export function ReviewQueueIndicator({ locale }: { locale: 'EN' | 'RU' }) {
   const router = useRouter();
   const ru = locale === 'RU';
@@ -89,9 +90,14 @@ export function ReviewQueueIndicator({ locale }: { locale: 'EN' | 'RU' }) {
         ? 'Часы на утверждении'
         : 'Timesheets awaiting approval';
 
-  function goToReview(): void {
+  function goToLedger(week?: ReviewQueueWeek): void {
     setOpen(false);
-    router.push('/admin/review');
+    const qs = new URLSearchParams();
+    if (week) {
+      qs.set('startDate', week.startDate.slice(0, 10));
+      qs.set('endDate', week.endDate.slice(0, 10));
+    }
+    router.push(qs.size > 0 ? `/admin/timesheets?${qs.toString()}` : '/admin/timesheets');
   }
 
   return (
@@ -103,7 +109,7 @@ export function ReviewQueueIndicator({ locale }: { locale: 'EN' | 'RU' }) {
         aria-label={label}
         aria-haspopup="true"
         aria-expanded={open}
-        onClick={() => (count > 0 ? setOpen((v) => !v) : goToReview())}
+        onClick={() => (count > 0 ? setOpen((v) => !v) : goToLedger())}
       >
         <CalendarIcon />
         {count > 0 ? (
@@ -127,7 +133,7 @@ export function ReviewQueueIndicator({ locale }: { locale: 'EN' | 'RU' }) {
             <ul className="notif-drawer-list">
               {weeks.map((w) => (
                 <li key={w.periodId} className="notif-drawer-item notif-drawer-item-warning">
-                  <button type="button" className="notif-drawer-item-link" onClick={goToReview} style={{ display: 'flex', justifyContent: 'space-between', width: '100%' }}>
+                  <button type="button" className="notif-drawer-item-link" onClick={() => goToLedger(w)} style={{ display: 'flex', justifyContent: 'space-between', width: '100%' }}>
                     <span>
                       {ru ? 'Неделя' : 'Week'} {formatWeek(w.startDate, w.endDate, ru)}
                     </span>
@@ -137,8 +143,8 @@ export function ReviewQueueIndicator({ locale }: { locale: 'EN' | 'RU' }) {
               ))}
             </ul>
           )}
-          <button type="button" className="notif-drawer-item-link" onClick={goToReview}>
-            {ru ? 'Открыть очередь проверки' : 'Open the review queue'} →
+          <button type="button" className="notif-drawer-item-link" onClick={() => goToLedger()}>
+            {ru ? 'Открыть Табель' : 'Open timesheets'} →
           </button>
         </div>
       ) : null}

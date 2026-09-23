@@ -20,7 +20,7 @@ function describeError(code: string | undefined, ru: boolean): string {
 // T12 §1b — one click, no reason. Distinct from StartCorrectionForm (which asks for a reason the
 // worker sees). Opens the shared /admin/corrections/[id] editor; the applied version is
 // source=ADMIN_EDIT so the worker gets no "Часы исправил администратор" notice.
-export function DirectEditForm({ timesheetId }: { timesheetId: string }) {
+export function DirectEditForm({ timesheetId, returnTo }: { timesheetId: string; returnTo?: string }) {
   const router = useRouter();
   const ru = useAppLocale() === 'RU';
   const [loading, setLoading] = useState(false);
@@ -41,7 +41,7 @@ export function DirectEditForm({ timesheetId }: { timesheetId: string }) {
         setLoading(false);
         return;
       }
-      router.push(`/admin/corrections/${data.correctionRequestId}`);
+      router.push(`/admin/corrections/${data.correctionRequestId}${returnTo ? `?returnTo=${encodeURIComponent(returnTo)}` : ''}`);
     } catch {
       setError(ru ? 'Ошибка сети. Попробуйте снова.' : 'Network error. Please try again.');
       setLoading(false);

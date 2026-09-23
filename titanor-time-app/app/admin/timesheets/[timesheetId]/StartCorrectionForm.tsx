@@ -19,7 +19,7 @@ function describeError(code: string | undefined, ru: boolean): string {
 
 // Task A — admin starts an inline correction on a SUBMITTED / FOREMAN_APPROVED timesheet, then
 // edits days on the existing /admin/corrections/[id] page and hits "Применить изменения" there.
-export function StartCorrectionForm({ timesheetId }: { timesheetId: string }) {
+export function StartCorrectionForm({ timesheetId, returnTo }: { timesheetId: string; returnTo?: string }) {
   const router = useRouter();
   const ru = useAppLocale() === 'RU';
   const [open, setOpen] = useState(false);
@@ -47,7 +47,7 @@ export function StartCorrectionForm({ timesheetId }: { timesheetId: string }) {
         setLoading(false);
         return;
       }
-      router.push(`/admin/corrections/${data.correctionRequestId}`);
+      router.push(`/admin/corrections/${data.correctionRequestId}${returnTo ? `?returnTo=${encodeURIComponent(returnTo)}` : ''}`);
     } catch {
       setError(ru ? 'Ошибка сети. Попробуйте снова.' : 'Network error. Please try again.');
       setLoading(false);

@@ -17,7 +17,7 @@ function describeError(code: string | undefined, ru: boolean): string {
   }
 }
 
-export function RequestCorrectionForm({ timesheetId }: { timesheetId: string }) {
+export function RequestCorrectionForm({ timesheetId, returnTo }: { timesheetId: string; returnTo?: string }) {
   const router = useRouter();
   const ru = useAppLocale() === 'RU';
   const [reason, setReason] = useState('');
@@ -44,7 +44,7 @@ export function RequestCorrectionForm({ timesheetId }: { timesheetId: string }) 
         setLoading(false);
         return;
       }
-      router.push(`/admin/corrections/${data.id}`);
+      router.push(`/admin/corrections/${data.id}${returnTo ? `?returnTo=${encodeURIComponent(returnTo)}` : ''}`);
     } catch {
       setError(ru ? 'Ошибка сети. Попробуйте снова.' : 'Network error. Please try again.');
       setLoading(false);

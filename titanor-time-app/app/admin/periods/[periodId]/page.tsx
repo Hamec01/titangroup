@@ -6,6 +6,7 @@ import { LockPeriodAction } from './LockPeriodAction';
 import { LegacyPeriodEditForm } from './LegacyPeriodEditForm';
 import { resolveAppLocale } from '@/lib/i18n/server';
 import { adminDailyStrings } from '@/lib/i18n/admin-daily';
+import { localeText } from '@/lib/i18n/locale';
 
 export const dynamic = 'force-dynamic';
 
@@ -16,7 +17,8 @@ export default async function AdminPeriodDetailPage({ params }: RouteParams) {
   if (!session) {
     redirect('/login');
   }
-  const s = adminDailyStrings(await resolveAppLocale());
+  const locale = await resolveAppLocale();
+  const s = adminDailyStrings(locale);
 
   const isAdmin = session.user.roles.includes('ADMIN') || session.user.roles.includes('SUPER_ADMIN');
   if (!isAdmin) {
@@ -97,6 +99,11 @@ export default async function AdminPeriodDetailPage({ params }: RouteParams) {
         </p>
         <p>
           <Link href={`/admin/export?periodId=${period.id}`}>{s.periods.csv}</Link>
+        </p>
+        <p>
+          <Link href={`/admin/timesheets?view=summary&startDate=${encodeURIComponent(period.startDate)}&endDate=${encodeURIComponent(period.endDate)}`}>
+            {localeText(locale, 'Open customer hours for this period', 'Открыть часы заказчиков за этот период')}
+          </Link>
         </p>
         <p>
           <Link href="/admin/periods">{s.periods.back}</Link>

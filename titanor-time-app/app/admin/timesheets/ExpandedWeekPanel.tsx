@@ -1,5 +1,6 @@
 import type { AppLocale } from '@/lib/i18n/locale';
 import { localeText } from '@/lib/i18n/locale';
+import Link from 'next/link';
 import type { WeeklyCustomerSliceRow } from '@/lib/reporting/time-ledger';
 import { formatWorkedDuration } from '@/lib/reporting/report-format';
 import { formatHelsinkiDateTime, utcIsoToHelsinkiTime } from '@/lib/helsinki-datetime';
@@ -26,7 +27,8 @@ export function ExpandedWeekPanel({
   onApproved,
   onSelectWholeWeek,
   wholeWeekBusy = false,
-  wholeWeekTooMany
+  wholeWeekTooMany,
+  editReturnTo
 }: {
   locale: AppLocale;
   row: WeeklyCustomerSliceRow;
@@ -41,7 +43,9 @@ export function ExpandedWeekPanel({
   /** UT9-B-fixup #1 — this row's own whole-week attempt exceeded MAX_MASS_SELECTION_ITEMS even
    *  scoped to just its one week — refused, never a silently partial selection. */
   wholeWeekTooMany?: { totalItems: number; max: number } | null;
+  editReturnTo?: string;
 }) {
+  const editHref = `/admin/timesheets/${row.logicalKey.timesheetId}${editReturnTo ? `?returnTo=${encodeURIComponent(editReturnTo)}` : ''}`;
   return (
     <div className="ledger-expanded">
       {row.submissionState === 'NOT_SUBMITTED' && <p className="ledger-approve-draft-warning">{approveDraftWarningLabel(locale)}</p>}
@@ -146,6 +150,11 @@ export function ExpandedWeekPanel({
           <button type="button" className="ledger-link-button" disabled={wholeWeekBusy} onClick={onSelectWholeWeek}>
             {wholeWeekBusy ? confirmWholeWeekLoadingLabel(locale) : confirmWholeWeekLabel(locale)}
           </button>
+        )}
+        {row.submissionState === 'SUBMITTED' && (
+          <Link className="ledger-link-button" href={editHref}>
+            {localeText(locale, 'Edit hours', 'Внести изменения')}
+          </Link>
         )}
       </div>
       {wholeWeekTooMany && <p className="ledger-group-mass-note" role="alert">{massTooManyLabel(wholeWeekTooMany.totalItems, wholeWeekTooMany.max, locale)}</p>}

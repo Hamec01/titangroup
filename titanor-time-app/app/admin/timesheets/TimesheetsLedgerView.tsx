@@ -135,6 +135,7 @@ export function TimesheetsLedgerView({
 
   const parsedCurrent = useMemo(() => parseTimeLedgerUiState(new URLSearchParams(currentSearch), new Date()), [currentSearch]);
   const currentState: TimeLedgerUiState = parsedCurrent.ok ? parsedCurrent.state : initialState;
+  const editReturnTo = uiStateToHref(pathname, currentState);
 
   // UT6-B — mass-approval selection (UT6-A-R1 §7). Lives here, not inside CustomerGroupSection,
   // specifically so it SURVIVES a customer group's own component unmounting/remounting across a page
@@ -556,6 +557,7 @@ export function TimesheetsLedgerView({
                     onSelectWholeWeek={selectWholeWeek}
                     wholeWeekBusyKey={wholeWeekBusyKey}
                     wholeWeekTooMany={wholeWeekTooMany}
+                    editReturnTo={editReturnTo}
                   />
                 );
               })}

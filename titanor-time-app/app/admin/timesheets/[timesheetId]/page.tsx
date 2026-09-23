@@ -22,13 +22,13 @@ function formatMinutes(minutes: number, ru: boolean): string {
   return ru ? `${h}ч${m ? ` ${m}м` : ''}` : `${h}h${m ? ` ${m}m` : ''}`;
 }
 
-type RouteParams = { params: Promise<{ timesheetId: string }> };
+type RouteParams = { params: Promise<{ timesheetId: string }>; searchParams: Promise<{ returnTo?: string | string[] }> };
 
 // docs/titanor-time/01_SCREEN_MAP.md §2 `/admin/timesheets/[timesheetId]` — card + (when
 // FOREMAN_APPROVED) the final-approve/override-return actions folded into the same page rather
 // than a separate .../approve route, mirroring how /admin/review-scopes/[reviewScopeId] already
 // combines detail+actions.
-export default async function AdminTimesheetCardPage({ params }: RouteParams) {
+export default async function AdminTimesheetCardPage({ params, searchParams }: RouteParams) {
   const session = await resolveServerSession();
   if (!session) {
     redirect('/login');
@@ -49,6 +49,9 @@ export default async function AdminTimesheetCardPage({ params }: RouteParams) {
   }
 
   const { timesheetId } = await params;
+  const rawReturnTo = (await searchParams).returnTo;
+  const requestedReturnTo = Array.isArray(rawReturnTo) ? rawReturnTo[0] : rawReturnTo;
+  const returnTo = requestedReturnTo?.startsWith('/admin/timesheets') ? requestedReturnTo : '/admin/timesheets';
   const card = await getTimesheetCard(timesheetId);
 
   if (!card) {
@@ -56,7 +59,7 @@ export default async function AdminTimesheetCardPage({ params }: RouteParams) {
       <main className="setup-page">
         <div className="setup-card">
           <p>{localeText(locale, 'No timesheet with this id.', 'Табель с таким идентификатором не найден.')}</p>
-          <Link href="/admin/timesheets">{localeText(locale, 'Back to timesheets', 'К табелям')}</Link>
+          <Link href={returnTo}>{localeText(locale, 'Back to timesheets', 'К табелям')}</Link>
         </div>
       </main>
     );
@@ -147,20 +150,20 @@ export default async function AdminTimesheetCardPage({ params }: RouteParams) {
                   onDoneHref="/admin/review"
                   label={card.status === 'FOREMAN_APPROVED' ? localeText(locale, 'Final approve', 'Окончательно одобрить') : localeText(locale, 'Approve hours', 'Утвердить часы')}
                 />
-                <DirectEditForm timesheetId={card.timesheetId} />
-                {card.status === 'SUBMITTED' ? <StartCorrectionForm timesheetId={card.timesheetId} /> : null}
+                <DirectEditForm timesheetId={card.timesheetId} returnTo={returnTo} />
+                {card.status === 'SUBMITTED' ? <StartCorrectionForm timesheetId={card.timesheetId} returnTo={returnTo} /> : null}
                 <ReturnTimesheetForm timesheetId={card.timesheetId} />
               </>
             )}
           </>
         ) : card.status === 'FINAL_APPROVED' ? (
-          <RequestCorrectionForm timesheetId={card.timesheetId} />
+          <RequestCorrectionForm timesheetId={card.timesheetId} returnTo={returnTo} />
         ) : (
           <p className="setup-subtitle">{localeText(locale, `Not awaiting approval (status: ${timesheetStatusLabel(card.status, locale)}).`, `Не ожидает утверждения (статус: ${timesheetStatusLabel(card.status, locale)}).`)}</p>
         )}
 
         <p>
-          <Link href="/admin/timesheets">{localeText(locale, 'Back to timesheets', 'К табелям')}</Link>
+          <Link href={returnTo}>{localeText(locale, 'Back to timesheets', 'К табелям')}</Link>
         </p>
       </div>
     </main>

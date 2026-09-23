@@ -15,6 +15,8 @@ export interface PeriodOption {
   id: string;
   label: string;
   status: string;
+  startDate: string;
+  endDate: string;
 }
 
 export interface SiteOption {
@@ -35,7 +37,13 @@ export async function listPeriodOptions(): Promise<PeriodOption[]> {
     take: PERIOD_OPTION_LIMIT,
     select: { id: true, startDate: true, endDate: true, status: true }
   });
-  return periods.map((p) => ({ id: p.id, label: formatPeriodLabel(p.startDate, p.endDate, p.status), status: p.status }));
+  return periods.map((p) => ({
+    id: p.id,
+    label: formatPeriodLabel(p.startDate, p.endDate, p.status),
+    status: p.status,
+    startDate: p.startDate.toISOString().slice(0, 10),
+    endDate: p.endDate.toISOString().slice(0, 10)
+  }));
 }
 
 /** ADMIN sees every site — same unrestricted scope as the overview endpoint itself for ADMIN. */

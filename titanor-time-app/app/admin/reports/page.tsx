@@ -130,6 +130,8 @@ export default async function AdminReportsPage({ searchParams }: RouteParams) {
       selectedPeriodId={selectedPeriodId}
       selectedPeriodLabel={selectedPeriodOption?.label ?? null}
       selectedPeriodStatus={selectedPeriodOption?.status ?? null}
+      selectedPeriodStartDate={selectedPeriodOption?.startDate ?? null}
+      selectedPeriodEndDate={selectedPeriodOption?.endDate ?? null}
       selectedEmployeeId={rawEmployeeId}
       selectedSiteId={rawSiteId}
       detailPage={detailPage}

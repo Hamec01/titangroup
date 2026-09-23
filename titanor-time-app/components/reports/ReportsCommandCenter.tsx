@@ -29,12 +29,14 @@ export type ReportsScreen =
 interface Props {
   locale: AppLocale;
   view: ReportsView;
-  periodOptions: { id: string; label: string; status: string }[];
+  periodOptions: { id: string; label: string; status: string; startDate: string; endDate: string }[];
   employeeOptions: ReportSelectableEmployee[];
   siteOptions: { id: string; name: string }[];
   selectedPeriodId: string | null;
   selectedPeriodLabel: string | null;
   selectedPeriodStatus: string | null;
+  selectedPeriodStartDate: string | null;
+  selectedPeriodEndDate: string | null;
   selectedEmployeeId: string | null;
   selectedSiteId: string | null;
   detailPage: number;
@@ -57,6 +59,15 @@ export function ReportsCommandCenter(props: Props) {
   const ru = props.locale === 'RU';
   const { screen, selectedPeriodId, view } = props;
   const periodStatus = props.selectedPeriodStatus;
+  const selectedPeriodIndex = props.periodOptions.findIndex((period) => period.id === selectedPeriodId);
+  const newerPeriod = selectedPeriodIndex > 0 ? props.periodOptions[selectedPeriodIndex - 1] : null;
+  const olderPeriod = selectedPeriodIndex >= 0 && selectedPeriodIndex < props.periodOptions.length - 1 ? props.periodOptions[selectedPeriodIndex + 1] : null;
+  const todayIso = new Date().toISOString().slice(0, 10);
+  const currentPeriod = props.periodOptions.find((period) => period.startDate <= todayIso && period.endDate >= todayIso) ?? null;
+  const customerHoursHref =
+    props.selectedPeriodStartDate && props.selectedPeriodEndDate
+      ? `/admin/timesheets?view=summary&startDate=${encodeURIComponent(props.selectedPeriodStartDate)}&endDate=${encodeURIComponent(props.selectedPeriodEndDate)}`
+      : '/admin/timesheets?view=summary';
 
   const periodStatusText = (status: string | null): string => {
     if (status === 'OPEN') return ru ? 'Открыт' : 'Open';
@@ -120,6 +131,21 @@ export function ReportsCommandCenter(props: Props) {
         <Link className="report-filter-reset" href="/admin/reports">
           {ru ? 'Сбросить' : 'Reset'}
         </Link>
+        {olderPeriod ? (
+          <Link className="report-filter-reset" href={href({ view, periodId: olderPeriod.id, employeeId: view === 'worker' ? props.selectedEmployeeId : null, siteId: view === 'site' ? props.selectedSiteId : null })} rel="prev">
+            ← {ru ? 'Предыдущий период' : 'Previous period'}
+          </Link>
+        ) : null}
+        {newerPeriod ? (
+          <Link className="report-filter-reset" href={href({ view, periodId: newerPeriod.id, employeeId: view === 'worker' ? props.selectedEmployeeId : null, siteId: view === 'site' ? props.selectedSiteId : null })} rel="next">
+            {ru ? 'Следующий период' : 'Next period'} →
+          </Link>
+        ) : null}
+        {currentPeriod && currentPeriod.id !== selectedPeriodId ? (
+          <Link className="report-filter-reset" href={href({ view, periodId: currentPeriod.id, employeeId: view === 'worker' ? props.selectedEmployeeId : null, siteId: view === 'site' ? props.selectedSiteId : null })}>
+            {ru ? 'Текущий период' : 'Current period'}
+          </Link>
+        ) : null}
       </form>
 
       <nav className="report-tabs" aria-label={ru ? 'Разделы отчёта' : 'Report sections'}>
@@ -132,8 +158,8 @@ export function ReportsCommandCenter(props: Props) {
           >
             {t === 'overview'
               ? ru
-                ? 'Обзор периода'
-                : 'Period overview'
+                ? 'Внутренний отчёт'
+                : 'Internal report'
               : t === 'worker'
                 ? ru
                   ? 'По работнику'
@@ -147,6 +173,9 @@ export function ReportsCommandCenter(props: Props) {
                     : 'Saved files'}
           </Link>
         ))}
+        <Link className="report-tab" href={customerHoursHref}>
+          {ru ? 'Часы заказчиков' : 'Customer hours'}
+        </Link>
       </nav>
 
       <ScreenBody {...props} ru={ru} />
