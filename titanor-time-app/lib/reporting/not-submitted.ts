@@ -31,6 +31,8 @@ export interface MissingTimesheetParticipant {
 export interface MissingTimesheetParticipantFilters {
   periodIds: string[];
   employeeSearch?: string | null;
+  /** UT9-B — exact employeeId match, applied alongside employeeSearch (AND). */
+  employeeId?: string | null;
   /** WorkSite id — matched against the employee's SiteAssignment history intersecting THIS
    *  participant's own period dates (UT3-A-R1 §8: "authoritative", never the latest/current
    *  assignment). Applied as a second, in-memory pass (see loadMissingTimesheetParticipants'
@@ -60,6 +62,7 @@ export async function loadMissingTimesheetParticipants(filters: MissingTimesheet
       periodId: { in: filters.periodIds },
       expected: true,
       timesheets: { none: {} },
+      ...(filters.employeeId ? { employeeId: filters.employeeId } : {}),
       ...(Object.keys(employeeWhere).length > 0 ? { employee: employeeWhere } : {})
     },
     select: {

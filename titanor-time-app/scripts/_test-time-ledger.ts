@@ -147,6 +147,7 @@ function baseQuery(overrides: Partial<NormalizedTimeLedgerQuery> = {}): Normaliz
     allTime: false,
     requestedRange: null,
     employeeSearch: null,
+    employeeId: null,
     workAreaId: null,
     siteId: null,
     status: 'all',

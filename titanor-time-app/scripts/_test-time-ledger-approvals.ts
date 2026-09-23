@@ -219,7 +219,14 @@ async function main() {
     check('1g: result APPROVED', commit.body.result === 'APPROVED', commit.body);
     check('1h: batchId and itemId present', typeof commit.body.batchId === 'string' && typeof commit.body.itemId === 'string', commit.body);
     check('1i: supersededItemId null (nothing to supersede)', commit.body.supersededItemId === null, commit.body);
-    check('1j: finalizedTimesheetIds is always empty in UT5', Array.isArray(commit.body.finalizedTimesheetIds) && commit.body.finalizedTimesheetIds.length === 0, commit.body);
+    // UT9-B — this IS the worker's only customer for this timesheet, so confirming it now reaches
+    // full coverage and atomically finalizes the Timesheet (see
+    // lib/reporting/customer-hours-finalization.ts) — no longer always empty as it was pre-UT9-B.
+    check(
+      '1j: finalizedTimesheetIds contains this timesheet (its only customer just reached full coverage)',
+      Array.isArray(commit.body.finalizedTimesheetIds) && commit.body.finalizedTimesheetIds.length === 1 && commit.body.finalizedTimesheetIds[0] === itemKey.timesheetId,
+      commit.body
+    );
 
     const batch = await prisma.customerHoursApprovalBatch.findUniqueOrThrow({ where: { id: commit.body.batchId } });
     check('1k: batch itemCount=1, workedMinutes=450 (07:00-15:00 minus 30min auto lunch)', batch.itemCount === 1 && batch.workedMinutes === 450, batch);
@@ -228,8 +235,21 @@ async function main() {
     check('1m: item sourceKind=VERSION, sourceRevision=null', item.sourceKind === 'VERSION' && item.sourceRevision === null, item);
 
     const events = await prisma.auditEvent.findMany({ where: { requestId: commit.body.requestId }, orderBy: { createdAt: 'asc' } });
-    check('1n: exactly 2 audit events (batch created, approved)', events.length === 2, events.map((e) => e.eventType));
-    check('1o: audit event types in order', events[0]?.eventType === 'CUSTOMER_HOURS_APPROVAL_BATCH_CREATED' && events[1]?.eventType === 'CUSTOMER_HOURS_APPROVED', events.map((e) => e.eventType));
+    // UT9-B — 5 events, not 2: the customer-hours confirmation's own 2 (BATCH_CREATED, APPROVED),
+    // then the atomic finalization it triggered — one scope-level FOREMAN_APPROVED (this fixture's
+    // one SITE scope, auto-approved same as the old one-click flow), one Timesheet-level
+    // FOREMAN_APPROVED, then Timesheet-level FINAL_APPROVED (finalizeLockedTimesheet's own SUBMITTED
+    // chain, shared with the OLD /admin/review button — see lib/admin-timesheets.ts).
+    check('1n: 5 audit events (2 customer-hours + scope-approved + timesheet-foreman-approved + timesheet-final-approved)', events.length === 5, events.map((e) => e.eventType));
+    check(
+      '1o: audit event types in order',
+      events[0]?.eventType === 'CUSTOMER_HOURS_APPROVAL_BATCH_CREATED' &&
+        events[1]?.eventType === 'CUSTOMER_HOURS_APPROVED' &&
+        events[2]?.eventType === 'FOREMAN_APPROVED' &&
+        events[3]?.eventType === 'FOREMAN_APPROVED' &&
+        events[4]?.eventType === 'FINAL_APPROVED',
+      events.map((e) => e.eventType)
+    );
     const adminUserIdForCheck = await userIdForSession(adminToken);
     check('1p: audit actorUserId is the real actor', events.every((e) => e.actorUserId === adminUserIdForCheck), events);
   }
@@ -781,28 +801,35 @@ async function main() {
   }
 
   // ===============================================================================================
-  // 24. No review-scope / finalization mutation — UT5 never touches TimesheetReviewScope or flips
-  //     Timesheet.status, even on a successful approval.
+  // 24. UT9-B — TimesheetReviewScope / Timesheet.status ARE now touched, but ONLY as the atomic,
+  //     intentional consequence of this confirmation reaching full customer-hours coverage (this
+  //     fixture's only customer), and ONLY via the exact same finalizeLockedTimesheet chain the OLD
+  //     /admin/review "Утвердить табель" button uses (lib/admin-timesheets.ts) — never a second,
+  //     diverging state machine. Row COUNT still never changes (no scope is added or removed, only
+  //     existing ones transition PENDING -> APPROVED).
   // ===============================================================================================
   {
     const f = await oneSubmittedWeek('T24Scope');
     const scopesBefore = await prisma.timesheetReviewScope.findMany({ where: { timesheetVersion: { timesheetId: f.timesheetId } } });
     const statusBefore = (await prisma.timesheet.findUniqueOrThrow({ where: { id: f.timesheetId }, select: { status: true } })).status;
+    check('24-pre: every scope starts PENDING (nothing reviewed yet)', scopesBefore.every((s) => s.status === 'PENDING'), scopesBefore);
+    check('24-pre2: Timesheet starts SUBMITTED', statusBefore === 'SUBMITTED', statusBefore);
 
     const itemKey = itemKeyOf(f);
     const preview = await realPreview(adminToken, itemKey);
     const commit = await commitJson(adminToken, itemKey, preview.body.currentFingerprint, preview.body.confirmationToken);
     check('24: commit succeeded', commit.status === 200 && commit.body.result === 'APPROVED', commit.body);
+    check('24a: finalizedTimesheetIds contains this timesheet (its only customer reached full coverage)', JSON.stringify(commit.body.finalizedTimesheetIds) === JSON.stringify([f.timesheetId]), commit.body);
 
     const scopesAfter = await prisma.timesheetReviewScope.findMany({ where: { timesheetVersion: { timesheetId: f.timesheetId } } });
     const statusAfter = (await prisma.timesheet.findUniqueOrThrow({ where: { id: f.timesheetId }, select: { status: true } })).status;
-    check('24b: TimesheetReviewScope row count unchanged', scopesBefore.length === scopesAfter.length, { before: scopesBefore.length, after: scopesAfter.length });
+    check('24b: TimesheetReviewScope row count unchanged (no scope added/removed, only transitioned)', scopesBefore.length === scopesAfter.length, { before: scopesBefore.length, after: scopesAfter.length });
     check(
-      '24c: every existing TimesheetReviewScope row is byte-identical (status/reviewedByUserId/reviewedAt untouched)',
-      scopesBefore.every((s, i) => s.status === scopesAfter[i]?.status && s.reviewedByUserId === scopesAfter[i]?.reviewedByUserId),
+      '24c: every scope transitioned PENDING -> APPROVED, reviewedByUserId set to the actor (finalizeLockedTimesheet\'s own auto-approve loop, same as the old one-click flow)',
+      scopesAfter.every((s) => s.status === 'APPROVED' && s.reviewedByUserId !== null),
       { before: scopesBefore, after: scopesAfter }
     );
-    check('24d: Timesheet.status unchanged (never flipped toward FINAL_APPROVED by this route)', statusBefore === statusAfter, { before: statusBefore, after: statusAfter });
+    check('24d: Timesheet.status is now FINAL_APPROVED — the atomic, intentional UT9-B consequence of this commit reaching full coverage', statusAfter === 'FINAL_APPROVED', { before: statusBefore, after: statusAfter });
   }
 
   console.log(`\n${pass} passed, ${fail} failed`);

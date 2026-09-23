@@ -4,7 +4,7 @@ import type { WeeklyCustomerSliceRow } from '@/lib/reporting/time-ledger';
 import { formatWorkedDuration } from '@/lib/reporting/report-format';
 import { formatHelsinkiDateTime, utcIsoToHelsinkiTime } from '@/lib/helsinki-datetime';
 import { dayTypeLabel } from '@/lib/i18n/worker';
-import { issueLabel, approveDraftWarningLabel } from '@/lib/reporting/ledger-ui-text';
+import { issueLabel, approveDraftWarningLabel, confirmWholeWeekLabel, confirmWholeWeekLoadingLabel, massTooManyLabel } from '@/lib/reporting/ledger-ui-text';
 import { ApproveWeekAction } from './ApproveWeekAction';
 import { ApprovalDiffPanel } from './ApprovalDiffPanel';
 
@@ -20,7 +20,28 @@ function formatDayHeader(dateIso: string, locale: AppLocale): string {
 // in plain language, who-approved-when, and the "changed after approval" fact. Every genuinely
 // technical field (fingerprint, canonicalSource, CURRENT/SUPERSEDED, sourceRevision) lives ONLY in
 // the trailing collapsed "Диагностика" <details> — never in the always-visible part above it.
-export function ExpandedWeekPanel({ locale, row, onApproved }: { locale: AppLocale; row: WeeklyCustomerSliceRow; onApproved: () => void }) {
+export function ExpandedWeekPanel({
+  locale,
+  row,
+  onApproved,
+  onSelectWholeWeek,
+  wholeWeekBusy = false,
+  wholeWeekTooMany
+}: {
+  locale: AppLocale;
+  row: WeeklyCustomerSliceRow;
+  onApproved: () => void;
+  /** UT9-B — "Принять всю неделю": confirms every customer THIS worker has hours with for THIS
+   *  week (a day split between two customers included) in one atomic mass operation. Populates the
+   *  page's own mass-selection (same MassApproveBar the checkbox/"select visible" flow already
+   *  uses) rather than committing directly from here — the admin still gets the normal preview step
+   *  before anything is written. */
+  onSelectWholeWeek?: () => void;
+  wholeWeekBusy?: boolean;
+  /** UT9-B-fixup #1 — this row's own whole-week attempt exceeded MAX_MASS_SELECTION_ITEMS even
+   *  scoped to just its one week — refused, never a silently partial selection. */
+  wholeWeekTooMany?: { totalItems: number; max: number } | null;
+}) {
   return (
     <div className="ledger-expanded">
       {row.submissionState === 'NOT_SUBMITTED' && <p className="ledger-approve-draft-warning">{approveDraftWarningLabel(locale)}</p>}
@@ -121,7 +142,13 @@ export function ExpandedWeekPanel({ locale, row, onApproved }: { locale: AppLoca
 
       <div className="ledger-approve-action">
         <ApproveWeekAction locale={locale} row={row} onApproved={onApproved} />
+        {onSelectWholeWeek && (
+          <button type="button" className="ledger-link-button" disabled={wholeWeekBusy} onClick={onSelectWholeWeek}>
+            {wholeWeekBusy ? confirmWholeWeekLoadingLabel(locale) : confirmWholeWeekLabel(locale)}
+          </button>
+        )}
       </div>
+      {wholeWeekTooMany && <p className="ledger-group-mass-note" role="alert">{massTooManyLabel(wholeWeekTooMany.totalItems, wholeWeekTooMany.max, locale)}</p>}
 
       <details className="ledger-diagnostics">
         <summary>{localeText(locale, 'Diagnostics', 'Диагностика')}</summary>

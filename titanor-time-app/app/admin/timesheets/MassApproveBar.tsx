@@ -66,12 +66,19 @@ function selectionSignatureOf(items: MassSelectedItem[]): string {
 export function MassApproveBar({
   locale,
   selectedItems,
+  scope = 'CUSTOMER',
   onClearSelection,
   onApproved,
   onActiveChange
 }: {
   locale: AppLocale;
   selectedItems: Map<string, MassSelectedItem>;
+  /** UT9-B — 'CUSTOMER' (default): validateMassSelection requires one (siteId, workAreaId). 'WEEK'
+   *  ("Принять всю неделю"): requires one (timesheetId, weekStart) instead, site/workArea free to
+   *  vary. Sent to both the mass preview and mass commit routes — never inferred from the
+   *  selection's own shape, since a WEEK-scope selection could coincidentally look like a
+   *  single-customer one (e.g. only one customer this week, no split day). */
+  scope?: 'CUSTOMER' | 'WEEK';
   onClearSelection: () => void;
   onApproved: () => void;
   onActiveChange?: (active: boolean) => void;
@@ -157,7 +164,7 @@ export function MassApproveBar({
     idempotencyKeyRef.current = null;
     errorSourceRef.current = null;
 
-    const result = await fetchJson<MassPreviewResponseDto>('/api/admin/time-ledger/mass-approval-preview', null, { selection: selectionBody() });
+    const result = await fetchJson<MassPreviewResponseDto>('/api/admin/time-ledger/mass-approval-preview', null, { selection: selectionBody(), scope });
     busyRef.current = false;
     if (seq !== attemptSeqRef.current) return; // superseded (selection changed / cancelled meanwhile)
     if (!result.ok) {
@@ -185,7 +192,8 @@ export function MassApproveBar({
 
     const result = await fetchJson<MassCommitResponse>('/api/admin/time-ledger/mass-approvals', idempotencyKeyRef.current, {
       selection: selectionBody(),
-      confirmationToken: preview.confirmationToken
+      confirmationToken: preview.confirmationToken,
+      scope
     });
     busyRef.current = false;
     if (seq !== attemptSeqRef.current) return; // superseded meanwhile
@@ -254,7 +262,7 @@ export function MassApproveBar({
 
   if (items.length === 0 && phase === 'idle') return null;
 
-  const customerLabel = first ? (first.workAreaName ?? first.siteName) : '';
+  const customerLabel = first ? (scope === 'WEEK' ? first.employeeName : (first.workAreaName ?? first.siteName)) : '';
   const totalMinutes = items.reduce((sum, it) => sum + it.workedMinutes, 0);
   const busy = phase === 'previewing' || phase === 'committing';
 

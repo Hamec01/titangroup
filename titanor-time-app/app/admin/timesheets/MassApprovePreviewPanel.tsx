@@ -26,7 +26,18 @@ export interface MassPreviewItemDto {
 }
 
 export interface MassPreviewResponseDto {
-  context: { siteId: string; siteName: string; workAreaId: string | null; workAreaName: string | null; periodStart: string; periodEnd: string };
+  context: {
+    scope: 'CUSTOMER' | 'WEEK';
+    siteId: string | null;
+    siteName: string | null;
+    workAreaId: string | null;
+    workAreaName: string | null;
+    /** UT9-B — set only for scope='WEEK' ("Принять всю неделю"): whose week this is. */
+    employeeId: string | null;
+    employeeName: string | null;
+    periodStart: string;
+    periodEnd: string;
+  };
   summary: { weekPartCount: number; employeeCount: number; workedMinutes: number; alreadyApprovedCount: number; technicallyBlockedCount: number; staleCount: number };
   items: MassPreviewItemDto[];
   confirmationToken?: string;
@@ -60,7 +71,9 @@ export function MassApprovePreviewPanel({
   return (
     <div className="ledger-mass-preview" role="alert">
       <p className="ledger-mass-preview-context">
-        {customerLabel} · {preview.context.siteName} · {massPeriodLabel(preview.context.periodStart, preview.context.periodEnd, locale)}
+        {preview.context.scope === 'WEEK'
+          ? `${preview.context.employeeName ?? ''} · ${massPeriodLabel(preview.context.periodStart, preview.context.periodEnd, locale)}`
+          : `${customerLabel} · ${preview.context.siteName} · ${massPeriodLabel(preview.context.periodStart, preview.context.periodEnd, locale)}`}
       </p>
       <p className="ledger-mass-preview-context">
         {massPreviewSummaryLabel(preview.summary.employeeCount, preview.summary.weekPartCount, locale)} · {formatWorkedDuration(preview.summary.workedMinutes, locale)}

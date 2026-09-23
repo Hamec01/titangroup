@@ -1,3 +1,4 @@
+import type { Prisma } from '@prisma/client';
 import { prisma } from '@/lib/prisma';
 import { createAuditEvent } from '@/lib/audit';
 import { reinitializeDraftFromVersion, computeSiteScopeHasExceptionBulk } from '@/lib/review-scopes';
@@ -314,6 +315,124 @@ export type AdminApproveError =
   | { code: 'SELF_APPROVAL_FORBIDDEN' }
   | { code: 'FOREMAN_REVIEW_PENDING'; siteNames: string[] };
 
+export interface LockedTimesheetForFinalize {
+  id: string;
+  status: string;
+  employeeId: string;
+  currentVersionId: string | null;
+}
+
+/**
+ * UT9-B — the two gates Task B's one-click "Утвердить табель" enforces beyond plain status/
+ * permission: whether self-approval is refused, and whether a pending SITE-scope with an actually
+ * assigned foreman blocks the SUBMITTED path. Both are TRUE (enforced) for the old /admin/review
+ * button — unchanged. The new единый сценарий in "Табель" (customer-hours confirmation reaching
+ * full coverage) bypasses both, per UT9-A owner sign-off: the admin confirming every customer's
+ * hours is already the final say, foreman review is not a precondition, and self-approval carries
+ * no separate warning there.
+ */
+export interface FinalizeTimesheetOptions {
+  bypassSelfApproval: boolean;
+  bypassForemanCheck: boolean;
+}
+
+/**
+ * UT9-B — extracted from adminApproveTimesheet's own transaction body so the SAME rules (FOREMAN_
+ * APPROVED -> FINAL_APPROVED directly; SUBMITTED -> approve every PENDING scope -> FOREMAN_APPROVED
+ * -> FINAL_APPROVED, one chain) can be invoked from INSIDE an already-open, already-locked
+ * transaction — Prisma has no nested transactions, so a caller that already holds the Employee/
+ * Timesheet locks (e.g. a customer-hours commit route) cannot call adminApproveTimesheet itself
+ * (it opens its own $transaction). The caller must already hold the Employee + Timesheet FOR UPDATE
+ * locks for `ts.id` before calling this. Never queries TimesheetReviewScope/ForemanAssignment
+ * itself when bypassing those checks — no wasted reads.
+ */
+export async function finalizeLockedTimesheet(
+  tx: Prisma.TransactionClient,
+  ts: LockedTimesheetForFinalize,
+  actorUserId: string,
+  actorEmployeeId: string | null,
+  requestId: string,
+  options: FinalizeTimesheetOptions
+): Promise<{ status: 'FINAL_APPROVED' } | AdminApproveError> {
+  if (!options.bypassSelfApproval && actorEmployeeId !== null && actorEmployeeId === ts.employeeId) {
+    return { code: 'SELF_APPROVAL_FORBIDDEN' };
+  }
+
+  if (ts.status === 'FOREMAN_APPROVED') {
+    await tx.timesheet.update({ where: { id: ts.id }, data: { status: 'FINAL_APPROVED' } });
+    await createAuditEvent(tx, {
+      actorUserId,
+      eventType: 'FINAL_APPROVED',
+      entityType: 'TIMESHEET',
+      entityId: ts.id,
+      requestId,
+      beforeValue: { status: 'FOREMAN_APPROVED' },
+      afterValue: { status: 'FINAL_APPROVED' }
+    });
+    return { status: 'FINAL_APPROVED' };
+  }
+
+  if (ts.status !== 'SUBMITTED' || !ts.currentVersionId) {
+    return { code: 'INVALID_STATE_TRANSITION' };
+  }
+
+  const scopes = await tx.timesheetReviewScope.findMany({
+    where: { timesheetVersionId: ts.currentVersionId },
+    select: { id: true, status: true, scopeType: true, siteId: true }
+  });
+
+  if (!options.bypassForemanCheck) {
+    const pendingSiteIds = [...new Set(scopes.filter((s) => s.status === 'PENDING' && s.scopeType === 'SITE' && s.siteId).map((s) => s.siteId as string))];
+    if (pendingSiteIds.length > 0) {
+      const today = helsinkiToday();
+      const foremanCovered = await tx.foremanAssignment.findMany({
+        where: { siteId: { in: pendingSiteIds }, validFrom: { lte: today }, OR: [{ validTo: null }, { validTo: { gte: today } }] },
+        select: { site: { select: { name: true } } }
+      });
+      if (foremanCovered.length > 0) {
+        return { code: 'FOREMAN_REVIEW_PENDING', siteNames: [...new Set(foremanCovered.map((f) => f.site.name))] };
+      }
+    }
+  }
+
+  for (const scope of scopes.filter((s) => s.status === 'PENDING')) {
+    await tx.timesheetReviewScope.update({ where: { id: scope.id }, data: { status: 'APPROVED', reviewedByUserId: actorUserId, reviewedAt: new Date() } });
+    await createAuditEvent(tx, {
+      actorUserId,
+      eventType: 'FOREMAN_APPROVED',
+      entityType: 'TIMESHEET_REVIEW_SCOPE',
+      entityId: scope.id,
+      requestId,
+      beforeValue: { status: 'PENDING' },
+      afterValue: { status: 'APPROVED', viaAdminApprove: true }
+    });
+  }
+
+  await tx.timesheet.update({ where: { id: ts.id }, data: { status: 'FOREMAN_APPROVED' } });
+  await createAuditEvent(tx, {
+    actorUserId,
+    eventType: 'FOREMAN_APPROVED',
+    entityType: 'TIMESHEET',
+    entityId: ts.id,
+    requestId,
+    beforeValue: { status: 'SUBMITTED' },
+    afterValue: { status: 'FOREMAN_APPROVED', viaAdminApprove: true }
+  });
+
+  await tx.timesheet.update({ where: { id: ts.id }, data: { status: 'FINAL_APPROVED' } });
+  await createAuditEvent(tx, {
+    actorUserId,
+    eventType: 'FINAL_APPROVED',
+    entityType: 'TIMESHEET',
+    entityId: ts.id,
+    requestId,
+    beforeValue: { status: 'FOREMAN_APPROVED' },
+    afterValue: { status: 'FINAL_APPROVED', viaAdminApprove: true }
+  });
+
+  return { status: 'FINAL_APPROVED' };
+}
+
 /**
  * Task B (2026-08-27) — the admin is the last instance (заказчик прораба не учитывает). This
  * collapses the three-screen ritual into one action:
@@ -325,6 +444,12 @@ export type AdminApproveError =
  *     model is preserved for whenever foremen actually exist; the admin uses /admin/review-scopes
  *     for the NON_SITE / foreman-less scopes as before).
  * Self-approval (actor is the worker) is refused, same rule as approveReviewScope.
+ *
+ * UT9-B — this exact function/route (the old /admin/review "Утвердить табель" button) is
+ * UNCHANGED: still enforces self-approval and foreman-pending, exactly as before. It now delegates
+ * its post-lock logic to finalizeLockedTimesheet(bypassSelfApproval: false, bypassForemanCheck:
+ * false) instead of duplicating it — the new, more permissive customer-hours-driven finalization
+ * path (lib/reporting/customer-hours-finalization.ts) calls the same shared core with both bypassed.
  */
 export async function adminApproveTimesheet(
   timesheetId: string,
@@ -341,82 +466,8 @@ export async function adminApproveTimesheet(
     await tx.$queryRaw`SELECT id FROM "Employee" WHERE id = ${routing.employeeId}::uuid FOR UPDATE`;
     await tx.$queryRaw`SELECT id FROM "Timesheet" WHERE id = ${timesheetId}::uuid FOR UPDATE`;
 
-    const ts = await tx.timesheet.findUniqueOrThrow({ where: { id: timesheetId }, select: { status: true, employeeId: true, currentVersionId: true } });
-    if (actorEmployeeId !== null && actorEmployeeId === ts.employeeId) {
-      return { code: 'SELF_APPROVAL_FORBIDDEN' as const };
-    }
-
-    if (ts.status === 'FOREMAN_APPROVED') {
-      await tx.timesheet.update({ where: { id: timesheetId }, data: { status: 'FINAL_APPROVED' } });
-      await createAuditEvent(tx, {
-        actorUserId,
-        eventType: 'FINAL_APPROVED',
-        entityType: 'TIMESHEET',
-        entityId: timesheetId,
-        requestId,
-        beforeValue: { status: 'FOREMAN_APPROVED' },
-        afterValue: { status: 'FINAL_APPROVED' }
-      });
-      return { status: 'FINAL_APPROVED' as const };
-    }
-
-    if (ts.status !== 'SUBMITTED' || !ts.currentVersionId) {
-      return { code: 'INVALID_STATE_TRANSITION' as const };
-    }
-
-    const scopes = await tx.timesheetReviewScope.findMany({
-      where: { timesheetVersionId: ts.currentVersionId },
-      select: { id: true, status: true, scopeType: true, siteId: true }
-    });
-    const pendingSiteIds = [...new Set(scopes.filter((s) => s.status === 'PENDING' && s.scopeType === 'SITE' && s.siteId).map((s) => s.siteId as string))];
-
-    if (pendingSiteIds.length > 0) {
-      const today = helsinkiToday();
-      const foremanCovered = await tx.foremanAssignment.findMany({
-        where: { siteId: { in: pendingSiteIds }, validFrom: { lte: today }, OR: [{ validTo: null }, { validTo: { gte: today } }] },
-        select: { site: { select: { name: true } } }
-      });
-      if (foremanCovered.length > 0) {
-        return { code: 'FOREMAN_REVIEW_PENDING' as const, siteNames: [...new Set(foremanCovered.map((f) => f.site.name))] };
-      }
-    }
-
-    for (const scope of scopes.filter((s) => s.status === 'PENDING')) {
-      await tx.timesheetReviewScope.update({ where: { id: scope.id }, data: { status: 'APPROVED', reviewedByUserId: actorUserId, reviewedAt: new Date() } });
-      await createAuditEvent(tx, {
-        actorUserId,
-        eventType: 'FOREMAN_APPROVED',
-        entityType: 'TIMESHEET_REVIEW_SCOPE',
-        entityId: scope.id,
-        requestId,
-        beforeValue: { status: 'PENDING' },
-        afterValue: { status: 'APPROVED', viaAdminApprove: true }
-      });
-    }
-
-    await tx.timesheet.update({ where: { id: timesheetId }, data: { status: 'FOREMAN_APPROVED' } });
-    await createAuditEvent(tx, {
-      actorUserId,
-      eventType: 'FOREMAN_APPROVED',
-      entityType: 'TIMESHEET',
-      entityId: timesheetId,
-      requestId,
-      beforeValue: { status: 'SUBMITTED' },
-      afterValue: { status: 'FOREMAN_APPROVED', viaAdminApprove: true }
-    });
-
-    await tx.timesheet.update({ where: { id: timesheetId }, data: { status: 'FINAL_APPROVED' } });
-    await createAuditEvent(tx, {
-      actorUserId,
-      eventType: 'FINAL_APPROVED',
-      entityType: 'TIMESHEET',
-      entityId: timesheetId,
-      requestId,
-      beforeValue: { status: 'FOREMAN_APPROVED' },
-      afterValue: { status: 'FINAL_APPROVED', viaAdminApprove: true }
-    });
-
-    return { status: 'FINAL_APPROVED' as const };
+    const ts = await tx.timesheet.findUniqueOrThrow({ where: { id: timesheetId }, select: { id: true, status: true, employeeId: true, currentVersionId: true } });
+    return finalizeLockedTimesheet(tx, ts, actorUserId, actorEmployeeId, requestId, { bypassSelfApproval: false, bypassForemanCheck: false });
   });
 
   if ('code' in outcome) {

@@ -492,13 +492,30 @@ async function main() {
 
   // ===============================================================================================
   // 11. Correction/direct-edit approval path also reconciles.
+  //
+  // UT9-B — a SECOND, deliberately UNAPPROVED customer (siteOther/waOther, Tuesday) is added
+  // alongside the main one this test actually exercises: confirming just the main customer now
+  // atomically finalizes the Timesheet the moment its own coverage is complete
+  // (lib/reporting/customer-hours-finalization.ts) — and requestCorrection's directEdit:true path is
+  // deliberately refused against an already-FINAL_APPROVED timesheet (lib/corrections.ts, a
+  // pre-existing, unrelated rule: a no-reason admin direct edit needs the classic four-eyes flow
+  // once a timesheet is final). Keeping a second customer unconfirmed keeps THIS timesheet at
+  // SUBMITTED, exactly what this test needs, without changing anything this test actually asserts
+  // (every check below still scopes to site.id/wa.id only).
   // ===============================================================================================
   {
     const site = await mkSite('T11');
     const wa = await mkWorkArea(site.id, 'T11');
+    const siteOther = await mkSite('T11Other');
+    const waOther = await mkWorkArea(siteOther.id, 'T11Other');
     const emp = await mkWorker('T11');
     const monday = nextMonday();
-    const { ts } = await buildDraft(emp.id, site.id, wa.id, monday);
+    const tuesday = new Date(monday.getTime() + 86400000);
+    const { ts, draft } = await buildDraft(emp.id, site.id, wa.id, monday);
+    const asgOther = await mkAssignment(emp.id, siteOther.id, waOther.id, false);
+    await prisma.timesheetDraftPlannedShift.create({ data: { draftId: draft.id, employeeId: emp.id, date: tuesday, siteId: siteOther.id, sourceAssignmentId: asgOther.id, plannedStartAt: at(tuesday, 7), plannedEndAt: at(tuesday, 15), plannedBreakMinutes: 0 } });
+    const ddOther = await prisma.timesheetDraftDay.create({ data: { draftId: draft.id, date: tuesday, dayType: 'WORK', confirmedZero: false } });
+    await prisma.timesheetDraftSegment.create({ data: { draftDayId: ddOther.id, draftId: draft.id, employeeId: emp.id, date: tuesday, startAt: at(tuesday, 7), endAt: at(tuesday, 15), siteId: siteOther.id, workAreaId: waOther.id, sourceAssignmentId: asgOther.id } });
     await submitDraft(emp.id, ts.id);
     const itemKey = { timesheetId: ts.id, siteId: site.id, workAreaId: wa.id, weekStart: isoDate(monday) };
     await approveWeek(adminToken, itemKey);

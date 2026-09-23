@@ -376,6 +376,9 @@ export async function loadCustomerHoursSummary(
     allTime: false,
     requestedRange,
     employeeSearch: query.employeeSearch,
+    // UT9-B — the exact-employeeId deep-link filter is a Табель-only concept (the notification
+    // redirect); the Сводка/export surface never accepts it as an input, so it is always null here.
+    employeeId: null,
     workAreaId: query.workAreaId,
     siteId: query.siteId,
     status: 'all',

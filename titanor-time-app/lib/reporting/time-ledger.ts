@@ -36,6 +36,12 @@ export interface NormalizedTimeLedgerQuery {
   allTime: boolean;
   requestedRange: { startDate: string; endDate: string } | null; // null iff allTime
   employeeSearch: string | null;
+  /** UT9-B — exact employeeId match (never a substring), for precise deep-linking (the
+   *  TIMESHEET_AWAITING_APPROVAL notification's "Открыть в Табеле" — see NotificationCenter.tsx)
+   *  where employeeSearch's contains-match could theoretically surface more than the one intended
+   *  worker. Applied together with employeeSearch (AND, not OR) whenever both are set — in
+   *  practice only one is ever supplied by a real caller. */
+  employeeId: string | null;
   workAreaId: string | 'none' | null;
   siteId: string | null;
   status: 'all' | 'ready' | 'needs_attention' | 'approved' | 'changed_after_approval' | 'not_submitted' | 'source_error';
@@ -984,9 +990,12 @@ async function listOverlappingPeriods(range: { startDate: string; endDate: strin
   return db.payrollPeriod.findMany({ where, select: { id: true, startDate: true, endDate: true, status: true }, orderBy: [{ startDate: 'asc' }, { id: 'asc' }] });
 }
 
-async function loadTimesheetsForPeriods(periodIds: string[], employeeSearch: string | null, db: Db): Promise<TimesheetRow[]> {
+async function loadTimesheetsForPeriods(periodIds: string[], employeeSearch: string | null, employeeId: string | null, db: Db): Promise<TimesheetRow[]> {
   if (periodIds.length === 0) return [];
   const where: Prisma.TimesheetWhereInput = { periodId: { in: periodIds } };
+  if (employeeId) {
+    where.employeeId = employeeId;
+  }
   if (employeeSearch) {
     where.employee = { OR: [{ firstName: { contains: employeeSearch, mode: 'insensitive' } }, { lastName: { contains: employeeSearch, mode: 'insensitive' } }, { employeeNumber: { contains: employeeSearch, mode: 'insensitive' } }] };
   }
@@ -1130,9 +1139,9 @@ function computeSummary(entries: TimeLedgerEntry[]): TimeLedgerResult['summary']
 
 async function runFastPath(query: NormalizedTimeLedgerQuery, actor: LedgerActor, effectiveWeekRange: { startDate: string; endDate: string } | null, periods: PeriodRow[], db: Db): Promise<TimeLedgerEntry[]> {
   const periodIds = periods.map((p) => p.id);
-  const timesheets = await loadTimesheetsForPeriods(periodIds, query.employeeSearch, db);
+  const timesheets = await loadTimesheetsForPeriods(periodIds, query.employeeSearch, query.employeeId, db);
   const built = await buildEntriesForTimesheets(timesheets, actor, db, { effectiveWeekRange });
-  const missingParticipants = await loadMissingTimesheetParticipants({ periodIds, employeeSearch: query.employeeSearch, siteId: query.siteId }, db);
+  const missingParticipants = await loadMissingTimesheetParticipants({ periodIds, employeeSearch: query.employeeSearch, employeeId: query.employeeId, siteId: query.siteId }, db);
   const missingRows = missingParticipants.map((p) => participantToNotSubmittedRow(p, effectiveWeekRange));
 
   const all: TimeLedgerEntry[] = [...built.sliceRows, ...built.notSubmittedFromTimesheet, ...built.sourceErrors, ...missingRows];
@@ -1174,9 +1183,9 @@ async function runChunkedPath(
     const chunk = periods.slice(i, i + chunkSize);
     const periodIds = chunk.map((p) => p.id);
 
-    const timesheets = await loadTimesheetsForPeriods(periodIds, query.employeeSearch, db);
+    const timesheets = await loadTimesheetsForPeriods(periodIds, query.employeeSearch, query.employeeId, db);
     const built = await buildEntriesForTimesheets(timesheets, actor, db, { effectiveWeekRange });
-    const missingParticipants = await loadMissingTimesheetParticipants({ periodIds, employeeSearch: query.employeeSearch, siteId: query.siteId }, db);
+    const missingParticipants = await loadMissingTimesheetParticipants({ periodIds, employeeSearch: query.employeeSearch, employeeId: query.employeeId, siteId: query.siteId }, db);
     const missingRows = missingParticipants.map((p) => participantToNotSubmittedRow(p, effectiveWeekRange));
 
     const chunkEntries: TimeLedgerEntry[] = [...built.sliceRows, ...built.notSubmittedFromTimesheet, ...built.sourceErrors, ...missingRows];
@@ -1225,7 +1234,7 @@ async function hydratePage(
 
   const participantPeriodIds = [...new Set(notSubmittedParticipantBacked.map((e) => e.periodId))];
   if (participantPeriodIds.length > 0) {
-    const freshParticipants = await loadMissingTimesheetParticipants({ periodIds: participantPeriodIds, employeeSearch: query.employeeSearch, siteId: query.siteId }, db);
+    const freshParticipants = await loadMissingTimesheetParticipants({ periodIds: participantPeriodIds, employeeSearch: query.employeeSearch, employeeId: query.employeeId, siteId: query.siteId }, db);
     for (const p of freshParticipants) {
       const row = participantToNotSubmittedRow(p, effectiveWeekRange);
       freshByDiscriminant.set(sortTupleFor(row).entryDiscriminant, row);

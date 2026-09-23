@@ -16,8 +16,10 @@ import {
   buildApprovalItemSnapshotV1,
   classifyMassApprovalItemProblem,
   type ValidatedApprovalRequestBody,
-  type WeeklyApprovalBatchItemResult
+  type WeeklyApprovalBatchItemResult,
+  type MassSelectionScope
 } from '@/lib/reporting/weekly-approval';
+import { attemptTimesheetFinalization } from '@/lib/reporting/customer-hours-finalization';
 import type { ConfirmationItemKey } from '@/lib/customer-hours-confirmation-token';
 
 // UT6-B — POST /api/admin/time-ledger/mass-approvals. Same overall shape as UT5-B's single-item
@@ -33,7 +35,7 @@ export const dynamic = 'force-dynamic';
 export const revalidate = 0;
 
 const ROUTE_TEMPLATE = '/api/admin/time-ledger/mass-approvals';
-const ALLOWED_BODY_KEYS = ['selection', 'confirmationToken'];
+const ALLOWED_BODY_KEYS = ['selection', 'confirmationToken', 'scope'];
 
 interface ResponseBody {
   status: number;
@@ -55,7 +57,7 @@ interface ItemResultDto {
 
 type MassCommitOutcome =
   | { kind: 'ERROR'; status: number; code: string; message: string; failedItemKey?: ConfirmationItemKey }
-  | { kind: 'COMMITTED'; batchId: string | null; results: ItemResultDto[] };
+  | { kind: 'COMMITTED'; batchId: string | null; results: ItemResultDto[]; finalizedTimesheetIds: string[] };
 
 const APPROVAL_ITEM_UNIQUE_INDEX_MARKERS = ['ux_customer_hours_approval_item_active_with_customer', 'ux_customer_hours_approval_item_active_no_customer'];
 
@@ -82,7 +84,15 @@ export function findFirstMassApprovalProblem(prepared: WeeklyApprovalBatchItemRe
   return prepared.find((r) => classifyMassApprovalItemProblem(r) !== null);
 }
 
-async function runMassCommitAttempt(originalSelection: ValidatedApprovalRequestBody[], actorUserId: string, actorEmployeeId: string | null, requestId: string, idempotencyKey: string): Promise<MassCommitOutcome> {
+async function runMassCommitAttempt(
+  originalSelection: ValidatedApprovalRequestBody[],
+  scope: MassSelectionScope,
+  actorUserId: string,
+  actorEmployeeId: string | null,
+  actorRoles: string[],
+  requestId: string,
+  idempotencyKey: string
+): Promise<MassCommitOutcome> {
   const timesheetIds = [...new Set(originalSelection.map((s) => s.itemKey.timesheetId))];
 
   // Pre-transaction routing lookup only (UT5-A-R1 §3's convention, generalized to N timesheets) —
@@ -133,22 +143,37 @@ async function runMassCommitAttempt(originalSelection: ValidatedApprovalRequestB
     }
 
     // Lock every CURRENT CustomerHoursApprovalItem this selection's logical keys could match, ONE
-    // statement via UNNEST(timesheetIds, weekStarts) — validateMassSelection already guarantees the
-    // whole selection shares one (siteId, workAreaId) customer and has no duplicate logical key, so
-    // this single tuple-IN covers exactly the selection's own rows, nothing more.
-    const contextSiteId = originalSelection[0].itemKey.siteId;
-    const contextWorkAreaId = originalSelection[0].itemKey.workAreaId;
+    // statement via UNNEST(timesheetIds, weekStarts). For scope='CUSTOMER', validateMassSelection
+    // already guarantees the whole selection shares one (siteId, workAreaId) customer, so the extra
+    // siteId/workAreaId filter keeps this tuple-IN from also locking some OTHER customer's row that
+    // happens to share a (timesheetId, weekStart) with the selection (over-locking would silently
+    // reduce concurrency for unrelated customers). For scope='WEEK', validateMassSelection instead
+    // guarantees one (timesheetId, weekStart) with site/workArea free to vary — the whole point is
+    // locking every customer row for that one worker's one week, so the siteId/workAreaId filter is
+    // dropped entirely and the tuple-IN alone is the correct, exact scope.
     const lockTimesheetIds = originalSelection.map((s) => s.itemKey.timesheetId);
     const lockWeekStarts = originalSelection.map((s) => s.itemKey.weekStart);
-    await tx.$queryRaw`
-      SELECT id FROM "CustomerHoursApprovalItem"
-      WHERE "approvalState" = 'CURRENT'
-        AND "siteId" = ${contextSiteId}::uuid
-        AND "workAreaId" IS NOT DISTINCT FROM ${contextWorkAreaId}::uuid
-        AND ("timesheetId", "weekStart") IN (SELECT * FROM UNNEST(${lockTimesheetIds}::uuid[], ${lockWeekStarts}::date[]))
-      ORDER BY id
-      FOR UPDATE
-    `;
+    if (scope === 'WEEK') {
+      await tx.$queryRaw`
+        SELECT id FROM "CustomerHoursApprovalItem"
+        WHERE "approvalState" = 'CURRENT'
+          AND ("timesheetId", "weekStart") IN (SELECT * FROM UNNEST(${lockTimesheetIds}::uuid[], ${lockWeekStarts}::date[]))
+        ORDER BY id
+        FOR UPDATE
+      `;
+    } else {
+      const contextSiteId = originalSelection[0].itemKey.siteId;
+      const contextWorkAreaId = originalSelection[0].itemKey.workAreaId;
+      await tx.$queryRaw`
+        SELECT id FROM "CustomerHoursApprovalItem"
+        WHERE "approvalState" = 'CURRENT'
+          AND "siteId" = ${contextSiteId}::uuid
+          AND "workAreaId" IS NOT DISTINCT FROM ${contextWorkAreaId}::uuid
+          AND ("timesheetId", "weekStart") IN (SELECT * FROM UNNEST(${lockTimesheetIds}::uuid[], ${lockWeekStarts}::date[]))
+        ORDER BY id
+        FOR UPDATE
+      `;
+    }
 
     const prepared = await prepareWeeklyCustomerApprovalsBatch({ selection: originalSelection, actor: { userId: actorUserId, employeeId: actorEmployeeId }, mode: 'COMMIT', db: tx });
 
@@ -286,7 +311,19 @@ async function runMassCommitAttempt(originalSelection: ValidatedApprovalRequestB
       batchId = batch.id;
     }
 
-    return { kind: 'COMMITTED', batchId, results };
+    // UT9-B — every DISTINCT timesheet this selection touched (both freshly written AND
+    // already-approved no-op items — a no-op reconfirm can be the LAST missing piece if every other
+    // customer of that same timesheet was already confirmed by a separate, earlier action), checked
+    // once each. "Принять все"/"Принять всю неделю" both flow through here: whichever of the
+    // touched timesheets reaches full coverage gets finalized, the rest are simply left as they are
+    // — never a partial/best-effort finalization of an incompletely-covered one.
+    const finalizedTimesheetIds: string[] = [];
+    for (const timesheetId of new Set(okItems.map((r) => r.itemKey.timesheetId))) {
+      const finalization = await attemptTimesheetFinalization(tx, timesheetId, actorUserId, actorRoles, requestId);
+      if (finalization.finalized) finalizedTimesheetIds.push(timesheetId);
+    }
+
+    return { kind: 'COMMITTED', batchId, results, finalizedTimesheetIds };
   });
 }
 
@@ -311,7 +348,13 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   }
   const bodyRecord = rawBody as Record<string, unknown>;
 
-  const validated = validateMassSelection(bodyRecord.selection);
+  const scopeRaw = bodyRecord.scope;
+  if (scopeRaw !== undefined && scopeRaw !== 'CUSTOMER' && scopeRaw !== 'WEEK') {
+    return jsonError(400, { code: 'VALIDATION_ERROR', message: 'Invalid request body.', fieldErrors: { scope: ["must be 'CUSTOMER' or 'WEEK'"] } }, requestId);
+  }
+  const scope: MassSelectionScope = scopeRaw === 'WEEK' ? 'WEEK' : 'CUSTOMER';
+
+  const validated = validateMassSelection(bodyRecord.selection, scope);
   if (!validated.ok) {
     return jsonError(400, { code: validated.error.code, message: validated.error.message, fieldErrors: validated.error.fieldErrors }, requestId);
   }
@@ -328,7 +371,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   // selection in a different order still hits the SAME cached response instead of a spurious
   // IDEMPOTENCY_KEY_REUSED conflict.
   const normalizedSelection = sortSelectionCanonically(selection).map((s) => ({ itemKey: s.itemKey, expectedFingerprint: s.expectedFingerprint }));
-  const requestHash = computeRequestHash({ body: { selection: normalizedSelection, confirmationToken } });
+  const requestHash = computeRequestHash({ body: { selection: normalizedSelection, confirmationToken, scope } });
   const begin = await beginIdempotentRequest(identity, requestHash);
   if (begin.kind === 'CACHED') {
     return NextResponse.json(begin.body, { status: begin.statusCode, headers: successHeaders(requestId) });
@@ -361,14 +404,14 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
 
   let outcome: MassCommitOutcome;
   try {
-    outcome = await runMassCommitAttempt(selection, session.user.id, session.user.employeeId, requestId, idempotencyKeyHeader);
+    outcome = await runMassCommitAttempt(selection, scope, session.user.id, session.user.employeeId, session.user.roles, requestId, idempotencyKeyHeader);
   } catch (err) {
     if (isApprovalItemUniqueViolation(err)) {
       // At most one bounded retry, entirely outside the aborted transaction (UT5-A-R1 §3/§15) — the
       // whole multi-item attempt re-runs from scratch, never a per-item catch-and-continue inside an
       // already-aborted transaction.
       try {
-        outcome = await runMassCommitAttempt(selection, session.user.id, session.user.employeeId, requestId, idempotencyKeyHeader);
+        outcome = await runMassCommitAttempt(selection, scope, session.user.id, session.user.employeeId, session.user.roles, requestId, idempotencyKeyHeader);
       } catch (err2) {
         if (isApprovalItemUniqueViolation(err2)) {
           outcome = { kind: 'ERROR', status: 409, code: 'APPROVAL_CONFLICT', message: 'Could not complete this approval due to a conflicting concurrent write — please retry.' };
@@ -390,6 +433,6 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
 
   return respond({
     status: 200,
-    body: { requestId, batchId: outcome.batchId, itemCount, alreadyApprovedCount, results: outcome.results, finalizedTimesheetIds: [] as string[] }
+    body: { requestId, batchId: outcome.batchId, itemCount, alreadyApprovedCount, results: outcome.results, finalizedTimesheetIds: outcome.finalizedTimesheetIds }
   });
 }

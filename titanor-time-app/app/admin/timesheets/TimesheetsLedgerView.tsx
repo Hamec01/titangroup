@@ -105,6 +105,28 @@ export function TimesheetsLedgerView({
     return () => window.removeEventListener('popstate', onPopState);
   }, []);
 
+  // UT9-B-fixup #3 — an EXTERNAL Next.js-router-mediated navigation to this same page (e.g.
+  // components/admin/NotificationCenter.tsx's handleView calling router.push() for the
+  // TIMESHEET_AWAITING_APPROVAL redirect) previously had no effect at all: React preserves this
+  // component's OWN instance/state across that re-render (same component at the same tree
+  // position), so its useState(initialData)/currentSearch never re-seed from the new props, and
+  // navigate()'s raw window.history.replaceState() means this component never asked Next's router
+  // for updates either — the page silently kept showing whatever was already loaded, ignoring the
+  // fresh initialData the new render actually carried. useSearchParams() (searchParamsAtMount, read
+  // every render — its NAME is legacy, its value is genuinely live) DOES reactively reflect a real
+  // router.push()/Link navigation, but never our OWN navigate() (invisible to Next's router by
+  // design — see navigate()'s own comment) — so comparing it against a ref of "the last value WE
+  // saw FROM THIS HOOK" (never against currentSearch itself, which navigate() also writes to)
+  // correctly fires only for a genuine external navigation, never fighting navigate()'s own updates.
+  const lastRouterSearchRef = useRef<string>(searchParamsAtMount.toString());
+  useEffect(() => {
+    const fresh = searchParamsAtMount.toString();
+    if (fresh !== lastRouterSearchRef.current) {
+      lastRouterSearchRef.current = fresh;
+      setCurrentSearch(fresh);
+    }
+  }, [searchParamsAtMount]);
+
   // The search string this component has already fetched (or was seeded with via SSR) — used to
   // tell "the URL genuinely changed, fetch" apart from "we just re-rendered for another reason"
   // (point: "SSR initial data без лишнего первого duplicate fetch").
@@ -121,6 +143,16 @@ export function TimesheetsLedgerView({
   const [selectedItems, setSelectedItems] = useState<Map<string, MassSelectedItem>>(new Map());
   const selectedCustomerKey = selectedItems.size > 0 ? [...selectedItems.values()][0].customerKey : null;
   const [allMatching, setAllMatching] = useState<{ groupKey: string; busy: boolean; tooMany: { totalItems: number; max: number } | null } | null>(null);
+  // UT9-B — 'CUSTOMER' (default, every existing selection path: checkbox, "select visible", "confirm
+  // all matching this customer") vs 'WEEK' ("Принять всю неделю" — selectWholeWeek below, the only
+  // path that can ever populate the selection with more than one customer at once). Threaded into
+  // MassApproveBar so it sends the matching `scope` to the mass preview/commit routes — never
+  // guessed there from the selection's own shape.
+  const [selectionScope, setSelectionScope] = useState<'CUSTOMER' | 'WEEK'>('CUSTOMER');
+  const [wholeWeekBusyKey, setWholeWeekBusyKey] = useState<string | null>(null);
+  // UT9-B-fixup #1 — keyed by row (like wholeWeekBusyKey), never a global flag: this worker's/week's
+  // own attempt exceeded MAX_MASS_SELECTION_ITEMS, refused rather than silently confirmed partial.
+  const [wholeWeekTooMany, setWholeWeekTooMany] = useState<{ rowKey: string; totalItems: number; max: number } | null>(null);
   // UT6-B-fixup #1 — true whenever MassApproveBar has a live preview/attempt open (any phase other
   // than 'idle'), reported via its onActiveChange callback. Selection edits are frozen for as long as
   // a confirmationToken is bound to the current selection, so a changed selection can never be sent
@@ -134,6 +166,8 @@ export function TimesheetsLedgerView({
       lastFilterFingerprintRef.current = filterFingerprint;
       setSelectedItems(new Map());
       setAllMatching(null);
+      setSelectionScope('CUSTOMER');
+      setWholeWeekTooMany(null);
     }
   }, [filterFingerprint]);
 
@@ -156,6 +190,7 @@ export function TimesheetsLedgerView({
   // CustomerGroupSection/WorkerSliceRow never need to know about MassSelectedItem's shape at all.
   const toggleSelectInGroup = useCallback(
     (row: WeeklyCustomerSliceRow, group: CustomerGroup) => {
+      setSelectionScope('CUSTOMER');
       setSelectedItems((prev) => {
         const key = rowLogicalKey(row);
         const next = new Map(prev);
@@ -172,6 +207,7 @@ export function TimesheetsLedgerView({
 
   const selectVisible = useCallback(
     (group: CustomerGroup) => {
+      setSelectionScope('CUSTOMER');
       setSelectedItems((prev) => {
         const next = new Map(prev);
         for (const row of group.rows) next.set(rowLogicalKey(row), toSelectedItem(row, group));
@@ -184,6 +220,8 @@ export function TimesheetsLedgerView({
   const clearSelection = useCallback(() => {
     setSelectedItems(new Map());
     setAllMatching(null);
+    setSelectionScope('CUSTOMER');
+    setWholeWeekTooMany(null);
   }, []);
 
   // UT6-A-R1 §7/§10 — "confirm all matching" first resolves the FULL filtered set for this one
@@ -196,6 +234,7 @@ export function TimesheetsLedgerView({
     async (group: CustomerGroup) => {
       if (selectionLocked) return; // defense in depth — the button is already disabled while locked
       const groupKey = customerKeyOf(group.siteId, group.workAreaId);
+      setSelectionScope('CUSTOMER');
       setAllMatching({ groupKey, busy: true, tooMany: null });
       try {
         const state = nextUiState(currentState, { siteId: group.siteId, workAreaId: group.workAreaId, page: 1, pageSize: MAX_PAGE_SIZE });
@@ -217,6 +256,69 @@ export function TimesheetsLedgerView({
         setAllMatching(null);
       } catch {
         setAllMatching(null);
+      }
+    },
+    [currentState, toSelectedItem, selectionLocked]
+  );
+
+  // UT9-B-fixup #1 — "Принять всю неделю": resolves EVERY customer this one worker has hours with
+  // for THIS EXACT week, server-side. Deliberately scoped to startDate=weekStart/endDate=weekEnd
+  // (this row's own week — never the admin's current, possibly much wider, visible date range) PLUS
+  // the exact employeeId — never the wide range this fixup was written to stop trusting: with a
+  // wide range and pageSize capped at MAX_MASS_SELECTION_ITEMS, this worker's target week could be
+  // pushed past page 1 by unrelated rows from OTHER weeks, silently confirming an INCOMPLETE week.
+  // Narrowing the request itself to the one week (and one worker) makes that structurally
+  // impossible — the response can only ever contain rows for this worker's this week, regardless of
+  // how much data exists elsewhere in the admin's current filter. The resulting selection is fed
+  // through the SAME MassApproveBar preview/commit flow, tagged scope='WEEK' so the server's own
+  // validateMassSelection relaxes its "one customer" rule to "one timesheet+week" instead.
+  const selectWholeWeek = useCallback(
+    async (row: WeeklyCustomerSliceRow) => {
+      if (selectionLocked) return;
+      const busyKey = rowLogicalKey(row);
+      setWholeWeekBusyKey(busyKey);
+      setWholeWeekTooMany(null);
+      try {
+        const state = nextUiState(currentState, {
+          ...blankFilters(),
+          employeeId: row.logicalKey.employeeId,
+          allTime: false,
+          startDate: row.logicalKey.weekStart,
+          endDate: row.logicalKey.weekEnd,
+          page: 1,
+          pageSize: MAX_PAGE_SIZE
+        });
+        const res = await fetch(uiStateToApiUrl(state), { credentials: 'same-origin' });
+        if (!res.ok) {
+          setWholeWeekBusyKey(null);
+          return;
+        }
+        const body = (await res.json()) as TimeLedgerResult;
+        // UT9-B-fixup #1 — even scoped to one worker's one week, a pathological fan-out (many
+        // customers in one week) could still exceed the cap. Never silently confirm a partial list
+        // in that case — refuse and tell the admin, exactly like confirmAllMatching's own tooMany.
+        if (body.pagination.totalItems > MAX_MASS_SELECTION_ITEMS) {
+          setWholeWeekBusyKey(null);
+          setWholeWeekTooMany({ rowKey: busyKey, totalItems: body.pagination.totalItems, max: MAX_MASS_SELECTION_ITEMS });
+          return;
+        }
+        const next = new Map<string, MassSelectedItem>();
+        for (const g of body.customerGroups) {
+          for (const r of g.rows) {
+            // Defensive exact check — the request is already scoped to this employeeId+week, but an
+            // employee could in principle have more than one Timesheet touching the same calendar
+            // week (adjacent/overlapping periods); never silently pull in a different timesheet's
+            // slice just because it shares this employee and week.
+            if (r.logicalKey.timesheetId === row.logicalKey.timesheetId && r.logicalKey.weekStart === row.logicalKey.weekStart) {
+              next.set(rowLogicalKey(r), toSelectedItem(r, g));
+            }
+          }
+        }
+        setSelectionScope('WEEK');
+        setSelectedItems(next);
+        setWholeWeekBusyKey(null);
+      } catch {
+        setWholeWeekBusyKey(null);
       }
     },
     [currentState, toSelectedItem, selectionLocked]
@@ -451,6 +553,9 @@ export function TimesheetsLedgerView({
                     allMatchingTooMany={groupAllMatching?.tooMany ?? null}
                     selectionLocked={selectionLocked}
                     historicalRows={historicalByCustomerKey.get(groupKey)}
+                    onSelectWholeWeek={selectWholeWeek}
+                    wholeWeekBusyKey={wholeWeekBusyKey}
+                    wholeWeekTooMany={wholeWeekTooMany}
                   />
                 );
               })}
@@ -470,7 +575,7 @@ export function TimesheetsLedgerView({
           )}
         </>
       )}
-      <MassApproveBar locale={locale} selectedItems={selectedItems} onClearSelection={clearSelection} onApproved={retry} onActiveChange={setSelectionLocked} />
+      <MassApproveBar locale={locale} selectedItems={selectedItems} scope={selectionScope} onClearSelection={clearSelection} onApproved={retry} onActiveChange={setSelectionLocked} />
     </div>
   );
 }

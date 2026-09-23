@@ -187,7 +187,7 @@ async function main() {
     // Cross-check: the SAME confirmedMinutes must equal the sum of APPROVED rows' workedMinutes in
     // getTimeLedger's own output for this exact filter — never a second, independent computation.
     const ledger = await getTimeLedger(
-      { allTime: false, requestedRange: { startDate: filters.startDate, endDate: filters.endDate }, employeeSearch: null, siteId: site.id, workAreaId: wa.id, status: 'all', onlyIssues: false, onlyChangedAfterApproval: false, submissionState: 'all', submissionSource: 'all', page: 1, pageSize: 50 },
+      { allTime: false, requestedRange: { startDate: filters.startDate, endDate: filters.endDate }, employeeSearch: null, employeeId: null, siteId: site.id, workAreaId: wa.id, status: 'all', onlyIssues: false, onlyChangedAfterApproval: false, submissionState: 'all', submissionSource: 'all', page: 1, pageSize: 50 },
       { userId: adminUserId, employeeId: null }
     );
     const ledgerApprovedMinutes = ledger.customerGroups.flatMap((g) => g.rows).filter((r) => r.approvalState === 'APPROVED').reduce((s, r) => s + r.workedMinutes, 0);

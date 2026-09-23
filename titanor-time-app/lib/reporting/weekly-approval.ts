@@ -139,20 +139,29 @@ function selectionLogicalKeyString(k: ConfirmationItemKey): string {
 }
 
 export interface MassValidationError {
-  code: 'EMPTY_SELECTION' | 'SELECTION_TOO_LARGE' | 'DUPLICATE_SELECTION_ITEM' | 'MIXED_CUSTOMER_SELECTION' | 'VALIDATION_ERROR';
+  code: 'EMPTY_SELECTION' | 'SELECTION_TOO_LARGE' | 'DUPLICATE_SELECTION_ITEM' | 'MIXED_CUSTOMER_SELECTION' | 'MIXED_WEEK_SELECTION' | 'VALIDATION_ERROR';
   message: string;
   fieldErrors?: Record<string, string[]>;
 }
+
+/** UT9-B — 'CUSTOMER' (default, UT6-A-R1 §4's original rule): every item shares one (siteId,
+ *  workAreaId). 'WEEK' ("Принять всю неделю"): every item shares one (timesheetId, weekStart)
+ *  instead — site/workArea are free to vary, since the whole point is confirming ALL of one
+ *  worker's customers for one week in a single atomic operation (UT9-A point 4/UT9-B decision 3).
+ *  Never a third selection shape — both still funnel through the exact same batch prepare/commit
+ *  engine below. */
+export type MassSelectionScope = 'CUSTOMER' | 'WEEK';
 
 /**
  * Validates a raw `selection` array (UT6-A-R1 §2): non-empty, at most MAX_MASS_SELECTION_ITEMS, no
  * unknown/extra fields on the array itself or on any item/itemKey, every item individually
  * well-formed (reusing parseSelectionItemFields, never a second copy of those field checks), no
- * repeated logical key, and every item belonging to the exact same customer (siteId + workAreaId,
- * including null) — UT6-A-R1 §4's "one operation, one customer" rule. Never silently deduplicates or
- * truncates; every rejection is a named, stable error code.
+ * repeated logical key, and — depending on `scope` — every item belonging to the exact same
+ * customer (siteId + workAreaId, including null; UT6-A-R1 §4's original "one operation, one
+ * customer" rule) or the exact same (timesheetId, weekStart) pair (UT9-B's "whole week" scope).
+ * Never silently deduplicates or truncates; every rejection is a named, stable error code.
  */
-export function validateMassSelection(rawSelection: unknown): { ok: true; value: ValidatedApprovalRequestBody[] } | { ok: false; error: MassValidationError } {
+export function validateMassSelection(rawSelection: unknown, scope: MassSelectionScope = 'CUSTOMER'): { ok: true; value: ValidatedApprovalRequestBody[] } | { ok: false; error: MassValidationError } {
   if (!Array.isArray(rawSelection)) {
     return { ok: false, error: { code: 'VALIDATION_ERROR', message: 'selection must be an array.', fieldErrors: { selection: ['must be an array'] } } };
   }
@@ -201,10 +210,18 @@ export function validateMassSelection(rawSelection: unknown): { ok: true; value:
     seen.add(key);
   }
 
-  const firstSiteId = items[0].itemKey.siteId;
-  const firstWorkAreaId = items[0].itemKey.workAreaId;
-  if (items.some((item) => item.itemKey.siteId !== firstSiteId || item.itemKey.workAreaId !== firstWorkAreaId)) {
-    return { ok: false, error: { code: 'MIXED_CUSTOMER_SELECTION', message: 'All selected items must belong to the same customer (siteId + workAreaId).' } };
+  if (scope === 'WEEK') {
+    const firstTimesheetId = items[0].itemKey.timesheetId;
+    const firstWeekStart = items[0].itemKey.weekStart;
+    if (items.some((item) => item.itemKey.timesheetId !== firstTimesheetId || item.itemKey.weekStart !== firstWeekStart)) {
+      return { ok: false, error: { code: 'MIXED_WEEK_SELECTION', message: 'All selected items must belong to the same timesheet and week.' } };
+    }
+  } else {
+    const firstSiteId = items[0].itemKey.siteId;
+    const firstWorkAreaId = items[0].itemKey.workAreaId;
+    if (items.some((item) => item.itemKey.siteId !== firstSiteId || item.itemKey.workAreaId !== firstWorkAreaId)) {
+      return { ok: false, error: { code: 'MIXED_CUSTOMER_SELECTION', message: 'All selected items must belong to the same customer (siteId + workAreaId).' } };
+    }
   }
 
   return { ok: true, value: items };

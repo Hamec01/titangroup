@@ -39,6 +39,7 @@ const SUPPORTED_PARAMS = [
   'startDate',
   'endDate',
   'employeeSearch',
+  'employeeId',
   'siteId',
   'workAreaId',
   'status',
@@ -58,6 +59,10 @@ export interface TimeLedgerUiState {
   /** Sunday, YYYY-MM-DD, always startDate + 6/13/20/27 days. Null iff allTime. */
   endDate: string | null;
   employeeSearch: string | null;
+  /** UT9-B — exact employeeId deep-link filter (the TIMESHEET_AWAITING_APPROVAL notification's
+   *  "Открыть в Табеле"). Never set by any filter control in this UI — only ever arrives via a URL
+   *  the notification itself builds. */
+  employeeId: string | null;
   siteId: string | null;
   workAreaId: string | 'none' | null;
   status: NormalizedTimeLedgerQuery['status'];
@@ -191,6 +196,9 @@ export function parseTimeLedgerUiState(searchParams: URLSearchParams, now: Date)
     return { ok: false }; // only one of startDate/endDate present — ambiguous
   }
 
+  const employeeId = searchParams.get('employeeId');
+  if (employeeId !== null && !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(employeeId)) return { ok: false };
+
   const siteId = searchParams.get('siteId');
   if (siteId !== null && !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(siteId)) return { ok: false };
 
@@ -237,6 +245,7 @@ export function parseTimeLedgerUiState(searchParams: URLSearchParams, now: Date)
       startDate,
       endDate,
       employeeSearch,
+      employeeId,
       siteId,
       workAreaId: workAreaIdRaw as 'none' | string | null,
       status: statusRaw as NormalizedTimeLedgerQuery['status'],
@@ -266,6 +275,7 @@ export function uiStateToSearchParams(state: TimeLedgerUiState): URLSearchParams
     p.set('endDate', state.endDate as string);
   }
   if (state.employeeSearch) p.set('employeeSearch', state.employeeSearch);
+  if (state.employeeId) p.set('employeeId', state.employeeId);
   if (state.siteId) p.set('siteId', state.siteId);
   if (state.workAreaId) p.set('workAreaId', state.workAreaId);
   if (state.status !== 'all') p.set('status', state.status);
@@ -290,6 +300,7 @@ export function uiStateToApiQuery(state: TimeLedgerUiState): NormalizedTimeLedge
     allTime: state.allTime,
     requestedRange: state.allTime ? null : { startDate: state.startDate as string, endDate: state.endDate as string },
     employeeSearch: state.employeeSearch,
+    employeeId: state.employeeId,
     workAreaId: state.workAreaId,
     siteId: state.siteId,
     status: state.status,
@@ -313,6 +324,7 @@ export function uiStateToApiUrl(state: TimeLedgerUiState): string {
     p.set('endDate', q.requestedRange!.endDate);
   }
   if (q.employeeSearch) p.set('employeeSearch', q.employeeSearch);
+  if (q.employeeId) p.set('employeeId', q.employeeId);
   if (q.siteId) p.set('siteId', q.siteId);
   if (q.workAreaId) p.set('workAreaId', q.workAreaId);
   if (q.status !== 'all') p.set('status', q.status);
@@ -399,6 +411,7 @@ export function defaultTimeLedgerUiState(now: Date): TimeLedgerUiState {
     startDate: wk.startDate,
     endDate: wk.endDate,
     employeeSearch: null,
+    employeeId: null,
     siteId: null,
     workAreaId: null,
     status: 'all',
@@ -416,6 +429,7 @@ export function defaultTimeLedgerUiState(now: Date): TimeLedgerUiState {
 export function activeFilterCount(state: TimeLedgerUiState): number {
   let n = 0;
   if (state.employeeSearch) n += 1;
+  if (state.employeeId) n += 1;
   if (state.siteId) n += 1;
   if (state.workAreaId) n += 1;
   if (state.status !== 'all') n += 1;

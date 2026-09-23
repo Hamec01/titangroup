@@ -8,6 +8,7 @@ import { computeRequestHash, beginIdempotentRequest, completeIdempotentRequest, 
 import { verifyConfirmationToken, confirmationItemKeyEquals, type ConfirmationItemKey } from '@/lib/customer-hours-confirmation-token';
 import { prepareWeeklyCustomerApproval, validateApprovalRequestBody, buildSelectionSnapshotV1, buildApprovalItemSnapshotV1, type WeeklyApprovalPreparationOk } from '@/lib/reporting/weekly-approval';
 import { resolveCanonicalSource, type CanonicalSourceTimesheetInput } from '@/lib/reporting/canonical-source';
+import { attemptTimesheetFinalization } from '@/lib/reporting/customer-hours-finalization';
 
 // UT5-B — POST /api/admin/time-ledger/approvals. Exactly one explicit item (arrays/mass mode are
 // UT6). Full order per UT5-A-R1: CSRF -> auth -> permission -> mandatory Idempotency-Key -> strict
@@ -36,8 +37,8 @@ function errorBody(requestId: string, code: string, message: string, fieldErrors
 // =================================================================================================
 
 type CommitOutcome =
-  | { kind: 'APPROVED'; batchId: string; itemId: string; fingerprint: string; workedMinutes: number; supersededItemId: string | null }
-  | { kind: 'ALREADY_APPROVED'; itemId: string; fingerprint: string; workedMinutes: number }
+  | { kind: 'APPROVED'; batchId: string; itemId: string; fingerprint: string; workedMinutes: number; supersededItemId: string | null; finalized: boolean }
+  | { kind: 'ALREADY_APPROVED'; itemId: string; fingerprint: string; workedMinutes: number; finalized: boolean }
   | { kind: 'ERROR'; status: number; code: string; message: string };
 
 const APPROVAL_ITEM_UNIQUE_INDEX_MARKERS = ['ux_customer_hours_approval_item_active_with_customer', 'ux_customer_hours_approval_item_active_no_customer'];
@@ -53,6 +54,7 @@ async function runCommitAttempt(
   expectedFingerprint: string,
   actorUserId: string,
   actorEmployeeId: string | null,
+  actorRoles: string[],
   requestId: string,
   idempotencyKey: string,
   tokenEmployeeId: string
@@ -174,7 +176,10 @@ async function runCommitAttempt(
           workedMinutes: prepared.slice.workedMinutes
         }
       });
-      return { kind: 'ALREADY_APPROVED', itemId: existing.id, fingerprint: prepared.slice.fingerprint, workedMinutes: prepared.slice.workedMinutes };
+      // UT9-B — even a no-op reconfirm can be the LAST missing piece of coverage if every other
+      // customer of this timesheet was already confirmed by a separate, earlier action.
+      const finalization = await attemptTimesheetFinalization(tx, itemKey.timesheetId, actorUserId, actorRoles, requestId);
+      return { kind: 'ALREADY_APPROVED', itemId: existing.id, fingerprint: prepared.slice.fingerprint, workedMinutes: prepared.slice.workedMinutes, finalized: finalization.finalized };
     }
 
     // Supersede the old CURRENT item first (UT5-A-R1 §7 — only these 3 columns, the trigger rejects
@@ -254,7 +259,8 @@ async function runCommitAttempt(
       }
     });
 
-    return { kind: 'APPROVED', batchId: batch.id, itemId: item.id, fingerprint: prepared.slice.fingerprint, workedMinutes: prepared.slice.workedMinutes, supersededItemId };
+    const finalization = await attemptTimesheetFinalization(tx, itemKey.timesheetId, actorUserId, actorRoles, requestId);
+    return { kind: 'APPROVED', batchId: batch.id, itemId: item.id, fingerprint: prepared.slice.fingerprint, workedMinutes: prepared.slice.workedMinutes, supersededItemId, finalized: finalization.finalized };
   });
 }
 
@@ -328,11 +334,11 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
 
   let outcome: CommitOutcome;
   try {
-    outcome = await runCommitAttempt(itemKey, expectedFingerprint, session.user.id, session.user.employeeId, requestId, idempotencyKeyHeader, payload.employeeId);
+    outcome = await runCommitAttempt(itemKey, expectedFingerprint, session.user.id, session.user.employeeId, session.user.roles, requestId, idempotencyKeyHeader, payload.employeeId);
   } catch (err) {
     if (isApprovalItemUniqueViolation(err)) {
       try {
-        outcome = await runCommitAttempt(itemKey, expectedFingerprint, session.user.id, session.user.employeeId, requestId, idempotencyKeyHeader, payload.employeeId);
+        outcome = await runCommitAttempt(itemKey, expectedFingerprint, session.user.id, session.user.employeeId, session.user.roles, requestId, idempotencyKeyHeader, payload.employeeId);
       } catch (err2) {
         if (isApprovalItemUniqueViolation(err2)) {
           outcome = { kind: 'ERROR', status: 409, code: 'APPROVAL_CONFLICT', message: 'Could not complete this approval due to a conflicting concurrent write — please retry.' };
@@ -358,10 +364,11 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     fingerprint: outcome.fingerprint,
     workedMinutes: outcome.workedMinutes,
     supersededItemId: outcome.kind === 'APPROVED' ? outcome.supersededItemId : null,
-    // UT5 deliberately never computes full slice-coverage finalization eligibility (UT5-A §10 /
-    // UT5-A-R1 confirmation) — always empty until a later checkpoint builds that engine. The field
-    // exists now because the spec names it (§10.3), so the contract never needs a breaking change.
-    finalizedTimesheetIds: [] as string[]
+    // UT9-B — real now: this timesheet's id iff attemptTimesheetFinalization actually flipped it to
+    // FINAL_APPROVED as a direct, atomic consequence of this exact confirmation reaching full
+    // coverage. Empty whenever it did not (partial coverage, ineligible status, missing
+    // timesheet.final_approve, or already final) — never a partial/best-effort finalization.
+    finalizedTimesheetIds: outcome.finalized ? [itemKey.timesheetId] : ([] as string[])
   };
   return respond({ status: 200, body: responseBody });
 }

@@ -186,8 +186,17 @@ async function main() {
     check('1j: selectionSnapshot mode=MASS with all 3 itemKeys', snapshot.mode === 'MASS' && Array.isArray(snapshot.itemKeys) && snapshot.itemKeys.length === 3, snapshot);
 
     const events = await prisma.auditEvent.findMany({ where: { requestId: commit.body.requestId }, orderBy: { createdAt: 'asc' } });
-    check('1k: 1 batch-created + 3 approved = 4 audit events', events.length === 4, events.map((e) => e.eventType));
+    // UT9-B — each of the 3 workers' timesheets has this as its ONLY customer, so this mass
+    // approval also atomically finalizes all 3 (lib/reporting/customer-hours-finalization.ts): the
+    // original 4 (1 batch-created + 3 approved) plus 3 finalization chains of 3 events each
+    // (scope-approved, timesheet-foreman-approved, timesheet-final-approved) = 13.
+    check('1k: 4 customer-hours events + 3x3 finalization events = 13 audit events', events.length === 13, events.map((e) => e.eventType));
     check('1l: first event is BATCH_CREATED', events[0]?.eventType === 'CUSTOMER_HOURS_APPROVAL_BATCH_CREATED', events[0]);
+    check(
+      '1m: finalizedTimesheetIds contains all 3 workers\' timesheets',
+      Array.isArray(commit.body.finalizedTimesheetIds) && commit.body.finalizedTimesheetIds.length === 3 && keys.every((k) => commit.body.finalizedTimesheetIds.includes(k.timesheetId)),
+      commit.body.finalizedTimesheetIds
+    );
   }
 
   // ===============================================================================================

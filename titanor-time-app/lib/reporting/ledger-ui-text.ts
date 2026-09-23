@@ -136,6 +136,14 @@ export function selectVisibleLabel(locale: AppLocale): string {
 export function confirmAllMatchingLabel(customerName: string, locale: AppLocale): string {
   return pick(locale, `Confirm all matching hours for ${customerName}`, `Подтвердить все подходящие часы ${customerName}`);
 }
+// UT9-B — "Принять всю неделю": confirms every customer this ONE worker has hours with for THIS
+// one week (a day split between two customers included) in a single atomic mass operation.
+export function confirmWholeWeekLabel(locale: AppLocale): string {
+  return pick(locale, 'Confirm the whole week (all customers)', 'Принять всю неделю (все заказчики)');
+}
+export function confirmWholeWeekLoadingLabel(locale: AppLocale): string {
+  return pick(locale, 'Looking up the whole week…', 'Ищем всю неделю…');
+}
 export function massSelectedCountLabel(count: number, locale: AppLocale): string {
   return pick(locale, `${count} selected`, `Выбрано: ${count}`);
 }

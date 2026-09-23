@@ -24,7 +24,10 @@ export function WorkerSliceRow({
   onApproved,
   selected = false,
   selectionDisabled = false,
-  onToggleSelect
+  onToggleSelect,
+  onSelectWholeWeek,
+  wholeWeekBusy = false,
+  wholeWeekTooMany
 }: {
   locale: AppLocale;
   row: WeeklyCustomerSliceRow;
@@ -32,6 +35,10 @@ export function WorkerSliceRow({
   selected?: boolean;
   selectionDisabled?: boolean;
   onToggleSelect?: () => void;
+  /** UT9-B — "Принять всю неделю" (ExpandedWeekPanel renders the actual button). */
+  onSelectWholeWeek?: (row: WeeklyCustomerSliceRow) => void;
+  wholeWeekBusy?: boolean;
+  wholeWeekTooMany?: { totalItems: number; max: number } | null;
 }) {
   const [open, setOpen] = useState(false);
   const panelId = useId();
@@ -71,7 +78,14 @@ export function WorkerSliceRow({
       </div>
       {open && (
         <div id={panelId}>
-          <ExpandedWeekPanel locale={locale} row={row} onApproved={onApproved} />
+          <ExpandedWeekPanel
+            locale={locale}
+            row={row}
+            onApproved={onApproved}
+            onSelectWholeWeek={onSelectWholeWeek ? () => onSelectWholeWeek(row) : undefined}
+            wholeWeekBusy={wholeWeekBusy}
+            wholeWeekTooMany={wholeWeekTooMany}
+          />
         </div>
       )}
     </div>

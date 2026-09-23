@@ -34,7 +34,10 @@ export function CustomerGroupSection({
   allMatchingBusy,
   allMatchingTooMany,
   selectionLocked,
-  historicalRows
+  historicalRows,
+  onSelectWholeWeek,
+  wholeWeekBusyKey,
+  wholeWeekTooMany
 }: {
   locale: AppLocale;
   group: CustomerGroup;
@@ -54,6 +57,12 @@ export function CustomerGroupSection({
    *  slice / unreadable source), matched by TimesheetsLedgerView. Rendered below the normal rows,
    *  never counted in pageMinutes/distinctWorkers, never selectable for mass approval. */
   historicalRows?: HistoricalApprovalRowData[];
+  /** UT9-B — "Принять всю неделю" (ExpandedWeekPanel's own button, threaded down here just to reach
+   *  WorkerSliceRow). Undefined for the orphan-historical render (no live rows to select from). */
+  onSelectWholeWeek?: (row: WeeklyCustomerSliceRow) => void;
+  wholeWeekBusyKey?: string | null;
+  /** UT9-B-fixup #1 — set only for the ONE row whose whole-week attempt exceeded the cap. */
+  wholeWeekTooMany?: { rowKey: string; totalItems: number; max: number } | null;
 }) {
   const distinctWorkers = new Set(group.rows.map((r) => r.logicalKey.employeeId)).size;
   const pageMinutes = group.rows.reduce((sum, r) => sum + r.workedMinutes, 0);
@@ -98,6 +107,9 @@ export function CustomerGroupSection({
                 selected={selectedKeys?.has(key) ?? false}
                 selectionDisabled={massDisabled}
                 onToggleSelect={onToggleSelect ? () => onToggleSelect(row) : undefined}
+                onSelectWholeWeek={onSelectWholeWeek}
+                wholeWeekBusy={wholeWeekBusyKey === key}
+                wholeWeekTooMany={wholeWeekTooMany?.rowKey === key ? wholeWeekTooMany : null}
               />
             </li>
           );

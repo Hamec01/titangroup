@@ -169,12 +169,23 @@ export function NotificationCenter({ strings, locale }: { strings: AdminStrings;
     if (employeeId) router.push(`/admin/workers/${employeeId}/profile#qualifications`);
   }
 
-  // T12 §1a — a timesheet-approval notification links to the timesheet card, not the worker dossier.
+  // UT9-B — a timesheet-approval notification now links straight into the new unified «Табель»,
+  // scoped to the EXACT worker (employeeId, never the employeeSearch substring match) and their
+  // exact period — both already carried on the notification itself, no extra lookup needed. Falls
+  // back to the old per-timesheet card only if the notification is somehow missing the period
+  // dates (defensive — every TIMESHEET_AWAITING_APPROVAL row always carries them today).
   function handleView(item: NotificationItem): void {
     setDrawerOpen(false);
-    if (item.type === 'TIMESHEET_AWAITING_APPROVAL' && item.timesheetId) {
-      router.push(`/admin/timesheets/${item.timesheetId}`);
-      return;
+    if (item.type === 'TIMESHEET_AWAITING_APPROVAL') {
+      if (item.employeeId && item.periodStartDate && item.periodEndDate) {
+        const qs = new URLSearchParams({ employeeId: item.employeeId, startDate: item.periodStartDate, endDate: item.periodEndDate });
+        router.push(`/admin/timesheets?${qs.toString()}`);
+        return;
+      }
+      if (item.timesheetId) {
+        router.push(`/admin/timesheets/${item.timesheetId}`);
+        return;
+      }
     }
     if (item.employeeId) router.push(`/admin/workers/${item.employeeId}/profile#qualifications`);
   }

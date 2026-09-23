@@ -2,7 +2,14 @@ import { NextRequest, NextResponse } from 'next/server';
 import { jsonError, successHeaders } from '@/lib/api-error';
 import { guardApiRequest } from '@/lib/api-guard';
 import { prisma } from '@/lib/prisma';
-import { prepareWeeklyCustomerApprovalsBatch, validateMassSelection, computeSelectionHash, classifyMassApprovalItemProblem, type WeeklyApprovalBatchItemResult } from '@/lib/reporting/weekly-approval';
+import {
+  prepareWeeklyCustomerApprovalsBatch,
+  validateMassSelection,
+  computeSelectionHash,
+  classifyMassApprovalItemProblem,
+  type WeeklyApprovalBatchItemResult,
+  type MassSelectionScope
+} from '@/lib/reporting/weekly-approval';
 import { signMassConfirmationToken } from '@/lib/customer-hours-confirmation-token';
 import type { LedgerIssue } from '@/lib/reporting/time-ledger';
 
@@ -23,7 +30,7 @@ import type { LedgerIssue } from '@/lib/reporting/time-ledger';
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
 
-const ALLOWED_BODY_KEYS = ['selection'];
+const ALLOWED_BODY_KEYS = ['selection', 'scope'];
 
 // UT6-B-fixup #2 — the period shown in preview is always derived from the SERVER's own validated
 // selection (itemKey.weekStart, already checked to be real Mondays by validateMassSelection), never
@@ -151,7 +158,14 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     return jsonError(400, { code: 'VALIDATION_ERROR', message: 'Invalid request body.' }, requestId);
   }
 
-  const validated = validateMassSelection((rawBody as Record<string, unknown>).selection);
+  const bodyRecord = rawBody as Record<string, unknown>;
+  const scopeRaw = bodyRecord.scope;
+  if (scopeRaw !== undefined && scopeRaw !== 'CUSTOMER' && scopeRaw !== 'WEEK') {
+    return jsonError(400, { code: 'VALIDATION_ERROR', message: 'Invalid request body.', fieldErrors: { scope: ["must be 'CUSTOMER' or 'WEEK'"] } }, requestId);
+  }
+  const scope: MassSelectionScope = scopeRaw === 'WEEK' ? 'WEEK' : 'CUSTOMER';
+
+  const validated = validateMassSelection(bodyRecord.selection, scope);
   if (!validated.ok) {
     return jsonError(400, { code: validated.error.code, message: validated.error.message, fieldErrors: validated.error.fieldErrors }, requestId);
   }
@@ -159,10 +173,30 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
 
   const results = await prepareWeeklyCustomerApprovalsBatch({ selection, actor: { userId: session.user.id, employeeId: session.user.employeeId }, mode: 'READ', db: prisma });
 
-  const [contextSite, contextWorkArea] = await Promise.all([
-    prisma.workSite.findUnique({ where: { id: selection[0].itemKey.siteId }, select: { name: true } }),
-    selection[0].itemKey.workAreaId ? prisma.workArea.findUnique({ where: { id: selection[0].itemKey.workAreaId }, select: { name: true } }) : Promise.resolve(null)
-  ]);
+  // UT9-B — 'WEEK' scope describes "whose week", not "which customer": the selection spans several
+  // (siteId, workAreaId) pairs by construction, so a single site/workArea context would be
+  // misleading. The employee name is read from the FIRST resolved item (every item in a WEEK-scope
+  // selection already shares one timesheetId, hence one employeeId — validateMassSelection's own
+  // invariant), never guessed from unvalidated request input.
+  const firstOk = results.find((r): r is Extract<WeeklyApprovalBatchItemResult, { ok: true }> => r.ok);
+  const context =
+    scope === 'WEEK'
+      ? { scope, siteId: null, siteName: null, workAreaId: null, workAreaName: null, employeeId: firstOk?.employeeId ?? null, employeeName: firstOk?.employeeName ?? null }
+      : await (async () => {
+          const [contextSite, contextWorkArea] = await Promise.all([
+            prisma.workSite.findUnique({ where: { id: selection[0].itemKey.siteId }, select: { name: true } }),
+            selection[0].itemKey.workAreaId ? prisma.workArea.findUnique({ where: { id: selection[0].itemKey.workAreaId }, select: { name: true } }) : Promise.resolve(null)
+          ]);
+          return {
+            scope,
+            siteId: selection[0].itemKey.siteId,
+            siteName: contextSite?.name ?? '',
+            workAreaId: selection[0].itemKey.workAreaId,
+            workAreaName: contextWorkArea?.name ?? null,
+            employeeId: null,
+            employeeName: null
+          };
+        })();
 
   const items = results.map(buildMassPreviewItemResult);
 
@@ -196,14 +230,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     {
       requestId,
       selectionHash: computeSelectionHash(selection),
-      context: {
-        siteId: selection[0].itemKey.siteId,
-        siteName: contextSite?.name ?? '',
-        workAreaId: selection[0].itemKey.workAreaId,
-        workAreaName: contextWorkArea?.name ?? null,
-        periodStart,
-        periodEnd
-      },
+      context: { ...context, periodStart, periodEnd },
       // UT6-B-fixup #2 — renamed from itemCount to weekPartCount: this is always the TOTAL selected
       // weekly slices (including already-approved/blocked/stale ones), never to be confused with a
       // commit response's own itemCount (which counts only what was actually WRITTEN).

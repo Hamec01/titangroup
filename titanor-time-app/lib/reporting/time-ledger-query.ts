@@ -18,7 +18,7 @@ export interface TimeLedgerQueryParseError {
 
 export type TimeLedgerQueryParseResult = { ok: true; query: NormalizedTimeLedgerQuery } | { ok: false; error: TimeLedgerQueryParseError };
 
-const SUPPORTED_PARAMS = ['allTime', 'startDate', 'endDate', 'employeeSearch', 'siteId', 'workAreaId', 'status', 'onlyIssues', 'onlyChangedAfterApproval', 'submissionState', 'submissionSource', 'page', 'pageSize'] as const;
+const SUPPORTED_PARAMS = ['allTime', 'startDate', 'endDate', 'employeeSearch', 'employeeId', 'siteId', 'workAreaId', 'status', 'onlyIssues', 'onlyChangedAfterApproval', 'submissionState', 'submissionSource', 'page', 'pageSize'] as const;
 
 const DEFAULT_PAGE_SIZE = 50;
 const MAX_PAGE_SIZE = 200;
@@ -88,6 +88,11 @@ export function parseTimeLedgerQuery(searchParams: URLSearchParams): TimeLedgerQ
     if (startDateRaw && endDateRaw && !fieldErrors.startDate && !fieldErrors.endDate && startDateRaw > endDateRaw) {
       fieldErrors.endDate = ['must be >= startDate'];
     }
+  }
+
+  const employeeIdParam = searchParams.get('employeeId');
+  if (employeeIdParam !== null && !UUID_PATTERN.test(employeeIdParam)) {
+    fieldErrors.employeeId = ['must be a UUID'];
   }
 
   const siteIdParam = searchParams.get('siteId');
@@ -193,6 +198,7 @@ export function parseTimeLedgerQuery(searchParams: URLSearchParams): TimeLedgerQ
       allTime: allTimeRequested,
       requestedRange,
       employeeSearch,
+      employeeId: employeeIdParam,
       workAreaId: workAreaIdParam === null ? null : (workAreaIdParam as 'none' | string),
       siteId: siteIdParam,
       status: statusParam as NormalizedTimeLedgerQuery['status'],
