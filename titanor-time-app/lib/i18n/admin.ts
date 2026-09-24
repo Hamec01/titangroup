@@ -127,6 +127,11 @@ export const ADMIN_NAV: Record<AppLocale, AdminNavStrings> = {
         ]
       },
       {
+        key: 'documents',
+        label: 'Documents',
+        items: [{ href: '/admin/documents', label: 'Files and documents' }]
+      },
+      {
         key: 'reports',
         label: 'Reports',
         items: [
@@ -178,6 +183,11 @@ export const ADMIN_NAV: Record<AppLocale, AdminNavStrings> = {
           { href: '/admin/review-scopes', label: 'Проверка по разделам' },
           { href: '/admin/corrections', label: 'Исправления' }
         ]
+      },
+      {
+        key: 'documents',
+        label: 'Документы',
+        items: [{ href: '/admin/documents', label: 'Файлы и документы' }]
       },
       {
         key: 'reports',

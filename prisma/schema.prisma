@@ -390,61 +390,64 @@ enum ProfessionCategory {
 }
 
 model User {
-  id                             String                        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  username                       String                        @unique @db.VarChar(64)
-  email                          String?                       @unique @db.VarChar(255)
-  passwordHash                   String?                       @db.Text
-  status                         UserStatus
-  locale                         Locale
-  twoFactorEnabled               Boolean                       @default(false)
-  twoFactorSecret                String?                       @db.Text
-  employeeId                     String?                       @unique @db.Uuid
-  lastLoginAt                    DateTime?                     @db.Timestamptz(6)
-  userKind                       UserKind                      @default(HUMAN)
-  createdAt                      DateTime                      @default(now()) @db.Timestamptz(6)
-  updatedAt                      DateTime                      @updatedAt @db.Timestamptz(6)
-  employee                       Employee?                     @relation(fields: [employeeId], references: [id], onDelete: Restrict, onUpdate: Cascade)
-  createdAbsences                Absence[]                     @relation("AbsenceCreatedBy")
-  approvedAbsences               Absence[]                     @relation("AbsenceApprovedBy")
-  assignedAssignments            SiteAssignment[]              @relation("SiteAssignmentAssignedBy")
-  defaultForemanSites            WorkSite[]                    @relation("WorkSiteDefaultForeman")
-  foremanAssignments             ForemanAssignment[]           @relation("ForemanAssignmentForeman")
-  assignedForemanAssignments     ForemanAssignment[]           @relation("ForemanAssignmentAssignedBy")
-  openedPeriods                  PayrollPeriod[]               @relation("PayrollPeriodOpenedBy")
-  lockedPeriods                  PayrollPeriod[]               @relation("PayrollPeriodLockedBy")
-  excludedParticipants           PayrollPeriodParticipant[]    @relation("PayrollPeriodParticipantExcludedBy")
-  createdTemplateVersions        WorkScheduleTemplateVersion[] @relation("TemplateVersionCreatedBy")
-  createdTimesheetVersions       TimesheetVersion[]            @relation("TimesheetVersionCreatedBy")
-  reviewedTimesheetScopes        TimesheetReviewScope[]        @relation("TimesheetReviewScopeReviewedBy")
-  requestedCorrections           CorrectionRequest[]           @relation("CorrectionRequestRequestedBy")
-  decidedCorrections             CorrectionRequest[]           @relation("CorrectionRequestDecidedBy")
-  openedCorrectionDrafts         CorrectionDraft[]             @relation("CorrectionDraftOpenedBy")
-  issuedActivationTokens         ActivationToken[]             @relation("ActivationTokenCreatedBy")
-  receivedSystemActivationTokens UserActivationToken[]         @relation("UserActivationTokenTarget")
-  issuedSystemActivationTokens   UserActivationToken[]         @relation("UserActivationTokenCreatedBy")
-  userRoles                      UserRole[]
-  userSessions                   UserSession[]
-  passwordResetTokens            PasswordResetToken[]          @relation("PasswordResetTarget")
-  issuedPasswordResets           PasswordResetToken[]          @relation("PasswordResetIssuedBy")
-  auditEvents                    AuditEvent[]
-  idempotencyKeys                IdempotencyKey[]
-  createdGeofenceVersions        WorkSiteGeofenceVersion[]     @relation("GeofenceVersionCreatedBy")
-  clockShiftAdjustments          ClockShiftAdjustment[]        @relation("ClockShiftAdjustmentChangedBy")
-  forceClosedClockShifts         ClockShift[]                  @relation("ClockShiftForceClosedBy")
-  resolvedAttendanceExceptions   AttendanceException[]         @relation("AttendanceExceptionResolvedBy")
-  updatedAttendancePolicies      CompanyAttendancePolicy[]     @relation("CompanyAttendancePolicyUpdatedBy")
-  createdExportBatches           ExportBatch[]                 @relation("ExportBatchCreatedBy")
-  createdSubmissionSchedules     TimesheetSubmissionSchedule[] @relation("TimesheetSubmissionScheduleCreatedBy")
-  updatedSubmissionSchedules     TimesheetSubmissionSchedule[] @relation("TimesheetSubmissionScheduleUpdatedBy")
-  assignedSubmissionSchedules    EmployeeTimesheetSchedule[]   @relation("EmployeeTimesheetScheduleAssignedBy")
-  uploadedEmployeeContracts      EmployeeProfile[]             @relation("EmployeeProfileContractUploadedBy")
-  verifiedEmployeeQualifications EmployeeQualification[]       @relation("EmployeeQualificationVerifiedBy")
-  createdEmployeeProfessions     EmployeeProfession[]          @relation("EmployeeProfessionCreatedBy")
-  adminNotificationDismissals    AdminNotificationDismissal[]
-  workerNotificationDismissals   WorkerNotificationDismissal[]
-  assignmentTransitions          AssignmentTransition[]        @relation("AssignmentTransitionActor")
-  createdReportFiles             ReportFile[]                  @relation("ReportFileCreatedBy")
-  customerHoursApprovalBatchesApproved CustomerHoursApprovalBatch[] @relation("CustomerHoursApprovalBatchApprovedBy")
+  id                                   String                        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  username                             String                        @unique @db.VarChar(64)
+  email                                String?                       @unique @db.VarChar(255)
+  passwordHash                         String?                       @db.Text
+  status                               UserStatus
+  locale                               Locale
+  twoFactorEnabled                     Boolean                       @default(false)
+  twoFactorSecret                      String?                       @db.Text
+  employeeId                           String?                       @unique @db.Uuid
+  lastLoginAt                          DateTime?                     @db.Timestamptz(6)
+  userKind                             UserKind                      @default(HUMAN)
+  createdAt                            DateTime                      @default(now()) @db.Timestamptz(6)
+  updatedAt                            DateTime                      @updatedAt @db.Timestamptz(6)
+  employee                             Employee?                     @relation(fields: [employeeId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  createdAbsences                      Absence[]                     @relation("AbsenceCreatedBy")
+  approvedAbsences                     Absence[]                     @relation("AbsenceApprovedBy")
+  assignedAssignments                  SiteAssignment[]              @relation("SiteAssignmentAssignedBy")
+  defaultForemanSites                  WorkSite[]                    @relation("WorkSiteDefaultForeman")
+  foremanAssignments                   ForemanAssignment[]           @relation("ForemanAssignmentForeman")
+  assignedForemanAssignments           ForemanAssignment[]           @relation("ForemanAssignmentAssignedBy")
+  openedPeriods                        PayrollPeriod[]               @relation("PayrollPeriodOpenedBy")
+  lockedPeriods                        PayrollPeriod[]               @relation("PayrollPeriodLockedBy")
+  excludedParticipants                 PayrollPeriodParticipant[]    @relation("PayrollPeriodParticipantExcludedBy")
+  createdTemplateVersions              WorkScheduleTemplateVersion[] @relation("TemplateVersionCreatedBy")
+  createdTimesheetVersions             TimesheetVersion[]            @relation("TimesheetVersionCreatedBy")
+  reviewedTimesheetScopes              TimesheetReviewScope[]        @relation("TimesheetReviewScopeReviewedBy")
+  requestedCorrections                 CorrectionRequest[]           @relation("CorrectionRequestRequestedBy")
+  decidedCorrections                   CorrectionRequest[]           @relation("CorrectionRequestDecidedBy")
+  openedCorrectionDrafts               CorrectionDraft[]             @relation("CorrectionDraftOpenedBy")
+  issuedActivationTokens               ActivationToken[]             @relation("ActivationTokenCreatedBy")
+  receivedSystemActivationTokens       UserActivationToken[]         @relation("UserActivationTokenTarget")
+  issuedSystemActivationTokens         UserActivationToken[]         @relation("UserActivationTokenCreatedBy")
+  userRoles                            UserRole[]
+  userSessions                         UserSession[]
+  passwordResetTokens                  PasswordResetToken[]          @relation("PasswordResetTarget")
+  issuedPasswordResets                 PasswordResetToken[]          @relation("PasswordResetIssuedBy")
+  auditEvents                          AuditEvent[]
+  idempotencyKeys                      IdempotencyKey[]
+  createdGeofenceVersions              WorkSiteGeofenceVersion[]     @relation("GeofenceVersionCreatedBy")
+  clockShiftAdjustments                ClockShiftAdjustment[]        @relation("ClockShiftAdjustmentChangedBy")
+  forceClosedClockShifts               ClockShift[]                  @relation("ClockShiftForceClosedBy")
+  resolvedAttendanceExceptions         AttendanceException[]         @relation("AttendanceExceptionResolvedBy")
+  updatedAttendancePolicies            CompanyAttendancePolicy[]     @relation("CompanyAttendancePolicyUpdatedBy")
+  createdExportBatches                 ExportBatch[]                 @relation("ExportBatchCreatedBy")
+  createdSubmissionSchedules           TimesheetSubmissionSchedule[] @relation("TimesheetSubmissionScheduleCreatedBy")
+  updatedSubmissionSchedules           TimesheetSubmissionSchedule[] @relation("TimesheetSubmissionScheduleUpdatedBy")
+  assignedSubmissionSchedules          EmployeeTimesheetSchedule[]   @relation("EmployeeTimesheetScheduleAssignedBy")
+  uploadedEmployeeContracts            EmployeeProfile[]             @relation("EmployeeProfileContractUploadedBy")
+  verifiedEmployeeQualifications       EmployeeQualification[]       @relation("EmployeeQualificationVerifiedBy")
+  createdEmployeeProfessions           EmployeeProfession[]          @relation("EmployeeProfessionCreatedBy")
+  adminNotificationDismissals          AdminNotificationDismissal[]
+  workerNotificationDismissals         WorkerNotificationDismissal[]
+  assignmentTransitions                AssignmentTransition[]        @relation("AssignmentTransitionActor")
+  createdReportFiles                   ReportFile[]                  @relation("ReportFileCreatedBy")
+  customerHoursApprovalBatchesApproved CustomerHoursApprovalBatch[]  @relation("CustomerHoursApprovalBatchApprovedBy")
+  createdDocumentFolders               DocumentFolder[]              @relation("DocumentFolderCreatedBy")
+  createdDocumentFiles                 DocumentFile[]                @relation("DocumentFileCreatedBy")
+  documentUploadReservations           DocumentUploadReservation[]   @relation("DocumentUploadReservationCreatedBy")
 }
 
 model Role {
@@ -575,36 +578,36 @@ model UserActivationToken {
 }
 
 model Employee {
-  id                    String                      @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  employeeNumber        String                      @unique
-  firstName             String
-  lastName              String
-  phone                 String?
-  version               Int                         @default(1)
-  createdAt             DateTime                    @default(now()) @db.Timestamptz(6)
-  updatedAt             DateTime                    @updatedAt @db.Timestamptz(6)
-  user                  User?
-  employments           Employment[]
-  absences              Absence[]
-  activationTokens      ActivationToken[]
-  siteAssignments       SiteAssignment[]
-  periodParticipants    PayrollPeriodParticipant[]
-  timesheets            Timesheet[]
-  deviceInstallations   WorkerDeviceInstallation[]
-  clockEvents           ClockEvent[]
-  openShift             EmployeeOpenShift?
-  clockShifts           ClockShift[]
-  attendanceExceptions  AttendanceException[]
-  clockEventIdConflicts ClockEventIdConflict[]
-  exportItems           ExportItem[]
-  submissionSchedules   EmployeeTimesheetSchedule[]
-  profile               EmployeeProfile?
-  qualifications        EmployeeQualification[]
-  adminNotifications    AdminNotification[]
-  workerNotifications   WorkerNotification[]
-  shiftPresenceSamples  ShiftPresenceSample[]
-  professions           EmployeeProfession[]
-  assignmentTransitions AssignmentTransition[]
+  id                         String                      @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  employeeNumber             String                      @unique
+  firstName                  String
+  lastName                   String
+  phone                      String?
+  version                    Int                         @default(1)
+  createdAt                  DateTime                    @default(now()) @db.Timestamptz(6)
+  updatedAt                  DateTime                    @updatedAt @db.Timestamptz(6)
+  user                       User?
+  employments                Employment[]
+  absences                   Absence[]
+  activationTokens           ActivationToken[]
+  siteAssignments            SiteAssignment[]
+  periodParticipants         PayrollPeriodParticipant[]
+  timesheets                 Timesheet[]
+  deviceInstallations        WorkerDeviceInstallation[]
+  clockEvents                ClockEvent[]
+  openShift                  EmployeeOpenShift?
+  clockShifts                ClockShift[]
+  attendanceExceptions       AttendanceException[]
+  clockEventIdConflicts      ClockEventIdConflict[]
+  exportItems                ExportItem[]
+  submissionSchedules        EmployeeTimesheetSchedule[]
+  profile                    EmployeeProfile?
+  qualifications             EmployeeQualification[]
+  adminNotifications         AdminNotification[]
+  workerNotifications        WorkerNotification[]
+  shiftPresenceSamples       ShiftPresenceSample[]
+  professions                EmployeeProfession[]
+  assignmentTransitions      AssignmentTransition[]
   customerHoursApprovalItems CustomerHoursApprovalItem[]
 }
 
@@ -891,51 +894,51 @@ model City {
 }
 
 model WorkSite {
-  id                       String                       @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  name                     String
-  cityId                   String?                      @db.Uuid
-  address                  String?
-  description              String?                      @db.Text
-  active                   Boolean                      @default(true)
+  id                         String                       @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  name                       String
+  cityId                     String?                      @db.Uuid
+  address                    String?
+  description                String?                      @db.Text
+  active                     Boolean                      @default(true)
   // T14 (2026-08-29) — set for a site where GPS is routinely unavailable (inside a ship hull, a
   // covered assembly hall, a basement). A GPS_NOT_VERIFIED exception whose reason is a plain
   // TIMEOUT / POSITION_UNAVAILABLE (no coordinate at all) at such a site is created already
   // resolved (ACKNOWLEDGE_AS_VALID, actor = SYSTEM) instead of adding to the review queue.
   // A geofence-verification failure with a real coordinate (worker was measurably elsewhere) is
   // NOT auto-resolved by this flag.
-  gpsOftenUnavailable      Boolean                      @default(false)
+  gpsOftenUnavailable        Boolean                      @default(false)
   // R15-D7 — the moment a "finish this site" action operationally closed it. Distinct from
   // `active` (which still drives list/picker visibility): a site with `finishedAt` set but an
   // open shift still running shows as "Завершается" until Check Out, then "Завершён". NULL = not
   // finished. Nothing is deleted; geofence + history stay.
-  finishedAt               DateTime?                    @db.Timestamptz(6)
-  defaultForemanUserId     String?                      @db.Uuid
-  version                  Int                          @default(1)
-  currentGeofenceVersionId String?                      @db.Uuid
-  createdAt                DateTime                     @default(now()) @db.Timestamptz(6)
-  updatedAt                DateTime                     @updatedAt @db.Timestamptz(6)
-  city                     City?                        @relation(fields: [cityId], references: [id], onDelete: SetNull, onUpdate: Cascade)
-  defaultForemanUser       User?                        @relation("WorkSiteDefaultForeman", fields: [defaultForemanUserId], references: [id], onDelete: SetNull, onUpdate: Cascade)
-  currentGeofenceVersion   WorkSiteGeofenceVersion?     @relation("WorkSiteCurrentGeofence", fields: [id, currentGeofenceVersionId], references: [siteId, id], onDelete: Restrict, onUpdate: Cascade)
-  workAreas                WorkArea[]
-  siteAssignments          SiteAssignment[]
-  foremanAssignments       ForemanAssignment[]
-  draftPlannedShifts       TimesheetDraftPlannedShift[]
-  draftSegments            TimesheetDraftSegment[]
-  plannedShifts            TimesheetPlannedShift[]
-  workSegments             WorkSegment[]
-  reviewScopes             TimesheetReviewScope[]       @relation("TimesheetReviewScopeSite")
-  reviewScopeContexts      TimesheetReviewScope[]       @relation("TimesheetReviewScopeContextSite")
-  correctionDraftSegments  CorrectionDraftSegment[]
-  geofenceVersions         WorkSiteGeofenceVersion[]    @relation("WorkSiteGeofenceVersions")
-  clockEvents              ClockEvent[]                 @relation("ClockEventSite")
-  assumedClockEvents       ClockEvent[]                 @relation("ClockEventAssumedSite")
-  employeeOpenShifts       EmployeeOpenShift[]
-  clockShifts              ClockShift[]
-  clockShiftFragments      ClockShiftFragment[]
-  attendanceExceptions     AttendanceException[]
-  exportItems              ExportItem[]
-  shiftPresenceSamples     ShiftPresenceSample[]
+  finishedAt                 DateTime?                    @db.Timestamptz(6)
+  defaultForemanUserId       String?                      @db.Uuid
+  version                    Int                          @default(1)
+  currentGeofenceVersionId   String?                      @db.Uuid
+  createdAt                  DateTime                     @default(now()) @db.Timestamptz(6)
+  updatedAt                  DateTime                     @updatedAt @db.Timestamptz(6)
+  city                       City?                        @relation(fields: [cityId], references: [id], onDelete: SetNull, onUpdate: Cascade)
+  defaultForemanUser         User?                        @relation("WorkSiteDefaultForeman", fields: [defaultForemanUserId], references: [id], onDelete: SetNull, onUpdate: Cascade)
+  currentGeofenceVersion     WorkSiteGeofenceVersion?     @relation("WorkSiteCurrentGeofence", fields: [id, currentGeofenceVersionId], references: [siteId, id], onDelete: Restrict, onUpdate: Cascade)
+  workAreas                  WorkArea[]
+  siteAssignments            SiteAssignment[]
+  foremanAssignments         ForemanAssignment[]
+  draftPlannedShifts         TimesheetDraftPlannedShift[]
+  draftSegments              TimesheetDraftSegment[]
+  plannedShifts              TimesheetPlannedShift[]
+  workSegments               WorkSegment[]
+  reviewScopes               TimesheetReviewScope[]       @relation("TimesheetReviewScopeSite")
+  reviewScopeContexts        TimesheetReviewScope[]       @relation("TimesheetReviewScopeContextSite")
+  correctionDraftSegments    CorrectionDraftSegment[]
+  geofenceVersions           WorkSiteGeofenceVersion[]    @relation("WorkSiteGeofenceVersions")
+  clockEvents                ClockEvent[]                 @relation("ClockEventSite")
+  assumedClockEvents         ClockEvent[]                 @relation("ClockEventAssumedSite")
+  employeeOpenShifts         EmployeeOpenShift[]
+  clockShifts                ClockShift[]
+  clockShiftFragments        ClockShiftFragment[]
+  attendanceExceptions       AttendanceException[]
+  exportItems                ExportItem[]
+  shiftPresenceSamples       ShiftPresenceSample[]
   customerHoursApprovalItems CustomerHoursApprovalItem[]
 
   @@index([cityId])
@@ -943,22 +946,22 @@ model WorkSite {
 }
 
 model WorkArea {
-  id                      String                   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  siteId                  String                   @db.Uuid
-  name                    String
-  active                  Boolean                  @default(true)
-  version                 Int                      @default(1)
-  createdAt               DateTime                 @default(now()) @db.Timestamptz(6)
-  updatedAt               DateTime                 @updatedAt @db.Timestamptz(6)
-  site                    WorkSite                 @relation(fields: [siteId], references: [id], onDelete: Restrict, onUpdate: Cascade)
-  siteAssignments         SiteAssignment[]
-  draftSegments           TimesheetDraftSegment[]
-  workSegments            WorkSegment[]
-  correctionDraftSegments CorrectionDraftSegment[]
-  clockEvents             ClockEvent[]
-  employeeOpenShifts      EmployeeOpenShift[]
-  clockShifts             ClockShift[]
-  clockShiftFragments     ClockShiftFragment[]
+  id                         String                      @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  siteId                     String                      @db.Uuid
+  name                       String
+  active                     Boolean                     @default(true)
+  version                    Int                         @default(1)
+  createdAt                  DateTime                    @default(now()) @db.Timestamptz(6)
+  updatedAt                  DateTime                    @updatedAt @db.Timestamptz(6)
+  site                       WorkSite                    @relation(fields: [siteId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  siteAssignments            SiteAssignment[]
+  draftSegments              TimesheetDraftSegment[]
+  workSegments               WorkSegment[]
+  correctionDraftSegments    CorrectionDraftSegment[]
+  clockEvents                ClockEvent[]
+  employeeOpenShifts         EmployeeOpenShift[]
+  clockShifts                ClockShift[]
+  clockShiftFragments        ClockShiftFragment[]
   customerHoursApprovalItems CustomerHoursApprovalItem[]
 
   @@unique([siteId, name])
@@ -1165,28 +1168,28 @@ model PayrollPeriodParticipant {
 }
 
 model Timesheet {
-  id                     String                   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  employeeId             String                   @db.Uuid
-  periodId               String                   @db.Uuid
-  status                 TimesheetStatus
-  currentVersionId       String?                  @db.Uuid
-  lastReturnedReason     TimesheetReturnReason?
-  systemReopenGeneration Int                      @default(0)
-  systemReopenAt         DateTime?                @db.Timestamptz(6)
-  createdAt              DateTime                 @default(now()) @db.Timestamptz(6)
-  updatedAt              DateTime                 @updatedAt @db.Timestamptz(6)
-  employee               Employee                 @relation(fields: [employeeId], references: [id], onDelete: Restrict, onUpdate: Cascade)
-  period                 PayrollPeriod            @relation(fields: [periodId], references: [id], onDelete: Restrict, onUpdate: Cascade)
-  participant            PayrollPeriodParticipant @relation(fields: [periodId, employeeId], references: [periodId, employeeId], onDelete: Restrict, onUpdate: Cascade)
-  currentVersion         TimesheetVersion?        @relation("TimesheetCurrentVersion", fields: [currentVersionId, id], references: [id, timesheetId], onDelete: Restrict, onUpdate: Cascade)
-  draft                  TimesheetDraft?
-  versions               TimesheetVersion[]       @relation("TimesheetVersions")
-  correctionRequests     CorrectionRequest[]
-  clockShiftFragments    ClockShiftFragment[]
-  attendanceExceptions   AttendanceException[]
-  autoSubmissionAttempts AutoSubmissionAttempt[]
-  adminNotifications     AdminNotification[]
-  workerNotifications    WorkerNotification[]
+  id                         String                      @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  employeeId                 String                      @db.Uuid
+  periodId                   String                      @db.Uuid
+  status                     TimesheetStatus
+  currentVersionId           String?                     @db.Uuid
+  lastReturnedReason         TimesheetReturnReason?
+  systemReopenGeneration     Int                         @default(0)
+  systemReopenAt             DateTime?                   @db.Timestamptz(6)
+  createdAt                  DateTime                    @default(now()) @db.Timestamptz(6)
+  updatedAt                  DateTime                    @updatedAt @db.Timestamptz(6)
+  employee                   Employee                    @relation(fields: [employeeId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  period                     PayrollPeriod               @relation(fields: [periodId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  participant                PayrollPeriodParticipant    @relation(fields: [periodId, employeeId], references: [periodId, employeeId], onDelete: Restrict, onUpdate: Cascade)
+  currentVersion             TimesheetVersion?           @relation("TimesheetCurrentVersion", fields: [currentVersionId, id], references: [id, timesheetId], onDelete: Restrict, onUpdate: Cascade)
+  draft                      TimesheetDraft?
+  versions                   TimesheetVersion[]          @relation("TimesheetVersions")
+  correctionRequests         CorrectionRequest[]
+  clockShiftFragments        ClockShiftFragment[]
+  attendanceExceptions       AttendanceException[]
+  autoSubmissionAttempts     AutoSubmissionAttempt[]
+  adminNotifications         AdminNotification[]
+  workerNotifications        WorkerNotification[]
   customerHoursApprovalItems CustomerHoursApprovalItem[]
 
   @@unique([employeeId, periodId])
@@ -2185,16 +2188,16 @@ enum CustomerHoursApprovalState {
 }
 
 model CustomerHoursApprovalBatch {
-  id                String                       @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  approvedByUserId  String                       @db.Uuid
-  approvedAt        DateTime                     @default(now()) @db.Timestamptz(6)
-  requestId         String                       @db.Uuid
-  idempotencyKey    String                       @db.Uuid
+  id                String                      @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  approvedByUserId  String                      @db.Uuid
+  approvedAt        DateTime                    @default(now()) @db.Timestamptz(6)
+  requestId         String                      @db.Uuid
+  idempotencyKey    String                      @db.Uuid
   selectionSnapshot Json
   itemCount         Int
   workedMinutes     Int
-  createdAt         DateTime                     @default(now()) @db.Timestamptz(6)
-  approvedByUser    User                         @relation("CustomerHoursApprovalBatchApprovedBy", fields: [approvedByUserId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  createdAt         DateTime                    @default(now()) @db.Timestamptz(6)
+  approvedByUser    User                        @relation("CustomerHoursApprovalBatchApprovedBy", fields: [approvedByUserId], references: [id], onDelete: Restrict, onUpdate: Cascade)
   items             CustomerHoursApprovalItem[]
 
   @@unique([approvedByUserId, idempotencyKey])
@@ -2202,14 +2205,14 @@ model CustomerHoursApprovalBatch {
 }
 
 model CustomerHoursApprovalItem {
-  id                   String                           @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  batchId              String                           @db.Uuid
-  timesheetId          String                           @db.Uuid
-  employeeId           String                           @db.Uuid
-  siteId               String                           @db.Uuid
-  workAreaId           String?                          @db.Uuid
-  weekStart            DateTime                         @db.Date
-  weekEnd              DateTime                         @db.Date
+  id                   String                          @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  batchId              String                          @db.Uuid
+  timesheetId          String                          @db.Uuid
+  employeeId           String                          @db.Uuid
+  siteId               String                          @db.Uuid
+  workAreaId           String?                         @db.Uuid
+  weekStart            DateTime                        @db.Date
+  weekEnd              DateTime                        @db.Date
   sourceKind           CustomerHoursApprovalSourceKind
   // Polymorphic: TimesheetVersion.id when sourceKind=VERSION, TimesheetDraft.id when
   // sourceKind=DRAFT — deliberately NOT a Prisma FK. A real FK would have to point at two
@@ -2219,17 +2222,17 @@ model CustomerHoursApprovalItem {
   // application-level concern for the reconciliation service (a later checkpoint), same trade-off
   // AttendanceException already makes with several nullable same-shape FKs, just polymorphic
   // instead of alternative-nullable.
-  sourceId             String                           @db.Uuid
+  sourceId             String                          @db.Uuid
   sourceRevision       BigInt?
-  fingerprint          String                           @db.Char(64)
+  fingerprint          String                          @db.Char(64)
   workedMinutes        Int
   grossMinutes         Int
   breakMinutes         Int
   snapshot             Json
-  approvalState        CustomerHoursApprovalState       @default(CURRENT)
-  supersededAt         DateTime?                        @db.Timestamptz(6)
-  supersededBySourceId String?                          @db.Uuid
-  createdAt            DateTime                         @default(now()) @db.Timestamptz(6)
+  approvalState        CustomerHoursApprovalState      @default(CURRENT)
+  supersededAt         DateTime?                       @db.Timestamptz(6)
+  supersededBySourceId String?                         @db.Uuid
+  createdAt            DateTime                        @default(now()) @db.Timestamptz(6)
 
   batch     CustomerHoursApprovalBatch @relation(fields: [batchId], references: [id], onDelete: Restrict, onUpdate: Cascade)
   timesheet Timesheet                  @relation(fields: [timesheetId, employeeId], references: [id, employeeId], onDelete: Restrict, onUpdate: Cascade)
@@ -2241,4 +2244,81 @@ model CustomerHoursApprovalItem {
   @@index([weekStart, workAreaId, siteId])
   @@index([batchId])
   @@index([employeeId, siteId, workAreaId, weekStart, approvalState])
+}
+
+// One shared corporate document space for every authorised ADMIN/SUPER_ADMIN. createdByUserId is
+// audit provenance only; it never scopes visibility. Binary objects live in the configured remote
+// DocumentStorage backend, never PostgreSQL or the application container.
+model StorageSpace {
+  id            String                      @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  name          String                      @unique @db.VarChar(120)
+  quotaBytes    BigInt
+  usedBytes     BigInt                      @default(0)
+  reservedBytes BigInt                      @default(0)
+  createdAt     DateTime                    @default(now()) @db.Timestamptz(6)
+  updatedAt     DateTime                    @updatedAt @db.Timestamptz(6)
+  folders       DocumentFolder[]
+  files         DocumentFile[]
+  reservations  DocumentUploadReservation[]
+}
+
+model DocumentFolder {
+  id              String           @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  storageSpaceId  String           @db.Uuid
+  parentId        String?          @db.Uuid
+  name            String           @db.VarChar(255)
+  normalizedName  String           @db.VarChar(255)
+  createdByUserId String           @db.Uuid
+  createdAt       DateTime         @default(now()) @db.Timestamptz(6)
+  updatedAt       DateTime         @updatedAt @db.Timestamptz(6)
+  storageSpace    StorageSpace     @relation(fields: [storageSpaceId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  parent          DocumentFolder?  @relation("DocumentFolderTree", fields: [parentId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  children        DocumentFolder[] @relation("DocumentFolderTree")
+  files           DocumentFile[]
+  createdByUser   User             @relation("DocumentFolderCreatedBy", fields: [createdByUserId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+
+  @@index([storageSpaceId, parentId, name])
+  @@index([parentId])
+  @@index([createdByUserId])
+}
+
+model DocumentFile {
+  id               String          @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  storageSpaceId   String          @db.Uuid
+  folderId         String?         @db.Uuid
+  originalName     String          @db.VarChar(255)
+  displayName      String          @db.VarChar(255)
+  normalizedName   String          @db.VarChar(255)
+  extension        String?         @db.VarChar(32)
+  mimeType         String          @db.VarChar(255)
+  category         String          @db.VarChar(24)
+  sizeBytes        BigInt
+  storageKey       String          @unique @db.VarChar(512)
+  checksumSha256   String          @db.Char(64)
+  status           String          @default("ACTIVE") @db.VarChar(16)
+  createdByUserId  String          @db.Uuid
+  createdAt        DateTime        @default(now()) @db.Timestamptz(6)
+  updatedAt        DateTime        @updatedAt @db.Timestamptz(6)
+  lastDownloadedAt DateTime?       @db.Timestamptz(6)
+  storageSpace     StorageSpace    @relation(fields: [storageSpaceId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  folder           DocumentFolder? @relation(fields: [folderId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  createdByUser    User            @relation("DocumentFileCreatedBy", fields: [createdByUserId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+
+  @@index([storageSpaceId, folderId, displayName])
+  @@index([storageSpaceId, category])
+  @@index([createdByUserId])
+}
+
+model DocumentUploadReservation {
+  id              String       @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  storageSpaceId  String       @db.Uuid
+  createdByUserId String       @db.Uuid
+  sizeBytes       BigInt
+  expiresAt       DateTime     @db.Timestamptz(6)
+  createdAt       DateTime     @default(now()) @db.Timestamptz(6)
+  storageSpace    StorageSpace @relation(fields: [storageSpaceId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  createdByUser   User         @relation("DocumentUploadReservationCreatedBy", fields: [createdByUserId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+
+  @@index([storageSpaceId, expiresAt])
+  @@index([createdByUserId])
 }

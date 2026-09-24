@@ -20,6 +20,7 @@ function iconForGroup(key: string): string {
   if (key === 'people') return '♙';
   if (key === 'time') return '◷';
   if (key === 'review') return '✓';
+  if (key === 'documents') return '▤';
   if (key === 'reports') return '▥';
   return '•';
 }
