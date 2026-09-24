@@ -7283,7 +7283,7 @@ a.ov-summary-card:focus-visible {
    shell's white/near-white surfaces (same family as var(--error), which already gets its own
    darker light-theme value at .admin-modern-shell's base declaration — these never did). Scoped to
    [data-theme='light'] specifically, since AdminModernShell.tsx always renders a literal data-theme
-   attribute (never omits it — see lib/admin-theme.ts's normalizeAdminTheme, default 'light'), so
+   attribute (never omits it — see lib/admin-theme.ts's normalizeAdminTheme), so
    every dark alternate (titan-dark/graphite/ocean) keeps its existing, already-legible colours. */
 .admin-modern-shell[data-theme='light'] :where(
   .ledger-summary-tone-warning strong,

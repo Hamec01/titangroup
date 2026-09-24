@@ -20,6 +20,7 @@
     { "file": "_test-t9-fixtures.ts", "lane": "helper", "note": "Shared T9.1/T9.2 fixture builder (buildFixture). Imported by the t9-* browser tests and _test-foreman-admin-redirect.ts. Never executed directly." },
 
     { "file": "_test-auto-unpaid-break.ts", "lane": "unit", "note": "computeDayWorkedMs / effectiveUnpaidBreakMinutes — pure." },
+    { "file": "_test-admin-theme.ts", "lane": "unit", "note": "Admin theme default — missing/invalid preference resolves to Titan dark while every explicit valid user choice remains preserved. Pure." },
     { "file": "_test-documents.ts", "lane": "unit", "note": "Shared Documents module — safe normalized names, traversal rejection, file extension parsing, and MIME/extension category classification. Pure; no database or S3." },
     { "file": "_test-exception-list-query.ts", "lane": "unit", "note": "parseExceptionListQuery — pure query parsing." },
     { "file": "_test-offline-idb-invariants.ts", "lane": "unit", "note": "IndexedDB outbox invariants via fake-indexeddb; re-spawns itself per phase for isolation." },

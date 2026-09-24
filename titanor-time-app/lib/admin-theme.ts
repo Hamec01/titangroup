@@ -6,7 +6,8 @@ export const ADMIN_THEME_COOKIE = 'titanor-admin-theme';
 
 export const ADMIN_THEME_VALUES = ['light', 'titan-dark', 'graphite', 'ocean'] as const;
 export type AdminTheme = (typeof ADMIN_THEME_VALUES)[number];
+export const DEFAULT_ADMIN_THEME: AdminTheme = 'titan-dark';
 
 export function normalizeAdminTheme(value: string | null | undefined): AdminTheme {
-  return ADMIN_THEME_VALUES.includes(value as AdminTheme) ? (value as AdminTheme) : 'light';
+  return ADMIN_THEME_VALUES.includes(value as AdminTheme) ? (value as AdminTheme) : DEFAULT_ADMIN_THEME;
 }
