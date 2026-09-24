@@ -36,6 +36,25 @@ export function GuideView({ initialLocale, homeHref }: { initialLocale: AppLocal
         <h1>{t.pageTitle}</h1>
         <p className="setup-subtitle">{t.tagline}</p>
 
+        <section className="guide-section guide-news-section">
+          <details className="owner-secondary-panel guide-reference-group guide-changelog-group">
+            <summary>{t.changelogTitle}</summary>
+            <div className="guide-changelog-content">
+              <p>{t.changelogIntro}</p>
+              {t.changelog.map((entry) => (
+                <div key={entry.date} className="guide-change-entry">
+                  <h3>{entry.date}</h3>
+                  <ul className="guide-tips">
+                    {entry.items.map((item, i) => (
+                      <li key={i} className="policy-notice">{item}</li>
+                    ))}
+                  </ul>
+                </div>
+              ))}
+            </div>
+          </details>
+        </section>
+
         <section className="guide-section">
           {t.intro.map((paragraph, i) => (
             <p key={i}>{paragraph}</p>
@@ -108,27 +127,6 @@ export function GuideView({ initialLocale, homeHref }: { initialLocale: AppLocal
               </li>
             ))}
           </ul>
-        </section>
-
-        <section className="guide-section">
-          <details className="owner-secondary-panel guide-reference-group guide-changelog-group">
-            <summary>{t.changelogTitle}</summary>
-            <div className="guide-changelog-content">
-              <p>{t.changelogIntro}</p>
-              {t.changelog.map((entry) => (
-                <div key={entry.date} className="guide-change-entry">
-                  <h3>{entry.date}</h3>
-                  <ul className="guide-tips">
-                    {entry.items.map((item, i) => (
-                      <li key={i} className="policy-notice">
-                        {item}
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-              ))}
-            </div>
-          </details>
         </section>
 
         <p>

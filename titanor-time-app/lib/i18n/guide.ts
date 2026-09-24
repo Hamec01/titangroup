@@ -7,7 +7,9 @@ import type { AppLocale } from './locale';
 // those directly. Kept as a data module (not JSX) so the content itself stays easy to review/edit
 // without touching component code.
 //
-// Last brought current: 2026-09-04 (changelog only — R15-D7 A→F: rebuilt worker card + one-button
+// Last brought current: 2026-09-24 (unified customer timesheet, customer-hours summary/export,
+// shared document storage, current menu and approval flow). Earlier changelog includes the rebuilt
+// worker card + one-button
 // workplace change, "end today", finish site / disable customer, group transfer, worker
 // archive/restore, "work area" → "customer" rename, the rebuilt Customer working-hours report,
 // the timesheet workplace-change marker, the password-reset QR). The reference sections below are
@@ -138,7 +140,7 @@ export const GUIDE_CONTENT: Record<AppLocale, GuideContent> = {
       '«Сегодня» открывается сразу после входа — это главный экран для повседневной работы. В таблице по каждому работнику видно: статус (работает / закончил / не начинал), объект, время прихода и ухода, сколько отработано сегодня, есть ли проблемы.',
       'Строка разбита на отдельные кликабельные ячейки: клик по имени открывает редактирование профиля, по статусу — быструю проверку, по объекту — назначения этого работника, по приходу/уходу/сегодня — историю по дням за последние недели, по проблемам — список проблем этого работника. Кнопка «Открыть →» открывает полную карточку работника целиком.',
       'Сверху есть поиск по имени/объекту и сводные показатели (сколько работников активны, сколько сейчас на смене, сколько требуют внимания). Ниже, в раскрывающихся блоках — сведения по табелям и техническим конфликтам, если они есть.',
-      'В шапке справа — две иконки со счётчиками. Колокольчик: уведомления, которые требуют внимания (истекающие допуски и сертификаты работников; «работник сдал табель за неделю — нужно утвердить»). Календарь: сколько табелей ждёт вашего утверждения, с разбивкой по неделям — клик открывает очередь «На утверждении». Рядом — переключатель языка RU/EN и ссылка «Инструкция» (эта страница).'
+      'В шапке справа — две иконки со счётчиками. Колокольчик показывает уведомления, которые требуют внимания: например, истекающие допуски или сообщение «работник сдал табель». Календарь показывает, сколько недель ждёт проверки; из него нужно перейти в новый «Табель», где часы сгруппированы по заказчикам и принимаются по одному, выбранными строками или массово. Рядом — переключатель языка RU/EN и ссылка «Инструкция» (эта страница).'
     ],
     referenceTitle: 'Разделы меню — что где находится',
     referenceIntro: 'Меню администратора сгруппировано по смыслу — каждая группа открывается по клику и содержит связанные разделы.',
@@ -167,7 +169,7 @@ export const GUIDE_CONTENT: Record<AppLocale, GuideContent> = {
         title: 'Учёт времени',
         items: [
           { title: 'Расчётные периоды', text: 'Периоды (обычно неделя или две недели), создаются автоматически на основе циклов отправки табеля. В рамках периода отработанное время собирается в табель, который затем проходит проверку.' },
-          { title: 'Табели', text: 'Список всех табелей по статусам. С карточки табеля доступны действия в зависимости от статуса. У отправленного на проверку: утвердить часы; вернуть работнику с причиной; «Изменить часы» — быстрая правка администратором без причины, работник не получает уведомление; «Исправить часы / отметить больничный, отпуск» — правка с причиной, которую работник видит. У окончательно одобренного — запросить исправление.' },
+          { title: 'Табели', text: 'Главный экран проверки часов. Здесь часы сгруппированы по заказчику и объекту, видны работники, недели, округлённые итоги и статусы «не сдано / сдано / подтверждено для заказчика / изменено». Неделю можно раскрыть до дней и реального времени прихода/ухода. Можно принять одного работника, выбранных работников, всю неделю или все подходящие часы заказчика. Предупреждения можно просмотреть и принять на себя риск; технически повреждённые данные не подтверждаются.' },
           { title: 'Проблемы учёта', text: 'Автоматически обнаруженные несоответствия в отметках прихода/ухода — например, не подтверждён GPS, нет отметки ухода, пересекаются две смены. Для проблем с GPS в карточке показывается расстояние от точки работника до центра геозоны и мини-карта — видно, был ли работник рядом с объектом, даже если точность низкая. Каждую проблему нужно решить: отклонить как несущественную, подтвердить данные как верные либо исправить конкретное время или объект.' },
           { title: 'Правила учёта', text: 'Общие настройки компании: через сколько дней после окончания периода и в какое время неотправленный табель отправляется автоматически; сколько ждать перед повторным открытием табеля при поздней синхронизации; максимально допустимая длительность одной смены; максимальная точность GPS (в метрах), при которой система считает геозону подтверждённой — её можно поднять для объекта со слабым сигналом внутри помещений.' }
         ]
@@ -175,7 +177,6 @@ export const GUIDE_CONTENT: Record<AppLocale, GuideContent> = {
       {
         title: 'Проверка',
         items: [
-          { title: 'На утверждении', text: 'Один экран со всеми табелями, ожидающими вашего утверждения, по всем открытым периодам. Фильтр по объекту, сортировка, «только с замечаниями». По «чистым» табелям (без проблем и расхождений план ≠ факт) — кнопка утверждения в один клик; по остальным — «Открыть» ведёт на карточку. Отдельный раскрывающийся блок «Ещё не сдали» — кто пока не отправил табель.' },
           { title: 'Проверка по разделам', text: 'Детальная проверка табеля по частям — по каждому объекту отдельно и по данным вне объекта: каждый раздел можно одобрить или вернуть отдельно. Используется, когда по табелю нужно разобраться подробнее, чем в один клик.' },
           { title: 'Исправления', text: 'Изменение табеля, который уже прошёл окончательное одобрение. Запускается с карточки такого табеля, требует причины и проходит отдельное одобрение, прежде чем изменённые данные станут окончательными. Для табеля, который ещё на проверке, отдельное «исправление» не нужно — используйте «Изменить часы» или верните работнику.' }
         ]
@@ -183,10 +184,16 @@ export const GUIDE_CONTENT: Record<AppLocale, GuideContent> = {
       {
         title: 'Отчёты',
         items: [
-          { title: 'Отчёты', text: 'Суммарные отработанные часы по работнику, по расчётному периоду в целом или по конкретному объекту. Показывается только рабочее время — расчёт зарплаты система не выполняет.' },
+          { title: 'Отчёты', text: 'Два понятных режима: внутренний отчёт по расчётному периоду и клиентский отчёт «Часы заказчиков». В клиентском режиме используются те же подтверждённые данные, что и в «Табеле»: фильтр заказчика, переход между неделями, ожидающие и изменённые часы, PDF/CSV.' },
           { title: 'Произвольный отчёт', text: 'Отработанные часы за любой период с выбором работников и объектов, в PDF или CSV. По дням или итогами, с подытогами по работнику и объекту. Только часы, без зарплаты.' },
-          { title: 'Часы заказчику', text: 'Документ для заказчика: подтверждённые (окончательно одобренные) часы по объекту за период. Перед выгрузкой система проверяет готовность — если какой-то табель не утверждён, показывает список со ссылками и блокирует финальный PDF/CSV. PDF с логотипом Titanor и пометкой «FINAL APPROVED». Без зарплат, ставок, надбавок, TES и подписи.' },
+          { title: 'Часы заказчиков / Сводка', text: 'Документ для заказчика на основе единого Табеля. Финальный файл включает только «Подтверждено для заказчика»; предварительный просмотр отдельно показывает ожидающие, изменённые, неотправленные и исторические строки. Реальные приходы и уходы остаются в подробностях, а итоговые часы округлены и учитывают неоплачиваемый обед.' },
           { title: 'Выгрузка CSV', text: 'Формирование скачиваемого CSV-файла с отработанными часами за период — для передачи во внешнюю систему расчёта зарплаты. Каждая выгрузка сохраняется как отдельная неизменяемая запись; если после выгрузки была одобрена корректировка, создаётся новый файл, а не редактируется старый.' }
+        ]
+      },
+      {
+        title: 'Документы',
+        items: [
+          { title: 'Файлы и документы', text: 'Общее корпоративное хранилище объёмом 10 ГБ для всех администраторов. Все администраторы видят одни и те же папки и файлы. Можно загружать несколько файлов с прогрессом, создавать папки, искать, сортировать, скачивать, переименовывать, перемещать и удалять. Файлы хранятся на отдельном защищённом сервере хранения, а действия записываются в аудит.' }
         ]
       }
     ],
@@ -214,6 +221,17 @@ export const GUIDE_CONTENT: Record<AppLocale, GuideContent> = {
     changelogTitle: 'Что нового',
     changelogIntro: 'Коротко — что менялось в системе за последнее время. Самое свежее сверху.',
     changelog: [
+      {
+        date: '21–24 сентября 2026',
+        items: [
+          'Появился единый «Табель» по заказчикам. В одном месте видны работники, недели, округлённые часы и общие суммы; неделю можно раскрыть до дней и точного времени прихода/ухода.',
+          'Подтверждение стало проще: можно принять одного работника, выбранных работников, всю неделю или все подходящие часы выбранного заказчика. Замечания показываются предупреждением и не мешают администратору принять ответственность; блокируются только технически невозможные операции.',
+          'Добавлена вкладка «Сводка» и новый клиентский экспорт CSV/PDF. Финальный файл содержит только подтверждённые для заказчика часы; неотправленные, изменённые и исторические строки явно отделены и не попадают в итог.',
+          'Если часы изменились после подтверждения, прежнее подтверждение сохраняется в истории, а строка помечается «Изменено после подтверждения» и может быть подтверждена повторно.',
+          'Добавлено общее хранилище «Файлы и документы» на 10 ГБ для всех администраторов: папки, поиск, загрузка с прогрессом, скачивание, переименование, перемещение и удаление.',
+          'Основной цветовой темой стала «Titan тёмная». Остальные темы остаются доступными и сохраняются как личный выбор.'
+        ]
+      },
       {
         date: '2–3 сентября 2026',
         items: [
@@ -390,7 +408,7 @@ export const GUIDE_CONTENT: Record<AppLocale, GuideContent> = {
       '"Today" opens right after sign-in — it\'s the main screen for day-to-day work. For each worker, the table shows: status (working / finished / not started), site, check-in and check-out time, hours worked today, and whether there are issues.',
       'Each row is split into separate clickable cells: clicking the name opens profile editing, the status cell opens a quick status check, the site cell opens that worker\'s assignments, check-in/check-out/today open a day-by-day history for recent weeks, and the issues cell opens that worker\'s issue list. The "Open →" button opens the worker\'s full profile.',
       'At the top there\'s a search box (by name/site) and summary counters (active workers, currently working, needing attention). Below, in expandable panels, are timesheet details and any technical conflicts, if there are any.',
-      'The header has two counter icons on the right. The bell: notifications that need attention (workers\' expiring qualifications and certificates; "a worker submitted the timesheet for a week — needs approval"). The calendar: how many timesheets are waiting for your approval, broken down by week — clicking it opens the "Awaiting approval" queue. Next to them is the RU/EN language switch and the "Guide" link (this page).'
+      'The header has two counter icons on the right. The bell shows notices that need attention, such as expiring qualifications or “a worker submitted a timesheet”. The calendar shows how many weeks await review; use it to open the new Timesheets screen, where hours are grouped by customer and approved individually, by selection, or in bulk. Next to them is the RU/EN language switch and the Guide link (this page).'
     ],
     referenceTitle: 'Menu sections — what\'s where',
     referenceIntro: 'The admin menu is grouped by purpose — each group opens on click and contains related sections.',
@@ -419,7 +437,7 @@ export const GUIDE_CONTENT: Record<AppLocale, GuideContent> = {
         title: 'Time & attendance',
         items: [
           { title: 'Payroll periods', text: 'Periods (usually a week or two weeks), created automatically from submission cycles. Worked time within a period is collected into a timesheet, which then goes through review.' },
-          { title: 'Timesheets', text: 'The full list of timesheets by status. The actions on a timesheet\'s card depend on its status. For one submitted for review: approve hours; return it to the worker with a reason; "Edit hours" — a quick admin edit with no reason, the worker is not notified; "Edit hours / mark sick leave, vacation" — an edit with a reason the worker sees. For an already-finalized one — request a correction.' },
+          { title: 'Timesheets', text: 'The main hours-review screen. Hours are grouped by customer and site, with workers, weeks, rounded totals and clear submitted/confirmed/changed statuses. Expand a week for daily details and exact check-in/check-out times. Approve one worker, selected workers, a whole week, or every eligible row for one customer. Business issues are warnings that can be accepted; technically invalid data remains blocked.' },
           { title: 'Attendance issues', text: 'Automatically detected inconsistencies in check-in/check-out — for example, GPS not verified, a missing checkout, two overlapping shifts. For GPS issues the card shows the distance from the worker\'s point to the geofence centre and a mini-map — you can see whether the worker was near the site even when accuracy is poor. Each issue needs to be resolved: dismissed as not significant, acknowledged as valid data, or corrected (a specific time or site fixed).' },
           { title: 'Attendance policy', text: 'Company-wide settings: how many days after a period ends, and at what time, an unsubmitted timesheet is submitted automatically; how long to wait before reopening a timesheet after a late sync; the maximum allowed length of a single shift; the maximum GPS accuracy (in metres) at which the system treats the geofence as confirmed — raise it for a site with a weak signal indoors.' }
         ]
@@ -427,7 +445,6 @@ export const GUIDE_CONTENT: Record<AppLocale, GuideContent> = {
       {
         title: 'Review',
         items: [
-          { title: 'Awaiting approval', text: 'One screen with every timesheet waiting for your approval, across all open periods. Filter by site, sort, "only with issues". Clean timesheets (no issues, no plan ≠ actual mismatch) get a one-click approve button; the rest have an "Open" link to the card. A separate expandable "Not submitted yet" panel shows who hasn\'t sent a timesheet.' },
           { title: 'By-scope review', text: 'Detailed review of a timesheet in parts — per site, and for non-site data: each part can be approved or returned separately. Used when a timesheet needs a closer look than a single click.' },
           { title: 'Corrections', text: 'Changing a timesheet that\'s already been finally approved. Started from that timesheet\'s own card, requires a reason, and goes through its own approval before the changed data becomes final. A timesheet still under review doesn\'t need a separate "correction" — use "Edit hours" or return it to the worker.' }
         ]
@@ -435,10 +452,16 @@ export const GUIDE_CONTENT: Record<AppLocale, GuideContent> = {
       {
         title: 'Reports',
         items: [
-          { title: 'Reports', text: 'Total worked hours by worker, by payroll period as a whole, or by a specific site. Only worked time is shown — the system doesn\'t calculate pay.' },
+          { title: 'Reports', text: 'Two clear modes: the internal payroll-period report and the customer-hours report. Customer hours use the same confirmed source as Timesheets, with customer filtering, week navigation, pending/changed totals, and PDF/CSV export.' },
           { title: 'Custom report', text: 'Worked hours for any date range, with worker and site selection, as PDF or CSV. Daily or totals, with per-worker and per-site subtotals. Hours only, no pay.' },
-          { title: 'Customer hours', text: 'A document for the customer: confirmed (final-approved) hours by site for a date range. The system checks readiness first — if a timesheet is not approved it shows a linked list and blocks the final PDF/CSV. PDF with the Titanor logo and a "FINAL APPROVED" mark. No salary, rates, premiums, TES or signature.' },
+          { title: 'Customer hours / Summary', text: 'A customer document built from the unified Timesheet. Final export includes only rows confirmed for the customer; preview clearly separates pending, changed, not-submitted and historical rows. Exact arrival/departure stays in details, while totals use rounded hours with unpaid lunch deducted.' },
           { title: 'CSV exports', text: 'Generates a downloadable CSV file of worked hours for a period, for use in an external payroll system. Each export is saved as a separate, immutable record; if a correction is approved after an export, a new file is created rather than editing the old one.' }
+        ]
+      },
+      {
+        title: 'Documents',
+        items: [
+          { title: 'Files and documents', text: 'One shared 10 GB corporate storage space for every administrator. All admins see the same folders and files. Upload multiple files with progress, create folders, search, sort, download, rename, move and delete. File bytes live on separate protected storage and actions are recorded in the audit trail.' }
         ]
       }
     ],
@@ -466,6 +489,17 @@ export const GUIDE_CONTENT: Record<AppLocale, GuideContent> = {
     changelogTitle: 'What\'s new',
     changelogIntro: 'A short list of what has changed in the system recently. Newest first.',
     changelog: [
+      {
+        date: '21–24 September 2026',
+        items: [
+          'A unified customer-based Timesheet now shows workers, weeks, rounded hours and totals in one place, with daily and exact check-in/out details when expanded.',
+          'Approval is simpler: one worker, selected workers, a whole week or every eligible row for a customer. Business issues are warnings the administrator can accept; only technically impossible operations are blocked.',
+          'The Summary tab and new customer CSV/PDF export use the same confirmed data. Final export contains only customer-confirmed hours; pending, changed and historical rows are clearly separated.',
+          'Hours changed after confirmation keep their history, become “Changed after confirmation”, and can be confirmed again.',
+          'A shared 10 GB Files and documents area was added for all administrators, with folders, search, progress uploads, downloads, rename, move and delete.',
+          'Titan dark is now the default colour theme; every other theme remains available as a saved personal choice.'
+        ]
+      },
       {
         date: '2–3 September 2026',
         items: [
