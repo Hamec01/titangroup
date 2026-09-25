@@ -155,7 +155,7 @@ export function TimesheetsLedgerView({
   // own attempt exceeded MAX_MASS_SELECTION_ITEMS, refused rather than silently confirmed partial.
   const [wholeWeekTooMany, setWholeWeekTooMany] = useState<{ rowKey: string; totalItems: number; max: number } | null>(null);
   // UT6-B-fixup #1 — true whenever MassApproveBar has a live preview/attempt open (any phase other
-  // than 'idle'), reported via its onActiveChange callback. Selection edits are frozen for as long as
+  // than 'idle'/'success'), reported via its onActiveChange callback. Selection edits are frozen for as long as
   // a confirmationToken is bound to the current selection, so a changed selection can never be sent
   // against a stale token.
   const [selectionLocked, setSelectionLocked] = useState(false);

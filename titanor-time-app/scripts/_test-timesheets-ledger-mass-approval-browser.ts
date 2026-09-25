@@ -260,6 +260,16 @@ async function main() {
     check('4e: exactly 3 real CustomerHoursApprovalItem rows exist in the DB', items === 3, items);
     const batch = await prisma.customerHoursApprovalBatch.findFirst({ where: { itemCount: 3 }, orderBy: { createdAt: 'desc' } });
     check('4f: one batch with itemCount=3, mode MASS in its snapshot', !!batch && (batch.selectionSnapshot as any).mode === 'MASS', batch?.selectionSnapshot);
+
+    // Regression (2026-09-25): the 'success' phase used to keep the selection locked, so nothing
+    // could be selected again until a full page reload. Same page, no navigation.
+    const firstCheckbox = page.locator('.ledger-row-checkbox').first();
+    check('4g: checkboxes are unlocked again right after a successful commit (no reload)', !(await firstCheckbox.isDisabled()));
+    check('4h: no "selection locked" note after a successful commit', (await page.locator('.ledger-group-mass-note').count()) === 0);
+    await firstCheckbox.check();
+    await page.waitForFunction(() => document.querySelector('.ledger-mass-bar .ledger-approve-button') !== null, { timeout: 5000 }).catch(() => {});
+    check('4i: a new selection after success offers a fresh "Подтвердить выбранные часы" action', (await bar.locator('.ledger-approve-button').count()) > 0, await bar.innerText());
+    await bar.locator('.ledger-link-button').first().click(); // "Снять выбор" — leave no selection behind
   }
 
   // ---------------------------------------------------------------------------------------------

@@ -101,8 +101,11 @@ export function MassApproveBar({
   const first = items[0];
   const selectionSignature = useMemo(() => selectionSignatureOf(items), [items]);
 
+  // 'success' holds no live token (the selection is already cleared) — it must NOT lock selection,
+  // otherwise the reset-on-new-selection effect below could never fire and the page stays frozen
+  // until a reload.
   useEffect(() => {
-    onActiveChange?.(phase !== 'idle');
+    onActiveChange?.(phase !== 'idle' && phase !== 'success');
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [phase]);
 
