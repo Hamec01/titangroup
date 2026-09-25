@@ -1,6 +1,8 @@
+'use client';
+
+import { useState } from 'react';
 import type { AppLocale } from '@/lib/i18n/locale';
 import { localeText } from '@/lib/i18n/locale';
-import Link from 'next/link';
 import type { WeeklyCustomerSliceRow } from '@/lib/reporting/time-ledger';
 import { formatWorkedDuration } from '@/lib/reporting/report-format';
 import { formatHelsinkiDateTime, utcIsoToHelsinkiTime } from '@/lib/helsinki-datetime';
@@ -8,6 +10,7 @@ import { dayTypeLabel } from '@/lib/i18n/worker';
 import { issueLabel, approveDraftWarningLabel, confirmWholeWeekLabel, confirmWholeWeekLoadingLabel, massTooManyLabel } from '@/lib/reporting/ledger-ui-text';
 import { ApproveWeekAction } from './ApproveWeekAction';
 import { ApprovalDiffPanel } from './ApprovalDiffPanel';
+import { InlineWeekEditor } from './InlineWeekEditor';
 
 function formatDayHeader(dateIso: string, locale: AppLocale): string {
   const d = new Date(`${dateIso}T00:00:00.000Z`);
@@ -28,7 +31,6 @@ export function ExpandedWeekPanel({
   onSelectWholeWeek,
   wholeWeekBusy = false,
   wholeWeekTooMany,
-  editReturnTo
 }: {
   locale: AppLocale;
   row: WeeklyCustomerSliceRow;
@@ -43,12 +45,37 @@ export function ExpandedWeekPanel({
   /** UT9-B-fixup #1 — this row's own whole-week attempt exceeded MAX_MASS_SELECTION_ITEMS even
    *  scoped to just its one week — refused, never a silently partial selection. */
   wholeWeekTooMany?: { totalItems: number; max: number } | null;
-  editReturnTo?: string;
 }) {
-  const editHref = `/admin/timesheets/${row.logicalKey.timesheetId}${editReturnTo ? `?returnTo=${encodeURIComponent(editReturnTo)}` : ''}`;
+  // «Внести изменения» edits the week right here (InlineWeekEditor) instead of navigating to the
+  // timesheet card and then to the corrections editor.
+  const [editing, setEditing] = useState(false);
+  const [savedNotice, setSavedNotice] = useState(false);
+
+  if (editing) {
+    return (
+      <div className="ledger-expanded">
+        <InlineWeekEditor
+          locale={locale}
+          row={row}
+          onCancel={() => setEditing(false)}
+          onSaved={() => {
+            setEditing(false);
+            setSavedNotice(true);
+            onApproved();
+          }}
+        />
+      </div>
+    );
+  }
+
   return (
     <div className="ledger-expanded">
       {row.submissionState === 'NOT_SUBMITTED' && <p className="ledger-approve-draft-warning">{approveDraftWarningLabel(locale)}</p>}
+      {savedNotice && (
+        <p className="ledger-approve-success" role="status">
+          {localeText(locale, 'Hours saved. Confirm the week again when ready.', 'Часы сохранены. Подтвердите неделю заново, когда будете готовы.')}
+        </p>
+      )}
       <table className="ledger-days-table">
         <thead>
           <tr>
@@ -152,9 +179,16 @@ export function ExpandedWeekPanel({
           </button>
         )}
         {row.submissionState === 'SUBMITTED' && (
-          <Link className="ledger-link-button" href={editHref}>
+          <button
+            type="button"
+            className="ledger-link-button"
+            onClick={() => {
+              setSavedNotice(false);
+              setEditing(true);
+            }}
+          >
             {localeText(locale, 'Edit hours', 'Внести изменения')}
-          </Link>
+          </button>
         )}
       </div>
       {wholeWeekTooMany && <p className="ledger-group-mass-note" role="alert">{massTooManyLabel(wholeWeekTooMany.totalItems, wholeWeekTooMany.max, locale)}</p>}

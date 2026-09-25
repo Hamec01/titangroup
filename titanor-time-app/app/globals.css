@@ -6866,6 +6866,68 @@ a.ov-summary-card:focus-visible {
   margin: 0 0 6px;
 }
 
+/* Inline week editor («Внести изменения» inside the expanded ledger row). */
+.ledger-edit-scroll {
+  overflow-x: auto;
+}
+.ledger-edit-table td {
+  vertical-align: top;
+}
+.ledger-edit-row-changed td:first-child {
+  box-shadow: inset 3px 0 0 var(--accent);
+  font-weight: 600;
+}
+.ledger-edit-segments {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+}
+.ledger-edit-segment {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.ledger-edit-line {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.ledger-edit-break {
+  padding-left: 12px;
+}
+.ledger-edit-input {
+  min-height: 36px;
+  padding: 0 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.03);
+  color: var(--text);
+  font-size: 0.82rem;
+}
+.ledger-edit-input:focus-visible {
+  outline: 2px solid var(--accent-light);
+  outline-offset: 1px;
+}
+.ledger-edit-check {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 0.78rem;
+}
+.ledger-edit-remove {
+  color: var(--error);
+}
+.ledger-edit-note {
+  color: var(--text-soft);
+  font-size: 0.78rem;
+  white-space: normal;
+}
+.ledger-edit-hint {
+  margin: 10px 0 0;
+}
+
 .ledger-diagnostics {
   margin-top: 12px;
 }
