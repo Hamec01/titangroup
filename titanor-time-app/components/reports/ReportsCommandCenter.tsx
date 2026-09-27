@@ -10,6 +10,9 @@ import { formatWorkedDuration, timesheetStatusLabel } from '@/lib/reporting/repo
 import { formatHelsinkiDateTime } from '@/lib/helsinki-datetime';
 import { ReportExportControls } from '@/components/reports/ReportExportControls';
 import { ReportFileDeleteButton } from '@/components/reports/ReportFileDeleteButton';
+import { ReportWeekDetailView } from '@/components/reports/ReportWeekDetailView';
+import type { ReportWeekDetail, ReportWeekQuery } from '@/lib/reporting/report-week-detail';
+import { ReportPeriodSelect } from '@/components/reports/ReportPeriodSelect';
 
 export type ReportsView = 'overview' | 'worker' | 'site' | 'files';
 
@@ -17,7 +20,7 @@ export type ReportsScreen =
   | { kind: 'period-invalid' }
   | { kind: 'period-not-found' }
   | { kind: 'no-periods' }
-  | { kind: 'overview'; report: PeriodTimeReport }
+  | { kind: 'overview'; report: PeriodTimeReport; weekDetail: ReportWeekDetail; weekDetailTruncated: boolean }
   | { kind: 'worker-picker' }
   | { kind: 'site-picker' }
   | { kind: 'entity-invalid'; entity: 'worker' | 'site' }
@@ -39,6 +42,7 @@ interface Props {
   selectedPeriodEndDate: string | null;
   selectedEmployeeId: string | null;
   selectedSiteId: string | null;
+  weekQuery: ReportWeekQuery;
   detailPage: number;
   filesPage: number;
   screen: ReportsScreen;
@@ -69,6 +73,16 @@ export function ReportsCommandCenter(props: Props) {
       ? `/admin/timesheets?view=summary&startDate=${encodeURIComponent(props.selectedPeriodStartDate)}&endDate=${encodeURIComponent(props.selectedPeriodEndDate)}`
       : '/admin/timesheets?view=summary';
 
+  const overviewParams = {
+    groupBy: props.weekQuery.groupBy,
+    sort: props.weekQuery.sort === 'name_asc' ? null : props.weekQuery.sort,
+    customerId: props.weekQuery.customerId,
+    reportSiteId: props.weekQuery.siteId,
+    employeeSearch: props.weekQuery.employeeSearch,
+    reportStatus: props.weekQuery.status === 'all' ? null : props.weekQuery.status,
+    onlyIssues: props.weekQuery.onlyIssues ? 'true' : null
+  };
+
   const periodStatusText = (status: string | null): string => {
     if (status === 'OPEN') return ru ? 'Открыт' : 'Open';
     if (status === 'LOCKED') return ru ? 'Заблокирован' : 'Locked';
@@ -80,8 +94,7 @@ export function ReportsCommandCenter(props: Props) {
   // structurally impossible (§2.7).
   const tabHref = (target: ReportsView): string => {
     if (!selectedPeriodId) return href({ view: target });
-    if (target === 'worker') return href({ view: 'worker', periodId: selectedPeriodId, employeeId: props.selectedEmployeeId });
-    if (target === 'site') return href({ view: 'site', periodId: selectedPeriodId, siteId: props.selectedSiteId });
+    if (target === 'overview') return href({ view: target, periodId: selectedPeriodId, ...overviewParams });
     return href({ view: target, periodId: selectedPeriodId });
   };
 
@@ -114,16 +127,20 @@ export function ReportsCommandCenter(props: Props) {
         <input type="hidden" name="view" value={view} />
         {view === 'worker' && props.selectedEmployeeId && <input type="hidden" name="employeeId" value={props.selectedEmployeeId} />}
         {view === 'site' && props.selectedSiteId && <input type="hidden" name="siteId" value={props.selectedSiteId} />}
+        {view === 'overview' ? (
+          <>
+            <input type="hidden" name="groupBy" value={props.weekQuery.groupBy} />
+            {props.weekQuery.sort !== 'name_asc' ? <input type="hidden" name="sort" value={props.weekQuery.sort} /> : null}
+            {props.weekQuery.customerId ? <input type="hidden" name="customerId" value={props.weekQuery.customerId} /> : null}
+            {props.weekQuery.siteId ? <input type="hidden" name="reportSiteId" value={props.weekQuery.siteId} /> : null}
+            {props.weekQuery.employeeSearch ? <input type="hidden" name="employeeSearch" value={props.weekQuery.employeeSearch} /> : null}
+            {props.weekQuery.status !== 'all' ? <input type="hidden" name="reportStatus" value={props.weekQuery.status} /> : null}
+            {props.weekQuery.onlyIssues ? <input type="hidden" name="onlyIssues" value="true" /> : null}
+          </>
+        ) : null}
         <div className="report-filter-field">
           <label htmlFor="report-period">{ru ? 'Расчётный период' : 'Payroll period'}</label>
-          <select id="report-period" name="periodId" defaultValue={selectedPeriodId ?? ''}>
-            {props.periodOptions.length === 0 && <option value="">{ru ? 'Периодов нет' : 'No periods'}</option>}
-            {props.periodOptions.map((p) => (
-              <option key={p.id} value={p.id}>
-                {p.label}
-              </option>
-            ))}
-          </select>
+          <ReportPeriodSelect options={props.periodOptions} selectedPeriodId={selectedPeriodId} ru={ru} />
         </div>
         <button className="report-filter-submit" type="submit">
           {ru ? 'Показать' : 'Apply'}
@@ -132,45 +149,31 @@ export function ReportsCommandCenter(props: Props) {
           {ru ? 'Сбросить' : 'Reset'}
         </Link>
         {olderPeriod ? (
-          <Link className="report-filter-reset" href={href({ view, periodId: olderPeriod.id, employeeId: view === 'worker' ? props.selectedEmployeeId : null, siteId: view === 'site' ? props.selectedSiteId : null })} rel="prev">
+          <Link className="report-filter-reset" href={href({ view, periodId: olderPeriod.id, employeeId: view === 'worker' ? props.selectedEmployeeId : null, siteId: view === 'site' ? props.selectedSiteId : null, ...(view === 'overview' ? overviewParams : {}) })} rel="prev">
             ← {ru ? 'Предыдущий период' : 'Previous period'}
           </Link>
         ) : null}
         {newerPeriod ? (
-          <Link className="report-filter-reset" href={href({ view, periodId: newerPeriod.id, employeeId: view === 'worker' ? props.selectedEmployeeId : null, siteId: view === 'site' ? props.selectedSiteId : null })} rel="next">
+          <Link className="report-filter-reset" href={href({ view, periodId: newerPeriod.id, employeeId: view === 'worker' ? props.selectedEmployeeId : null, siteId: view === 'site' ? props.selectedSiteId : null, ...(view === 'overview' ? overviewParams : {}) })} rel="next">
             {ru ? 'Следующий период' : 'Next period'} →
           </Link>
         ) : null}
         {currentPeriod && currentPeriod.id !== selectedPeriodId ? (
-          <Link className="report-filter-reset" href={href({ view, periodId: currentPeriod.id, employeeId: view === 'worker' ? props.selectedEmployeeId : null, siteId: view === 'site' ? props.selectedSiteId : null })}>
+          <Link className="report-filter-reset" href={href({ view, periodId: currentPeriod.id, employeeId: view === 'worker' ? props.selectedEmployeeId : null, siteId: view === 'site' ? props.selectedSiteId : null, ...(view === 'overview' ? overviewParams : {}) })}>
             {ru ? 'Текущий период' : 'Current period'}
           </Link>
         ) : null}
       </form>
 
       <nav className="report-tabs" aria-label={ru ? 'Разделы отчёта' : 'Report sections'}>
-        {(['overview', 'worker', 'site', 'files'] as ReportsView[]).map((t) => (
+        {(['overview', 'files'] as ReportsView[]).map((t) => (
           <Link
             key={t}
             className={view === t ? 'report-tab report-tab-active' : 'report-tab'}
             aria-current={view === t ? 'page' : undefined}
             href={tabHref(t)}
           >
-            {t === 'overview'
-              ? ru
-                ? 'Внутренний отчёт'
-                : 'Internal report'
-              : t === 'worker'
-                ? ru
-                  ? 'По работнику'
-                  : 'By worker'
-                : t === 'site'
-                  ? ru
-                    ? 'По объекту'
-                    : 'By site'
-                  : ru
-                    ? 'Сохранённые файлы'
-                    : 'Saved files'}
+            {t === 'overview' ? (ru ? 'Внутренний отчёт' : 'Internal report') : ru ? 'Сохранённые файлы' : 'Saved files'}
           </Link>
         ))}
         <Link className="report-tab" href={customerHoursHref}>
@@ -265,7 +268,7 @@ function ScreenBody(props: Props & { ru: boolean }) {
     case 'site-picker':
       return <EntitySwitcher {...props} />;
     case 'overview':
-      return <PeriodOverview {...props} report={screen.report} />;
+      return <PeriodOverview {...props} report={screen.report} weekDetail={screen.weekDetail} weekDetailTruncated={screen.weekDetailTruncated} />;
     case 'worker':
       return (
         <>
@@ -380,11 +383,10 @@ function Pagination({
   );
 }
 
-function PeriodOverview(props: Props & { ru: boolean; report: PeriodTimeReport }) {
+function PeriodOverview(props: Props & { ru: boolean; report: PeriodTimeReport; weekDetail: ReportWeekDetail; weekDetailTruncated: boolean }) {
   const { ru, report, locale } = props;
   const s = report.summary;
   const st = s.timesheetStatusCounts;
-  const makeHref = (page: number) => href({ view: 'overview', periodId: report.period.id, page });
   return (
     <>
       <div className="report-period-strip">
@@ -404,71 +406,13 @@ function PeriodOverview(props: Props & { ru: boolean; report: PeriodTimeReport }
         <Kpi label={ru ? 'Окончательно одобрены' : 'Final approved'} value={String(st.FINAL_APPROVED)} note={`${s.withoutTimesheetCount} ${ru ? 'без табеля' : 'without timesheet'}`} />
       </div>
 
-      <section className="report-panel">
-        <div className="report-panel-heading">
-          <div>
-            <h2>{ru ? 'Объекты и часы' : 'Sites and hours'}</h2>
-            <p>{ru ? 'Откройте объект для детализации по людям и дням.' : 'Open a site for per-worker and daily detail.'}</p>
-          </div>
-        </div>
-        <div className="report-table-wrap">
-          <table className="report-table">
-            <thead>
-              <tr>
-                <th>{ru ? 'Объект' : 'Site'}</th>
-                <th>{ru ? 'Работники (часы/назн.)' : 'Workers (hrs/assigned)'}</th>
-                <th>{ru ? 'Дни' : 'Days'}</th>
-                <th>{ru ? 'Всего' : 'Gross'}</th>
-                <th>{ru ? 'Отработано' : 'Worked'}</th>
-                <th>{ru ? 'Интервалы' : 'Segments'}</th>
-              </tr>
-            </thead>
-            <tbody>
-              {report.sites.map((site) => (
-                <tr key={site.site.id}>
-                  <td>
-                    <Link href={href({ view: 'site', periodId: report.period.id, siteId: site.site.id })}>{site.site.name}</Link>
-                  </td>
-                  <td>
-                    {site.workedWorkerCount} / {site.assignedWorkerCount}
-                  </td>
-                  <td>{site.workedDayCount}</td>
-                  <td>{formatWorkedDuration(site.grossMinutes, locale)}</td>
-                  <td>{formatWorkedDuration(site.workedMinutes, locale)}</td>
-                  <td>{site.segmentCount}</td>
-                </tr>
-              ))}
-              {report.sites.length === 0 && (
-                <tr>
-                  <td colSpan={6} className="report-empty">
-                    {ru ? 'В этом периоде нет объектов с часами или назначениями.' : 'No sites with hours or assignments in this period.'}
-                  </td>
-                </tr>
-              )}
-            </tbody>
-            {report.sites.length > 0 && (
-              <tfoot>
-                <tr>
-                  <td>{ru ? 'Итого' : 'Total'}</td>
-                  <td>
-                    {s.workedWorkerCount} / {s.assignedWorkerCount}
-                  </td>
-                  <td>{s.workedDayCount}</td>
-                  <td>{formatWorkedDuration(s.grossMinutes, locale)}</td>
-                  <td>{formatWorkedDuration(s.workedMinutes, locale)}</td>
-                  <td>{s.segmentCount}</td>
-                </tr>
-              </tfoot>
-            )}
-          </table>
-        </div>
-        <Pagination ru={ru} page={report.page} totalPages={report.totalPages} totalItems={report.totalItems} pageSize={report.pageSize} makeHref={makeHref} />
-        <p className="report-fine-print">
-          {ru
-            ? 'Счётчики работников и дней в строке «Итого» — это компанейские значения без двойного счёта. Только минуты и интервалы являются суммой строк.'
-            : 'Worker and day counts on the Total line are deduplicated company figures. Only minutes and segment counts are column sums.'}
-        </p>
-      </section>
+      <ReportWeekDetailView
+        locale={locale}
+        periodId={report.period.id}
+        detail={props.weekDetail}
+        query={props.weekQuery}
+        truncated={props.weekDetailTruncated}
+      />
     </>
   );
 }

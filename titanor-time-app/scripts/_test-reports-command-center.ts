@@ -1,9 +1,9 @@
 // docs/titanor-time/REPORT_REDESIGN_PRODUCTION_READINESS_RU.md §13.C — browser QA for the new
 // /admin/reports command centre. Real Chromium, production standalone server (TEST_BASE_URL),
 // disposable PostgreSQL 16. Self-contained fixtures (direct Prisma — works on a fresh DB and on a
-// restored real-data copy alike, so this doubles as the preview acceptance run). Covers §2 (URL
-// is the source of truth), §3 (real pagination), §4 (new/classic design), §9 (create / download /
-// history / delete), RU/EN, desktop/mobile.
+// restored real-data copy alike, so this doubles as the preview acceptance run). Covers the
+// read-only full-period week table, URL-driven grouping/filtering/sorting, legacy worker/site URLs,
+// new/classic design, create/download/history/delete, RU/EN, desktop/mobile.
 import { chromium, type Page } from 'playwright';
 import { randomUUID } from 'node:crypto';
 import argon2 from 'argon2';
@@ -67,7 +67,8 @@ async function main() {
   const from = period.startDate;
   const to = period.endDate;
 
-  // 1 site with real hours + 118 assignment-only sites -> 119 site rows -> pagination at 20/page.
+  // 1 site with real hours + assignment-only sites: the weekly detail must show the actual worked
+  // row and keep every missing timesheet in the separate "Not submitted" section.
   const hoursEmp = await prisma.employee.create({ data: { employeeNumber: `RCC-H-${randomUUID().slice(0, 8)}`, firstName: 'Hilda', lastName: 'Hours' } });
   await prisma.employment.create({ data: { employeeId: hoursEmp.id, active: true, startDate: new Date('2020-01-01') } });
   const hoursSite = await prisma.workSite.create({ data: { name: `RCC Hours Site ${randomUUID().slice(0, 4)}` } });
@@ -108,25 +109,30 @@ async function main() {
     await page.waitForLoadState('networkidle');
   };
 
-  // ── §2 tabs + URL is the source of truth ────────────────────────────────────────────────────
+  // ── Weekly detail + URL is the source of truth ──────────────────────────────────────────────
   await page.goto(REPORTS, { waitUntil: 'networkidle' });
-  check('overview: renders with the working-report notice', (await page.locator('.report-working-notice').isVisible()) && (await page.locator('.report-tab-active').innerText()).match(/overview|обзор/i) !== null);
+  check(
+    'overview: working-report notice + Internal report tab + weekly detail render',
+    (await page.locator('.report-working-notice').isVisible()) &&
+      /Internal report|Внутренний отчёт/i.test(await page.locator('.report-tab-active').innerText()) &&
+      (await page.locator('.report-week-section').isVisible())
+  );
+  check('overview: exact seven/fourteen day period columns render immediately', (await page.locator('.report-week-table thead th').count()) === 1 + 14 + 2);
+  check('overview: worked row is visible without opening a separate report', /Hilda|Hours/.test(await page.locator('.report-week-table tbody').innerText()));
+  check('overview: every assignment-only participant remains visible as not submitted', (await page.locator('.report-week-missing li').count()) >= TOTAL_SITES - 1);
 
-  // period pagination — parse the actual total (the restored copy may hold extra real sites)
-  const infoText = await page.locator('.report-pagination-info').innerText();
-  const total = Number(infoText.match(/of (\d+)|из (\d+)/)?.slice(1).find(Boolean) ?? 0);
-  const expectedPages = Math.ceil(total / 20);
-  check('overview: site table is paginated to 20 rows', (await page.locator('.report-table tbody tr').count()) === 20, infoText);
-  check('overview: readout shows the full count and page maths', total >= TOTAL_SITES && new RegExp(`(page|страница) 1 (of|из) ${expectedPages}`).test(infoText), infoText);
-  const page1FirstSite = await page.locator('.report-table tbody tr td').first().innerText();
-  await clickNav(page.locator('.report-pagination-controls a', { hasText: /Next|Вперёд/ }), /[?&]page=2\b/);
-  check('overview: Next advances page in the URL and changes the rows', (await sp(page)).page === '2' && (await page.locator('.report-table tbody tr td').first().innerText()) !== page1FirstSite);
-  await Promise.all([page.waitForURL((u) => !/[?&]page=2\b/.test(u.href), { timeout: 20000 }), page.goBack()]);
-  await page.waitForLoadState('networkidle');
-  check('overview: Back returns to page 1', ((await sp(page)).page ?? '1') === '1' && (await page.locator('.report-table tbody tr td').first().innerText()) === page1FirstSite);
+  await clickNav(page.locator('.report-week-group-option', { hasText: /By worker|По работнику/ }), /groupBy=worker/);
+  check('grouping: worker mode is URL-backed and active', (await sp(page)).groupBy === 'worker' && /By worker|По работнику/.test(await page.locator('.report-week-group-option.is-active').innerText()));
+  await page.reload({ waitUntil: 'networkidle' });
+  check('grouping: reload restores worker mode', (await sp(page)).groupBy === 'worker' && (await page.locator('.report-week-group-option.is-active').count()) === 1);
 
-  // worker tab without an id -> picker
-  await clickNav(page.locator('.report-tab', { hasText: /By worker|По работнику/ }), /view=worker/);
+  await page.locator('.report-week-filters select[name=reportSiteId]').selectOption(hoursSite.id);
+  await clickNav(page.locator('.report-week-filter-actions button[type=submit]'), new RegExp(`reportSiteId=${hoursSite.id}`));
+  check('filters: site filter is URL-backed and keeps the worked row', (await sp(page)).reportSiteId === hoursSite.id && /Hilda|Hours/.test(await page.locator('.report-week-table tbody').innerText()));
+
+  // Legacy worker/site URLs remain compatible even though these are now grouping controls in the
+  // primary report interface.
+  await page.goto(`${BASE}/admin/reports?view=worker&periodId=${period.id}`, { waitUntil: 'networkidle' });
   check('worker tab w/o id: picker screen shown, no employeeId in URL', (await page.locator('.report-picker').isVisible()) && !(await sp(page)).employeeId && (await sp(page)).view === 'worker');
   await page.locator('.report-picker-form select').selectOption(hoursEmp.id);
   await clickNav(page.locator('.report-picker-form button[type=submit]'), new RegExp(`employeeId=${hoursEmp.id}`));
@@ -134,8 +140,8 @@ async function main() {
   check('worker selected: report shown, employeeId in URL, NO siteId', afterWorker.view === 'worker' && afterWorker.employeeId === hoursEmp.id && !afterWorker.siteId);
   check('worker report: heading names the worker', /Hours/.test(await page.locator('.report-detail-head h2').innerText()));
 
-  // switch to site tab -> picker; select -> siteId in URL, employeeId dropped
-  await clickNav(page.locator('.report-tab', { hasText: /By site|По объекту/ }), /view=site/);
+  // Legacy site URL -> picker; select -> siteId in URL, employeeId dropped.
+  await page.goto(`${BASE}/admin/reports?view=site&periodId=${period.id}`, { waitUntil: 'networkidle' });
   check('site tab: picker shown, employeeId dropped (no conflict possible)', (await page.locator('.report-picker').isVisible()) && (await sp(page)).view === 'site' && !(await sp(page)).employeeId);
   await page.locator('.report-picker-form select').selectOption(hoursSite.id);
   await clickNav(page.locator('.report-picker-form button[type=submit]'), new RegExp(`siteId=${hoursSite.id}`));
@@ -289,7 +295,7 @@ async function main() {
     await page.waitForFunction((value) => document.querySelector('.admin-modern-shell')?.getAttribute('data-theme') === value, theme);
     const appearance = await page.evaluate(() => {
       const shell = document.querySelector<HTMLElement>('.admin-modern-shell')!;
-      const panel = document.querySelector<HTMLElement>('.report-panel')!;
+      const panel = document.querySelector<HTMLElement>('.report-week-group')!;
       const input = document.querySelector<HTMLElement>('.report-filter-field select')!;
       const primary = document.querySelector<HTMLElement>('.report-button-primary')!;
       return {
@@ -333,6 +339,8 @@ async function main() {
   await mpage.goto(`${BASE}/admin/reports?periodId=${period.id}`, { waitUntil: 'networkidle' });
   const bodyScrollW = await mpage.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1);
   check('mobile: page body does not scroll horizontally', bodyScrollW);
+  const weekTableScroll = await mpage.locator('.report-week-table-wrap').first().evaluate((element) => ({ clientWidth: element.clientWidth, scrollWidth: element.scrollWidth, overflowX: getComputedStyle(element).overflowX }));
+  check('mobile: wide week table scrolls inside its own container', weekTableScroll.scrollWidth > weekTableScroll.clientWidth && ['auto', 'scroll'].includes(weekTableScroll.overflowX), weekTableScroll);
   await mpage.locator('.admin-theme-trigger').click();
   const mobileThemeMenu = await mpage.locator('.admin-theme-menu').boundingBox();
   check('mobile: four-theme menu opens fully inside the viewport', !!mobileThemeMenu && mobileThemeMenu.x >= 0 && mobileThemeMenu.x + mobileThemeMenu.width <= MOBILE.width);

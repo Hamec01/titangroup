@@ -11,6 +11,8 @@ import { listPeriodOptions, listSiteOptionsForAdmin } from '@/lib/attendance-ove
 import { listReportFiles, parseReportFilesQuery } from '@/lib/report-files';
 import { ReportsCommandCenter, type ReportsScreen, type ReportsView } from '@/components/reports/ReportsCommandCenter';
 import { resolveAppLocale } from '@/lib/i18n/server';
+import { getTimeLedger } from '@/lib/reporting/time-ledger';
+import { buildReportWeekDetail, parseReportWeekQuery } from '@/lib/reporting/report-week-detail';
 
 export const dynamic = 'force-dynamic';
 
@@ -41,6 +43,7 @@ export default async function AdminReportsPage({ searchParams }: RouteParams) {
   }
 
   const sp = await searchParams;
+  const weekQuery = parseReportWeekQuery(sp);
   const rawView = one(sp.view);
   const employeeIdParam = one(sp.employeeId);
   const siteIdParam = one(sp.siteId);
@@ -115,9 +118,46 @@ export default async function AdminReportsPage({ searchParams }: RouteParams) {
       else screen = { kind: 'site', report: result.report };
     }
   } else {
-    const result = await getPeriodTimeReport(selectedPeriodId, { page: detailPage, pageSize: detailPageSize });
+    const detailLimit = 5_000;
+    const makeLedgerQuery = (startDate: string, endDate: string) => ({
+      allTime: false as const,
+      requestedRange: { startDate, endDate },
+      employeeSearch: null,
+      employeeId: null,
+      workAreaId: null,
+      siteId: null,
+      status: 'all' as const,
+      onlyIssues: false,
+      onlyChangedAfterApproval: false,
+      submissionState: 'all' as const,
+      submissionSource: 'all' as const,
+      page: 1,
+      pageSize: detailLimit
+    });
+    const actor = { userId: session.user.id, employeeId: session.user.employeeId };
+    const preloadedLedger = selectedPeriodOption
+      ? getTimeLedger(makeLedgerQuery(selectedPeriodOption.startDate, selectedPeriodOption.endDate), actor)
+      : Promise.resolve(null);
+    const [result, ledgerFromOption] = await Promise.all([
+      getPeriodTimeReport(selectedPeriodId, { page: detailPage, pageSize: detailPageSize }),
+      preloadedLedger
+    ]);
     if (result.code === 'PERIOD_NOT_FOUND') screen = { kind: 'period-not-found' };
-    else screen = { kind: 'overview', report: result.report };
+    else {
+      const ledger = ledgerFromOption ?? (await getTimeLedger(makeLedgerQuery(result.report.period.startDate, result.report.period.endDate), actor));
+      screen = {
+        kind: 'overview',
+        report: result.report,
+        weekDetail: buildReportWeekDetail(
+          ledger,
+          result.report.period.startDate,
+          result.report.period.endDate,
+          weekQuery,
+          locale === 'RU' ? 'Без заказчика' : 'No customer'
+        ),
+        weekDetailTruncated: ledger.pagination.totalItems > detailLimit
+      };
+    }
   }
 
   return (
@@ -134,6 +174,7 @@ export default async function AdminReportsPage({ searchParams }: RouteParams) {
       selectedPeriodEndDate={selectedPeriodOption?.endDate ?? null}
       selectedEmployeeId={rawEmployeeId}
       selectedSiteId={rawSiteId}
+      weekQuery={weekQuery}
       detailPage={detailPage}
       filesPage={filesPage}
       screen={screen}

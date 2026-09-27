@@ -7,8 +7,8 @@ import type { AppLocale } from './locale';
 // those directly. Kept as a data module (not JSX) so the content itself stays easy to review/edit
 // without touching component code.
 //
-// Last brought current: 2026-09-24 (unified customer timesheet, customer-hours summary/export,
-// shared document storage, current menu and approval flow). Earlier changelog includes the rebuilt
+// Last brought current: 2026-09-27 (full-period read-only report, unified customer timesheet,
+// customer-hours summary/export, shared document storage, current menu and approval flow). Earlier changelog includes the rebuilt
 // worker card + one-button
 // workplace change, "end today", finish site / disable customer, group transfer, worker
 // archive/restore, "work area" → "customer" rename, the rebuilt Customer working-hours report,
@@ -184,7 +184,7 @@ export const GUIDE_CONTENT: Record<AppLocale, GuideContent> = {
       {
         title: 'Отчёты',
         items: [
-          { title: 'Отчёты', text: 'Два понятных режима: внутренний отчёт по расчётному периоду и клиентский отчёт «Часы заказчиков». В клиентском режиме используются те же подтверждённые данные, что и в «Табеле»: фильтр заказчика, переход между неделями, ожидающие и изменённые часы, PDF/CSV.' },
+          { title: 'Отчёты', text: 'Внутренний отчёт сразу показывает выбранный расчётный период целиком: каждый день, работники, часы, итоги и статусы. Вид можно сгруппировать по заказчику, объекту или работнику, отфильтровать и отсортировать. Это режим только для просмотра; редактирование и подтверждение остаются в «Табеле». Показатели, PDF/CSV, сохранённые файлы и «Часы заказчиков» сохранены.' },
           { title: 'Произвольный отчёт', text: 'Отработанные часы за любой период с выбором работников и объектов, в PDF или CSV. По дням или итогами, с подытогами по работнику и объекту. Только часы, без зарплаты.' },
           { title: 'Часы заказчиков / Сводка', text: 'Документ для заказчика на основе единого Табеля. Финальный файл включает только «Подтверждено для заказчика»; предварительный просмотр отдельно показывает ожидающие, изменённые, неотправленные и исторические строки. Реальные приходы и уходы остаются в подробностях, а итоговые часы округлены и учитывают неоплачиваемый обед.' },
           { title: 'Выгрузка CSV', text: 'Формирование скачиваемого CSV-файла с отработанными часами за период — для передачи во внешнюю систему расчёта зарплаты. Каждая выгрузка сохраняется как отдельная неизменяемая запись; если после выгрузки была одобрена корректировка, создаётся новый файл, а не редактируется старый.' }
@@ -221,6 +221,14 @@ export const GUIDE_CONTENT: Record<AppLocale, GuideContent> = {
     changelogTitle: 'Что нового',
     changelogIntro: 'Коротко — что менялось в системе за последнее время. Самое свежее сверху.',
     changelog: [
+      {
+        date: '27 сентября 2026',
+        items: [
+          'Раздел «Отчёты» теперь сразу показывает выбранный расчётный период целиком: все дни, часы каждого работника, итоги и статусы — без перехода в отдельный табель.',
+          'Данные можно показать общим списком или сгруппировать по заказчику, объекту и работнику. Добавлены поиск, фильтры по статусу и замечаниям, а также сортировка по алфавиту и часам.',
+          'Новый вид — только для просмотра: изменение и подтверждение часов остаются в «Табеле». Прежние показатели, PDF/CSV, сохранённые файлы и «Часы заказчиков» сохранены.'
+        ]
+      },
       {
         date: '21–24 сентября 2026',
         items: [
@@ -452,7 +460,7 @@ export const GUIDE_CONTENT: Record<AppLocale, GuideContent> = {
       {
         title: 'Reports',
         items: [
-          { title: 'Reports', text: 'Two clear modes: the internal payroll-period report and the customer-hours report. Customer hours use the same confirmed source as Timesheets, with customer filtering, week navigation, pending/changed totals, and PDF/CSV export.' },
+          { title: 'Reports', text: 'The internal report now shows the selected payroll period in full: every date, worker, hour total and status. It can be grouped by customer, site or worker, filtered and sorted. It is read-only; editing and confirmation remain in Timesheets. Existing metrics, PDF/CSV, saved files and Customer hours are preserved.' },
           { title: 'Custom report', text: 'Worked hours for any date range, with worker and site selection, as PDF or CSV. Daily or totals, with per-worker and per-site subtotals. Hours only, no pay.' },
           { title: 'Customer hours / Summary', text: 'A customer document built from the unified Timesheet. Final export includes only rows confirmed for the customer; preview clearly separates pending, changed, not-submitted and historical rows. Exact arrival/departure stays in details, while totals use rounded hours with unpaid lunch deducted.' },
           { title: 'CSV exports', text: 'Generates a downloadable CSV file of worked hours for a period, for use in an external payroll system. Each export is saved as a separate, immutable record; if a correction is approved after an export, a new file is created rather than editing the old one.' }
@@ -489,6 +497,14 @@ export const GUIDE_CONTENT: Record<AppLocale, GuideContent> = {
     changelogTitle: 'What\'s new',
     changelogIntro: 'A short list of what has changed in the system recently. Newest first.',
     changelog: [
+      {
+        date: '27 September 2026',
+        items: [
+          'Reports now shows the selected payroll period in full: every date, each worker\'s hours, totals and statuses, without opening a separate timesheet.',
+          'Data can be shown as one list or grouped by customer, site or worker. Search, status and issue filters, plus alphabetical and hour-based sorting, were added.',
+          'The new view is read-only: editing and confirming hours remain in Timesheets. Existing metrics, PDF/CSV, saved files and Customer hours are preserved.'
+        ]
+      },
       {
         date: '21–24 September 2026',
         items: [

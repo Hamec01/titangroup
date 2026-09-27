@@ -5204,10 +5204,75 @@ a.ov-summary-card:focus-visible {
 .report-create-note { margin: 0; padding: 12px 14px; border-radius: 9px; color: #967028; background: #fff7df; font-size: 0.75rem; line-height: 1.45; }
 .report-alert { margin: 0 0 16px; padding: 12px 14px; border-radius: 9px; color: #a14955; background: #fff0f1; font-size: 0.8rem; }
 .report-center .setup-subtitle { color: #718096; }.report-center .login-error { color: #a14955; }
+
+/* Read-only weekly report detail. Grouping and sorting are intentionally separate controls: a
+   grouping changes the hierarchy, while a sort only changes order inside that hierarchy. */
+.report-week-section { margin-top: 18px; }
+.report-week-heading { display: flex; align-items: end; justify-content: space-between; gap: 16px; margin-bottom: 12px; }
+.report-week-heading h2 { margin: 0; color: #172f47; font-size: 1.3rem; letter-spacing: -0.025em; }
+.report-week-heading p { margin: 4px 0 0; color: #718096; font-size: 0.76rem; }
+.report-week-visible-count { color: #718096; font-size: 0.74rem; font-weight: 700; }
+.report-week-toolbar { margin-bottom: 14px; padding: 14px; border: 1px solid #e0e8f0; border-radius: 14px; background: #fff; box-shadow: 0 5px 18px rgba(25, 53, 81, 0.04); }
+.report-week-group-switch { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; margin-bottom: 13px; }
+.report-week-group-switch > span { margin-right: 5px; color: #354f68; font-size: 0.76rem; font-weight: 800; }
+.report-week-group-option { min-height: 36px; display: inline-flex; align-items: center; padding: 0 13px; border: 1px solid #dce6ef; border-radius: 8px; color: #526b82; background: #f9fbfd; font-size: 0.75rem; font-weight: 750; text-decoration: none; }
+.report-week-group-option:hover, .report-week-group-option:focus-visible { border-color: #8fc7ee; color: #087bcf; outline: none; }
+.report-week-group-option.is-active { border-color: #168ee8; color: #fff; background: #168ee8; }
+.report-week-filters { display: grid; grid-template-columns: minmax(150px, 0.85fr) minmax(150px, 0.85fr) minmax(210px, 1.3fr) minmax(160px, 0.9fr) minmax(190px, 1fr); gap: 10px; align-items: end; }
+.report-week-filters label > span { display: block; margin: 0 0 5px; color: #718096; font-size: 0.67rem; font-weight: 800; letter-spacing: 0.04em; text-transform: uppercase; }
+.report-week-filters select, .report-week-filters input[type='text'], .report-week-filters input:not([type]) { width: 100%; min-height: 39px; padding: 0 10px; border: 1px solid #dbe5ee; border-radius: 8px; color: #22374d; background: #f9fbfd; font-size: 0.76rem; }
+.report-week-filters select:focus-visible, .report-week-filters input:focus-visible { border-color: #4aa9e9; outline: 3px solid rgba(74, 169, 233, 0.15); }
+.report-week-only-issues { min-height: 39px; display: flex; align-items: center; gap: 8px; grid-column: span 2; color: #526b82; font-size: 0.74rem; }
+.report-week-only-issues input { width: 18px; height: 18px; }
+.report-week-only-issues > span { margin: 0 !important; text-transform: none !important; letter-spacing: 0 !important; }
+.report-week-filter-actions { display: flex; align-items: center; justify-content: flex-end; gap: 11px; grid-column: 4 / -1; }
+.report-week-group { margin-top: 12px; overflow: clip; border: 1px solid #dce6ef; border-radius: 13px; background: #fff; box-shadow: 0 5px 18px rgba(25, 53, 81, 0.04); content-visibility: auto; contain-intrinsic-size: auto 480px; }
+.report-week-group > summary { min-height: 54px; display: flex; align-items: center; justify-content: space-between; gap: 18px; padding: 11px 15px; color: #526b82; background: #fbfdff; cursor: pointer; font-size: 0.76rem; list-style-position: inside; }
+.report-week-group > summary:hover { background: #f4faff; }
+.report-week-group-title { color: #087bcf; font-size: 0.88rem; font-weight: 800; }
+.report-week-group-title small { color: #526b82; font-size: 0.76rem; font-weight: 650; }
+.report-week-table-wrap { max-width: 100%; overflow: auto; border-top: 1px solid #e7edf3; scrollbar-gutter: stable; }
+.report-week-table { width: 100%; min-width: 980px; border-collapse: separate; border-spacing: 0; }
+.report-week-table th, .report-week-table td { padding: 9px 8px; border-bottom: 1px solid #edf1f5; color: #334d65; font-size: 0.72rem; text-align: left; vertical-align: top; white-space: nowrap; }
+.report-week-table thead th { position: sticky; top: 0; z-index: 2; color: #718096; background: #f9fbfd; font-size: 0.63rem; font-weight: 800; letter-spacing: 0.035em; text-transform: uppercase; }
+.report-week-table th:first-child { position: sticky; left: 0; z-index: 1; min-width: 220px; max-width: 280px; background: #fff; }
+.report-week-table thead th:first-child { z-index: 3; background: #f9fbfd; }
+.report-week-table tbody tr:hover td, .report-week-table tbody tr:hover th { background: #f8fbfe; }
+.report-week-worker-cell > span, .report-week-worker-cell > small, .report-week-total-cell > strong, .report-week-total-cell > small { display: block; }
+.report-week-worker-cell > span { overflow: hidden; max-width: 250px; color: #243f58; font-weight: 800; text-overflow: ellipsis; }
+.report-week-worker-cell > small, .report-week-total-cell > small { margin-top: 3px; color: #718096; font-size: 0.65rem; font-weight: 500; }
+.report-week-row-details { margin-top: 7px; white-space: normal; }
+.report-week-row-details summary { color: #0b6eae; font-size: 0.65rem; font-weight: 700; cursor: pointer; }
+.report-week-row-details ul { display: grid; gap: 4px; max-width: 520px; margin: 7px 0 0; padding: 0; list-style: none; color: #526b82; font-size: 0.65rem; line-height: 1.35; }
+.report-week-total-cell strong { color: #172f47; }
+.report-week-status { display: inline-flex; align-items: center; min-height: 25px; padding: 3px 8px; border-radius: 999px; font-size: 0.64rem; font-weight: 800; }
+.report-week-status-success { color: #14774c; background: #e3f7ed; }
+.report-week-status-warning { color: #94620b; background: #fff2cf; }
+.report-week-status-neutral { color: #315f83; background: #eaf6ff; }
+.report-week-issue-count { display: block; margin-top: 4px; color: #94620b; font-size: 0.62rem; }
+.report-week-table tfoot th, .report-week-table tfoot td { color: #213e59; background: #f5f9fc; font-weight: 800; }
+.report-week-table tfoot th:first-child { background: #f5f9fc; }
+.report-week-missing, .report-week-errors, .report-week-empty { margin-top: 12px; padding: 15px; border: 1px solid #e0e8f0; border-radius: 12px; background: #fff; }
+.report-week-missing h3, .report-week-errors h3 { margin: 0 0 9px; color: #203c56; font-size: 0.88rem; }
+.report-week-missing ul, .report-week-errors ul { display: grid; gap: 7px; margin: 0; padding: 0; list-style: none; }
+.report-week-missing li { display: flex; justify-content: space-between; gap: 12px; color: #526b82; font-size: 0.74rem; }
+.report-week-missing li span:first-child { color: #243f58; font-weight: 750; }
+.report-week-errors { border-color: #e9c7cc; color: #a63d49; background: #fff5f6; }
+.report-week-empty { color: #718096; text-align: center; }
+.report-week-empty p { margin: 0 0 8px; }
+.report-week-empty a { color: #0b6eae; font-weight: 750; }
 @media (max-width: 980px) { .report-kpi-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }.report-grid-2 { grid-template-columns: 1fr; } }
 @media (max-width: 760px) {
   .admin-modern-sidebar { position: fixed; inset: 0 auto 0 0; transform: translateX(-105%); transition: transform 180ms ease; box-shadow: 18px 0 40px rgba(20, 46, 72, 0.18); }
-  .admin-modern-sidebar.is-open { transform: translateX(0); }.admin-sidebar-backdrop { display: block; position: fixed; inset: 0; border: 0; background: rgba(13, 30, 47, 0.32); z-index: 40; }.admin-sidebar-close { display: block; position: absolute; top: 19px; right: 15px; padding: 5px 9px; font-size: 1.5rem; }.admin-modern-shell { display: block; }.admin-modern-header { padding: 11px 16px; }.admin-menu-button { display: inline-block; }.admin-modern-context { display: none; }.admin-modern-header-content { gap: 8px; }.admin-modern-header .admin-brand { display: inline; margin-right: auto; font-size: 0.9rem; }.admin-modern-header .admin-identity, .admin-modern-header .admin-guide-link, .admin-modern-header .admin-design-toggle span:last-child { display: none; }.admin-modern-header .admin-header-actions { gap: 7px; }.admin-modern-content { padding: 24px 14px 42px; }.report-center-header { align-items: flex-start; flex-direction: column; gap: 16px; }.report-header-actions { justify-content: flex-start; }.report-filter-field { min-width: min(100%, 240px); }.report-period-strip { align-items: flex-start; flex-direction: column; }.report-file-row { align-items: flex-start; flex-direction: column; }.report-file-actions { width: 100%; }.report-file-actions a, .report-file-actions button { flex: 1; text-align: center; } }
+  .admin-modern-sidebar.is-open { transform: translateX(0); }.admin-sidebar-backdrop { display: block; position: fixed; inset: 0; border: 0; background: rgba(13, 30, 47, 0.32); z-index: 40; }.admin-sidebar-close { display: block; position: absolute; top: 19px; right: 15px; padding: 5px 9px; font-size: 1.5rem; }.admin-modern-shell { display: block; }.admin-modern-header { padding: 11px 16px; }.admin-menu-button { display: inline-block; }.admin-modern-context { display: none; }.admin-modern-header-content { gap: 8px; }.admin-modern-header .admin-brand { display: inline; margin-right: auto; font-size: 0.9rem; }.admin-modern-header .admin-identity, .admin-modern-header .admin-guide-link, .admin-modern-header .admin-design-toggle span:last-child { display: none; }.admin-modern-header .admin-header-actions { gap: 7px; }.admin-modern-content { padding: 24px 14px 42px; }.report-center-header { align-items: flex-start; flex-direction: column; gap: 16px; }.report-header-actions { justify-content: flex-start; }.report-filter-field { min-width: min(100%, 240px); }.report-period-strip { align-items: flex-start; flex-direction: column; }.report-file-row { align-items: flex-start; flex-direction: column; }.report-file-actions { width: 100%; }.report-file-actions a, .report-file-actions button { flex: 1; text-align: center; }
+  .report-week-heading { align-items: flex-start; flex-direction: column; gap: 5px; }
+  .report-week-filters { grid-template-columns: 1fr 1fr; }
+  .report-week-search { grid-column: 1 / -1; }
+  .report-week-only-issues, .report-week-filter-actions { grid-column: 1 / -1; }
+  .report-week-filter-actions { justify-content: flex-start; }
+  .report-week-group > summary { align-items: flex-start; flex-direction: column; gap: 5px; }
+  .report-week-missing li { flex-direction: column; gap: 3px; }
+}
 @media (max-width: 480px) { .report-kpi-grid { grid-template-columns: 1fr 1fr; gap: 8px; }.report-kpi { min-height: 96px; padding: 13px; }.report-kpi-value { font-size: 1.35rem; }.report-panel { padding: 15px; }.report-button { flex: 1; justify-content: center; }.report-header-actions { width: 100%; } }
 
 /* Report redesign — production-readiness pass (URL-driven tabs, real pagination, working-report
@@ -6047,22 +6112,22 @@ a.ov-summary-card:focus-visible {
 }
 
 /* Reports use the same theme tokens as the rest of the modern workspace. */
-.admin-modern-shell[data-theme] .report-center :where(h1, .report-panel h2, .report-panel h3, .report-period-strip strong, .report-kpi-value, .report-status-row span:last-child, .report-file-main strong) {
+.admin-modern-shell[data-theme] .report-center :where(h1, .report-panel h2, .report-panel h3, .report-period-strip strong, .report-kpi-value, .report-status-row span:last-child, .report-file-main strong, .report-week-heading h2, .report-week-worker-cell > span, .report-week-total-cell strong, .report-week-missing h3, .report-week-errors h3) {
   color: var(--theme-text);
 }
 
-.admin-modern-shell[data-theme] .report-center :where(.report-center-lead, .report-filter-field label, .report-period-strip span, .report-kpi-label, .report-kpi-note, .report-panel-heading p, .report-table th, .report-muted, .report-detail-head p, .report-empty, .report-file-main span, .report-pagination-info, .report-fine-print, .report-tab, .report-status-row) {
+.admin-modern-shell[data-theme] .report-center :where(.report-center-lead, .report-filter-field label, .report-period-strip span, .report-kpi-label, .report-kpi-note, .report-panel-heading p, .report-table th, .report-muted, .report-detail-head p, .report-empty, .report-file-main span, .report-pagination-info, .report-fine-print, .report-tab, .report-status-row, .report-week-heading p, .report-week-visible-count, .report-week-filters label > span, .report-week-worker-cell > small, .report-week-total-cell > small) {
   color: var(--theme-muted);
 }
 
-.admin-modern-shell[data-theme] .report-center :where(.report-button, .report-filter-bar, .report-kpi, .report-panel, .report-file-row, .report-file-actions a, .report-file-actions button, .report-inline-retry) {
+.admin-modern-shell[data-theme] .report-center :where(.report-button, .report-filter-bar, .report-kpi, .report-panel, .report-file-row, .report-file-actions a, .report-file-actions button, .report-inline-retry, .report-week-toolbar, .report-week-group, .report-week-missing, .report-week-empty) {
   border-color: var(--theme-border);
   background: var(--theme-surface);
   color: var(--theme-text);
   box-shadow: 0 5px 18px var(--theme-shadow);
 }
 
-.admin-modern-shell[data-theme] .report-center :where(.report-filter-field select, .report-filter-field input, .report-picker-form select) {
+.admin-modern-shell[data-theme] .report-center :where(.report-filter-field select, .report-filter-field input, .report-picker-form select, .report-week-filters select, .report-week-filters input) {
   border-color: var(--theme-border);
   background: var(--theme-input);
   color: var(--theme-text);
@@ -6076,6 +6141,41 @@ a.ov-summary-card:focus-visible {
 
 .admin-modern-shell[data-theme] .report-center :where(.report-table th, .report-table td, .report-pagination) {
   border-color: var(--theme-border);
+}
+
+.admin-modern-shell[data-theme] .report-center :where(.report-week-group-option, .report-week-table th, .report-week-table td, .report-week-table-wrap) {
+  border-color: var(--theme-border);
+}
+
+.admin-modern-shell[data-theme] .report-center .report-week-group-option {
+  color: var(--theme-muted);
+  background: var(--theme-surface-subtle);
+}
+
+.admin-modern-shell[data-theme] .report-center .report-week-group-option.is-active {
+  border-color: var(--theme-accent);
+  color: var(--theme-on-accent);
+  background: var(--theme-accent);
+}
+
+.admin-modern-shell[data-theme] .report-center :where(.report-week-group > summary, .report-week-table thead th, .report-week-table tfoot th, .report-week-table tfoot td) {
+  color: var(--theme-muted);
+  background: var(--theme-surface-subtle);
+}
+
+.admin-modern-shell[data-theme] .report-center .report-week-table :where(th, td) {
+  color: var(--theme-text);
+  background-color: var(--theme-surface);
+}
+
+.admin-modern-shell[data-theme] .report-center .report-week-table thead th,
+.admin-modern-shell[data-theme] .report-center .report-week-table tfoot :where(th, td) {
+  background-color: var(--theme-surface-subtle);
+}
+
+.admin-modern-shell[data-theme] .report-center .report-week-group-title,
+.admin-modern-shell[data-theme] .report-center .report-week-row-details summary {
+  color: var(--theme-link);
 }
 
 .admin-modern-shell[data-theme] .report-center .report-table td {
