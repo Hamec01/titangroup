@@ -24,6 +24,7 @@ export function customerKeyOf(siteId: string, workAreaId: string | null): string
 // selection), not just re-checked server-side.
 export function CustomerGroupSection({
   locale,
+  approvalEnabled,
   group,
   onApproved,
   selectedKeys,
@@ -40,6 +41,7 @@ export function CustomerGroupSection({
   wholeWeekTooMany
 }: {
   locale: AppLocale;
+  approvalEnabled: boolean;
   group: CustomerGroup;
   onApproved: () => void;
   selectedKeys?: Set<string>;
@@ -102,6 +104,7 @@ export function CustomerGroupSection({
             <li key={key}>
               <WorkerSliceRow
                 locale={locale}
+                approvalEnabled={approvalEnabled}
                 row={row}
                 onApproved={onApproved}
                 selected={selectedKeys?.has(key) ?? false}

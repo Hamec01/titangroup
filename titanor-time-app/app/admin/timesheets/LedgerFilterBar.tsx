@@ -35,12 +35,14 @@ function blankFilters(): Partial<TimeLedgerUiState> {
 // onNavigate; there is no separate "Apply" step.
 export function LedgerFilterBar({
   locale,
+  approvalEnabled,
   state,
   onNavigate,
   siteOptions,
   initialSelectedCustomerOptions
 }: {
   locale: AppLocale;
+  approvalEnabled: boolean;
   state: TimeLedgerUiState;
   onNavigate: (changes: Partial<TimeLedgerUiState>) => void;
   siteOptions: SiteOption[];
@@ -208,7 +210,7 @@ export function LedgerFilterBar({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [mobileOpen]);
 
-  const count = activeFilterCount(state);
+  const count = activeFilterCount(approvalEnabled ? state : { ...state, status: 'all', onlyChangedAfterApproval: false });
 
   const fields = (
     <div className="ledger-filter-fields">
@@ -270,7 +272,7 @@ export function LedgerFilterBar({
         </select>
       </div>
 
-      <div className="ledger-filter-field">
+      {approvalEnabled && <div className="ledger-filter-field">
         <label htmlFor={`${panelId}-status`}>{localeText(locale, 'Status', 'Статус')}</label>
         <select id={`${panelId}-status`} value={state.status} onChange={(e) => onNavigate({ status: e.target.value as NormalizedTimeLedgerQuery['status'] })}>
           {STATUS_OPTIONS.map((st) => (
@@ -279,7 +281,7 @@ export function LedgerFilterBar({
             </option>
           ))}
         </select>
-      </div>
+      </div>}
 
       <details className="ledger-extra-filters">
         <summary>{localeText(locale, 'More filters', 'Дополнительные фильтры')}</summary>
@@ -287,10 +289,10 @@ export function LedgerFilterBar({
           <input type="checkbox" checked={state.onlyIssues} onChange={(e) => onNavigate({ onlyIssues: e.target.checked })} />
           {localeText(locale, 'Only with issues', 'Только с замечаниями')}
         </label>
-        <label className="ledger-checkbox-field">
+        {approvalEnabled && <label className="ledger-checkbox-field">
           <input type="checkbox" checked={state.onlyChangedAfterApproval} onChange={(e) => onNavigate({ onlyChangedAfterApproval: e.target.checked })} />
           {localeText(locale, 'Only changed after approval', 'Только изменённые после подтверждения')}
-        </label>
+        </label>}
         <div className="ledger-filter-field">
           <label htmlFor={`${panelId}-source`}>{localeText(locale, 'Submission', 'Отправка')}</label>
           <select id={`${panelId}-source`} value={state.submissionSource} onChange={(e) => onNavigate({ submissionSource: e.target.value as NormalizedTimeLedgerQuery['submissionSource'] })}>

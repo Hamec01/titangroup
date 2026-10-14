@@ -10,11 +10,13 @@ import type { TimeLedgerUiState } from '@/lib/reporting/time-ledger-ui-query';
 // clicking their own counter instead.
 export function LedgerSummaryStrip({
   locale,
+  approvalEnabled,
   summary,
   state,
   onNavigate
 }: {
   locale: AppLocale;
+  approvalEnabled: boolean;
   summary: TimeLedgerResult['summary'];
   state: TimeLedgerUiState;
   onNavigate: (changes: Partial<TimeLedgerUiState>) => void;
@@ -27,25 +29,33 @@ export function LedgerSummaryStrip({
       <span className="ledger-summary-item">
         <strong>{formatWorkedDuration(summary.workedMinutes, locale)}</strong>
       </span>
-      <span className="ledger-summary-item ledger-summary-tone-neutral">
+      {approvalEnabled && <span className="ledger-summary-item ledger-summary-tone-neutral">
         {localeText(locale, 'Ready', 'Готово')}: <strong>{summary.readyCount}</strong>
-      </span>
-      <span className="ledger-summary-item ledger-summary-tone-warning">
+      </span>}
+      {approvalEnabled && <span className="ledger-summary-item ledger-summary-tone-warning">
         {localeText(locale, 'Needs attention', 'Требует внимания')}: <strong>{summary.needsAttentionCount}</strong>
-      </span>
-      <span className="ledger-summary-item ledger-summary-tone-success">
+      </span>}
+      {approvalEnabled && <span className="ledger-summary-item ledger-summary-tone-success">
         {localeText(locale, 'Approved', 'Подтверждено')}: <strong>{summary.approvedCount}</strong>
-      </span>
-      <span className="ledger-summary-item ledger-summary-tone-warning">
+      </span>}
+      {approvalEnabled && <span className="ledger-summary-item ledger-summary-tone-warning">
         {localeText(locale, 'Changed', 'Изменено')}: <strong>{summary.changedAfterApprovalCount}</strong>
-      </span>
-      <button type="button" className="ledger-summary-item ledger-summary-button" onClick={() => onNavigate({ status: 'not_submitted', page: 1 })} disabled={state.status === 'not_submitted'}>
-        {localeText(locale, 'Not submitted', 'Ещё не сдали')}: <strong>{summary.notSubmittedEntryCount}</strong>
-      </button>
-      {summary.sourceErrorCount > 0 && (
-        <button type="button" className="ledger-summary-item ledger-summary-button ledger-summary-tone-danger" onClick={() => onNavigate({ status: 'source_error', page: 1 })} disabled={state.status === 'source_error'}>
-          {localeText(locale, 'Data errors', 'Ошибки данных')}: <strong>{summary.sourceErrorCount}</strong>
+      </span>}
+      {approvalEnabled ? (
+        <button type="button" className="ledger-summary-item ledger-summary-button" onClick={() => onNavigate({ status: 'not_submitted', page: 1 })} disabled={state.status === 'not_submitted'}>
+          {localeText(locale, 'Not submitted', 'Ещё не сдали')}: <strong>{summary.notSubmittedEntryCount}</strong>
         </button>
+      ) : (
+        <span className="ledger-summary-item">{localeText(locale, 'Not submitted', 'Ещё не сдали')}: <strong>{summary.notSubmittedEntryCount}</strong></span>
+      )}
+      {summary.sourceErrorCount > 0 && (
+        approvalEnabled ? (
+          <button type="button" className="ledger-summary-item ledger-summary-button ledger-summary-tone-danger" onClick={() => onNavigate({ status: 'source_error', page: 1 })} disabled={state.status === 'source_error'}>
+            {localeText(locale, 'Data errors', 'Ошибки данных')}: <strong>{summary.sourceErrorCount}</strong>
+          </button>
+        ) : (
+          <span className="ledger-summary-item ledger-summary-tone-danger">{localeText(locale, 'Data errors', 'Ошибки данных')}: <strong>{summary.sourceErrorCount}</strong></span>
+        )
       )}
     </div>
   );

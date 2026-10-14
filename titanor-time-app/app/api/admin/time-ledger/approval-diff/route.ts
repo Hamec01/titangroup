@@ -6,6 +6,7 @@ import { hasPermission } from '@/lib/permissions';
 import { SESSION_COOKIE_NAME } from '@/lib/session';
 import { prisma } from '@/lib/prisma';
 import { buildCustomerHoursApprovalDiff } from '@/lib/reporting/customer-hours-diff';
+import { customerHoursApprovalEnabled } from '@/lib/customer-hours-approval-flag';
 
 // UT7-B — GET /api/admin/time-ledger/approval-diff. Read-only, lazy (fetched by the UI only when an
 // admin expands a row whose approvalState is CHANGED_AFTER_APPROVAL / NEEDS_ATTENTION with
@@ -49,6 +50,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   if (!(await hasPermission(authenticated.user.roles, 'timesheet.read.all'))) {
     return jsonError(403, { code: 'FORBIDDEN', message: 'Missing required permission.' }, requestId);
   }
+  if (!customerHoursApprovalEnabled()) return jsonError(409, { code: 'FEATURE_DISABLED', message: 'Customer hours approval is disabled.' }, requestId);
 
   const params = request.nextUrl.searchParams;
   const fieldErrors: Record<string, string[]> = {};

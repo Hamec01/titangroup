@@ -9,6 +9,7 @@ function check(condition: unknown, message: string) {
 
 async function main() {
   const { classifyDocument, normalizeDocumentName, splitFileName } = await import('../lib/documents');
+  const { resolveDocumentPreview } = await import('../lib/document-preview');
 
   const normalized = normalizeDocumentName('  Quarterly Report  ');
   check(normalized.name === 'Quarterly Report', 'trims display name');
@@ -29,6 +30,11 @@ async function main() {
   check(classifyDocument('application/octet-stream', 'zip') === 'ARCHIVE', 'archive by extension');
   check(classifyDocument('text/plain', 'txt') === 'DOCUMENT', 'text document category');
   check(classifyDocument('application/octet-stream', 'bin') === 'OTHER', 'fallback category');
+  check(resolveDocumentPreview('application/pdf', 'report.pdf')?.kind === 'pdf', 'pdf preview');
+  check(resolveDocumentPreview('application/octet-stream', 'photo.PNG')?.contentType === 'image/png', 'safe extension fallback');
+  check(resolveDocumentPreview('text/html', 'page.html')?.contentType === 'text/plain; charset=utf-8', 'html is rendered as inert text');
+  check(resolveDocumentPreview('image/svg+xml', 'drawing.svg') === null, 'active SVG is not previewed');
+  check(resolveDocumentPreview('application/vnd.openxmlformats-officedocument.wordprocessingml.document', 'report.docx') === null, 'office file stays download-only');
 
   console.log(`documents unit: ${passed}/${passed} passed`);
 }

@@ -250,6 +250,8 @@ export interface SummaryCustomerTotal {
   siteName: string;
   workAreaId: string | null;
   workAreaName: string | null;
+  recordedMinutes: number;
+  recordedWorkerCount: number;
   confirmedMinutes: number;
   confirmedWorkerCount: number;
   /** UT8-B-fixup #5 — hours, not just a row count, since the "Сводка" tab's whole scenario is
@@ -281,6 +283,8 @@ export interface SummaryBlocker {
 }
 
 export interface CustomerHoursSummaryTotals {
+  recordedMinutes: number;
+  recordedWorkerCount: number;
   confirmedMinutes: number;
   pendingMinutes: number;
   changedMinutes: number;
@@ -339,7 +343,7 @@ export type CustomerHoursSummaryOutcome =
   | { ok: false; reason: 'WORK_AREA_NONE_REQUIRES_SITE' };
 
 function emptyCustomerTotal(siteId: string, siteName: string, workAreaId: string | null, workAreaName: string | null): SummaryCustomerTotal {
-  return { siteId, siteName, workAreaId, workAreaName, confirmedMinutes: 0, confirmedWorkerCount: 0, pendingMinutes: 0, changedMinutes: 0, pendingCount: 0, changedCount: 0, warningCount: 0, historicalCount: 0 };
+  return { siteId, siteName, workAreaId, workAreaName, recordedMinutes: 0, recordedWorkerCount: 0, confirmedMinutes: 0, confirmedWorkerCount: 0, pendingMinutes: 0, changedMinutes: 0, pendingCount: 0, changedCount: 0, warningCount: 0, historicalCount: 0 };
 }
 
 export async function loadCustomerHoursSummary(
@@ -440,18 +444,30 @@ export async function loadCustomerHoursSummary(
   }
 
   const confirmedWorkers = new Set<string>();
+  const recordedWorkers = new Set<string>();
   const pendingWorkers = new Set<string>();
   const changedWorkers = new Set<string>();
   let confirmedMinutes = 0;
+  let recordedMinutes = 0;
   let pendingMinutes = 0;
   let changedMinutes = 0;
   let warningCount = 0;
   const blockers: SummaryBlocker[] = [];
   const perCustomerConfirmedWorkers = new Map<string, Set<string>>();
+  const perCustomerRecordedWorkers = new Map<string, Set<string>>();
 
   for (const row of rows) {
     const key = `${row.logicalKey.siteId}::${row.logicalKey.workAreaId ?? ''}`;
     const cust = byCustomerMap.get(key)!;
+    recordedMinutes += row.workedMinutes;
+    recordedWorkers.add(row.logicalKey.employeeId);
+    cust.recordedMinutes += row.workedMinutes;
+    let recordedSet = perCustomerRecordedWorkers.get(key);
+    if (!recordedSet) {
+      recordedSet = new Set();
+      perCustomerRecordedWorkers.set(key, recordedSet);
+    }
+    recordedSet.add(row.logicalKey.employeeId);
     if (row.warnings.length > 0) {
       warningCount += 1;
       cust.warningCount += 1;
@@ -523,6 +539,9 @@ export async function loadCustomerHoursSummary(
   }
   for (const [key, set] of perCustomerConfirmedWorkers) {
     byCustomerMap.get(key)!.confirmedWorkerCount = set.size;
+  }
+  for (const [key, set] of perCustomerRecordedWorkers) {
+    byCustomerMap.get(key)!.recordedWorkerCount = set.size;
   }
 
   for (const h of historicalOutcome.rows) {
@@ -617,6 +636,8 @@ export async function loadCustomerHoursSummary(
     historical: historicalOutcome.rows,
     notSubmitted,
     totals: {
+      recordedMinutes,
+      recordedWorkerCount: recordedWorkers.size,
       confirmedMinutes,
       pendingMinutes,
       changedMinutes,

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { jsonError, successHeaders } from '@/lib/api-error';
 import { guardApiRequest } from '@/lib/api-guard';
+import { customerHoursApprovalEnabled } from '@/lib/customer-hours-approval-flag';
 import { prisma } from '@/lib/prisma';
 import {
   prepareWeeklyCustomerApprovalsBatch,
@@ -147,6 +148,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   const guard = await guardApiRequest(request, { csrf: true, permission: 'timesheet.customer_hours_approve.all' });
   if (!guard.ok) return guard.response;
   const { session, requestId } = guard;
+  if (!customerHoursApprovalEnabled()) return jsonError(409, { code: 'FEATURE_DISABLED', message: 'Customer hours approval is disabled.' }, requestId);
 
   let rawBody: unknown;
   try {

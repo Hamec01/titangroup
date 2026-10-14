@@ -195,65 +195,67 @@ function AdminTodayBody({
       <OwnerWorkerList items={result.items} totalItems={result.totalItems} asOf={result.asOf} />
       <Pagination basePath={basePath} rawQuery={rawQuery} page={result.page} totalPages={result.totalPages} totalItems={result.totalItems} />
 
-      <details className="owner-secondary-panel">
+      <details className="owner-secondary-panel owner-timesheets-panel">
         <summary>{ru ? 'Табели и утверждение' : 'Timesheets and approval details'}</summary>
         <SummaryCards basePath={basePath} rawQuery={rawQuery} summary={result.summary} />
       </details>
-      {result.conflicts ? (
-        <details className="owner-secondary-panel" open={result.conflicts.totalOpenOrRecent > 0}>
-          <summary>{ru ? 'Технические конфликты' : 'Technical conflicts'} {result.conflicts.totalOpenOrRecent > 0 ? `(${result.conflicts.totalOpenOrRecent})` : ''}</summary>
-          <ConflictsSection conflicts={result.conflicts} />
-        </details>
-      ) : null}
     </>
   );
 }
 
 function OwnerSearchForm({ basePath, rawQuery, periodOptions, siteOptions }: { basePath: string; rawQuery: OverviewRawQuery; periodOptions: PeriodOption[]; siteOptions: SiteOption[] }) {
   const ru = useAppLocale() === 'RU';
+  const activeFilterCount = [rawQuery.q, rawQuery.periodId, rawQuery.siteId, rawQuery.state, rawQuery.employeeId, rawQuery.pageSize && rawQuery.pageSize !== '20' ? rawQuery.pageSize : null].filter(Boolean).length;
   return (
-    <form method="GET" action={basePath} className="owner-search" aria-label={ru ? 'Поиск работников' : "Search today's workers"}>
-      <div className="owner-search-primary">
-        <div className="ov-filter-field owner-search-query">
-          <label htmlFor="owner-search-q">{ru ? 'Работник или объект' : 'Worker or site'}</label>
-          <input id="owner-search-q" name="q" type="search" maxLength={100} defaultValue={rawQuery.q ?? ''} placeholder={ru ? 'Имя, номер, объект или заказчик' : 'Name, employee number, site or customer'} />
-        </div>
-        <div className="ov-filter-field">
-          <label htmlFor="owner-search-site">{ru ? 'Объект' : 'Site'}</label>
-          <select id="owner-search-site" name="siteId" defaultValue={rawQuery.siteId ?? ''}>
-            <option value="">{ru ? 'Все объекты' : 'All sites'}</option>
-            {siteOptions.map((site) => <option key={site.id} value={site.id}>{site.name}</option>)}
-          </select>
-        </div>
-        <button type="submit" className="exc-apply-button">{ru ? 'Найти' : 'Search'}</button>
-        <Link href={basePath} className="exc-reset-link">{ru ? 'Сбросить' : 'Reset'}</Link>
-      </div>
-      <details className="owner-more-filters">
-        <summary>{ru ? 'Дополнительные фильтры' : 'More filters'}</summary>
-        <div className="owner-more-filter-grid">
-          <div className="ov-filter-field">
-            <label htmlFor="owner-filter-period">{ru ? 'Период' : 'Period'}</label>
-            <select id="owner-filter-period" name="periodId" defaultValue={rawQuery.periodId ?? ''}>
-              <option value="">{ru ? 'Текущие циклы' : 'Current cycles'}</option>
-              {periodOptions.map((period) => <option key={period.id} value={period.id}>{period.label}</option>)}
-            </select>
+    <details className="owner-search-panel" open={activeFilterCount > 0}>
+      <summary>
+        <span>{ru ? 'Поиск и фильтры' : 'Search and filters'}</span>
+        {activeFilterCount > 0 ? <span className="owner-filter-count">{activeFilterCount}</span> : null}
+      </summary>
+      <form method="GET" action={basePath} className="owner-search" aria-label={ru ? 'Поиск работников' : "Search today's workers"}>
+        {rawQuery.employeeId ? <input type="hidden" name="employeeId" value={rawQuery.employeeId} /> : null}
+        <div className="owner-search-primary">
+          <div className="ov-filter-field owner-search-query">
+            <label htmlFor="owner-search-q">{ru ? 'Работник или объект' : 'Worker or site'}</label>
+            <input id="owner-search-q" name="q" type="search" maxLength={100} defaultValue={rawQuery.q ?? ''} placeholder={ru ? 'Имя, номер, объект или заказчик' : 'Name, employee number, site or customer'} />
           </div>
           <div className="ov-filter-field">
-            <label htmlFor="owner-filter-state">{ru ? 'Статус или проблема' : 'Status or issue'}</label>
-            <select id="owner-filter-state" name="state" defaultValue={rawQuery.state ?? ''}>
-              <option value="">{ru ? 'Все' : 'All'}</option>
-              {OPERATIONAL_STATE_VALUES.map((state) => <option key={state} value={state}>{operationalStateLabel(state, ru ? 'RU' : 'EN')}</option>)}
+            <label htmlFor="owner-search-site">{ru ? 'Объект' : 'Site'}</label>
+            <select id="owner-search-site" name="siteId" defaultValue={rawQuery.siteId ?? ''}>
+              <option value="">{ru ? 'Все объекты' : 'All sites'}</option>
+              {siteOptions.map((site) => <option key={site.id} value={site.id}>{site.name}</option>)}
             </select>
           </div>
-          <div className="ov-filter-field">
-            <label htmlFor="owner-filter-pagesize">{ru ? 'Работников на странице' : 'Workers per page'}</label>
-            <select id="owner-filter-pagesize" name="pageSize" defaultValue={rawQuery.pageSize ?? '20'}>
-              {[20, 50, 100].map((size) => <option key={size} value={size}>{size}</option>)}
-            </select>
-          </div>
+          <button type="submit" className="exc-apply-button">{ru ? 'Найти' : 'Search'}</button>
+          <Link href={basePath} className="exc-reset-link">{ru ? 'Сбросить' : 'Reset'}</Link>
         </div>
-      </details>
-    </form>
+        <details className="owner-more-filters" open={Boolean(rawQuery.periodId || rawQuery.state || (rawQuery.pageSize && rawQuery.pageSize !== '20'))}>
+          <summary>{ru ? 'Дополнительные фильтры' : 'More filters'}</summary>
+          <div className="owner-more-filter-grid">
+            <div className="ov-filter-field">
+              <label htmlFor="owner-filter-period">{ru ? 'Период' : 'Period'}</label>
+              <select id="owner-filter-period" name="periodId" defaultValue={rawQuery.periodId ?? ''}>
+                <option value="">{ru ? 'Текущие циклы' : 'Current cycles'}</option>
+                {periodOptions.map((period) => <option key={period.id} value={period.id}>{period.label}</option>)}
+              </select>
+            </div>
+            <div className="ov-filter-field">
+              <label htmlFor="owner-filter-state">{ru ? 'Статус или проблема' : 'Status or issue'}</label>
+              <select id="owner-filter-state" name="state" defaultValue={rawQuery.state ?? ''}>
+                <option value="">{ru ? 'Все' : 'All'}</option>
+                {OPERATIONAL_STATE_VALUES.map((state) => <option key={state} value={state}>{operationalStateLabel(state, ru ? 'RU' : 'EN')}</option>)}
+              </select>
+            </div>
+            <div className="ov-filter-field">
+              <label htmlFor="owner-filter-pagesize">{ru ? 'Работников на странице' : 'Workers per page'}</label>
+              <select id="owner-filter-pagesize" name="pageSize" defaultValue={rawQuery.pageSize ?? '20'}>
+                {[20, 50, 100].map((size) => <option key={size} value={size}>{size}</option>)}
+              </select>
+            </div>
+          </div>
+        </details>
+      </form>
+    </details>
   );
 }
 

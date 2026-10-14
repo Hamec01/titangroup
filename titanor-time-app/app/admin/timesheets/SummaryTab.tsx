@@ -48,6 +48,8 @@ interface SummaryCustomerTotalDto {
   siteName: string;
   workAreaId: string | null;
   workAreaName: string | null;
+  recordedMinutes: number;
+  recordedWorkerCount: number;
   confirmedMinutes: number;
   confirmedWorkerCount: number;
   pendingMinutes: number;
@@ -75,6 +77,8 @@ interface SummaryResponse {
   requestedRange: { startDate: string; endDate: string };
   effectiveWeekRange: { startDate: string; endDate: string };
   totals: {
+    recordedMinutes: number;
+    recordedWorkerCount: number;
     confirmedMinutes: number;
     pendingMinutes: number;
     changedMinutes: number;
@@ -103,11 +107,13 @@ type LoadState = { phase: 'loading' } | { phase: 'ready'; data: SummaryResponse 
 // router.replace() here costs nothing extra server-side; useSearchParams() can be read reactively.
 export function SummaryTab({
   locale,
+  approvalEnabled,
   initialState,
   initialSiteOptions,
   initialSelectedCustomerOptions
 }: {
   locale: AppLocale;
+  approvalEnabled: boolean;
   initialState: TimeLedgerUiState;
   initialSiteOptions: SiteOption[];
   initialSelectedCustomerOptions: CustomerWorkAreaOption[];
@@ -156,14 +162,14 @@ export function SummaryTab({
   return (
     <div className="ledger-view">
       <LedgerTopBar locale={locale} state={state} onNavigate={navigate} />
-      <LedgerFilterBar locale={locale} state={state} onNavigate={navigate} siteOptions={initialSiteOptions} initialSelectedCustomerOptions={initialSelectedCustomerOptions} />
+      <LedgerFilterBar locale={locale} approvalEnabled={approvalEnabled} state={state} onNavigate={navigate} siteOptions={initialSiteOptions} initialSelectedCustomerOptions={initialSelectedCustomerOptions} />
       {load.phase === 'loading' && (
         <p className="ledger-loading" role="status" aria-live="polite">
           {localeText(locale, 'Loading…', 'Загрузка…')}
         </p>
       )}
       {load.phase === 'error' && <SummaryErrorBanner locale={locale} code={load.code} />}
-      {load.phase === 'ready' && <SummaryBody locale={locale} data={load.data} state={state} />}
+      {load.phase === 'ready' && <SummaryBody locale={locale} approvalEnabled={approvalEnabled} data={load.data} state={state} />}
     </div>
   );
 }
@@ -183,8 +189,68 @@ function SummaryErrorBanner({ locale, code }: { locale: AppLocale; code: string 
   );
 }
 
-function SummaryBody({ locale, data, state }: { locale: AppLocale; data: SummaryResponse; state: TimeLedgerUiState }) {
+function SummaryBody({ locale, approvalEnabled, data, state }: { locale: AppLocale; approvalEnabled: boolean; data: SummaryResponse; state: TimeLedgerUiState }) {
   const { totals, byCustomer, readyForCustomerExport, blockers } = data;
+
+  if (!approvalEnabled) {
+    return (
+      <div className="ledger-summary-tab">
+        <section className="ledger-summary-stat-row">
+          <SummaryStat
+            label={localeText(locale, 'Recorded working hours', 'Фактически зафиксированные часы')}
+            value={formatWorkedDuration(totals.recordedMinutes, locale)}
+            sub={`${totals.recordedWorkerCount} ${summaryWorkersLabel(locale)}`}
+            tone="confirmed"
+          />
+          <SummaryStat label={summaryWarningsCountLabel(locale)} value={String(totals.warningCount)} tone="neutral" />
+          <SummaryStat label={summaryTechnicalErrorsLabel(locale)} value={String(totals.sourceErrorCount)} tone="error" />
+          <SummaryStat label={summaryNotSubmittedLabel(locale)} value={String(totals.notSubmittedCount)} sub={`${totals.notSubmittedWorkerCount} ${summaryWorkersLabel(locale)}`} tone="error" />
+        </section>
+
+        <p className="ledger-summary-readiness" role="status">
+          {localeText(locale, 'All current recorded hours are included. Approval is not required.', 'Включены все актуальные зафиксированные часы. Утверждение не требуется.')}
+        </p>
+
+        <section className="ledger-summary-export-actions">
+          <a className="ledger-summary-export-link" href={uiStateToSummaryExportApiUrl(state, 'csv', 'recorded')}>
+            {localeText(locale, 'Download recorded hours (CSV)', 'Скачать зафиксированные часы (CSV)')}
+          </a>
+          <a className="ledger-summary-export-link" href={uiStateToSummaryExportApiUrl(state, 'pdf', 'recorded')}>
+            {localeText(locale, 'Download recorded hours (PDF)', 'Скачать зафиксированные часы (PDF)')}
+          </a>
+        </section>
+
+        {byCustomer.length === 0 ? (
+          <p className="wk-empty" role="status">{localeText(locale, 'No results for these filters.', 'Нет результатов по этим фильтрам.')}</p>
+        ) : (
+          <div className="ledger-summary-table-scroll" tabIndex={0} role="region" aria-label={localeText(locale, 'Recorded hours by customer', 'Зафиксированные часы по заказчикам')}>
+            <table className="ledger-summary-customer-table">
+              <thead>
+                <tr>
+                  <th>{localeText(locale, 'Customer', 'Заказчик')}</th>
+                  <th>{localeText(locale, 'Site', 'Объект')}</th>
+                  <th>{localeText(locale, 'Recorded hours', 'Зафиксированные часы')}</th>
+                  <th>{localeText(locale, 'Workers', 'Работники')}</th>
+                  <th>{summaryWarningsCountLabel(locale)}</th>
+                </tr>
+              </thead>
+              <tbody>
+                {byCustomer.filter((c) => c.recordedMinutes > 0).map((c) => (
+                  <tr key={`${c.siteId}::${c.workAreaId ?? ''}`}>
+                    <td>{c.workAreaName ?? localeText(locale, '(no customer)', 'Без заказчика')}</td>
+                    <td>{c.siteName}</td>
+                    <td>{formatWorkedDuration(c.recordedMinutes, locale)}</td>
+                    <td>{c.recordedWorkerCount}</td>
+                    <td>{c.warningCount}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+    );
+  }
 
   return (
     <div className="ledger-summary-tab">
@@ -221,32 +287,34 @@ function SummaryBody({ locale, data, state }: { locale: AppLocale; data: Summary
           {localeText(locale, 'No results for these filters.', 'Нет результатов по этим фильтрам.')}
         </p>
       ) : (
-        <table className="ledger-summary-customer-table">
-          <thead>
-            <tr>
-              <th>{localeText(locale, 'Customer', 'Заказчик')}</th>
-              <th>{localeText(locale, 'Site', 'Объект')}</th>
-              <th>{summaryConfirmedMinutesLabel(locale)}</th>
-              <th>{summaryPendingMinutesLabel(locale)}</th>
-              <th>{summaryChangedMinutesLabel(locale)}</th>
-              <th>{summaryWarningsCountLabel(locale)}</th>
-              <th>{summaryHistoricalSectionTitleLabel(locale)}</th>
-            </tr>
-          </thead>
-          <tbody>
-            {byCustomer.map((c) => (
-              <tr key={`${c.siteId}::${c.workAreaId ?? ''}`}>
-                <td>{c.workAreaName ?? localeText(locale, '(no customer)', 'Без заказчика')}</td>
-                <td>{c.siteName}</td>
-                <td>{formatWorkedDuration(c.confirmedMinutes, locale)}</td>
-                <td>{formatWorkedDuration(c.pendingMinutes, locale)}</td>
-                <td>{formatWorkedDuration(c.changedMinutes, locale)}</td>
-                <td>{c.warningCount}</td>
-                <td>{c.historicalCount}</td>
+        <div className="ledger-summary-table-scroll" tabIndex={0} role="region" aria-label={localeText(locale, 'Hours by customer', 'Часы по заказчикам')}>
+          <table className="ledger-summary-customer-table">
+            <thead>
+              <tr>
+                <th>{localeText(locale, 'Customer', 'Заказчик')}</th>
+                <th>{localeText(locale, 'Site', 'Объект')}</th>
+                <th>{summaryConfirmedMinutesLabel(locale)}</th>
+                <th>{summaryPendingMinutesLabel(locale)}</th>
+                <th>{summaryChangedMinutesLabel(locale)}</th>
+                <th>{summaryWarningsCountLabel(locale)}</th>
+                <th>{summaryHistoricalSectionTitleLabel(locale)}</th>
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {byCustomer.map((c) => (
+                <tr key={`${c.siteId}::${c.workAreaId ?? ''}`}>
+                  <td>{c.workAreaName ?? localeText(locale, '(no customer)', 'Без заказчика')}</td>
+                  <td>{c.siteName}</td>
+                  <td>{formatWorkedDuration(c.confirmedMinutes, locale)}</td>
+                  <td>{formatWorkedDuration(c.pendingMinutes, locale)}</td>
+                  <td>{formatWorkedDuration(c.changedMinutes, locale)}</td>
+                  <td>{c.warningCount}</td>
+                  <td>{c.historicalCount}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       )}
 
       {totals.historicalCount > 0 && (

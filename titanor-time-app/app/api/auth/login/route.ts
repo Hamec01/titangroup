@@ -21,6 +21,10 @@ const MAX_IDENTIFIER_LENGTH = 255;
 const MAX_PASSWORD_LENGTH = 256;
 const IDENTIFIER_RATE_LIMIT = { limit: 5, windowMs: 15 * 60 * 1000 };
 const IP_RATE_LIMIT = { limit: 50, windowMs: 15 * 60 * 1000 };
+// Enabled by default so new installations keep the security boundary. The owner may explicitly
+// disable only the normal login limiter with LOGIN_RATE_LIMIT_ENABLED=false; activation,
+// recovery, password-change, and attendance limiters are separate and remain enabled.
+const LOGIN_RATE_LIMIT_ENABLED = process.env.LOGIN_RATE_LIMIT_ENABLED !== 'false';
 
 // A real Argon2id hash of an unrelated, fixed string — can never match a real
 // password. Verified against on every attempt where the identifier doesn't
@@ -103,16 +107,18 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   const normalizedIdentifier = (identifier as string).trim().toLowerCase();
   const ip = clientIp(request);
 
-  const [identifierAllowed, ipAllowed] = await Promise.all([
-    checkRateLimit(`identifier:${normalizedIdentifier}`, IDENTIFIER_RATE_LIMIT.limit, IDENTIFIER_RATE_LIMIT.windowMs),
-    checkRateLimit(`ip:${ip ?? 'unknown'}`, IP_RATE_LIMIT.limit, IP_RATE_LIMIT.windowMs)
-  ]);
-  if (!identifierAllowed || !ipAllowed) {
-    return jsonError(
-      429,
-      { code: 'RATE_LIMITED', message: 'Too many login attempts. Try again later.' },
-      requestId
-    );
+  if (LOGIN_RATE_LIMIT_ENABLED) {
+    const [identifierAllowed, ipAllowed] = await Promise.all([
+      checkRateLimit(`identifier:${normalizedIdentifier}`, IDENTIFIER_RATE_LIMIT.limit, IDENTIFIER_RATE_LIMIT.windowMs),
+      checkRateLimit(`ip:${ip ?? 'unknown'}`, IP_RATE_LIMIT.limit, IP_RATE_LIMIT.windowMs)
+    ]);
+    if (!identifierAllowed || !ipAllowed) {
+      return jsonError(
+        429,
+        { code: 'RATE_LIMITED', message: 'Too many login attempts. Try again later.' },
+        requestId
+      );
+    }
   }
 
   const user = await prisma.user.findFirst({

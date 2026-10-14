@@ -14,5 +14,5 @@ export async function GET(request: NextRequest) {
     prisma.documentFolder.findMany({ where: { storageSpaceId: space.id, name: { contains: q, mode: 'insensitive' } }, take: 100, orderBy: { name: 'asc' } }),
     prisma.documentFile.findMany({ where: { storageSpaceId: space.id, status: 'ACTIVE', displayName: { contains: q, mode: 'insensitive' } }, take: 100, orderBy: { displayName: 'asc' } })
   ]);
-  return Response.json({ folders: folders.map((f) => ({ id: f.id, name: f.name, parentId: f.parentId })), files: files.map((f) => ({ id: f.id, displayName: f.displayName, folderId: f.folderId, sizeBytes: f.sizeBytes.toString(), category: f.category })) }, { headers: { 'Cache-Control': 'no-store' } });
+  return Response.json({ folders: folders.map((f) => ({ id: f.id, name: f.name, parentId: f.parentId })), files: files.map((f) => ({ id: f.id, displayName: f.displayName, folderId: f.folderId, sizeBytes: f.sizeBytes.toString(), category: f.category, mimeType: f.mimeType })) }, { headers: { 'Cache-Control': 'no-store' } });
 }

@@ -193,7 +193,7 @@ export const GUIDE_CONTENT: Record<AppLocale, GuideContent> = {
       {
         title: 'Документы',
         items: [
-          { title: 'Файлы и документы', text: 'Общее корпоративное хранилище объёмом 10 ГБ для всех администраторов. Все администраторы видят одни и те же папки и файлы. Можно загружать несколько файлов с прогрессом, создавать папки, искать, сортировать, скачивать, переименовывать, перемещать и удалять. Файлы хранятся на отдельном защищённом сервере хранения, а действия записываются в аудит.' }
+          { title: 'Файлы и документы', text: 'Общее корпоративное хранилище объёмом 10 ГБ для всех администраторов. Все администраторы видят одни и те же папки и файлы. Изображения, PDF, видео, аудио и текстовые файлы можно безопасно просматривать прямо в админке или скачать сразу; также доступны загрузка с прогрессом, папки, поиск, сортировка, переименование, перемещение и удаление. Файлы хранятся на отдельном защищённом сервере хранения, а действия записываются в аудит.' }
         ]
       }
     ],
@@ -469,7 +469,7 @@ export const GUIDE_CONTENT: Record<AppLocale, GuideContent> = {
       {
         title: 'Documents',
         items: [
-          { title: 'Files and documents', text: 'One shared 10 GB corporate storage space for every administrator. All admins see the same folders and files. Upload multiple files with progress, create folders, search, sort, download, rename, move and delete. File bytes live on separate protected storage and actions are recorded in the audit trail.' }
+          { title: 'Files and documents', text: 'One shared 10 GB corporate storage space for every administrator. All admins see the same folders and files. Images, PDFs, video, audio and text files can be previewed securely inside the admin area or downloaded immediately; progress uploads, folders, search, sorting, rename, move and delete remain available. File bytes live on separate protected storage and actions are recorded in the audit trail.' }
         ]
       }
     ],

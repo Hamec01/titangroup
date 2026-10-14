@@ -43,6 +43,7 @@ export function AdminModernShell({
   const isActive = (href: string): boolean => pathname === href || pathname.startsWith(`${href}/`);
   const activeGroupKey = nav.groups.find((group) => group.items.some((item) => isActive(item.href)))?.key ?? null;
   const [mobileOpen, setMobileOpen] = useState(false);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [openGroups, setOpenGroups] = useState<Record<string, boolean>>(() =>
     Object.fromEntries(nav.groups.map((group) => [group.key, group.key === activeGroupKey]))
   );
@@ -51,6 +52,48 @@ export function AdminModernShell({
 
   // Close on navigation.
   useEffect(() => setMobileOpen(false), [pathname]);
+
+  // The older admin screens use semantic tables. They are useful on desktop, but squeezing five
+  // or seven columns into a phone viewport either clips the final columns or forces the operator
+  // to discover a hidden horizontal scroll. Add the translated column heading to every body cell
+  // so CSS can present those same tables as readable labelled cards on narrow screens. This stays
+  // progressive: without JavaScript the original table and its scroll container still work.
+  useEffect(() => {
+    let frame = 0;
+    const content = document.getElementById('admin-main');
+    if (!content) return;
+
+    const enhanceTables = () => {
+      frame = 0;
+      content.querySelectorAll<HTMLTableElement>('.worker-table').forEach((table) => {
+        const headingRow = table.tHead?.rows[table.tHead.rows.length - 1];
+        if (!headingRow) return;
+
+        const labels = Array.from(headingRow.cells, (cell) => cell.textContent?.trim() ?? '');
+        Array.from(table.tBodies).forEach((body) => {
+          Array.from(body.rows).forEach((row) => {
+            Array.from(row.cells).forEach((cell, index) => {
+              cell.dataset.mobileLabel = labels[index] ?? '';
+            });
+          });
+        });
+        table.classList.add('admin-responsive-table');
+      });
+    };
+
+    const scheduleEnhancement = () => {
+      if (frame) return;
+      frame = window.requestAnimationFrame(enhanceTables);
+    };
+
+    enhanceTables();
+    const observer = new MutationObserver(scheduleEnhancement);
+    observer.observe(content, { childList: true, subtree: true });
+    return () => {
+      observer.disconnect();
+      if (frame) window.cancelAnimationFrame(frame);
+    };
+  }, [pathname]);
 
   // Restore the operator's compact/expanded menu choices. The group containing the current page
   // always opens so navigation never leaves the active location hidden.
@@ -103,7 +146,12 @@ export function AdminModernShell({
   }
 
   return (
-    <div className="admin-modern-shell" data-theme={theme} data-mobile-open={mobileOpen ? 'true' : undefined}>
+    <div
+      className="admin-modern-shell"
+      data-theme={theme}
+      data-mobile-open={mobileOpen ? 'true' : undefined}
+      data-sidebar-collapsed={sidebarCollapsed ? 'true' : 'false'}
+    >
       <aside
         id={sidebarId}
         className={mobileOpen ? 'admin-modern-sidebar is-open' : 'admin-modern-sidebar'}
@@ -174,6 +222,18 @@ export function AdminModernShell({
         </div>
         <div className="admin-modern-sidebar-foot">{ru ? 'Все данные защищены правами доступа' : 'All data is permission protected'}</div>
       </aside>
+
+      <button
+        type="button"
+        className="admin-sidebar-collapse"
+        onClick={() => setSidebarCollapsed((collapsed) => !collapsed)}
+        aria-expanded={!sidebarCollapsed}
+        aria-controls={sidebarId}
+        aria-label={sidebarCollapsed ? (ru ? 'Показать боковое меню' : 'Show sidebar') : (ru ? 'Скрыть боковое меню' : 'Hide sidebar')}
+        title={sidebarCollapsed ? (ru ? 'Показать меню' : 'Show menu') : (ru ? 'Скрыть меню' : 'Hide menu')}
+      >
+        <span aria-hidden="true">{sidebarCollapsed ? '›' : '‹'}</span>
+      </button>
 
       {mobileOpen && (
         <button

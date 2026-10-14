@@ -13,7 +13,7 @@ import type { CustomerHoursSummaryResult } from '@/lib/reporting/customer-hours-
 // mode='preview': every row in scope, each carrying its own approval_status column — never
 // presented as the official document (the PDF/UI layer adds the explicit watermark/banner).
 
-export type SummaryExportMode = 'preview' | 'final';
+export type SummaryExportMode = 'preview' | 'final' | 'recorded';
 
 // Header: row_type(0) customer_name(1) site_name(2) week_start(3) week_end(4) employee_name(5)
 // employee_number(6) worked_minutes(7) worked_hours(8) approval_status(9) confirmed_by(10) confirmed_at(11)
@@ -46,6 +46,8 @@ interface DetailRow {
 }
 
 export function buildCustomerHoursSummaryCsv(summary: CustomerHoursSummaryResult, mode: SummaryExportMode): Buffer {
+  if (mode === 'recorded') return buildRecordedHoursCsv(summary);
+
   const header = ['row_type', 'customer_name', 'site_name', 'week_start', 'week_end', 'employee_name', 'employee_number', 'worked_minutes', 'worked_hours', 'approval_status', 'confirmed_by', 'confirmed_at'];
   const lines: string[] = [buildCsvRow(header, new Set())];
 
@@ -173,6 +175,63 @@ export function buildCustomerHoursSummaryCsv(summary: CustomerHoursSummaryResult
 export function customerHoursSummaryCsvFileName(summary: CustomerHoursSummaryResult, mode: SummaryExportMode): string {
   const one = summary.byCustomer.length === 1 ? summary.byCustomer[0].workAreaName : null;
   const slug = (one ?? 'customers').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '').slice(0, 40) || 'customers';
-  const modeTag = mode === 'preview' ? '_preview' : '';
+  const modeTag = mode === 'preview' ? '_preview' : mode === 'recorded' ? '_recorded' : '';
   return `titanor-summary_${slug}_${summary.requestedRange.startDate}_${summary.requestedRange.endDate}${modeTag}.csv`;
+}
+
+function buildRecordedHoursCsv(summary: CustomerHoursSummaryResult): Buffer {
+  const header = ['row_type', 'customer_name', 'site_name', 'week_start', 'week_end', 'employee_name', 'employee_number', 'worked_minutes', 'worked_hours'];
+  const lines: string[] = [buildCsvRow(header, new Set())];
+  const textIndices = new Set([1, 2, 5, 6]);
+
+  const rows = summary.rows
+    .map((r) => {
+      const customer = summary.byCustomer.find((c) => c.siteId === r.logicalKey.siteId && c.workAreaId === r.logicalKey.workAreaId);
+      return {
+        customerName: customer?.workAreaName ?? '(no customer)',
+        siteName: customer?.siteName ?? '',
+        weekStart: r.logicalKey.weekStart,
+        weekEnd: r.logicalKey.weekEnd,
+        employeeName: r.employeeName,
+        employeeNumber: r.employeeNumber,
+        employeeId: r.logicalKey.employeeId,
+        customerKey: `${r.logicalKey.siteId}::${r.logicalKey.workAreaId ?? ''}`,
+        workedMinutes: r.workedMinutes
+      };
+    })
+    .sort((a, b) => a.customerName.localeCompare(b.customerName) || a.employeeName.localeCompare(b.employeeName) || a.weekStart.localeCompare(b.weekStart));
+
+  const byCustomer = new Map<string, typeof rows>();
+  for (const row of rows) {
+    const list = byCustomer.get(row.customerKey) ?? [];
+    list.push(row);
+    byCustomer.set(row.customerKey, list);
+  }
+
+  let grandTotal = 0;
+  for (const customerRows of byCustomer.values()) {
+    let customerTotal = 0;
+    const byEmployee = new Map<string, typeof rows>();
+    for (const row of customerRows) {
+      const list = byEmployee.get(row.employeeId) ?? [];
+      list.push(row);
+      byEmployee.set(row.employeeId, list);
+    }
+    for (const employeeRows of byEmployee.values()) {
+      let employeeTotal = 0;
+      for (const row of employeeRows) {
+        lines.push(buildCsvRow(['DETAIL', row.customerName, row.siteName, row.weekStart, row.weekEnd, row.employeeName, row.employeeNumber, row.workedMinutes, hours(row.workedMinutes)], textIndices));
+        employeeTotal += row.workedMinutes;
+      }
+      const first = employeeRows[0];
+      lines.push(buildCsvRow(['WORKER_TOTAL', first.customerName, first.siteName, '', '', first.employeeName, first.employeeNumber, employeeTotal, hours(employeeTotal)], textIndices));
+      customerTotal += employeeTotal;
+    }
+    const first = customerRows[0];
+    lines.push(buildCsvRow(['CUSTOMER_TOTAL', first.customerName, first.siteName, '', '', '', '', customerTotal, hours(customerTotal)], textIndices));
+    grandTotal += customerTotal;
+  }
+  if (byCustomer.size > 1) lines.push(buildCsvRow(['GRAND_TOTAL', '', '', '', '', '', '', grandTotal, hours(grandTotal)], textIndices));
+
+  return Buffer.concat([CSV_BOM, Buffer.from(lines.join(''), 'utf8')]);
 }

@@ -385,7 +385,7 @@ export function uiStateToSummaryApiUrl(state: TimeLedgerUiState): string {
   return `/api/admin/time-ledger/summary?${summaryFilterParams(state).toString()}`;
 }
 
-export function uiStateToSummaryExportApiUrl(state: TimeLedgerUiState, format: 'csv' | 'pdf', mode: 'preview' | 'final'): string {
+export function uiStateToSummaryExportApiUrl(state: TimeLedgerUiState, format: 'csv' | 'pdf', mode: 'preview' | 'final' | 'recorded'): string {
   const p = summaryFilterParams(state);
   p.set('format', format);
   p.set('mode', mode);

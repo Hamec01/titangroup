@@ -66,18 +66,19 @@ export async function buildCustomerHoursSummaryPdf(summary: CustomerHoursSummary
   doc.fillColor('#000000');
   y = Math.max(y + 44, ly + 6);
 
-  doc.font('DejaVu-Bold').fontSize(12).text('CUSTOMER HOURS SUMMARY', x, y);
+  const isRecorded = mode === 'recorded';
+  doc.font('DejaVu-Bold').fontSize(12).text(isRecorded ? 'ФАКТИЧЕСКИ ЗАФИКСИРОВАННЫЕ ЧАСЫ / RECORDED WORKING HOURS' : 'CUSTOMER HOURS SUMMARY', x, y);
   y += 15;
   const isFinal = mode === 'final';
-  doc.font('DejaVu-Bold').fontSize(9).fillColor(isFinal ? '#1f7a3d' : '#a34d00');
-  doc.text(isFinal ? 'CONFIRMED FOR CUSTOMER' : 'PREVIEW — CONTAINS UNCONFIRMED HOURS, NOT AN OFFICIAL DOCUMENT', x, y);
+  doc.font('DejaVu-Bold').fontSize(9).fillColor(isFinal || isRecorded ? '#1f7a3d' : '#a34d00');
+  doc.text(isRecorded ? 'ТЕКУЩИЕ ЗАФИКСИРОВАННЫЕ ЧАСЫ / CURRENT RECORDED HOURS' : isFinal ? 'CONFIRMED FOR CUSTOMER' : 'PREVIEW — CONTAINS UNCONFIRMED HOURS, NOT AN OFFICIAL DOCUMENT', x, y);
   doc.fillColor('#000000');
   y += 16;
 
   doc.font('DejaVu').fontSize(8.5);
   const headLines: [string, string][] = [
     ['Period', `${summary.requestedRange.startDate} – ${summary.requestedRange.endDate}`],
-    ['Workers (confirmed)', String(summary.totals.confirmedWorkerCount)],
+    [isRecorded ? 'Workers (recorded)' : 'Workers (confirmed)', String(isRecorded ? summary.totals.recordedWorkerCount : summary.totals.confirmedWorkerCount)],
     ['Generated (Europe/Helsinki)', meta.generatedAtHelsinki],
     ['Prepared by', meta.preparedBy]
   ];
@@ -89,22 +90,29 @@ export async function buildCustomerHoursSummaryPdf(summary: CustomerHoursSummary
   y += 6;
 
   // Table geometry: Week | Employee | Number | Hours | Status | Confirmed by | Confirmed at
-  const cols = [
-    { w: 90, align: 'left' as const },
-    { w: 170, align: 'left' as const },
-    { w: 90, align: 'left' as const },
-    { w: 70, align: 'right' as const },
-    { w: 130, align: 'left' as const },
-    { w: 150, align: 'left' as const },
-    { w: contentWidth - 90 - 170 - 90 - 70 - 130 - 150, align: 'left' as const }
-  ];
+  const cols = isRecorded
+    ? [
+        { w: 150, align: 'left' as const },
+        { w: contentWidth - 150 - 120 - 100, align: 'left' as const },
+        { w: 120, align: 'left' as const },
+        { w: 100, align: 'right' as const }
+      ]
+    : [
+        { w: 90, align: 'left' as const },
+        { w: 170, align: 'left' as const },
+        { w: 90, align: 'left' as const },
+        { w: 70, align: 'right' as const },
+        { w: 130, align: 'left' as const },
+        { w: 150, align: 'left' as const },
+        { w: contentWidth - 90 - 170 - 90 - 70 - 130 - 150, align: 'left' as const }
+      ];
   const totalW = cols.reduce((a, c) => a + c.w, 0);
 
   const drawColHead = (yy: number): number => {
     doc.font('DejaVu-Bold').fontSize(7.5);
     doc.rect(x, yy, totalW, HEADER_ROW_HEIGHT).fillAndStroke('#eeeeee', '#333333');
     doc.fillColor('#000000');
-    const labels = ['Week', 'Employee', 'Number', 'Hours', 'Status', 'Confirmed by', 'Confirmed at'];
+    const labels = isRecorded ? ['Week', 'Employee', 'Number', 'Hours'] : ['Week', 'Employee', 'Number', 'Hours', 'Status', 'Confirmed by', 'Confirmed at'];
     let cx = x;
     for (let i = 0; i < cols.length; i++) {
       doc.text(labels[i], cx + 3, yy + 6, { width: cols[i].w - 6, align: cols[i].align, lineBreak: false });
@@ -166,11 +174,11 @@ export async function buildCustomerHoursSummaryPdf(summary: CustomerHoursSummary
       const status = r.submissionState === 'SUBMITTED' ? (STATUS_LABEL_EN[r.approvalState] ?? r.approvalState) : 'Not submitted';
       const confirmedBy = r.currentApprovalItem?.approvedByUserName ?? '—';
       const confirmedAt = r.currentApprovalItem ? formatHelsinkiDateTime(r.currentApprovalItem.approvedAt) : '—';
-      y = drawRow([weekLabel, `${r.employeeName}`, r.employeeNumber, formatWorkedDuration(r.workedMinutes, 'EN'), status, confirmedBy, confirmedAt], y);
+      y = drawRow(isRecorded ? [weekLabel, `${r.employeeName}`, r.employeeNumber, formatWorkedDuration(r.workedMinutes, 'EN')] : [weekLabel, `${r.employeeName}`, r.employeeNumber, formatWorkedDuration(r.workedMinutes, 'EN'), status, confirmedBy, confirmedAt], y);
       customerTotal += r.workedMinutes;
     }
     ensure(ROW_HEIGHT);
-    y = drawRow(['', '', '', formatWorkedDuration(customerTotal, 'EN'), 'Customer total', '', ''], y, true);
+    y = drawRow(isRecorded ? ['', 'Customer total', '', formatWorkedDuration(customerTotal, 'EN')] : ['', '', '', formatWorkedDuration(customerTotal, 'EN'), 'Customer total', '', ''], y, true);
     y += 10;
   }
 
@@ -246,7 +254,11 @@ export async function buildCustomerHoursSummaryPdf(summary: CustomerHoursSummary
     doc.font('DejaVu').fontSize(7).fillColor('#555555');
     doc.text(`Page ${i + 1} of ${range.count}`, 0, height - ob + 12, { width, align: 'center', lineBreak: false });
     doc.text(
-      isFinal ? 'Confirmed working hours per customer. Not an invoice — no salary, rates or TES calculation.' : 'PREVIEW — contains unconfirmed / changed hours. Not an official document.',
+      isRecorded
+        ? 'Actual recorded working hours. Not an invoice — no salary, rates or TES calculation.'
+        : isFinal
+          ? 'Confirmed working hours per customer. Not an invoice — no salary, rates or TES calculation.'
+          : 'PREVIEW — contains unconfirmed / changed hours. Not an official document.',
       0,
       height - ob + 22,
       { width, align: 'center', lineBreak: false }
@@ -261,6 +273,6 @@ export async function buildCustomerHoursSummaryPdf(summary: CustomerHoursSummary
 export function customerHoursSummaryPdfFileName(summary: CustomerHoursSummaryResult, mode: SummaryExportMode): string {
   const one = summary.byCustomer.length === 1 ? summary.byCustomer[0].workAreaName : null;
   const slug = (one ?? 'customers').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '').slice(0, 40) || 'customers';
-  const modeTag = mode === 'preview' ? '_preview' : '';
+  const modeTag = mode === 'preview' ? '_preview' : mode === 'recorded' ? '_recorded' : '';
   return `titanor-summary_${slug}_${summary.requestedRange.startDate}_${summary.requestedRange.endDate}${modeTag}.pdf`;
 }

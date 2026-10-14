@@ -2,6 +2,7 @@ import { Prisma } from '@prisma/client';
 import { NextRequest, NextResponse } from 'next/server';
 import { jsonError, successHeaders, type ApiErrorBody } from '@/lib/api-error';
 import { guardApiRequest } from '@/lib/api-guard';
+import { customerHoursApprovalEnabled } from '@/lib/customer-hours-approval-flag';
 import { prisma } from '@/lib/prisma';
 import { createAuditEvent } from '@/lib/audit';
 import { computeRequestHash, beginIdempotentRequest, completeIdempotentRequest, isValidIdempotencyKeyFormat, type IdempotencyIdentity } from '@/lib/idempotency';
@@ -331,6 +332,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   const guard = await guardApiRequest(request, { csrf: true, permission: 'timesheet.customer_hours_approve.all' });
   if (!guard.ok) return guard.response;
   const { session, requestId } = guard;
+  if (!customerHoursApprovalEnabled()) return jsonError(409, { code: 'FEATURE_DISABLED', message: 'Customer hours approval is disabled.' }, requestId);
 
   const idempotencyKeyHeader = request.headers.get('idempotency-key');
   if (!idempotencyKeyHeader || !isValidIdempotencyKeyFormat(idempotencyKeyHeader)) {

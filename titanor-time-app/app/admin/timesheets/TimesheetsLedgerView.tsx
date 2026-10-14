@@ -51,6 +51,7 @@ interface FetchErrorState {
 // render/hydration value only, since that is guaranteed consistent between server and client.
 export function TimesheetsLedgerView({
   locale,
+  approvalEnabled,
   initialState,
   initialData,
   initialHistoricalRows,
@@ -60,6 +61,7 @@ export function TimesheetsLedgerView({
   initialSelectedCustomerOptions
 }: {
   locale: AppLocale;
+  approvalEnabled: boolean;
   initialState: TimeLedgerUiState;
   initialData: TimeLedgerResult;
   initialHistoricalRows: HistoricalApprovalRow[];
@@ -134,7 +136,10 @@ export function TimesheetsLedgerView({
   const seqRef = useRef(0);
 
   const parsedCurrent = useMemo(() => parseTimeLedgerUiState(new URLSearchParams(currentSearch), new Date()), [currentSearch]);
-  const currentState: TimeLedgerUiState = parsedCurrent.ok ? parsedCurrent.state : initialState;
+  const parsedState: TimeLedgerUiState = parsedCurrent.ok ? parsedCurrent.state : initialState;
+  const currentState: TimeLedgerUiState = approvalEnabled
+    ? parsedState
+    : { ...parsedState, status: 'all', onlyChangedAfterApproval: false };
 
   // UT6-B — mass-approval selection (UT6-A-R1 §7). Lives here, not inside CustomerGroupSection,
   // specifically so it SURVIVES a customer group's own component unmounting/remounting across a page
@@ -339,7 +344,10 @@ export function TimesheetsLedgerView({
     setLoading(true);
     setError(null);
 
-    fetch(uiStateToApiUrl(parsedCurrent.state), { credentials: 'same-origin', signal: controller.signal })
+    const fetchState: TimeLedgerUiState = approvalEnabled
+      ? parsedCurrent.state
+      : { ...parsedCurrent.state, status: 'all', onlyChangedAfterApproval: false };
+    fetch(uiStateToApiUrl(fetchState), { credentials: 'same-origin', signal: controller.signal })
       .then(async (res) => {
         if (seq !== seqRef.current) return; // superseded by a newer request — ignore
         const body = await res.json().catch(() => null);
@@ -369,11 +377,12 @@ export function TimesheetsLedgerView({
     // leave the previous customer/period's rows on screen under a filter they no longer match. The
     // `seq` check below still applies to the actual response, exactly like the main ledger fetch —
     // an in-flight request superseded by a newer filter change is simply ignored when it resolves.
-    setHistoricalRows([]);
-    setHistoricalTruncated(false);
-    setHistoricalError(false);
+    if (approvalEnabled) {
+      setHistoricalRows([]);
+      setHistoricalTruncated(false);
+      setHistoricalError(false);
 
-    fetch(uiStateToHistoricalApiUrl(parsedCurrent.state), { credentials: 'same-origin', signal: controller.signal })
+      fetch(uiStateToHistoricalApiUrl(parsedCurrent.state), { credentials: 'same-origin', signal: controller.signal })
       .then(async (res) => {
         if (seq !== seqRef.current) return; // superseded by a newer filter change — ignore
         if (!res.ok) {
@@ -395,6 +404,7 @@ export function TimesheetsLedgerView({
         setHistoricalError(true);
       }); // a failure here (or above) only ever sets historicalError — it never surfaces as a
     // page-level error banner and never blocks the main ledger rows/filters/approve flow.
+    }
 
     return () => controller.abort();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -443,8 +453,9 @@ export function TimesheetsLedgerView({
         setError({ code: 'NETWORK_ERROR', message: '' });
         setLoading(false);
       });
-    setHistoricalError(false);
-    fetch(uiStateToHistoricalApiUrl(currentState), { credentials: 'same-origin' })
+    if (approvalEnabled) {
+      setHistoricalError(false);
+      fetch(uiStateToHistoricalApiUrl(currentState), { credentials: 'same-origin' })
       .then(async (res) => {
         if (seq !== seqRef.current) return;
         if (!res.ok) {
@@ -464,7 +475,8 @@ export function TimesheetsLedgerView({
         if (seq !== seqRef.current) return;
         setHistoricalError(true);
       });
-  }, [currentState, currentSearch, router]);
+    }
+  }, [approvalEnabled, currentState, currentSearch, router]);
 
   const errorBanner = error ? renderErrorBanner(error, locale, navigate, retry) : null;
   const keepDataVisible = error ? error.code === 'TIME_LEDGER_READ_CHANGED_DURING_QUERY' || error.code === 'NETWORK_ERROR' || error.code === 'UNKNOWN' : true;
@@ -503,6 +515,7 @@ export function TimesheetsLedgerView({
       <LedgerTopBar locale={locale} state={currentState} onNavigate={navigate} />
       <LedgerFilterBar
         locale={locale}
+        approvalEnabled={approvalEnabled}
         state={currentState}
         onNavigate={navigate}
         siteOptions={initialSiteOptions}
@@ -512,8 +525,8 @@ export function TimesheetsLedgerView({
       {loading && <p className="ledger-loading" role="status" aria-live="polite">{localeText(locale, 'Loading…', 'Загрузка…')}</p>}
       {(!error || keepDataVisible) && (
         <>
-          <LedgerSummaryStrip locale={locale} summary={data.summary} state={currentState} onNavigate={navigate} />
-          {historicalError && (
+          <LedgerSummaryStrip locale={locale} approvalEnabled={approvalEnabled} summary={data.summary} state={currentState} onNavigate={navigate} />
+          {approvalEnabled && historicalError && (
             <div className="ledger-historical-warning" role="alert">
               <p>{historicalLoadErrorLabel(locale)}</p>
               <button type="button" className="ledger-retry-button" onClick={retry}>
@@ -521,12 +534,12 @@ export function TimesheetsLedgerView({
               </button>
             </div>
           )}
-          {!historicalError && historicalTruncated && (
+          {approvalEnabled && !historicalError && historicalTruncated && (
             <div className="ledger-historical-warning" role="status">
               <p>{historicalTruncatedLabel(locale)}</p>
             </div>
           )}
-          {data.customerGroups.length === 0 && data.notSubmitted.length === 0 && data.sourceErrors.length === 0 && historicalRows.length === 0 ? (
+          {data.customerGroups.length === 0 && data.notSubmitted.length === 0 && data.sourceErrors.length === 0 && (!approvalEnabled || historicalRows.length === 0) ? (
             <p className="wk-empty" role="status">
               {localeText(locale, 'No results for these filters.', 'Нет результатов по этим фильтрам.')}{' '}
               <button type="button" className="ledger-link-button" onClick={() => navigate({ ...blankFilters(), page: 1 })}>
@@ -542,27 +555,29 @@ export function TimesheetsLedgerView({
                   <CustomerGroupSection
                     key={groupKey}
                     locale={locale}
+                    approvalEnabled={approvalEnabled}
                     group={group}
                     onApproved={retry}
-                    selectedKeys={new Set(selectedItems.keys())}
+                    selectedKeys={approvalEnabled ? new Set(selectedItems.keys()) : undefined}
                     selectedCustomerKey={selectedCustomerKey}
-                    onToggleSelect={(row) => toggleSelectInGroup(row, group)}
-                    onSelectVisible={selectVisible}
-                    onConfirmAllMatching={confirmAllMatching}
+                    onToggleSelect={approvalEnabled ? (row) => toggleSelectInGroup(row, group) : undefined}
+                    onSelectVisible={approvalEnabled ? selectVisible : undefined}
+                    onConfirmAllMatching={approvalEnabled ? confirmAllMatching : undefined}
                     allMatchingBusy={groupAllMatching?.busy ?? false}
                     allMatchingTooMany={groupAllMatching?.tooMany ?? null}
                     selectionLocked={selectionLocked}
-                    historicalRows={historicalByCustomerKey.get(groupKey)}
-                    onSelectWholeWeek={selectWholeWeek}
+                    historicalRows={approvalEnabled ? historicalByCustomerKey.get(groupKey) : undefined}
+                    onSelectWholeWeek={approvalEnabled ? selectWholeWeek : undefined}
                     wholeWeekBusyKey={wholeWeekBusyKey}
                     wholeWeekTooMany={wholeWeekTooMany}
                   />
                 );
               })}
-              {orphanHistoricalGroups.map((g) => (
+              {approvalEnabled && orphanHistoricalGroups.map((g) => (
                 <CustomerGroupSection
                   key={g.key}
                   locale={locale}
+                  approvalEnabled={approvalEnabled}
                   group={{ siteId: g.siteId, siteName: g.siteName, workAreaId: g.workAreaId, workAreaName: g.workAreaName, rows: [] }}
                   onApproved={retry}
                   historicalRows={g.rows}
@@ -575,7 +590,7 @@ export function TimesheetsLedgerView({
           )}
         </>
       )}
-      <MassApproveBar locale={locale} selectedItems={selectedItems} scope={selectionScope} onClearSelection={clearSelection} onApproved={retry} onActiveChange={setSelectionLocked} />
+      {approvalEnabled && <MassApproveBar locale={locale} selectedItems={selectedItems} scope={selectionScope} onClearSelection={clearSelection} onApproved={retry} onActiveChange={setSelectionLocked} />}
     </div>
   );
 }

@@ -4,6 +4,7 @@ import { guardApiRequest } from '@/lib/api-guard';
 import { prisma } from '@/lib/prisma';
 import { prepareWeeklyCustomerApproval, validateApprovalRequestBody } from '@/lib/reporting/weekly-approval';
 import { signConfirmationToken } from '@/lib/customer-hours-confirmation-token';
+import { customerHoursApprovalEnabled } from '@/lib/customer-hours-approval-flag';
 
 // UT5-B — POST /api/admin/time-ledger/approval-preview. Read-only: never writes to the database,
 // never requires Idempotency-Key (nothing to dedupe — repeating a preview is harmless). Re-reads
@@ -18,6 +19,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   const guard = await guardApiRequest(request, { csrf: true, permission: 'timesheet.customer_hours_approve.all' });
   if (!guard.ok) return guard.response;
   const { session, requestId } = guard;
+  if (!customerHoursApprovalEnabled()) return jsonError(409, { code: 'FEATURE_DISABLED', message: 'Customer hours approval is disabled.' }, requestId);
 
   let rawBody: unknown;
   try {

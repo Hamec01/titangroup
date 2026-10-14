@@ -11,6 +11,7 @@ import { parseTimeLedgerQuery } from '@/lib/reporting/time-ledger-query';
 import { loadCustomerHoursSummary, SUMMARY_MAX_WEEKS, SUMMARY_MAX_SLICES } from '@/lib/reporting/customer-hours-summary';
 import { buildCustomerHoursSummaryCsv, customerHoursSummaryCsvFileName, type SummaryExportMode } from '@/lib/reporting/customer-hours-summary-csv';
 import { buildCustomerHoursSummaryPdf, customerHoursSummaryPdfFileName } from '@/lib/reporting/customer-hours-summary-pdf';
+import { customerHoursApprovalEnabled } from '@/lib/customer-hours-approval-flag';
 
 // UT8-B — GET /api/admin/time-ledger/summary/export?format=csv|pdf&mode=preview|final. The NEW
 // official customer-facing document — replaces lib/reporting/customer-time-report.ts's
@@ -59,10 +60,14 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   if (formatRaw !== 'CSV' && formatRaw !== 'PDF') {
     return jsonError(400, { code: 'VALIDATION_ERROR', message: 'format must be csv or pdf.', fieldErrors: { format: ['csv or pdf'] } }, requestId);
   }
-  if (modeRaw !== 'preview' && modeRaw !== 'final') {
-    return jsonError(400, { code: 'VALIDATION_ERROR', message: 'mode must be preview or final.', fieldErrors: { mode: ['preview or final'] } }, requestId);
+  if (modeRaw !== 'preview' && modeRaw !== 'final' && modeRaw !== 'recorded') {
+    return jsonError(400, { code: 'VALIDATION_ERROR', message: 'mode must be preview, final, or recorded.', fieldErrors: { mode: ['preview, final, or recorded'] } }, requestId);
   }
   const mode: SummaryExportMode = modeRaw;
+  const approvalEnabled = customerHoursApprovalEnabled();
+  if ((!approvalEnabled && mode !== 'recorded') || (approvalEnabled && mode === 'recorded')) {
+    return jsonError(409, { code: 'FEATURE_MODE_MISMATCH', message: approvalEnabled ? 'Recorded export is available when customer-hours approval is disabled.' : 'Approval-based exports are disabled; use recorded mode.' }, requestId);
+  }
 
   // format/mode are this route's own params, not part of the shared ledger query shape — stripped
   // before handing the rest to parseTimeLedgerQuery so its strict unknown-parameter check does not
@@ -124,7 +129,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     fileName = customerHoursSummaryPdfFileName(outcome, mode);
   }
 
-  if (mode === 'final') {
+  if (mode === 'final' || mode === 'recorded') {
     await prisma.$transaction((tx) =>
       createAuditEvent(tx, {
         actorUserId: authenticated.user.id,
@@ -141,9 +146,11 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
           siteId: parsed.query.siteId,
           workAreaId: parsed.query.workAreaId,
           customerCount: outcome.byCustomer.length,
-          workerCount: outcome.totals.confirmedWorkerCount,
-          confirmedMinutes: outcome.totals.confirmedMinutes,
-          rowCount: outcome.rows.filter((r) => r.approvalState === 'APPROVED').length
+          workerCount: mode === 'recorded' ? outcome.totals.recordedWorkerCount : outcome.totals.confirmedWorkerCount,
+          confirmedMinutes: mode === 'recorded' ? undefined : outcome.totals.confirmedMinutes,
+          recordedMinutes: mode === 'recorded' ? outcome.totals.recordedMinutes : undefined,
+          mode,
+          rowCount: mode === 'recorded' ? outcome.rows.length : outcome.rows.filter((r) => r.approvalState === 'APPROVED').length
         }
       })
     );

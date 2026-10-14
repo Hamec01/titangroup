@@ -26,6 +26,7 @@ function formatDayHeader(dateIso: string, locale: AppLocale): string {
 // the trailing collapsed "Диагностика" <details> — never in the always-visible part above it.
 export function ExpandedWeekPanel({
   locale,
+  approvalEnabled,
   row,
   onApproved,
   onSelectWholeWeek,
@@ -33,6 +34,7 @@ export function ExpandedWeekPanel({
   wholeWeekTooMany,
 }: {
   locale: AppLocale;
+  approvalEnabled: boolean;
   row: WeeklyCustomerSliceRow;
   onApproved: () => void;
   /** UT9-B — "Принять всю неделю": confirms every customer THIS worker has hours with for THIS
@@ -73,7 +75,9 @@ export function ExpandedWeekPanel({
       {row.submissionState === 'NOT_SUBMITTED' && <p className="ledger-approve-draft-warning">{approveDraftWarningLabel(locale)}</p>}
       {savedNotice && (
         <p className="ledger-approve-success" role="status">
-          {localeText(locale, 'Hours saved. Confirm the week again when ready.', 'Часы сохранены. Подтвердите неделю заново, когда будете готовы.')}
+          {approvalEnabled
+            ? localeText(locale, 'Hours saved. Confirm the week again when ready.', 'Часы сохранены. Подтвердите неделю заново, когда будете готовы.')
+            : localeText(locale, 'Hours saved.', 'Часы сохранены.')}
         </p>
       )}
       <table className="ledger-days-table">
@@ -161,19 +165,19 @@ export function ExpandedWeekPanel({
         </ul>
       )}
 
-      <p className="ledger-approval-history">{approvalHistorySentence(row, locale)}</p>
+      {approvalEnabled && <p className="ledger-approval-history">{approvalHistorySentence(row, locale)}</p>}
 
       {/* UT7-B — "было / стало" only for a row that actually has something to compare: real
           CHANGED_AFTER_APPROVAL, or a fingerprint that coincidentally matches a now-historical
           (SUPERSEDED) approval rather than the live CURRENT one. Never fetched for a plain
           READY/APPROVED row — lazy, on-demand only. */}
-      {(row.approvalState === 'CHANGED_AFTER_APPROVAL' || (row.approvalState === 'NEEDS_ATTENTION' && row.supersededFingerprintMatch)) && (
+      {approvalEnabled && (row.approvalState === 'CHANGED_AFTER_APPROVAL' || (row.approvalState === 'NEEDS_ATTENTION' && row.supersededFingerprintMatch)) && (
         <ApprovalDiffPanel locale={locale} logicalKey={row.logicalKey} />
       )}
 
       <div className="ledger-approve-action">
-        <ApproveWeekAction locale={locale} row={row} onApproved={onApproved} />
-        {onSelectWholeWeek && (
+        {approvalEnabled && <ApproveWeekAction locale={locale} row={row} onApproved={onApproved} />}
+        {approvalEnabled && onSelectWholeWeek && (
           <button type="button" className="ledger-link-button" disabled={wholeWeekBusy} onClick={onSelectWholeWeek}>
             {wholeWeekBusy ? confirmWholeWeekLoadingLabel(locale) : confirmWholeWeekLabel(locale)}
           </button>
@@ -191,26 +195,25 @@ export function ExpandedWeekPanel({
           </button>
         )}
       </div>
-      {wholeWeekTooMany && <p className="ledger-group-mass-note" role="alert">{massTooManyLabel(wholeWeekTooMany.totalItems, wholeWeekTooMany.max, locale)}</p>}
+      {approvalEnabled && wholeWeekTooMany && <p className="ledger-group-mass-note" role="alert">{massTooManyLabel(wholeWeekTooMany.totalItems, wholeWeekTooMany.max, locale)}</p>}
 
       <details className="ledger-diagnostics">
         <summary>{localeText(locale, 'Diagnostics', 'Диагностика')}</summary>
         <dl>
-          <dt>{localeText(locale, 'Fingerprint', 'Отпечаток')}</dt>
-          <dd>{row.currentFingerprint}</dd>
+          {approvalEnabled && <><dt>{localeText(locale, 'Fingerprint', 'Отпечаток')}</dt><dd>{row.currentFingerprint}</dd></>}
           <dt>{localeText(locale, 'Canonical source', 'Канонический источник')}</dt>
           <dd>
             {row.canonicalSource.dataSource} · {row.canonicalSource.sourceId}
             {row.canonicalSource.versionNumber !== null ? ` · v${row.canonicalSource.versionNumber}` : ''}
             {row.canonicalSource.sourceRevision !== null ? ` · rev ${row.canonicalSource.sourceRevision}` : ''}
           </dd>
-          {row.currentApprovalItem && (
+          {approvalEnabled && row.currentApprovalItem && (
             <>
               <dt>{localeText(locale, 'Current approval fingerprint', 'Отпечаток текущего подтверждения')}</dt>
               <dd>{row.currentApprovalItem.fingerprint}</dd>
             </>
           )}
-          {row.lastHistoricalApproval && (
+          {approvalEnabled && row.lastHistoricalApproval && (
             <>
               <dt>{localeText(locale, 'Last approval record state', 'Состояние последней записи подтверждения')}</dt>
               <dd>{row.lastHistoricalApproval.approvalState}</dd>

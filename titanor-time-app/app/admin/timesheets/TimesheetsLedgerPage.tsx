@@ -8,6 +8,7 @@ import { localeText } from '@/lib/i18n/locale';
 import { TimesheetsTabs } from './TimesheetsTabs';
 import { SummaryTab } from './SummaryTab';
 import { TimesheetsLedgerView } from './TimesheetsLedgerView';
+import { customerHoursApprovalEnabled } from '@/lib/customer-hours-approval-flag';
 
 // UT4-B — Server Component entry point for the new (flag-on) /admin/timesheets body. Resolves the
 // URL into a UI state via the SAME pure parser the client re-uses (lib/reporting/time-ledger-ui-query.ts),
@@ -25,6 +26,7 @@ export async function TimesheetsLedgerPage({
 }) {
   const usp = toURLSearchParams(searchParams);
   const parsed = parseTimeLedgerUiState(usp, new Date());
+  const approvalEnabled = customerHoursApprovalEnabled();
 
   if (!parsed.ok) {
     return (
@@ -42,7 +44,9 @@ export async function TimesheetsLedgerPage({
     );
   }
 
-  const state = parsed.state;
+  const state: TimeLedgerUiState = approvalEnabled
+    ? parsed.state
+    : { ...parsed.state, status: 'all', onlyChangedAfterApproval: false };
 
   // UT8-B — moved above the view branch: both the table view and the new "Сводка" tab need the SAME
   // site/customer filter option lists for their (shared-component) LedgerFilterBar.
@@ -57,7 +61,7 @@ export async function TimesheetsLedgerPage({
         <div className="setup-card worker-card ledger-card">
           <h1>{localeText(locale, 'Timesheets', 'Табель')}</h1>
           <TimesheetsTabs locale={locale} state={state} />
-          <SummaryTab locale={locale} initialState={state} initialSiteOptions={sites} initialSelectedCustomerOptions={selectedCustomerOptions} />
+          <SummaryTab locale={locale} approvalEnabled={approvalEnabled} initialState={state} initialSiteOptions={sites} initialSelectedCustomerOptions={selectedCustomerOptions} />
         </div>
       </main>
     );
@@ -75,7 +79,10 @@ export async function TimesheetsLedgerPage({
   // main "Табель" page. getTimeLedger's own result/error handling is exactly what it was before this
   // fixup — only now it no longer shares a single try/catch (and therefore a single failure mode)
   // with the historical read.
-  const [ledgerOutcome, historicalOutcome] = await Promise.allSettled([getTimeLedger(uiStateToApiQuery(state), actor), loadHistoricalApprovalIssues(uiStateToApiQuery(state), actor)]);
+  const [ledgerOutcome, historicalOutcome] = await Promise.allSettled([
+    getTimeLedger(uiStateToApiQuery(state), actor),
+    approvalEnabled ? loadHistoricalApprovalIssues(uiStateToApiQuery(state), actor) : Promise.resolve({ rows: [] as HistoricalApprovalRow[], truncated: false })
+  ]);
 
   if (ledgerOutcome.status === 'fulfilled') {
     initialData = ledgerOutcome.value;
@@ -114,6 +121,7 @@ export async function TimesheetsLedgerPage({
         ) : (
           <TimesheetsLedgerView
             locale={locale}
+            approvalEnabled={approvalEnabled}
             initialState={state}
             initialData={initialData}
             initialHistoricalRows={initialHistoricalRows}

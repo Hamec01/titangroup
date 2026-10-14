@@ -7,6 +7,7 @@ import { SESSION_COOKIE_NAME } from '@/lib/session';
 import { prisma } from '@/lib/prisma';
 import { parseTimeLedgerQuery } from '@/lib/reporting/time-ledger-query';
 import { loadHistoricalApprovalIssues } from '@/lib/reporting/customer-hours-history';
+import { customerHoursApprovalEnabled } from '@/lib/customer-hours-approval-flag';
 
 // UT7-B-fixup #2 / UT7-B-fixup-2 — GET /api/admin/time-ledger/historical-approvals. Read-only, a
 // SEPARATE bounded list alongside the main GET /api/admin/time-ledger response (never woven into its
@@ -31,6 +32,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   if (!(await hasPermission(authenticated.user.roles, 'timesheet.read.all'))) {
     return jsonError(403, { code: 'FORBIDDEN', message: 'Missing required permission.' }, requestId);
   }
+  if (!customerHoursApprovalEnabled()) return jsonError(409, { code: 'FEATURE_DISABLED', message: 'Customer hours approval is disabled.' }, requestId);
 
   const parsed = parseTimeLedgerQuery(request.nextUrl.searchParams);
   if (!parsed.ok) {

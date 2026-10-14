@@ -88,7 +88,9 @@ relevant query + canonical body)`.
   `system.scheduler`), с той же dummy-verify задержкой, что и неизвестный identifier. Проверка не
   зависит от `status` — уже сегодня `DEACTIVATED` отклонил бы вход, но это не структурная
   гарантия, отдельная от неё.
-- Rate limit: 5/15мин на `identifier` + 50/15мин на IP
+- Rate limit: 5/15мин на `identifier` + 50/15мин на IP по умолчанию. Явное
+  `LOGIN_RATE_LIMIT_ENABLED=false` отключает только limiter этого endpoint; ограничения активации,
+  восстановления, смены пароля и attendance остаются включены.
 - Audit: `LOGIN_SUCCEEDED` / `LOGIN_FAILED`
 
 #### `POST /api/auth/logout`
@@ -2461,3 +2463,19 @@ permission requirement или CSV byte contract этим коммитом не �
   entityId=employeeId, afterValue={"documentType":"WORKER_DOSSIER"})` — без единого
   sensitive-поля (это единственная запись audit-метаданных, никогда не PII)
 - Ошибки: `404 EMPLOYEE_NOT_FOUND`, `401`/`403` как у остальных admin-only routes
+
+# Optional customer-hours approval workflow
+
+`CUSTOMER_HOURS_APPROVAL_ENABLED` controls only the customer-hours approval layer in the unified
+admin timesheet. The default is enabled. With the exact value `false`:
+
+- worker clock-in/clock-out and timesheet submission behavior are unchanged;
+- approval buttons, bulk selection, approval statuses, diffs, and approval history are hidden;
+- approval mutation and approval-history API endpoints return `409 FEATURE_DISABLED` after normal
+  authentication and permission checks;
+- the summary counts all current recorded weekly customer slices, regardless of approval state;
+- summary CSV/PDF use `mode=recorded`, require no approval, omit approval columns, and are labelled
+  `ФАКТИЧЕСКИ ЗАФИКСИРОВАННЫЕ ЧАСЫ / RECORDED WORKING HOURS`;
+- existing `CustomerHoursApprovalBatch` and `CustomerHoursApprovalItem` rows are retained unchanged.
+
+Changing the variable back to `true` restores the existing approval workflow and its history.

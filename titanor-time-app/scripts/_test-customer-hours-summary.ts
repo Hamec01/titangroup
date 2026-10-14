@@ -18,6 +18,7 @@ async function main() {
   const { validateSummaryRange, SUMMARY_MAX_WEEKS } = await import('../lib/reporting/customer-hours-summary');
   const { buildCustomerHoursSummaryCsv } = await import('../lib/reporting/customer-hours-summary-csv');
   const { buildCustomerHoursSummaryPdf } = await import('../lib/reporting/customer-hours-summary-pdf');
+  const { customerHoursApprovalEnabled } = await import('../lib/customer-hours-approval-flag');
 
   // ---------------------------------------------------------------------------------------------
   // 1. validateSummaryRange — allTime is always rejected, regardless of any range also present.
@@ -336,6 +337,31 @@ async function main() {
     const previewPdf = await buildCustomerHoursSummaryPdf(fakeSummary, 'preview', meta);
     check('9f: final PDF renders (real PDF, unsubmitted-but-approved row silently excluded)', finalPdf.subarray(0, 4).toString('ascii') === '%PDF', finalPdf.length);
     check('9g: preview PDF renders more content than final (it includes the extra unsubmitted row)', previewPdf.length > finalPdf.length, { preview: previewPdf.length, final: finalPdf.length });
+  }
+
+  // ---------------------------------------------------------------------------------------------
+  // 10. Optional approval mode — backwards-compatible flag plus approval-free recorded exports.
+  // ---------------------------------------------------------------------------------------------
+  {
+    check('10: approval defaults to enabled when the variable is absent', customerHoursApprovalEnabled({}));
+    check('10b: exact false disables approval', !customerHoursApprovalEnabled({ CUSTOMER_HOURS_APPROVAL_ENABLED: 'false' }));
+    check('10c: other values do not accidentally disable approval', customerHoursApprovalEnabled({ CUSTOMER_HOURS_APPROVAL_ENABLED: 'FALSE' }));
+
+    const recordedRow: any = {
+      logicalKey: { employeeId: 'e1', timesheetId: 't1', siteId: 's1', workAreaId: 'w1', weekStart: '2036-01-05', weekEnd: '2036-01-11' },
+      employeeName: 'Current Worker', employeeNumber: 'E-1', approvalState: 'READY', submissionState: 'NOT_SUBMITTED', workedMinutes: 275, currentApprovalItem: null
+    };
+    const fakeSummary: any = {
+      requestedRange: { startDate: '2036-01-05', endDate: '2036-01-11' }, rows: [recordedRow], historical: [], sourceErrors: [], notSubmitted: [],
+      totals: { recordedWorkerCount: 1, recordedMinutes: 275, historicalTruncated: false },
+      byCustomer: [{ siteId: 's1', siteName: 'Site A', workAreaId: 'w1', workAreaName: 'Aros Marine', recordedMinutes: 275, recordedWorkerCount: 1 }]
+    };
+    const recordedCsv = buildCustomerHoursSummaryCsv(fakeSummary, 'recorded').toString('utf8');
+    const header = recordedCsv.split('\r\n')[0];
+    check('10d: recorded CSV contains every current row regardless of approval/submission state', recordedCsv.includes('Current Worker') && recordedCsv.includes('275') && recordedCsv.includes('4.58'), recordedCsv);
+    check('10e: recorded CSV has no approval/history columns', !header.includes('approval_status') && !header.includes('confirmed_by') && !recordedCsv.includes('pending'), header);
+    const recordedPdf = await buildCustomerHoursSummaryPdf(fakeSummary, 'recorded', { generatedAtHelsinki: '05.01.2036 10:00', preparedBy: 'admin' });
+    check('10f: recorded PDF renders without requiring approval', recordedPdf.subarray(0, 4).toString('ascii') === '%PDF', recordedPdf.length);
   }
 
   console.log(`\n${pass} passed, ${fail} failed`);

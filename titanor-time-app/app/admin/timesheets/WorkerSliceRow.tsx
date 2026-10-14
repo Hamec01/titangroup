@@ -20,6 +20,7 @@ import { ExpandedWeekPanel } from './ExpandedWeekPanel';
 // navigation (UT6-A-R1 §7).
 export function WorkerSliceRow({
   locale,
+  approvalEnabled,
   row,
   onApproved,
   selected = false,
@@ -30,6 +31,7 @@ export function WorkerSliceRow({
   wholeWeekTooMany
 }: {
   locale: AppLocale;
+  approvalEnabled: boolean;
   row: WeeklyCustomerSliceRow;
   onApproved: () => void;
   selected?: boolean;
@@ -64,7 +66,7 @@ export function WorkerSliceRow({
           </span>
           <span className="ledger-row-week">{row.logicalKey.weekStart}</span>
           <span className="ledger-row-hours">{formatWorkedDuration(row.workedMinutes, locale)}</span>
-          <StatusBadge label={approvalStateLabel(row.approvalState, locale)} tone={approvalStateTone(row.approvalState)} />
+          {approvalEnabled && <StatusBadge label={approvalStateLabel(row.approvalState, locale)} tone={approvalStateTone(row.approvalState)} />}
           <span className="ledger-row-submission">{submissionStateLabel(row.submissionState, locale)}</span>
           {issueCount > 0 && (
             <span className="ledger-row-issue-count">
@@ -80,6 +82,7 @@ export function WorkerSliceRow({
         <div id={panelId}>
           <ExpandedWeekPanel
             locale={locale}
+            approvalEnabled={approvalEnabled}
             row={row}
             onApproved={onApproved}
             onSelectWholeWeek={onSelectWholeWeek ? () => onSelectWholeWeek(row) : undefined}
