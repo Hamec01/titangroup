@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { Readable, Transform } from 'node:stream';
-import { DeleteObjectCommand, GetObjectCommand, HeadObjectCommand, S3Client } from '@aws-sdk/client-s3';
+import { DeleteObjectCommand, GetObjectCommand, HeadObjectCommand, PutObjectCommand, S3Client } from '@aws-sdk/client-s3';
 import { Upload } from '@aws-sdk/lib-storage';
 
 export const DOCUMENT_QUOTA_BYTES = BigInt(10) * BigInt(1024) * BigInt(1024) * BigInt(1024);
@@ -41,9 +41,19 @@ export function makeStorageKey(): string {
   return `${prefix}/objects/${id.slice(0, 2)}/${id}`;
 }
 
-export async function putDocumentStream(body: ReadableStream<Uint8Array>, expectedBytes: bigint, mimeType: string): Promise<StoredObject> {
+export async function putDocumentStream(body: ReadableStream<Uint8Array> | null, expectedBytes: bigint, mimeType: string): Promise<StoredObject> {
   const { client, bucket } = config();
   const storageKey = makeStorageKey();
+  if (expectedBytes === BigInt(0)) {
+    // Browsers send no request body for an empty file; store an explicit empty object.
+    try {
+      await client.send(new PutObjectCommand({ Bucket: bucket, Key: storageKey, Body: new Uint8Array(0), ContentType: mimeType, ContentLength: 0 }));
+    } catch {
+      throw new DocumentStorageUnavailableError('Remote document storage is unavailable');
+    }
+    return { storageKey, sizeBytes: BigInt(0), checksumSha256: createHash('sha256').digest('hex') };
+  }
+  if (!body) throw new Error('DOCUMENT_UPLOAD_SIZE_MISMATCH');
   const hash = createHash('sha256');
   let actualBytes = BigInt(0);
   const hashing = new Transform({

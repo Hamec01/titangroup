@@ -66,7 +66,10 @@ ENV NEXT_TELEMETRY_DISABLED=1
 ENV PORT=3000
 ENV HOSTNAME=0.0.0.0
 
-RUN apt-get update && apt-get install -y --no-install-recommends openssl \
+# p7zip-full + p7zip-rar (7-Zip 26 with the RAR/RAR5 codec, Debian non-free) back the document
+# storage's "extract archive" action (lib/document-archive.ts): zip, rar, 7z, tar, gz.
+RUN sed -i 's/^Components: main$/Components: main non-free/' /etc/apt/sources.list.d/debian.sources \
+    && apt-get update && apt-get install -y --no-install-recommends openssl p7zip-full p7zip-rar \
     && rm -rf /var/lib/apt/lists/*
 
 # --- web runtime: Next.js standalone (self-contained; its own traced node_modules,

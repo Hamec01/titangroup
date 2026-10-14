@@ -8,8 +8,13 @@ import { SESSION_COOKIE_NAME } from '@/lib/session';
 // Node.js runtime, which resolveAuthenticatedSession() needs for Prisma's
 // native query engine. Setting `runtime` explicitly is an error on this file
 // convention, unlike the old middleware.ts.
+//
+// The document upload route is excluded: Next.js buffers a proxied request body and truncates it at
+// 10 MB (`proxyClientMaxBodySize`), which broke every larger upload. That route streams the body
+// straight to object storage and performs the same session check itself (authorizeDocumentRequest),
+// plus its permission and CSRF checks.
 export const config = {
-  matcher: ['/api/admin/:path*', '/api/worker/:path*']
+  matcher: ['/api/admin/((?!documents/files/upload$).*)', '/api/worker/:path*']
 };
 
 // Authentication gate only — a session must exist, be unexpired/unrevoked,

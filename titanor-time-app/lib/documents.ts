@@ -22,7 +22,7 @@ export function classifyDocument(mimeType: string, extension: string | null): st
   if (mimeType.startsWith('image/')) return 'IMAGE';
   if (mimeType.startsWith('video/')) return 'VIDEO';
   if (mimeType === 'application/pdf') return 'PDF';
-  if (['zip', 'rar', '7z', 'tar', 'gz'].includes(extension ?? '')) return 'ARCHIVE';
+  if (['zip', 'rar', '7z', 'tar', 'gz', 'tgz'].includes(extension ?? '')) return 'ARCHIVE';
   if (/^(text\/|application\/(msword|vnd\.|rtf|json|xml))/i.test(mimeType)) return 'DOCUMENT';
   return 'OTHER';
 }
@@ -40,9 +40,17 @@ export async function getDocumentSpace() {
   return space;
 }
 
-export async function reserveDocumentBytes(actorUserId: string, sizeBytes: bigint): Promise<{ id: string; storageSpaceId: string }> {
-  const max = BigInt(process.env.DOCUMENT_MAX_FILE_BYTES || DEFAULT_MAX_FILE_BYTES.toString());
-  if (sizeBytes <= BigInt(0) || sizeBytes > max) throw new DocumentError('FILE_TOO_LARGE', 'Invalid file size.', 413);
+export function documentMaxFileBytes(): bigint {
+  return BigInt(process.env.DOCUMENT_MAX_FILE_BYTES || DEFAULT_MAX_FILE_BYTES.toString());
+}
+
+/**
+ * Reserves quota before bytes reach object storage. Reservations are always > 0 bytes (DB check);
+ * an empty file needs none — see finishDocumentUpload. `batch` reserves the combined size of an archive
+ * extraction, so the per-file ceiling is checked by the caller for each entry instead of the total.
+ */
+export async function reserveDocumentBytes(actorUserId: string, sizeBytes: bigint, options: { batch?: boolean } = {}): Promise<{ id: string; storageSpaceId: string }> {
+  if (sizeBytes <= BigInt(0) || (!options.batch && sizeBytes > documentMaxFileBytes())) throw new DocumentError('FILE_TOO_LARGE', 'Invalid file size.', 413);
   return prisma.$transaction(async (tx) => {
     const rows = await tx.$queryRaw<Array<{ id: string; quotaBytes: bigint; usedBytes: bigint; reservedBytes: bigint }>>`
       SELECT "id", "quotaBytes", "usedBytes", "reservedBytes" FROM "StorageSpace" WHERE "name"=${DOCUMENT_SPACE_NAME} FOR UPDATE`;
@@ -59,7 +67,10 @@ export async function reserveDocumentBytes(actorUserId: string, sizeBytes: bigin
     const reservation = await tx.documentUploadReservation.create({ data: { storageSpaceId: space.id, createdByUserId: actorUserId, sizeBytes, expiresAt: new Date(Date.now() + 60 * 60 * 1000) } });
     await tx.storageSpace.update({ where: { id: space.id }, data: { reservedBytes: { increment: sizeBytes } } });
     return { id: reservation.id, storageSpaceId: space.id };
-  }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+    // ReadCommitted, not Serializable: the FOR UPDATE row lock above already serialises every quota
+    // change on the single StorageSpace row (a concurrent upload waits, then sees the committed
+    // totals). Serializable made parallel uploads of several files fail with 40001 instead of waiting.
+  }, { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted });
 }
 
 export async function releaseDocumentReservation(id: string): Promise<void> {
@@ -71,25 +82,29 @@ export async function releaseDocumentReservation(id: string): Promise<void> {
   });
 }
 
-export async function finishDocumentUpload(input: { reservationId: string; folderId: string | null; originalName: string; mimeType: string; stored: StoredObject; actorUserId: string; requestId: string }) {
+export async function finishDocumentUpload(input: { reservationId: string | null; folderId: string | null; originalName: string; mimeType: string; stored: StoredObject; actorUserId: string; requestId: string }) {
   const parsed = splitFileName(input.originalName);
   try {
     return await prisma.$transaction(async (tx) => {
-      const reservation = await tx.documentUploadReservation.findUnique({ where: { id: input.reservationId } });
-      if (!reservation || reservation.createdByUserId !== input.actorUserId || reservation.sizeBytes !== input.stored.sizeBytes) throw new DocumentError('UPLOAD_RESERVATION_INVALID', 'Upload reservation is invalid.', 409);
+      // Empty files (no reservationId) take no quota, so there is nothing to move from reserved to used.
+      const reservation = input.reservationId ? await tx.documentUploadReservation.findUnique({ where: { id: input.reservationId } }) : null;
+      if (input.reservationId ? (!reservation || reservation.createdByUserId !== input.actorUserId || reservation.sizeBytes !== input.stored.sizeBytes) : input.stored.sizeBytes !== BigInt(0)) throw new DocumentError('UPLOAD_RESERVATION_INVALID', 'Upload reservation is invalid.', 409);
+      const storageSpaceId = reservation?.storageSpaceId ?? (await getDocumentSpace()).id;
       if (input.folderId) {
-        const folder = await tx.documentFolder.findFirst({ where: { id: input.folderId, storageSpaceId: reservation.storageSpaceId }, select: { id: true } });
+        const folder = await tx.documentFolder.findFirst({ where: { id: input.folderId, storageSpaceId }, select: { id: true } });
         if (!folder) throw new DocumentError('FOLDER_NOT_FOUND', 'Folder not found.', 404);
       }
-      const file = await tx.documentFile.create({ data: { storageSpaceId: reservation.storageSpaceId, folderId: input.folderId, originalName: parsed.name, displayName: parsed.name, normalizedName: parsed.normalizedName, extension: parsed.extension, mimeType: input.mimeType.slice(0, 255) || 'application/octet-stream', category: classifyDocument(input.mimeType, parsed.extension), sizeBytes: input.stored.sizeBytes, storageKey: input.stored.storageKey, checksumSha256: input.stored.checksumSha256, createdByUserId: input.actorUserId } });
-      await tx.documentUploadReservation.delete({ where: { id: reservation.id } });
-      await tx.storageSpace.update({ where: { id: reservation.storageSpaceId }, data: { reservedBytes: { decrement: reservation.sizeBytes }, usedBytes: { increment: reservation.sizeBytes } } });
+      const file = await tx.documentFile.create({ data: { storageSpaceId, folderId: input.folderId, originalName: parsed.name, displayName: parsed.name, normalizedName: parsed.normalizedName, extension: parsed.extension, mimeType: input.mimeType.slice(0, 255) || 'application/octet-stream', category: classifyDocument(input.mimeType, parsed.extension), sizeBytes: input.stored.sizeBytes, storageKey: input.stored.storageKey, checksumSha256: input.stored.checksumSha256, createdByUserId: input.actorUserId } });
+      if (reservation) {
+        await tx.documentUploadReservation.delete({ where: { id: reservation.id } });
+        await tx.storageSpace.update({ where: { id: reservation.storageSpaceId }, data: { reservedBytes: { decrement: reservation.sizeBytes }, usedBytes: { increment: reservation.sizeBytes } } });
+      }
       await createAuditEvent(tx, { actorUserId: input.actorUserId, eventType: 'DOCUMENT_FILE_UPLOADED', entityType: 'DOCUMENT_FILE', entityId: file.id, requestId: input.requestId, afterValue: { fileName: file.displayName, sizeBytes: file.sizeBytes.toString(), folderId: file.folderId } });
       return file;
     });
   } catch (error) {
     await deleteDocumentObject(input.stored.storageKey).catch(() => undefined);
-    await releaseDocumentReservation(input.reservationId).catch(() => undefined);
+    if (input.reservationId) await releaseDocumentReservation(input.reservationId).catch(() => undefined);
     if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') throw new DocumentError('DOCUMENT_NAME_CONFLICT', 'An item with this name already exists.', 409);
     throw error;
   }
@@ -97,4 +112,46 @@ export async function finishDocumentUpload(input: { reservationId: string; folde
 
 export function serializeSpace(space: { quotaBytes: bigint; usedBytes: bigint; reservedBytes: bigint }) {
   return { quotaBytes: space.quotaBytes.toString(), usedBytes: space.usedBytes.toString(), reservedBytes: space.reservedBytes.toString(), freeBytes: (space.quotaBytes - space.usedBytes - space.reservedBytes).toString(), configuredQuotaBytes: DOCUMENT_QUOTA_BYTES.toString() };
+}
+
+/**
+ * Find-or-create a chain of nested folders under `parentId` (folder upload keeps the uploaded tree).
+ * Existing folders with the same name are reused, so re-uploading a folder merges into it.
+ */
+export async function ensureDocumentFolderPath(input: { parentId: string | null; segments: string[]; actorUserId: string; requestId: string }): Promise<{ folderId: string | null; folderIds: string[]; created: number }> {
+  const names = input.segments.map((segment) => normalizeDocumentName(segment));
+  const space = await getDocumentSpace();
+  let depth = 0;
+  for (let cursor = input.parentId; cursor; depth += 1) {
+    if (depth + names.length > MAX_FOLDER_DEPTH) throw new DocumentError('FOLDER_DEPTH_EXCEEDED', '', 409);
+    const row: { parentId: string | null } | null = await prisma.documentFolder.findFirst({ where: { id: cursor, storageSpaceId: space.id }, select: { parentId: true } });
+    if (!row) throw new DocumentError('FOLDER_NOT_FOUND', '', 404);
+    cursor = row.parentId;
+  }
+  if (depth + names.length > MAX_FOLDER_DEPTH) throw new DocumentError('FOLDER_DEPTH_EXCEEDED', '', 409);
+  let parentId = input.parentId;
+  const folderIds: string[] = [];
+  let created = 0;
+  for (const name of names) {
+    const where = { storageSpaceId: space.id, parentId, normalizedName: name.normalizedName };
+    let folder = await prisma.documentFolder.findFirst({ where, select: { id: true } });
+    if (!folder) {
+      try {
+        folder = await prisma.$transaction(async (tx) => {
+          const row = await tx.documentFolder.create({ data: { storageSpaceId: space.id, parentId, ...name, createdByUserId: input.actorUserId } });
+          await createAuditEvent(tx, { actorUserId: input.actorUserId, eventType: 'DOCUMENT_FOLDER_CREATED', entityType: 'DOCUMENT_FOLDER', entityId: row.id, requestId: input.requestId, afterValue: { name: row.name, parentId: row.parentId } });
+          return { id: row.id };
+        });
+        created += 1;
+      } catch (error) {
+        // A parallel upload created the same folder first; use it.
+        if (!(error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002')) throw error;
+        folder = await prisma.documentFolder.findFirst({ where, select: { id: true } });
+        if (!folder) throw error;
+      }
+    }
+    parentId = folder.id;
+    folderIds.push(folder.id);
+  }
+  return { folderId: parentId, folderIds, created };
 }
