@@ -114,6 +114,7 @@ export const ADMIN_NAV: Record<AppLocale, AdminNavStrings> = {
         items: [
           { href: '/admin/periods', label: 'Payroll periods' },
           { href: '/admin/timesheets', label: 'Timesheets' },
+          { href: '/admin/timesheets-v2', label: 'Timesheets v2' },
           { href: '/admin/attendance/exceptions', label: 'Attendance issues' },
           { href: '/admin/attendance/policy', label: 'Attendance policy' }
         ]
@@ -172,6 +173,7 @@ export const ADMIN_NAV: Record<AppLocale, AdminNavStrings> = {
         items: [
           { href: '/admin/periods', label: 'Расчётные периоды' },
           { href: '/admin/timesheets', label: 'Табели' },
+          { href: '/admin/timesheets-v2', label: 'Табель v2' },
           { href: '/admin/attendance/exceptions', label: 'Проблемы учёта' },
           { href: '/admin/attendance/policy', label: 'Правила учёта' }
         ]
