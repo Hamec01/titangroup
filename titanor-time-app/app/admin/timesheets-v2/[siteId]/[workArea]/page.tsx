@@ -49,6 +49,11 @@ export default async function TimesheetsV2CustomerPage({ params, searchParams }:
               {localeText(locale, 'Workers', 'Работников')}: <strong>{outcome.matrix.rows.length}</strong> · {localeText(locale, 'Hours', 'Часов')}: <strong>{formatMatrixHours(outcome.matrix.totalMinutes) || '0'}</strong>
             </p>
             <MonthMatrixTable locale={locale} matrix={outcome.matrix} caption={`${customerName} — ${monthTitle(locale, month)}`} />
+            <div className="month-matrix-actions">
+              <a className="month-matrix-download" href={`/api/admin/timesheets-v2/export?siteId=${siteId}&workArea=${workArea}&month=${month}`} download>
+                ⬇ {localeText(locale, 'Download Excel', 'Скачать Excel')}
+              </a>
+            </div>
           </>
         )}
       </div>
