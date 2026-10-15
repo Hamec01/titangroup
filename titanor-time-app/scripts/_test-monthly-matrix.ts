@@ -98,6 +98,46 @@ async function main() {
   check(h.cells[23].kind === 'WEEKEND' && h.cells[23].dayType === 'PUBLIC_HOLIDAY', 'public holiday is blue like a weekend');
   check(h.cells[25].kind === 'WEEKEND', 'vacation on a Saturday stays a weekend cell');
 
+  // Owner rule 1 — schedule cap (template 07:00–18:00, 30 min unpaid lunch).
+  const { dayPlanFor, capToSchedule, overrideKey } = await import('../lib/reporting/monthly-matrix');
+  const tpl = { isWorkingDay: true, plannedStartTime: '07:00', plannedEndTime: '18:00', plannedBreakMinutes: 30, plannedBreakPaid: false };
+  const summer = dayPlanFor('2026-10-13', tpl);
+  check(summer.netMinutes === 630 && new Date(summer.startMs).toISOString() === '2026-10-13T04:00:00.000Z' && new Date(summer.endMs).toISOString() === '2026-10-13T15:00:00.000Z', 'plan in summer time (UTC+3): 07:00–18:00 = 10.5 h');
+  const winter = dayPlanFor('2026-11-10', tpl);
+  check(new Date(winter.startMs).toISOString() === '2026-11-10T05:00:00.000Z', 'plan in winter time (UTC+2)');
+  check(dayPlanFor('2026-10-13', { ...tpl, plannedBreakPaid: true }).netMinutes === 660, 'paid lunch is not deducted from the plan');
+  const night = dayPlanFor('2026-10-13', { ...tpl, plannedStartTime: '22:00', plannedEndTime: '06:00' });
+  check(night.netMinutes === 450 && night.endMs > night.startMs, 'overnight template runs past midnight');
+  check(!dayPlanFor('2026-10-18', { ...tpl, isWorkingDay: false }).isWorkingDay, 'day off');
+  const seg = (from: string, to: string) => ({ startAt: `2026-10-13T${from}:00.000Z`, endAt: `2026-10-13T${to}:00.000Z`, breaks: [] });
+  // Local 06:30–18:30 = 03:30–15:30Z; ledger deducted 30 min lunch: gross 720, worked 690.
+  check(capToSchedule({ segments: [seg('03:30', '15:30')], grossMinutes: 720, workedMinutes: 690 }, summer) === 630, '06:30–18:30 → 10.5 (owner example)');
+  check(capToSchedule({ segments: [seg('06:00', '17:00')], grossMinutes: 660, workedMinutes: 630 }, summer) === 510, '09:00–20:00 → 9 h in the window − 0.5 = 8.5 (owner example)');
+  check(capToSchedule({ segments: [seg('09:00', '15:00')], grossMinutes: 360, workedMinutes: 360 }, summer) === 360, '12:00–18:00 → recorded 6 h');
+  check(capToSchedule({ segments: [seg('09:00', '15:00')], grossMinutes: 360, workedMinutes: 330 }, summer) === 330, 'shorter day keeps the ledger lunch deduction');
+  check(capToSchedule({ segments: [seg('03:00', '05:00'), seg('06:00', '16:00')], grossMinutes: 720, workedMinutes: 720 }, summer) === 600, 'several segments: only the in-window parts (1 h + 9 h) count');
+  check(capToSchedule({ segments: [seg('03:30', '15:30')], grossMinutes: 720, workedMinutes: 690 }, { ...summer, isWorkingDay: false }) === 690, 'template day off → recorded hours');
+  check(capToSchedule({ segments: [seg('03:30', '15:30')], grossMinutes: 720, workedMinutes: 690 }, null) === 690, 'no template → recorded hours');
+  check(capToSchedule({ segments: [seg('16:00', '18:00')], grossMinutes: 120, workedMinutes: 120 }, summer) === 0, 'work entirely outside the window → 0');
+
+  const planned = buildMonthlyMatrix('2026-10', inputs, '2026-10-14', names, customerKeyOf(A, 'wa-1'), [], {
+    planFor: (_e, _c, date) => dayPlanFor(date, { ...tpl, plannedEndTime: '16:00', plannedBreakMinutes: 0 }),
+    overrides: new Map([
+      [overrideKey('e1', customerKeyOf(A, 'wa-1'), '2026-10-07'), { minutes: 450, off: false }],
+      [overrideKey('e1', customerKeyOf(A, 'wa-1'), '2026-10-08'), { minutes: 0, off: true }],
+      [overrideKey('e1', customerKeyOf(A, 'wa-1'), '2026-10-13'), { minutes: 0, off: false }],
+      [overrideKey('e1', customerKeyOf(A, 'wa-1'), '2026-10-17'), { minutes: 300, off: false }]
+    ])
+  });
+  const p1 = planned.rows[0];
+  // Test slices carry no segments, so a working day with a plan counts 0 in-window time — the cap is visible.
+  check(p1.cells[0].capped && p1.cells[0].recordedMinutes === 600 && p1.cells[0].workedMinutes === 0, 'cap applied and recorded hours kept for the tooltip');
+  check(p1.cells[6].manual && p1.cells[6].kind === 'WORK' && p1.cells[6].workedMinutes === 450, 'manual hours on an OFF day');
+  check(p1.cells[7].manual && p1.cells[7].kind === 'OFF' && p1.cells[7].workedMinutes === 0, 'manual OFF replaces recorded hours');
+  check(p1.cells[12].manual && p1.cells[12].kind === 'EMPTY' && p1.cells[12].workedMinutes === 0, 'manual clear empties a worked day');
+  check(p1.cells[16].manual && p1.cells[16].kind === 'WORK' && p1.cells[16].workedMinutes === 300, 'manual hours on a Saturday');
+  check(p1.totalMinutes === p1.cells.reduce((t, c) => t + c.workedMinutes, 0) && planned.totalMinutes === p1.totalMinutes, 'totals follow capped and manual values');
+
   console.log(`monthly matrix unit: ${passed}/${passed} passed`);
 }
 

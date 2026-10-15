@@ -4,10 +4,17 @@
 // Rows = workers attached to the customer (a SiteAssignment overlapping the month) plus anyone who
 // recorded hours for it.
 //
-// No new hours formula: every number is a DisplayDay.workedMinutes of a WeeklyCustomerSliceRow
-// returned by getTimeLedger() — the same per-(employee, site, workArea, week) slices "Табель" and
-// "Сводка" show. A day split between two customers therefore appears under each customer with that
-// customer's own share, exactly as in the weekly view.
+// Hours source: DisplayDay of the WeeklyCustomerSliceRows returned by getTimeLedger() — the same
+// per-(employee, site, workArea, week) slices "Табель" and "Сводка" show, so a day split between two
+// customers appears under each customer with that customer's own share. Табель v2 then applies two
+// owner rules on top (2026-10-15); the weekly "Табель" itself is never changed by them:
+//  1. Schedule cap — on a working day of the worker's schedule template only time inside the planned
+//     window counts, minus the same unpaid breaks the ledger deducts, and never more than the recorded
+//     hours or the planned net hours (template 07:00–18:00, 30 min unpaid lunch: 06:30–18:30 → 10.5,
+//     09:00–20:00 → 8.5, 12:00–18:00 → recorded). Days off in the template and workers without a
+//     template keep their recorded hours.
+//  2. Manual values — what an admin typed in "Редактировать табель" (TimesheetV2CellOverride) replaces
+//     the computed cell completely (hours, cleared, or OFF).
 //
 // Cell kinds:
 //  - WORK     hours were recorded on the day (any day of the week).
@@ -19,7 +26,8 @@
 //  - EMPTY    nothing to show (before the worker started, outside their active weeks, future days).
 
 import { prisma } from '@/lib/prisma';
-import { getTimeLedger, type LedgerActor, type NormalizedTimeLedgerQuery, type WeeklyCustomerSliceRow } from '@/lib/reporting/time-ledger';
+import { helsinkiDateAndTimeToUtcIso } from '@/lib/helsinki-datetime';
+import { getTimeLedger, type DisplayDay, type LedgerActor, type NormalizedTimeLedgerQuery, type WeeklyCustomerSliceRow } from '@/lib/reporting/time-ledger';
 
 type Db = NonNullable<Parameters<typeof getTimeLedger>[3]>;
 
@@ -35,6 +43,68 @@ export interface MatrixCell {
   dayType: string | null;
   /** True when the hours come from a week the worker has not submitted yet. */
   draft: boolean;
+  /** Hours the ledger recorded for the day, before the schedule cap / manual value. */
+  recordedMinutes: number;
+  /** The schedule cap lowered the recorded hours. */
+  capped: boolean;
+  /** An admin typed this cell in "Редактировать табель". */
+  manual: boolean;
+}
+
+/** A planned day of the worker's schedule template, as UTC instants for that calendar date. */
+export interface DayPlan {
+  isWorkingDay: boolean;
+  startMs: number;
+  endMs: number;
+  /** Planned hours: window length minus an unpaid planned break. */
+  netMinutes: number;
+}
+
+export type PlanLookup = (employeeId: string, customerKey: string, date: string) => DayPlan | null;
+
+export interface CellOverride {
+  minutes: number;
+  off: boolean;
+}
+
+export function overrideKey(employeeId: string, customerKey: string, date: string): string {
+  return `${employeeId}|${customerKey}|${date}`;
+}
+
+export interface MatrixOptions {
+  planFor?: PlanLookup;
+  overrides?: Map<string, CellOverride>;
+}
+
+/**
+ * Owner rule 1 (see header): worked minutes of one day limited to the schedule window. Recorded
+ * breaks/auto lunch (gross − worked) are deducted from the in-window time, the result never exceeds
+ * the recorded hours nor the planned net hours. No plan or a day off → recorded hours unchanged.
+ */
+export function capToSchedule(day: Pick<DisplayDay, 'segments' | 'grossMinutes' | 'workedMinutes'>, plan: DayPlan | null): number {
+  if (!plan || !plan.isWorkingDay || day.workedMinutes <= 0) return day.workedMinutes;
+  let insideMs = 0;
+  for (const segment of day.segments) {
+    const start = Math.max(Date.parse(segment.startAt), plan.startMs);
+    const end = Math.min(Date.parse(segment.endAt), plan.endMs);
+    if (end > start) insideMs += end - start;
+  }
+  const breakMinutes = Math.max(0, day.grossMinutes - day.workedMinutes);
+  const inside = Math.round(insideMs / 60000) - breakMinutes;
+  return Math.max(0, Math.min(day.workedMinutes, plan.netMinutes, inside));
+}
+
+/** "07:00" + Helsinki date → the template day as UTC instants (an end at/before the start runs past midnight). */
+export function dayPlanFor(date: string, day: { isWorkingDay: boolean; plannedStartTime: string | null; plannedEndTime: string | null; plannedBreakMinutes: number; plannedBreakPaid: boolean }): DayPlan {
+  if (!day.isWorkingDay || !day.plannedStartTime || !day.plannedEndTime) return { isWorkingDay: false, startMs: 0, endMs: 0, netMinutes: 0 };
+  const startMs = Date.parse(helsinkiDateAndTimeToUtcIso(date, day.plannedStartTime));
+  let endMs = Date.parse(helsinkiDateAndTimeToUtcIso(date, day.plannedEndTime));
+  if (endMs <= startMs) {
+    const next = new Date(Date.parse(`${date}T00:00:00.000Z`) + 86400000).toISOString().slice(0, 10);
+    endMs = Date.parse(helsinkiDateAndTimeToUtcIso(next, day.plannedEndTime));
+  }
+  const windowMinutes = Math.round((endMs - startMs) / 60000);
+  return { isWorkingDay: true, startMs, endMs, netMinutes: Math.max(0, windowMinutes - (day.plannedBreakPaid ? 0 : day.plannedBreakMinutes)) };
 }
 
 export interface MatrixRow {
@@ -148,7 +218,8 @@ export function buildMonthlyMatrix(
   todayIso: string,
   names: Map<string, { firstName: string; lastName: string }> = new Map(),
   customerFilter: string | null = null,
-  assigned: AssignedWorker[] = []
+  assigned: AssignedWorker[] = [],
+  options: MatrixOptions = {}
 ): MonthlyMatrix {
   const days = monthDays(month);
   const dayIndex = new Map(days.map((d, i) => [d.date, i]));
@@ -168,7 +239,7 @@ export function buildMonthlyMatrix(
           employeeNumber,
           customerKey,
           customerName,
-          cells: days.map((d) => ({ date: d.date, kind: d.weekend ? 'WEEKEND' : 'EMPTY', workedMinutes: 0, dayType: null, draft: false })),
+          cells: days.map((d) => ({ date: d.date, kind: d.weekend ? 'WEEKEND' : 'EMPTY', workedMinutes: 0, dayType: null, draft: false, recordedMinutes: 0, capped: false, manual: false })),
           totalMinutes: 0
         },
         activeDates: new Set(),
@@ -203,8 +274,11 @@ export function buildMonthlyMatrix(
       entry.activeDates.add(day.date);
       const cell = entry.row.cells[i];
       if (day.workedMinutes > 0) {
+        const counted = capToSchedule(day, options.planFor?.(employeeId, customerKey, day.date) ?? null);
         cell.kind = 'WORK';
-        cell.workedMinutes += day.workedMinutes;
+        cell.recordedMinutes += day.workedMinutes;
+        cell.workedMinutes += counted;
+        cell.capped = cell.capped || counted < day.workedMinutes;
         cell.draft = cell.draft || draft;
         cell.dayType = null;
         if (!entry.firstWorked || day.date < entry.firstWorked) entry.firstWorked = day.date;
@@ -216,14 +290,23 @@ export function buildMonthlyMatrix(
   }
 
   // Weekdays with no hours inside an active week, from the first worked day until yesterday → OFF.
+  // Then manual values (owner rule 2) replace whatever was computed for their cell.
   for (const { row, activeDates, firstWorked } of acc.values()) {
     row.cells.forEach((cell, i) => {
       if (cell.kind === 'EMPTY' && !days[i].weekend && activeDates.has(cell.date) && firstWorked && cell.date >= firstWorked && cell.date < todayIso) cell.kind = 'OFF';
+      const manual = options.overrides?.get(overrideKey(row.employeeId, row.customerKey, cell.date));
+      if (manual) {
+        cell.manual = true;
+        cell.workedMinutes = manual.off ? 0 : manual.minutes;
+        cell.kind = manual.off ? 'OFF' : manual.minutes > 0 ? 'WORK' : days[i].weekend ? 'WEEKEND' : 'EMPTY';
+        cell.dayType = null;
+        cell.capped = false;
+      }
     });
     row.totalMinutes = row.cells.reduce((sum, c) => sum + c.workedMinutes, 0);
   }
 
-  const rows = [...acc.values()].filter((a) => a.attached || a.row.totalMinutes > 0 || a.row.cells.some((c) => c.kind === 'OFF')).map((a) => a.row);
+  const rows = [...acc.values()].filter((a) => a.attached || a.row.totalMinutes > 0 || a.row.cells.some((c) => c.kind === 'OFF' || c.manual)).map((a) => a.row);
   rows.sort((a, b) => a.customerName.localeCompare(b.customerName) || a.lastName.localeCompare(b.lastName) || a.firstName.localeCompare(b.firstName) || a.employeeNumber.localeCompare(b.employeeNumber));
   const dayTotals = days.map((_, i) => rows.reduce((sum, r) => sum + r.cells[i].workedMinutes, 0));
   return {
@@ -236,11 +319,7 @@ export function buildMonthlyMatrix(
   };
 }
 
-/** Hours as the customer's sheet shows them: "10", "7.5", "7.25". */
-export function formatMatrixHours(minutes: number): string {
-  if (minutes <= 0) return '';
-  return String(Math.round((minutes / 60) * 100) / 100);
-}
+export { formatMatrixHours } from '@/lib/timesheet-v2-cell-input';
 
 function ledgerQuery(month: string, siteId: string | null, workAreaId: string | 'none' | null): NormalizedTimeLedgerQuery {
   return {
@@ -260,13 +339,13 @@ function ledgerQuery(month: string, siteId: string | null, workAreaId: string | 
   };
 }
 
-/** Assignments whose [validFrom, validTo) window overlaps the month — the workers attached to a customer. */
+/** Assignments whose [validFrom, validTo] window (validTo inclusive) overlaps the month — the workers attached to a customer. */
 async function loadAssignedWorkers(month: string, filter: { siteId: string; workAreaId: string | null } | null, db: Db): Promise<Array<AssignedWorker & { siteId: string; workAreaId: string | null; siteName: string; workAreaName: string | null }>> {
   const { startDate, endDate } = monthRange(month);
   const rows = await db.siteAssignment.findMany({
     where: {
       validFrom: { lte: new Date(`${endDate}T00:00:00.000Z`) },
-      OR: [{ validTo: null }, { validTo: { gt: new Date(`${startDate}T00:00:00.000Z`) } }],
+      OR: [{ validTo: null }, { validTo: { gte: new Date(`${startDate}T00:00:00.000Z`) } }],
       ...(filter ? { siteId: filter.siteId, workAreaId: filter.workAreaId } : {})
     },
     select: { employeeId: true, siteId: true, workAreaId: true, employee: { select: { firstName: true, lastName: true, employeeNumber: true } }, site: { select: { name: true } }, workArea: { select: { name: true } } }
@@ -294,6 +373,48 @@ async function loadSlices(query: NormalizedTimeLedgerQuery, actor: LedgerActor, 
   return { ok: true, inputs, names: new Map(employees.map((e) => [e.id, { firstName: e.firstName, lastName: e.lastName }])) };
 }
 
+function timeOfDay(value: Date | null): string | null {
+  return value ? value.toISOString().slice(11, 16) : null;
+}
+
+/**
+ * Schedule plans (owner rule 1) and manual values (rule 2) for one month, optionally for one customer.
+ * The plan for a day comes from the worker's assignment to that customer covering the date
+ * (validTo inclusive), preferring the primary and then the most recent one, via its template version.
+ */
+export async function loadMatrixOptions(month: string, filter: { siteId: string; workAreaId: string | null } | null, db: Db = prisma): Promise<MatrixOptions> {
+  const { startDate, endDate } = monthRange(month);
+  const from = new Date(`${startDate}T00:00:00.000Z`);
+  const to = new Date(`${endDate}T00:00:00.000Z`);
+  const scope = filter ? { siteId: filter.siteId, workAreaId: filter.workAreaId } : {};
+  const [assignments, overrides] = await Promise.all([
+    db.siteAssignment.findMany({
+      where: { ...scope, templateVersionId: { not: null }, validFrom: { lte: to }, OR: [{ validTo: null }, { validTo: { gte: from } }] },
+      select: { employeeId: true, siteId: true, workAreaId: true, isPrimary: true, validFrom: true, validTo: true, templateVersion: { select: { days: { select: { weekday: true, isWorkingDay: true, plannedStartTime: true, plannedEndTime: true, plannedBreakMinutes: true, plannedBreakPaid: true } } } } }
+    }),
+    db.timesheetV2CellOverride.findMany({ where: { ...scope, date: { gte: from, lte: to } }, select: { employeeId: true, siteId: true, workAreaId: true, date: true, minutes: true, off: true } })
+  ]);
+  const byWorker = new Map<string, typeof assignments>();
+  for (const a of assignments) {
+    const key = `${a.employeeId}|${customerKeyOf(a.siteId, a.workAreaId)}`;
+    byWorker.set(key, [...(byWorker.get(key) ?? []), a]);
+  }
+  for (const list of byWorker.values()) list.sort((a, b) => Number(b.isPrimary) - Number(a.isPrimary) || b.validFrom.getTime() - a.validFrom.getTime());
+  const cache = new Map<string, DayPlan | null>();
+  const planFor: PlanLookup = (employeeId, customerKey, date) => {
+    const cacheKey = `${employeeId}|${customerKey}|${date}`;
+    if (cache.has(cacheKey)) return cache.get(cacheKey)!;
+    const day = new Date(`${date}T00:00:00.000Z`);
+    const assignment = (byWorker.get(`${employeeId}|${customerKey}`) ?? []).find((a) => a.validFrom <= day && (a.validTo === null || a.validTo >= day));
+    const jsDay = day.getUTCDay();
+    const templateDay = assignment?.templateVersion?.days.find((d) => d.weekday === (jsDay + 6) % 7);
+    const plan = templateDay ? dayPlanFor(date, { isWorkingDay: templateDay.isWorkingDay, plannedStartTime: timeOfDay(templateDay.plannedStartTime), plannedEndTime: timeOfDay(templateDay.plannedEndTime), plannedBreakMinutes: templateDay.plannedBreakMinutes, plannedBreakPaid: templateDay.plannedBreakPaid }) : null;
+    cache.set(cacheKey, plan);
+    return plan;
+  };
+  return { planFor, overrides: new Map(overrides.map((o) => [overrideKey(o.employeeId, customerKeyOf(o.siteId, o.workAreaId), o.date.toISOString().slice(0, 10)), { minutes: o.minutes, off: o.off }])) };
+}
+
 export interface CustomerCard {
   key: string;
   siteId: string;
@@ -311,13 +432,14 @@ export type CustomerCardsOutcome = { ok: true; cards: CustomerCard[]; totalMinut
  * attached workers or hours this month. People = attached workers ∪ workers with hours.
  */
 export async function loadCustomerCards(month: string, actor: LedgerActor, todayIso: string, db: Db = prisma): Promise<CustomerCardsOutcome> {
-  const [slices, assigned, workAreas] = await Promise.all([
+  const [slices, assigned, workAreas, options] = await Promise.all([
     loadSlices(ledgerQuery(month, null, null), actor, db),
     loadAssignedWorkers(month, null, db),
-    db.workArea.findMany({ where: { active: true }, select: { id: true, name: true, siteId: true, site: { select: { name: true } } } })
+    db.workArea.findMany({ where: { active: true }, select: { id: true, name: true, siteId: true, site: { select: { name: true } } } }),
+    loadMatrixOptions(month, null, db)
   ]);
   if (!slices.ok) return slices;
-  const matrix = buildMonthlyMatrix(month, slices.inputs, todayIso, slices.names, null, assigned);
+  const matrix = buildMonthlyMatrix(month, slices.inputs, todayIso, slices.names, null, assigned, options);
   const cards = new Map<string, CustomerCard & { people: Set<string> }>();
   const card = (siteId: string, workAreaId: string | null, siteName: string, workAreaName: string | null) => {
     const key = customerKeyOf(siteId, workAreaId);
@@ -342,10 +464,11 @@ export async function loadCustomerCards(month: string, actor: LedgerActor, today
 
 /** One customer's month: attached workers + anyone with hours for it. */
 export async function loadCustomerMonthMatrix(month: string, customer: { siteId: string; workAreaId: string | null }, actor: LedgerActor, todayIso: string, db: Db = prisma): Promise<MonthlyMatrixOutcome> {
-  const [slices, assigned] = await Promise.all([
+  const [slices, assigned, options] = await Promise.all([
     loadSlices(ledgerQuery(month, customer.siteId, customer.workAreaId ?? 'none'), actor, db),
-    loadAssignedWorkers(month, customer, db)
+    loadAssignedWorkers(month, customer, db),
+    loadMatrixOptions(month, customer, db)
   ]);
   if (!slices.ok) return slices;
-  return { ok: true, matrix: buildMonthlyMatrix(month, slices.inputs, todayIso, slices.names, customerKeyOf(customer.siteId, customer.workAreaId), assigned) };
+  return { ok: true, matrix: buildMonthlyMatrix(month, slices.inputs, todayIso, slices.names, customerKeyOf(customer.siteId, customer.workAreaId), assigned, options) };
 }

@@ -108,13 +108,14 @@ export const MIGRATION_INVENTORY = [
   '20260906193000_add_saved_report_files',
   '20260906210000_harden_report_files',
   '20260921120000_add_customer_hours_approval',
-  '20260924020000_add_shared_document_storage'
+  '20260924020000_add_shared_document_storage',
+  '20261015090000_add_timesheet_v2_cell_overrides'
 ] as const;
 
-export const MIGRATION_INVENTORY_COUNT = 104;
+export const MIGRATION_INVENTORY_COUNT = 105;
 
 /** sha256 of the newline-joined sorted names — a cheap single-value schema-version fingerprint. */
-export const MIGRATION_INVENTORY_CHECKSUM = 'df4d52d8049aa5de8a166bbced0b90d7be3c0ef20b24853f1798bab53f8e8e1d';
+export const MIGRATION_INVENTORY_CHECKSUM = '3c9f7b8902f78c20ecf996244d371355757179cc4e5fa02afc7dc276074e4abf';
 
 /** The newest migration this build knows about (informational only — comparisons use the full set). */
-export const LATEST_KNOWN_MIGRATION = '20260924020000_add_shared_document_storage';
+export const LATEST_KNOWN_MIGRATION = '20261015090000_add_timesheet_v2_cell_overrides';

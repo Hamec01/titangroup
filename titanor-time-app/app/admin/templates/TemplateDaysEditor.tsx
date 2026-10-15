@@ -2,6 +2,7 @@
 
 import { useAppLocale } from '@/components/i18n/AppLocaleProvider';
 import { localeText } from '@/lib/i18n/locale';
+import { templateWeekdayLabel } from '@/lib/template-weekdays';
 
 // docs/titanor-time/03_DATA_MODEL_ERD.md §4.5 — weekday 0=Mon..6=Sun. Shared by NewTemplateForm
 // (create, version 1) and EditTemplateForm (PATCH, version N+1) — the two forms must never drift
@@ -92,9 +93,7 @@ export function TemplateDaysEditor({
   onUpdateDay: (weekday: number, patch: Partial<TemplateDayState>) => void;
 }) {
   const locale = useAppLocale();
-  const weekdayLabels = locale === 'RU'
-    ? ['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Вс']
-    : WEEKDAY_LABELS;
+  const weekdayLabels = WEEKDAY_LABELS.map((_, weekday) => templateWeekdayLabel(locale, weekday, 'short'));
   return (
     <div className="template-days">
       {days.map((day) => (

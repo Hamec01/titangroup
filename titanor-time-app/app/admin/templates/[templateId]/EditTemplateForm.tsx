@@ -117,7 +117,7 @@ export function EditTemplateForm({ template }: { template: TemplateDetail }) {
 
   if (!editing) {
     return (
-      <div>
+      <div className="template-edit-entry">
         {savedVersionNumber !== null ? <p className="setup-subtitle">{localeText(locale, 'Saved — now on version', 'Сохранено — текущая версия')} {savedVersionNumber}.</p> : null}
         <button type="button" className="login-submit" onClick={() => setEditing(true)}>
           {localeText(locale, 'Edit schedule', 'Изменить график')}

@@ -2,7 +2,7 @@ import Link from 'next/link';
 import { redirect } from 'next/navigation';
 import { resolveServerSession } from '@/lib/server-session';
 import { getTemplateDetail } from '@/lib/templates';
-import { WEEKDAY_LABELS } from '../TemplateDaysEditor';
+import { templateWeekdayLabel } from '@/lib/template-weekdays';
 import { EditTemplateForm } from './EditTemplateForm';
 import { TemplateActivationAction } from './TemplateActivationAction';
 import { resolveAppLocale } from '@/lib/i18n/server';
@@ -75,7 +75,7 @@ export default async function AdminTemplateDetailPage({ params }: RouteParams) {
             <tbody>
               {template.days.map((day) => (
                 <tr key={day.weekday}>
-                  <td>{locale === 'RU' ? ['Понедельник', 'Вторник', 'Среда', 'Четверг', 'Пятница', 'Суббота', 'Воскресенье'][day.weekday - 1] : WEEKDAY_LABELS[day.weekday]}</td>
+                  <td>{templateWeekdayLabel(locale, day.weekday)}</td>
                   <td>{day.isWorkingDay ? s.common.yes : s.common.off}</td>
                   <td>{day.plannedStartTime ?? '—'}</td>
                   <td>{day.plannedEndTime ?? '—'}</td>

@@ -448,6 +448,7 @@ model User {
   createdDocumentFolders               DocumentFolder[]              @relation("DocumentFolderCreatedBy")
   createdDocumentFiles                 DocumentFile[]                @relation("DocumentFileCreatedBy")
   documentUploadReservations           DocumentUploadReservation[]   @relation("DocumentUploadReservationCreatedBy")
+  timesheetV2CellOverrides             TimesheetV2CellOverride[]     @relation("TimesheetV2CellOverrideUpdatedBy")
 }
 
 model Role {
@@ -609,6 +610,7 @@ model Employee {
   professions                EmployeeProfession[]
   assignmentTransitions      AssignmentTransition[]
   customerHoursApprovalItems CustomerHoursApprovalItem[]
+  timesheetV2CellOverrides   TimesheetV2CellOverride[]
 }
 
 // Worker Profile feature (2026-08-24 plan) — optional, self-service worker info plus an
@@ -940,6 +942,7 @@ model WorkSite {
   exportItems                ExportItem[]
   shiftPresenceSamples       ShiftPresenceSample[]
   customerHoursApprovalItems CustomerHoursApprovalItem[]
+  timesheetV2CellOverrides   TimesheetV2CellOverride[]
 
   @@index([cityId])
   @@index([active])
@@ -963,6 +966,7 @@ model WorkArea {
   clockShifts                ClockShift[]
   clockShiftFragments        ClockShiftFragment[]
   customerHoursApprovalItems CustomerHoursApprovalItem[]
+  timesheetV2CellOverrides   TimesheetV2CellOverride[]
 
   @@unique([siteId, name])
   @@unique([siteId, id])
@@ -2321,4 +2325,30 @@ model DocumentUploadReservation {
 
   @@index([storageSpaceId, expiresAt])
   @@index([createdByUserId])
+}
+
+// Табель v2 (/admin/timesheets-v2) — a value the admin typed into the customer month grid ("Редактировать
+// табель"). It replaces the automatically computed cell for that (employee, site, work area, day) in
+// Табель v2 and its Excel export only; the weekly timesheets, approvals and other reports are untouched.
+// minutes = hours worked (0 = cleared); off = the day is marked OFF. One row per cell — a unique index
+// with NULLS NOT DISTINCT (migration SQL) covers the nullable workAreaId ("no customer").
+model TimesheetV2CellOverride {
+  id              String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  employeeId      String    @db.Uuid
+  siteId          String    @db.Uuid
+  workAreaId      String?   @db.Uuid
+  date            DateTime  @db.Date
+  minutes         Int
+  off             Boolean   @default(false)
+  updatedByUserId String    @db.Uuid
+  createdAt       DateTime  @default(now()) @db.Timestamptz(6)
+  updatedAt       DateTime  @updatedAt @db.Timestamptz(6)
+  employee        Employee  @relation(fields: [employeeId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  site            WorkSite  @relation(fields: [siteId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  workArea        WorkArea? @relation(fields: [workAreaId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  updatedByUser   User      @relation("TimesheetV2CellOverrideUpdatedBy", fields: [updatedByUserId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+
+  @@index([siteId, workAreaId, date])
+  @@index([employeeId, date])
+  @@index([updatedByUserId])
 }

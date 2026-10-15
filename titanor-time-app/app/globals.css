@@ -8152,3 +8152,36 @@ a.ov-summary-card:focus-visible {
 .tv2-card-stats b{font-size:1.3rem}
 @media(max-width:700px){.tv2-cards{grid-template-columns:1fr}.month-matrix .mm-first{position:static;box-shadow:none}}
 .month-matrix-actions{display:flex;justify-content:flex-end;gap:10px;margin-top:16px}.month-matrix-download{display:inline-flex;align-items:center;gap:8px;min-height:42px;padding:8px 18px;border-radius:9px;background:#1d6f42;color:#fff!important;font-weight:700;text-decoration:none}.month-matrix-download:hover,.month-matrix-download:focus-visible{background:#185c37}
+.template-edit-entry{margin-top:20px}
+/* Табель v2 → "Редактировать табель" (MonthMatrixEditor.tsx) */
+.month-matrix-edit-link{display:inline-flex;align-items:center;height:40px;padding:0 16px;border-radius:8px;border:1px solid var(--theme-accent);color:var(--theme-link);font-weight:700;text-decoration:none;align-self:center}
+.month-matrix-edit-link:hover,.month-matrix-edit-link:focus-visible{background:var(--theme-accent-soft)}
+.month-matrix-title-static{margin:10px 0}
+.month-matrix-edit-bar{position:sticky;top:0;z-index:6;display:flex;flex-wrap:wrap;align-items:center;gap:8px 16px;padding:12px 14px;margin:6px 0 12px;border:1px solid var(--theme-accent);border-radius:10px;background:var(--theme-accent-soft);color:var(--theme-text)}
+.month-matrix-edit-bar>span:first-of-type{flex:1;min-width:240px;color:var(--theme-muted);font-size:.92rem}
+.month-matrix-edit-actions{display:flex;flex-wrap:wrap;gap:8px}
+.month-matrix-save,.month-matrix-cancel,.month-matrix-reset{display:inline-flex;align-items:center;min-height:40px;padding:0 16px;border-radius:8px;font-weight:700;text-decoration:none;cursor:pointer}
+.month-matrix-save{border:0;background:#1d6f42;color:#fff}.month-matrix-save:disabled{opacity:.5;cursor:not-allowed}
+.month-matrix-cancel{border:1px solid var(--theme-border-strong);color:var(--theme-text);background:var(--theme-surface)}
+.month-matrix-reset{border:1px solid var(--theme-danger);color:var(--theme-danger);background:transparent}.month-matrix-reset:disabled{opacity:.5}
+.month-matrix.is-editing .mm-edit-cell{padding:0;height:38px}
+.month-matrix.is-editing .mm-edit-cell input{width:100%;min-width:44px;height:38px;border:0;background:transparent;color:inherit;font:inherit;font-weight:600;text-align:center;padding:0 2px}
+.month-matrix.is-editing .mm-edit-cell input:focus{outline:2px solid var(--theme-link);outline-offset:-2px;background:rgba(255,255,255,.18)}
+.month-matrix .mm-edit-cell.is-work{background:#92d050;color:#14310a}
+.month-matrix .mm-edit-cell.is-work.on-weekend,.month-matrix .mm-edit-cell.is-weekend{background:#2aa6ea;color:#06263a}
+.month-matrix .mm-edit-cell.is-off{background:#ff3b30;color:#5c0000}
+.month-matrix .mm-edit-cell.is-invalid{background:#fff3cd;color:#7a1a00;box-shadow:inset 0 0 0 2px #d63b00}
+.month-matrix .mm-edit-cell.is-changed{box-shadow:inset 0 0 0 3px #7c4dff}
+.month-matrix .mm-cell.is-manual{position:relative}
+.month-matrix .mm-cell.is-manual::after,.mm-swatch.is-manual::after{content:'';position:absolute;top:0;right:0;border-style:solid;border-width:0 9px 9px 0;border-color:transparent #7c4dff transparent transparent}
+.mm-swatch.is-manual{position:relative;overflow:hidden}
+.month-matrix-legend-note{color:var(--theme-muted)}
+/* Табель v2 → "Перенести часы другому заказчику" (MoveHoursButton.tsx) */
+.month-matrix .mm-actions{text-align:center;min-width:44px;padding:4px}
+.mm-move-button{width:34px;height:30px;border:1px solid var(--theme-border-strong);border-radius:7px;background:var(--theme-surface-raised);color:var(--theme-link);font-size:1rem;cursor:pointer}
+.mm-move-button:hover,.mm-move-button:focus-visible{border-color:var(--theme-accent);background:var(--theme-accent-soft)}
+.documents-modal.mm-move-modal{width:min(560px,calc(100vw - 30px));grid-template-columns:minmax(0,1fr);white-space:normal;text-align:left;font-weight:400}.mm-move-modal>*{min-width:0}.mm-move-modal select{width:100%}.mm-move-summary{overflow-wrap:anywhere}
+.mm-move-days{display:flex;flex-wrap:wrap;gap:6px 14px;border:1px solid var(--theme-border);border-radius:10px;padding:10px 12px;margin:0}
+.mm-move-days label{display:inline-flex!important;align-items:center;gap:6px}
+.mm-move-summary{padding:10px 12px;border-radius:10px;background:var(--theme-accent-soft);color:var(--theme-text)}
+
