@@ -119,7 +119,7 @@ export function EndAssignmentAction({
         value={validTo}
         onChange={(event) => setValidTo(event.target.value)}
       />
-      <label htmlFor={`end-reason-${assignment.id}`}>{localeText(locale, 'Reason (required if ending earlier than planned)', 'Причина (обязательна при досрочном завершении)')}</label>
+      <label htmlFor={`end-reason-${assignment.id}`}>{localeText(locale, 'Reason (optional)', 'Причина (необязательно)')}</label>
       <input
         id={`end-reason-${assignment.id}`}
         type="text"

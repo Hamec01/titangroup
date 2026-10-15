@@ -21,6 +21,7 @@ import { dateRuns } from '../lib/move-hours-to-customer';
 import { POST as changePOST } from '../app/api/admin/assignments/[assignmentId]/change/route';
 import { POST as previewPOST } from '../app/api/admin/assignments/change-preview/route';
 import { POST as movePOST } from '../app/api/admin/timesheets-v2/move-hours/route';
+import { POST as overlapPOST } from '../app/api/admin/assignments/validate-overlap/route';
 
 let pass = 0;
 let fail = 0;
@@ -137,6 +138,46 @@ async function main() {
   const clash = await call(changePOST as never, sUrl, admin.token, { effectiveFrom: todayIso, siteId: site.id, workAreaId: aros.id, isPrimary: true }, sctx);
   check('A2: a start that would overlap another (even removed) assignment of the same customer → 409 ASSIGNMENT_OVERLAP', clash.status === 409 && clash.body?.error?.code === 'ASSIGNMENT_OVERLAP' && (await prisma.siteAssignment.findUniqueOrThrow({ where: { id: schedId } })).workAreaId === siris.id, { clash, removed: removed.id });
   check('A2: past start refused', (await call(changePOST as never, sUrl, admin.token, { effectiveFrom: iso(new Date(today.getTime() - 86400000)), siteId: site.id, workAreaId: null }, sctx)).status === 400);
+
+  // A3. Kosariev on prod (2026-10-15): every assignment removed, Aros Marine removed "for today".
+  // "Add workplace: Aros from today" must bring that Aros assignment back, not fail on EX-02.
+  const day0 = (n: number) => new Date(today.getTime() + n * 86400000);
+  const empK = await mkWorker('K');
+  await prisma.siteAssignment.create({ data: { employeeId: empK.id, siteId: site.id, workAreaId: null, isPrimary: true, validFrom: day0(-2), validTo: day0(-1), clockInDisabledAt: new Date(), endedReason: 'PROJECT_DONE', assignedByUserId: admin.userId } });
+  const arosRemoved = await prisma.siteAssignment.create({ data: { employeeId: empK.id, siteId: site.id, workAreaId: aros.id, isPrimary: true, validFrom: today, validTo: today, clockInDisabledAt: new Date(), endedReason: 'TRANSFER', assignedByUserId: admin.userId } });
+  await prisma.siteAssignment.create({ data: { employeeId: empK.id, siteId: site.id, workAreaId: null, isPrimary: false, validFrom: day0(1), validTo: day0(1), clockInDisabledAt: new Date(), endedReason: 'нету', assignedByUserId: admin.userId } });
+  const pre = await call(overlapPOST as never, 'http://localhost/api/admin/assignments/validate-overlap', admin.token, { employeeId: empK.id, siteId: site.id, workAreaId: aros.id, validFrom: todayIso });
+  check('A3: pre-check does not block — it will bring the removed Aros assignment back', pre.status === 200 && pre.body.hasOverlap === false && pre.body.reactivatesAssignmentId === arosRemoved.id, pre);
+  const tpl = await prisma.workScheduleTemplate.create({ data: { name: `A3 tpl ${randomUUID().slice(0, 4)}`, versions: { create: { versionNumber: 1, createdByUserId: admin.userId, effectiveFrom: new Date('2020-01-01T00:00:00.000Z'), days: { create: [0, 1, 2, 3, 4, 5, 6].map((weekday) => ({ weekday, isWorkingDay: weekday < 6, plannedStartTime: weekday < 6 ? new Date(Date.UTC(1970, 0, 1, 7)) : null, plannedEndTime: weekday < 6 ? new Date(Date.UTC(1970, 0, 1, 18)) : null, plannedBreakMinutes: weekday < 6 ? 30 : 0 })) } } } }, include: { versions: true } });
+  const restored = await createAssignment({ employeeId: empK.id, siteId: site.id, workAreaId: aros.id, templateId: tpl.id, validFrom: today, validTo: null, isPrimary: true, assignedByUserId: admin.userId, requestId: randomUUID() });
+  const backRow = await prisma.siteAssignment.findUniqueOrThrow({ where: { id: arosRemoved.id } });
+  check('A3: the removed Aros assignment is back — same row, from today, open-ended, Check-In enabled, primary, new schedule', 'id' in restored && restored.id === arosRemoved.id && iso(backRow.validFrom) === todayIso && backRow.validTo === null && backRow.clockInDisabledAt === null && backRow.isPrimary && backRow.endedReason === null && backRow.templateVersionId === tpl.versions[0].id, { restored, backRow });
+  check('A3: no extra assignment row, planned shift for today exists', (await prisma.siteAssignment.count({ where: { employeeId: empK.id } })) === 3 && (await prisma.timesheetDraftPlannedShift.count({ where: { sourceAssignmentId: arosRemoved.id, date: today } })) === 1);
+  check('A3: audited ASSIGNMENT_REACTIVATED + transition', (await prisma.auditEvent.count({ where: { eventType: 'ASSIGNMENT_REACTIVATED', entityId: arosRemoved.id } })) === 1 && (await prisma.assignmentTransition.count({ where: { fromAssignmentId: arosRemoved.id, toAssignmentId: arosRemoved.id } })) === 1);
+  const again2 = await createAssignment({ employeeId: empK.id, siteId: site.id, workAreaId: aros.id, templateId: null, validFrom: today, validTo: null, isPrimary: true, assignedByUserId: admin.userId, requestId: randomUUID() });
+  // Bringing back without choosing a schedule keeps the schedule the assignment had.
+  const empT = await mkWorker('T');
+  const arosT = await prisma.siteAssignment.create({ data: { employeeId: empT.id, siteId: site.id, workAreaId: aros.id, templateVersionId: tpl.versions[0].id, isPrimary: true, validFrom: today, validTo: today, clockInDisabledAt: new Date(), assignedByUserId: admin.userId } });
+  await createAssignment({ employeeId: empT.id, siteId: site.id, workAreaId: aros.id, templateId: null, validFrom: today, validTo: null, isPrimary: true, assignedByUserId: admin.userId, requestId: randomUUID() });
+  check('A3: no schedule chosen → the brought-back assignment keeps its schedule', (await prisma.siteAssignment.findUniqueOrThrow({ where: { id: arosT.id } })).templateVersionId === tpl.versions[0].id);
+  check('A3: a second Aros workplace on the same dates is still refused (now it is live)', 'code' in again2 && again2.code === 'ASSIGNMENT_OVERLAP', again2);
+
+  // Transfer of a worker WITH a current place to a customer that only has a removed assignment then.
+  const empL = await mkWorker('L');
+  const curL = await createAssignment({ employeeId: empL.id, siteId: site.id, workAreaId: null, templateId: null, validFrom: day0(-30), validTo: null, isPrimary: true, assignedByUserId: admin.userId, requestId: randomUUID() });
+  const arosL = await prisma.siteAssignment.create({ data: { employeeId: empL.id, siteId: site.id, workAreaId: aros.id, isPrimary: false, validFrom: today, validTo: today, clockInDisabledAt: new Date(), assignedByUserId: admin.userId } });
+  const curLId = (curL as { id: string }).id;
+  const tr = await call(changePOST as never, `http://localhost/api/admin/assignments/${curLId}/change`, admin.token, { effectiveFrom: todayIso, siteId: site.id, workAreaId: aros.id, isPrimary: true }, { params: Promise.resolve({ assignmentId: curLId }) });
+  const arosLRow = await prisma.siteAssignment.findUniqueOrThrow({ where: { id: arosL.id } });
+  check('A3: transfer today to Aros reuses the removed Aros row (no EX-02 409)', tr.status === 200 && tr.body.newAssignment.id === arosL.id && arosLRow.clockInDisabledAt === null && arosLRow.validTo === null && arosLRow.isPrimary, { tr, arosLRow });
+  check('A3: the old place is closed by the transfer', (await prisma.siteAssignment.findUniqueOrThrow({ where: { id: curLId } })).clockInDisabledAt !== null);
+
+  // Two removed rows of the same customer overlapping → still a clear refusal.
+  const empM = await mkWorker('M');
+  await prisma.siteAssignment.create({ data: { employeeId: empM.id, siteId: site.id, workAreaId: aros.id, isPrimary: false, validFrom: today, validTo: today, clockInDisabledAt: new Date(), assignedByUserId: admin.userId } });
+  await prisma.siteAssignment.create({ data: { employeeId: empM.id, siteId: site.id, workAreaId: aros.id, isPrimary: false, validFrom: day0(2), validTo: day0(2), clockInDisabledAt: new Date(), assignedByUserId: admin.userId } });
+  const two = await createAssignment({ employeeId: empM.id, siteId: site.id, workAreaId: aros.id, templateId: null, validFrom: today, validTo: null, isPrimary: true, assignedByUserId: admin.userId, requestId: randomUUID() });
+  check('A3: two removed rows in the way → ASSIGNMENT_OVERLAP, nothing changed', 'code' in two && two.code === 'ASSIGNMENT_OVERLAP' && (await prisma.siteAssignment.count({ where: { employeeId: empM.id, clockInDisabledAt: null } })) === 0, two);
 
   // =============================== B. move recorded hours ===============================
   check('dateRuns groups consecutive days', JSON.stringify(dateRuns(['2037-01-14', '2037-01-13', '2037-01-16'])) === JSON.stringify([['2037-01-13', '2037-01-14'], ['2037-01-16', '2037-01-16']]));

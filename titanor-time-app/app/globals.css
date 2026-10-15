@@ -8184,4 +8184,4 @@ a.ov-summary-card:focus-visible {
 .mm-move-days{display:flex;flex-wrap:wrap;gap:6px 14px;border:1px solid var(--theme-border);border-radius:10px;padding:10px 12px;margin:0}
 .mm-move-days label{display:inline-flex!important;align-items:center;gap:6px}
 .mm-move-summary{padding:10px 12px;border-radius:10px;background:var(--theme-accent-soft);color:var(--theme-text)}
-
+.assignment-list-state{font-weight:600;white-space:nowrap}.assignment-list-state.is-active{color:var(--theme-success,#14774c)}.assignment-list-state.is-scheduled{color:var(--theme-link,#0b6eae)}.assignment-list-state.is-removed,.assignment-list-state.is-ended{color:var(--theme-muted,#52667a)}

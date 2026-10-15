@@ -3,7 +3,7 @@ import { Prisma } from '@prisma/client';
 import type { SiteAssignment, AssignmentTransitionReason } from '@prisma/client';
 import { prisma } from '@/lib/prisma';
 import { createAuditEvent } from '@/lib/audit';
-import { createAssignmentInTx, isExclusionViolation, materializeAssignmentDraftsInTx } from '@/lib/assignments';
+import { createAssignmentInTx, isExclusionViolation, materializeAssignmentDraftsInTx, reactivateRemovedAssignmentInTx, ReactivationOverlapError } from '@/lib/assignments';
 import { recordAssignmentTransition, reasonFromFreeText, reasonFromPreset } from '@/lib/assignment-transitions';
 import { isAssignmentLiveNow } from '@/lib/assignment-lifecycle';
 import {
@@ -210,6 +210,9 @@ export interface ChangeWorkplaceInput {
   /** §P4 — 'REPLACE_SCHEDULED' demotes an overlapping scheduled future primary; absent → such an
    *  overlap returns SCHEDULED_PRIMARY_CONFLICT so the admin decides. */
   primaryConflictResolution?: 'KEEP_SCHEDULED' | 'REPLACE_SCHEDULED';
+  /** Owner 2026-10-15 — the target site + customer only clashes with this REMOVED assignment: bring
+   *  it back (lib/assignments.ts reactivateRemovedAssignmentInTx) instead of creating a new row. */
+  reactivateAssignmentId?: string;
 }
 
 export type ChangeWorkplaceError =
@@ -328,17 +331,22 @@ export async function changeWorkplaceInTx(
       // to keep the planned transfer; make the replacement non-primary in that case.
       const newIsPrimary = input.isPrimary && input.primaryConflictResolution !== 'KEEP_SCHEDULED';
 
-      const { assignment: newAssignment, demotedPrimaryIds, demotedScheduledPrimaryIds } = await createAssignmentInTx(tx, {
-        employeeId: existing.employeeId,
-        siteId: input.siteId,
-        workAreaId: input.workAreaId,
-        templateVersionId: input.templateVersionId,
-        validFrom: effectiveFrom,
-        validTo: input.newValidTo,
-        isPrimary: newIsPrimary,
-        assignedByUserId: actorUserId,
-        replaceScheduledPrimary: input.primaryConflictResolution === 'REPLACE_SCHEDULED'
-      });
+      const { assignment: newAssignment, demotedPrimaryIds, demotedScheduledPrimaryIds } = input.reactivateAssignmentId
+        ? await (async () => {
+            const reactivated = await reactivateRemovedAssignmentInTx(tx, { assignmentId: input.reactivateAssignmentId!, validFrom: effectiveFrom, validTo: input.newValidTo, templateVersionId: input.templateVersionId, isPrimary: newIsPrimary, assignedByUserId: actorUserId, requestId, replaceScheduledPrimary: input.primaryConflictResolution === 'REPLACE_SCHEDULED' });
+            return { assignment: reactivated, demotedPrimaryIds: reactivated.demotedPrimaryIds, demotedScheduledPrimaryIds: [] as string[] };
+          })()
+        : await createAssignmentInTx(tx, {
+            employeeId: existing.employeeId,
+            siteId: input.siteId,
+            workAreaId: input.workAreaId,
+            templateVersionId: input.templateVersionId,
+            validFrom: effectiveFrom,
+            validTo: input.newValidTo,
+            isPrimary: newIsPrimary,
+            assignedByUserId: actorUserId,
+            replaceScheduledPrimary: input.primaryConflictResolution === 'REPLACE_SCHEDULED'
+          });
 
       // §3.6 — a demoted prior primary OTHER than the one being replaced here gets its own
       // transition (the replaced one is already recorded by the from→to transition below). A
@@ -428,6 +436,9 @@ export async function changeWorkplaceInTx(
 
 /** Map the errors changeWorkplaceInTx throws to a typed ChangeWorkplaceError, or re-throw. */
 function mapChangeWorkplaceError(error: unknown): ChangeWorkplaceError {
+  if (error instanceof ReactivationOverlapError) {
+    return { code: 'ASSIGNMENT_OVERLAP' };
+  }
   if (error instanceof ScheduledPrimaryConflictError) {
     return {
       code: 'SCHEDULED_PRIMARY_CONFLICT',

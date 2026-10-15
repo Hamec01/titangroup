@@ -51,10 +51,6 @@ export function RemoveFromSiteAction({
 
   async function submit() {
     if (loading) return;
-    if (reasonCode === 'OTHER' && otherText.trim().length === 0) {
-      setError(t('Please describe the reason.', 'Опишите причину.'));
-      return;
-    }
     setError(null);
     setLoading(true);
     try {
@@ -168,8 +164,8 @@ export function RemoveFromSiteAction({
       {reasonCode === 'OTHER' ? (
         <input
           type="text"
-          aria-label={t('Describe the reason', 'Опишите причину')}
-          placeholder={t('Describe the reason', 'Опишите причину')}
+          aria-label={t('Describe the reason (optional)', 'Опишите причину (необязательно)')}
+          placeholder={t('Describe the reason (optional)', 'Опишите причину (необязательно)')}
           value={otherText}
           disabled={loading}
           onChange={(e) => setOtherText(e.target.value)}

@@ -61,10 +61,15 @@ export function WorkplaceNowSection({
       {card.currentAssignments.length === 0 ? (
         <div className="worker-setup-callout">
           <p>
-            {t(
-              'No site has been assigned yet. The worker can already sign in and install the app — it will explain the employer has not assigned a site.',
-              'Объект ещё не назначен. Работник уже может войти и установить приложение — оно сообщит, что начальник пока не назначил объект.'
-            )}
+            {card.pastAssignments.length > 0
+              ? t(
+                  'The worker has no workplace right now. Choose the site, customer and schedule below in "Add site and work schedule" — it applies from today. If they worked there before, that workplace is simply brought back.',
+                  'Сейчас у работника нет места работы. Выберите ниже в «Добавить объект и рабочий график» объект, заказчика и график — действует с сегодняшнего дня. Если работник уже был там раньше, прежнее назначение просто вернётся.'
+                )
+              : t(
+                  'No site has been assigned yet. The worker can already sign in and install the app — it will explain the employer has not assigned a site.',
+                  'Объект ещё не назначен. Работник уже может войти и установить приложение — оно сообщит, что начальник пока не назначил объект.'
+                )}
           </p>
         </div>
       ) : (

@@ -302,9 +302,85 @@ export async function materializeAssignmentDraftsInTx(
       };
     });
     if (plannedShiftRows.length > 0) {
-      await tx.timesheetDraftPlannedShift.createMany({ data: plannedShiftRows });
+      // skipDuplicates: a reactivated assignment keeps the planned shifts its recorded hours use.
+      await tx.timesheetDraftPlannedShift.createMany({ data: plannedShiftRows, skipDuplicates: true });
     }
   }
+}
+
+/**
+ * Owner 2026-10-15 — "add a workplace" whose dates only clash with ONE removed assignment of the
+ * same site + customer (Check-In disabled — e.g. taken off by mistake or by an earlier transfer).
+ * EX-02 forbids a second row for the same scope and dates, so instead of refusing, that row is
+ * brought back: Check-In re-enabled, dates widened to cover the requested range, the chosen schedule
+ * and primary flag applied, unused planned shifts rebuilt. Recorded hours on it stay where they are.
+ */
+export async function findReactivatableAssignment(input: { employeeId: string; siteId: string; workAreaId: string | null; validFrom: Date; validTo: Date | null; excludeAssignmentId?: string }): Promise<{ id: string } | null> {
+  const overlapping = await prisma.siteAssignment.findMany({
+    where: {
+      employeeId: input.employeeId,
+      siteId: input.siteId,
+      workAreaId: input.workAreaId,
+      ...(input.excludeAssignmentId ? { id: { not: input.excludeAssignmentId } } : {}),
+      ...(input.validTo ? { validFrom: { lte: input.validTo } } : {}),
+      OR: [{ validTo: null }, { validTo: { gte: input.validFrom } }]
+    },
+    select: { id: true, clockInDisabledAt: true }
+  });
+  const now = new Date();
+  if (overlapping.length !== 1 || !overlapping[0].clockInDisabledAt || overlapping[0].clockInDisabledAt > now) return null;
+  return { id: overlapping[0].id };
+}
+
+export class ReactivationOverlapError extends Error {}
+
+export async function reactivateRemovedAssignmentInTx(
+  tx: Prisma.TransactionClient,
+  params: { assignmentId: string; validFrom: Date; validTo: Date | null; templateVersionId: string | null; isPrimary: boolean; assignedByUserId: string; requestId: string; replaceScheduledPrimary: boolean }
+) {
+  const row = await tx.siteAssignment.findUniqueOrThrow({ where: { id: params.assignmentId } });
+  await acquireEmployeeLifecycleLock(tx, row.employeeId);
+  const validFrom = params.validFrom < row.validFrom ? params.validFrom : row.validFrom;
+  const validTo = params.validTo === null || row.validTo === null ? null : params.validTo > row.validTo ? params.validTo : row.validTo;
+  const others = await tx.siteAssignment.count({
+    where: { id: { not: row.id }, employeeId: row.employeeId, siteId: row.siteId, workAreaId: row.workAreaId, ...(validTo ? { validFrom: { lte: validTo } } : {}), OR: [{ validTo: null }, { validTo: { gte: validFrom } }] }
+  });
+  if (others > 0) throw new ReactivationOverlapError();
+
+  let demotedPrimaryIds: string[] = [];
+  if (params.isPrimary) {
+    const today = helsinkiToday();
+    const overlapping = await tx.siteAssignment.findMany({ where: { employeeId: row.employeeId, id: { not: row.id }, ...overlappingPrimaryWhere({ validFrom, validTo }) }, select: { id: true, validFrom: true } });
+    const scheduled = overlapping.filter((a) => a.validFrom > today);
+    if (scheduled.length > 0 && !params.replaceScheduledPrimary) throw new ScheduledPrimaryConflictError(scheduled[0].id, scheduled[0].validFrom);
+    demotedPrimaryIds = overlapping.map((a) => a.id);
+    if (demotedPrimaryIds.length) await tx.siteAssignment.updateMany({ where: { id: { in: demotedPrimaryIds } }, data: { isPrimary: false, version: { increment: 1 } } });
+  }
+
+  // Planned shifts that recorded hours point at stay; the rest are rebuilt for the new range/schedule.
+  await tx.timesheetDraftPlannedShift.deleteMany({ where: { sourceAssignmentId: row.id, segments: { none: {} } } });
+  const assignment = await tx.siteAssignment.update({
+    where: { id: row.id },
+    // No schedule chosen → keep the one the assignment already had.
+    data: { validFrom, validTo, templateVersionId: params.templateVersionId ?? row.templateVersionId, isPrimary: params.isPrimary, clockInDisabledAt: null, endedReason: null, version: { increment: 1 } }
+  });
+  await materializeAssignmentDraftsInTx(tx, assignment);
+
+  const now = new Date();
+  for (const demotedId of demotedPrimaryIds) {
+    await recordAssignmentTransition(tx, { employeeId: row.employeeId, kind: 'CHANGE', fromAssignmentId: demotedId, toAssignmentId: row.id, actedAt: now, effectiveFrom: validFrom, openShiftHandling: 'NONE', actorUserId: params.assignedByUserId, reasonCode: 'OTHER', reasonText: 'auto-demoted: a removed assignment was brought back as the workplace' });
+  }
+  await recordAssignmentTransition(tx, { employeeId: row.employeeId, kind: 'CHANGE', fromAssignmentId: row.id, toAssignmentId: row.id, actedAt: now, effectiveFrom: validFrom, openShiftHandling: 'NONE', actorUserId: params.assignedByUserId, reasonCode: 'OTHER', reasonText: 'Возврат на объект / к заказчику' });
+  await createAuditEvent(tx, {
+    actorUserId: params.assignedByUserId,
+    eventType: 'ASSIGNMENT_REACTIVATED',
+    entityType: 'SITE_ASSIGNMENT',
+    entityId: row.id,
+    requestId: params.requestId,
+    beforeValue: { validFrom: row.validFrom.toISOString().slice(0, 10), validTo: row.validTo ? row.validTo.toISOString().slice(0, 10) : null, clockInDisabledAt: row.clockInDisabledAt?.toISOString() ?? null, endedReason: row.endedReason, templateVersionId: row.templateVersionId, isPrimary: row.isPrimary },
+    afterValue: { validFrom: validFrom.toISOString().slice(0, 10), validTo: validTo ? validTo.toISOString().slice(0, 10) : null, templateVersionId: assignment.templateVersionId, isPrimary: assignment.isPrimary, demotedPrimaryAssignmentIds: demotedPrimaryIds }
+  });
+  return Object.assign(assignment, { demotedPrimaryIds });
 }
 
 /**
@@ -378,7 +454,8 @@ export async function createAssignment(
     validFrom: input.validFrom,
     validTo: input.validTo
   });
-  if (overlap.hasOverlap) {
+  const reactivatable = overlap.hasOverlap ? await findReactivatableAssignment(input) : null;
+  if (overlap.hasOverlap && !reactivatable) {
     return { code: 'ASSIGNMENT_OVERLAP', conflictingAssignmentId: overlap.conflictingAssignmentId! };
   }
 
@@ -388,7 +465,9 @@ export async function createAssignment(
 
   let created;
   try {
-    created = await prisma.$transaction(async (tx) => {
+    created = reactivatable
+      ? await prisma.$transaction((tx) => reactivateRemovedAssignmentInTx(tx, { assignmentId: reactivatable.id, validFrom: input.validFrom, validTo: input.validTo, templateVersionId, isPrimary: wantsPrimary, assignedByUserId: input.assignedByUserId, requestId: input.requestId, replaceScheduledPrimary: input.primaryConflictResolution === 'REPLACE_SCHEDULED' }))
+      : await prisma.$transaction(async (tx) => {
       // R15-D7 §3.13 — serialise every writer of this worker's assignments (also held by
       // changeWorkplace / removeFromSite / promoteToPrimary), so the demote-then-create below
       // and the ex_site_assignment_one_primary_per_period constraint stay consistent under concurrency.
@@ -456,6 +535,9 @@ export async function createAssignment(
     });
   } catch (error) {
     // §P4 — making this primary would overlap a scheduled future primary; the route asks the admin.
+    if (error instanceof ReactivationOverlapError) {
+      return { code: 'ASSIGNMENT_OVERLAP', conflictingAssignmentId: reactivatable!.id };
+    }
     if (error instanceof ScheduledPrimaryConflictError) {
       return {
         code: 'SCHEDULED_PRIMARY_CONFLICT',
@@ -553,6 +635,8 @@ export interface AssignmentListItem {
   isPrimary: boolean;
   validFrom: string;
   validTo: string | null;
+  /** Check-In disabled (removed / transferred away) — set means the assignment no longer runs. */
+  clockInDisabledAt: string | null;
   version: number;
 }
 
@@ -585,6 +669,7 @@ export async function listAssignments(page: number, pageSize: number): Promise<A
         isPrimary: true,
         validFrom: true,
         validTo: true,
+        clockInDisabledAt: true,
         version: true,
         employee: { select: { id: true, firstName: true, lastName: true } },
         site: { select: { id: true, name: true } },
@@ -607,6 +692,7 @@ export async function listAssignments(page: number, pageSize: number): Promise<A
     isPrimary: assignment.isPrimary,
     validFrom: assignment.validFrom.toISOString().slice(0, 10),
     validTo: assignment.validTo ? assignment.validTo.toISOString().slice(0, 10) : null,
+    clockInDisabledAt: assignment.clockInDisabledAt?.toISOString() ?? null,
     version: assignment.version
   }));
 

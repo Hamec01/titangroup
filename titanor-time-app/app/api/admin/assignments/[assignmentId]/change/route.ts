@@ -5,7 +5,7 @@ import { jsonError, successHeaders, type ApiErrorBody } from '@/lib/api-error';
 import { resolveAuthenticatedSession } from '@/lib/auth';
 import { hasPermission } from '@/lib/permissions';
 import { SESSION_COOKIE_NAME } from '@/lib/session';
-import { checkOverlap } from '@/lib/assignments';
+import { checkOverlap, findReactivatableAssignment } from '@/lib/assignments';
 import { helsinkiToday } from '@/lib/workers';
 import { assignmentUsageCount, changeWorkplace, correctUnusedAssignment } from '@/lib/assignment-lifecycle-service';
 
@@ -282,7 +282,11 @@ export async function POST(request: NextRequest, { params }: RouteParams): Promi
     validTo: newValidTo,
     excludeAssignmentId: existing.id
   });
-  if (overlap.hasOverlap) {
+  // A clash with exactly one REMOVED assignment of the target site + customer brings that one back.
+  const reactivatable = overlap.hasOverlap
+    ? await findReactivatableAssignment({ employeeId: existing.employeeId, siteId: siteId as string, workAreaId: normalizedWorkAreaId, validFrom: effectiveFromDate, validTo: newValidTo, excludeAssignmentId: existing.id })
+    : null;
+  if (overlap.hasOverlap && !reactivatable) {
     return jsonError(
       409,
       {
@@ -343,7 +347,8 @@ export async function POST(request: NextRequest, { params }: RouteParams): Promi
     reasonText: trimmedReason,
     actorUserId: authenticated.user.id,
     requestId,
-    primaryConflictResolution: normalizedPrimaryResolution
+    primaryConflictResolution: normalizedPrimaryResolution,
+    reactivateAssignmentId: reactivatable?.id
   });
 
   if ('code' in result) {

@@ -4,7 +4,7 @@ import { jsonError, successHeaders, type ApiErrorBody } from '@/lib/api-error';
 import { resolveAuthenticatedSession } from '@/lib/auth';
 import { hasPermission } from '@/lib/permissions';
 import { SESSION_COOKIE_NAME } from '@/lib/session';
-import { checkOverlap } from '@/lib/assignments';
+import { checkOverlap, findReactivatableAssignment } from '@/lib/assignments';
 
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
@@ -83,13 +83,18 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     );
   }
 
-  const result = await checkOverlap({
+  const range = {
     employeeId: employeeId as string,
     siteId: siteId as string,
     workAreaId: normalizedWorkAreaId,
     validFrom: new Date(`${validFrom as string}T00:00:00.000Z`),
     validTo: normalizedValidTo
-  });
+  };
+  const result = await checkOverlap(range);
+  // A clash with exactly one REMOVED assignment of the same site + customer is not a blocker: the
+  // create brings that assignment back (lib/assignments.ts findReactivatableAssignment).
+  const reactivatable = result.hasOverlap ? await findReactivatableAssignment(range) : null;
+  const body = reactivatable ? { hasOverlap: false, reactivatesAssignmentId: reactivatable.id } : result;
 
-  return NextResponse.json(result, { status: 200, headers: successHeaders(requestId) });
+  return NextResponse.json(body, { status: 200, headers: successHeaders(requestId) });
 }

@@ -127,19 +127,8 @@ export async function POST(request: NextRequest, { params }: RouteParams): Promi
     );
   }
 
-  // 02_ROLE_PERMISSION_MATRIX.md: "Причина: да, если раньше плана" — required
-  // only when ending earlier than whatever was previously planned (a null
-  // validTo counts as "never", so any concrete date here is earlier than that).
-  const isEarlierThanPlanned = existing.validTo === null || newValidTo.getTime() < existing.validTo.getTime();
-  // A preset code (PROJECT_DONE / TRANSFER / ASSIGNED_BY_MISTAKE) satisfies "reason required"; OTHER
-  // still needs the free text.
-  const hasReason = (normalizedReasonCode !== null && normalizedReasonCode !== 'OTHER') || trimmedReason !== null;
-  if (isEarlierThanPlanned && !hasReason) {
-    return NextResponse.json(
-      errorBody({ code: 'VALIDATION_ERROR', message: 'Invalid request body.', fieldErrors: { reason: ['required when ending earlier than planned'] } }, requestId),
-      { status: 400, headers: successHeaders(requestId) }
-    );
-  }
+  // Owner 2026-10-15: the reason is optional ("напишите причину — не обязательно") — admins must be
+  // able to end a workplace in one step. A given preset / text is still recorded on the transition.
 
   const outcome = await removeFromSite({
     existing,
