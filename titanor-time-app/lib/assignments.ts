@@ -642,6 +642,8 @@ export interface AssignmentListItem {
 
 export interface AssignmentListResult {
   items: AssignmentListItem[];
+  /** How many assignments the other view holds (current ↔ removed/ended) — for the toggle link. */
+  otherViewCount?: number;
   page: number;
   pageSize: number;
   totalItems: number;
@@ -657,10 +659,28 @@ export interface AssignmentListResult {
  * page/pageSize only, no search/sort/filter (not called out for this
  * specific endpoint, unlike GET /api/admin/sites).
  */
-export async function listAssignments(page: number, pageSize: number): Promise<AssignmentListResult> {
-  const [totalItems, assignments] = await Promise.all([
-    prisma.siteAssignment.count(),
+/**
+ * `view` (owner 2026-10-15): 'current' = running or scheduled (not removed, not past its end date) —
+ * the default of /admin/assignments, so removed / ended rows (kept for hours and history, never
+ * deleted) do not clutter it; 'archived' = the rest; 'all' = everything (the API's default).
+ */
+function assignmentViewWhere(view: 'all' | 'current' | 'archived'): Prisma.SiteAssignmentWhereInput {
+  if (view === 'all') return {};
+  const now = new Date();
+  const today = helsinkiToday();
+  const current: Prisma.SiteAssignmentWhereInput = {
+    AND: [{ OR: [{ clockInDisabledAt: null }, { clockInDisabledAt: { gt: now } }] }, { OR: [{ validTo: null }, { validTo: { gte: today } }] }]
+  };
+  return view === 'current' ? current : { NOT: current };
+}
+
+export async function listAssignments(page: number, pageSize: number, view: 'all' | 'current' | 'archived' = 'all'): Promise<AssignmentListResult> {
+  const where = assignmentViewWhere(view);
+  const [totalItems, otherViewCount, assignments] = await Promise.all([
+    prisma.siteAssignment.count({ where }),
+    view === 'all' ? Promise.resolve(undefined) : prisma.siteAssignment.count({ where: assignmentViewWhere(view === 'current' ? 'archived' : 'current') }),
     prisma.siteAssignment.findMany({
+      where,
       orderBy: { validFrom: 'desc' },
       skip: (page - 1) * pageSize,
       take: pageSize,
@@ -698,6 +718,7 @@ export async function listAssignments(page: number, pageSize: number): Promise<A
 
   return {
     items,
+    otherViewCount,
     page,
     pageSize,
     totalItems,

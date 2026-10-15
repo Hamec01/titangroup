@@ -11,7 +11,7 @@ import type { AssignmentListItem } from '@/lib/assignments';
 
 export const dynamic = 'force-dynamic';
 
-const PAGE_SIZE = 20;
+const PAGE_SIZE = 200;
 
 type ListState = 'ACTIVE' | 'SCHEDULED' | 'REMOVED' | 'ENDED';
 
@@ -36,7 +36,7 @@ function stateText(locale: AppLocale, state: ListState): string {
 // Page 1 only, no search/filter/sort UI — not called out for this specific
 // endpoint's contract (unlike GET /api/admin/sites), same scope call as
 // /admin/workers's list page.
-export default async function AdminAssignmentsPage() {
+export default async function AdminAssignmentsPage({ searchParams }: { searchParams: Promise<{ show?: string }> }) {
   const session = await resolveServerSession();
   if (!session) {
     redirect('/login');
@@ -57,18 +57,20 @@ export default async function AdminAssignmentsPage() {
     );
   }
 
-  const { items, totalItems } = await listAssignments(1, PAGE_SIZE);
+  // Running + scheduled by default; removed / ended ones stay (hours, history) behind a link.
+  const showArchived = (await searchParams).show === 'archived';
+  const { items, totalItems, otherViewCount = 0 } = await listAssignments(1, PAGE_SIZE, showArchived ? 'archived' : 'current');
 
   return (
     <main className="setup-page">
       <div className="setup-card worker-card">
         <h1>{s.assignments.title}</h1>
         <p className="setup-subtitle">
-          {totalItems} {totalItems === 1 ? s.assignments.singular : s.assignments.plural} ·{' '}
+          {showArchived ? localeText(locale, 'Removed and ended', 'Снятые и завершённые') : localeText(locale, 'Running and scheduled', 'Действующие и запланированные')}: {totalItems} ·{' '}
           <Link href="/admin/assignments/new">{s.common.createNew}</Link>
         </p>
         {items.length === 0 ? (
-          <p>{s.assignments.empty}</p>
+          <p>{showArchived ? localeText(locale, 'No removed or ended assignments.', 'Снятых и завершённых назначений нет.') : s.assignments.empty}</p>
         ) : (
           <div className="worker-table-scroll">
           <table className="worker-table">
@@ -109,6 +111,18 @@ export default async function AdminAssignmentsPage() {
           </table>
           </div>
         )}
+        <p className="assignment-list-toggle">
+          {showArchived ? (
+            <Link href="/admin/assignments">← {localeText(locale, 'Back to running and scheduled', 'Назад к действующим и запланированным')}</Link>
+          ) : otherViewCount > 0 ? (
+            <Link href="/admin/assignments?show=archived">
+              {localeText(locale, `Show removed and ended (${otherViewCount})`, `Показать снятые и завершённые (${otherViewCount})`)}
+            </Link>
+          ) : null}
+          <span className="setup-subtitle">
+            {localeText(locale, 'Removed and ended assignments are never deleted — they keep the hours and history of their days.', 'Снятые и завершённые назначения не удаляются — за ними остаются часы и история их дней.')}
+          </span>
+        </p>
       </div>
     </main>
   );

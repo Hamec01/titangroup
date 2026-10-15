@@ -14,7 +14,7 @@ import { prisma } from '../lib/prisma';
 import { generateSessionToken, hashSessionToken, SESSION_COOKIE_NAME } from '../lib/session';
 import { ensureEmployeePeriodCore } from '../lib/periods';
 import { materializeClockShift } from '../lib/attendance-materializer';
-import { createAssignment } from '../lib/assignments';
+import { createAssignment, listAssignments } from '../lib/assignments';
 import { helsinkiToday } from '../lib/workers';
 import { loadCustomerMonthMatrix } from '../lib/reporting/monthly-matrix';
 import { dateRuns } from '../lib/move-hours-to-customer';
@@ -178,6 +178,16 @@ async function main() {
   await prisma.siteAssignment.create({ data: { employeeId: empM.id, siteId: site.id, workAreaId: aros.id, isPrimary: false, validFrom: day0(2), validTo: day0(2), clockInDisabledAt: new Date(), assignedByUserId: admin.userId } });
   const two = await createAssignment({ employeeId: empM.id, siteId: site.id, workAreaId: aros.id, templateId: null, validFrom: today, validTo: null, isPrimary: true, assignedByUserId: admin.userId, requestId: randomUUID() });
   check('A3: two removed rows in the way → ASSIGNMENT_OVERLAP, nothing changed', 'code' in two && two.code === 'ASSIGNMENT_OVERLAP' && (await prisma.siteAssignment.count({ where: { employeeId: empM.id, clockInDisabledAt: null } })) === 0, two);
+
+  // A4. /admin/assignments shows running + scheduled by default; removed / ended live behind a link.
+  const cur = await listAssignments(1, 1000, 'current');
+  const arch = await listAssignments(1, 1000, 'archived');
+  const all = await listAssignments(1, 1000, 'all');
+  const kRows = (r: typeof cur) => r.items.filter((i) => i.employeeId === empK.id);
+  check('A4: current view = the live Aros row only for Kosariev-like worker', kRows(cur).length === 1 && kRows(cur)[0].id === arosRemoved.id, kRows(cur));
+  check('A4: archived view = his removed rows', kRows(arch).length === 2 && kRows(arch).every((i) => i.clockInDisabledAt !== null), kRows(arch));
+  check('A4: current + archived = all, counts cross-linked', cur.totalItems + arch.totalItems === all.totalItems && cur.otherViewCount === arch.totalItems && arch.otherViewCount === cur.totalItems);
+  check('A4: a scheduled assignment is in the current view', cur.items.some((i) => i.validFrom > todayIso));
 
   // =============================== B. move recorded hours ===============================
   check('dateRuns groups consecutive days', JSON.stringify(dateRuns(['2037-01-14', '2037-01-13', '2037-01-16'])) === JSON.stringify([['2037-01-13', '2037-01-14'], ['2037-01-16', '2037-01-16']]));
