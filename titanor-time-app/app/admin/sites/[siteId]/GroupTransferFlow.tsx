@@ -55,7 +55,8 @@ export function GroupTransferFlow({
   const [targetSiteId, setTargetSiteId] = useState('');
   const [targetWorkAreaId, setTargetWorkAreaId] = useState('');
   const [templateId, setTemplateId] = useState('');
-  const [isPrimary, setIsPrimary] = useState(true);
+  // Owner 2026-10-15: no "main / not main" choice in the UI — the new place is always the workplace.
+  const isPrimary = true;
   const [effectiveFrom, setEffectiveFrom] = useState(tomorrow);
 
   const [loading, setLoading] = useState(false);
@@ -236,11 +237,6 @@ export function GroupTransferFlow({
       </label>
       <br />
       <label>
-        <input type="checkbox" checked={isPrimary} onChange={(e) => { setIsPrimary(e.target.checked); setPreview(null); }} />{' '}
-        {t('This becomes each worker’s main workplace', 'Это станет основным местом работы каждого')}
-      </label>
-      <br />
-      <label>
         {t('From', 'С какого дня')}:{' '}
         <input type="date" value={effectiveFrom} min={tomorrow} onChange={(e) => { setEffectiveFrom(e.target.value); setPreview(null); }} />
       </label>
@@ -284,7 +280,6 @@ export function GroupTransferFlow({
                   />{' '}
                   <Link href={`/admin/workers/${w.employeeId}`}>{w.name} #{w.employeeNumber}</Link>
                   {w.workAreaName ? ` — ${w.workAreaName}` : ''}
-                  {w.isPrimary ? ` · ${t('main', 'основное')}` : ''}
                   {w.workingNow ? ` · ${t('working now', 'сейчас на смене')}` : ''}
                   {' · '}
                   <span className="setup-subtitle">{statusLabel(w.status)}</span>

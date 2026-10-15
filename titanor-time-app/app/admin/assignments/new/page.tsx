@@ -46,7 +46,6 @@ export default async function NewAssignmentPage({
         <NewAssignmentForm
           initialEmployeeId={initialEmployeeId}
           initialValidFrom={initialValidFrom}
-          initialIsPrimary={query.primary === 'true'}
           returnEmployeeId={initialEmployeeId || null}
           lockEmployee={Boolean(initialEmployeeId)}
         />

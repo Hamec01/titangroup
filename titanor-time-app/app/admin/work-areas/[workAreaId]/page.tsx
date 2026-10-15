@@ -51,7 +51,6 @@ export default async function WorkAreaDetailPage({ params }: { params: Promise<{
         <Link href={`/admin/workers/${w.employeeId}`}>
           #{w.employeeNumber} {w.name}
         </Link>
-        {w.isPrimary ? ` (${ru ? 'основной' : 'primary'})` : ''}
         {w.templateName ? ` — ${w.templateName}` : ''}
       </span>
       {past ? (

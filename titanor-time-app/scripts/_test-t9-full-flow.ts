@@ -172,7 +172,6 @@ async function main() {
   await admin.locator('#assignment-employee').selectOption({ value: workerEmployee.id });
   await admin.locator('#assignment-site').selectOption({ value: siteId });
   await admin.locator('#assignment-valid-from').fill('2020-01-01');
-  await admin.locator('#assignment-is-primary').check();
   await admin.locator('.login-submit').click();
   await waitPath(admin, /\/admin\/setup/, 15000);
   const assignmentRow = await prisma.siteAssignment.findFirstOrThrow({ where: { employeeId: workerEmployee.id, siteId } });

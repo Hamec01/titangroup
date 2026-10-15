@@ -179,7 +179,6 @@ export function DisableCustomerFlow({
                 <Link href={`/admin/workers/${w.employeeId}`}>
                   {w.name} #{w.employeeNumber}
                 </Link>
-                {w.isPrimary ? ` · ${t('main workplace', 'основное место')}` : ''}
                 {w.workingNow ? ` · ${t('working now', 'сейчас на смене')}` : ''}
                 {w.future ? ` · ${t('starts later', 'начнётся позже')}` : ''}
               </li>

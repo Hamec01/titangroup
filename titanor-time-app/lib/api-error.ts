@@ -10,6 +10,8 @@ export interface ApiErrorBody {
   code: string;
   message: string;
   fieldErrors?: Record<string, string[]>;
+  // Табель v2 move-hours 409 TIMESHEET_SUBMITTED — which days are already submitted.
+  dates?: string[];
   // period.lock's 409 NOT_ALL_FINAL_APPROVED (01_SCREEN_MAP.md §3: "список блокеров") — which
   // participants are still holding the lock back, so the UI can render the list without a
   // second round-trip.

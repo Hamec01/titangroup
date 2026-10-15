@@ -166,7 +166,6 @@ export function SiteFinishFlow({ site }: { site: SiteProp }) {
                       {w.name} #{w.employeeNumber}
                     </Link>
                     {w.workAreaName ? ` — ${w.workAreaName}` : ''}
-                    {w.isPrimary ? ` · ${t('main workplace', 'основное место')}` : ''}
                     {w.workingNow ? ` · ${t('working now', 'сейчас на смене')}` : ''}
                   </li>
                 ))}

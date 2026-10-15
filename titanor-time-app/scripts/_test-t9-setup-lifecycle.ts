@@ -131,7 +131,7 @@ async function main() {
     check('T9.7/G2: the guided site/work-schedule form is embedded in the worker profile', (await page.locator('form:has(#assignment-employee):has(#assignment-site)').count()) === 1);
     check('T9.7/G3: inline form locks the intended worker', await page.locator('#assignment-employee').inputValue() === workerBRes.body.employee.id && await page.locator('#assignment-employee').isDisabled());
     check('T9.7/G4: guided form defaults start date to Helsinki today', await page.locator('#assignment-valid-from').inputValue() === helsinkiToday);
-    check('T9.7/G5: guided first assignment defaults to primary', await page.locator('#assignment-is-primary').isChecked());
+    check('T9.7/G5: no "main / not main" choice in the assignment form (always the workplace)', (await page.locator('#assignment-is-primary').count()) === 0);
     await page.locator('button[type="submit"]', { hasText: 'Create assignment' }).click();
     await page.waitForURL(`${BASE}/admin/workers/${workerBRes.body.employee.id}`, { timeout: 15000 });
     check('T9.7/G6: save remains on the same worker profile', new URL(page.url()).pathname === `/admin/workers/${workerBRes.body.employee.id}`);
@@ -458,15 +458,16 @@ async function main() {
   // CH10 (R15-D7 Deploy B): the card offers ONE "Change workplace" form with Site / Customer /
   // Schedule / main-workplace fields and a Today / Tomorrow / Pick-a-date choice.
   await page.goto(`${BASE}/admin/workers/${chWId}`, { waitUntil: 'networkidle' });
-  const changeBtn = page.locator('#worker-assignments button', { hasText: /Change workplace/ });
+  const changeBtn = page.locator('#worker-assignments button', { hasText: /change workplace|изменить место работы/i });
   check('CH10: worker card offers a "Change workplace" action per current assignment', (await changeBtn.count()) >= 1, await changeBtn.count());
   await changeBtn.first().click();
   const cwForm = await page.locator('.assignment-end-form').innerText().catch(() => '');
   check('CH10b: the one form has Site / Customer / Schedule fields and a Today/Tomorrow/Pick-a-date choice', /Site/.test(cwForm) && /Customer/.test(cwForm) && /Work schedule/.test(cwForm) && /Today/.test(cwForm) && /Tomorrow/.test(cwForm) && /Pick a date/.test(cwForm), cwForm.slice(0, 300));
 
-  // CH11 (R15-D7 Deploy D) — the real "Set primary" button on /admin/assignments routes the
-  // primary change through promoteToPrimary: the prior live primary is demoted, one live primary
-  // remains, and an AssignmentTransition + ASSIGNMENT_PROMOTED audit are written.
+  // CH11 (R15-D7 Deploy D; owner 2026-10-15) — the "main / not main" controls are gone from
+  // /admin/assignments (the list shows no "primary" wording and no Set/Unset primary buttons). The
+  // server-side promoteToPrimary path is kept for internal use and still checked through its PATCH:
+  // the prior live primary is demoted, one live primary remains, transition + audit are written.
   const cpTodayIso = new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Helsinki' }).format(new Date());
   const cpW = await jsonFetch(`${BASE}/api/admin/workers`, { method: 'POST', headers: authHeaders(fx.admin.cookie, { 'Idempotency-Key': randomUUID() }), body: JSON.stringify({ firstName: 'PrimToggle', lastName: `ZZ${fx.run}` }) });
   const cpWId: string = cpW.body.employee.id;
@@ -479,25 +480,18 @@ async function main() {
   check('CH11-pre: two assignments for the toggle worker (a1 primary, a2 not)', cpA1.status === 201 && cpA2.status === 201, { a1: cpA1.status, a2: cpA2.status });
   await page.goto(`${BASE}/admin/assignments`, { waitUntil: 'networkidle' });
   const cpRowB = page.locator('tr', { hasText: cpName }).filter({ hasText: cpSiteB.body.name });
-  const setPrimaryBtn = cpRowB.locator('button', { hasText: 'Set primary' });
-  const btnVisible = (await setPrimaryBtn.count()) >= 1;
-  check('CH11a: the assignments list shows a "Set primary" button for the non-primary row', btnVisible, { rows: await page.locator('tr', { hasText: cpName }).count() });
-  if (btnVisible) {
-    await setPrimaryBtn.first().click();
-    await page.waitForTimeout(1500);
-  } else {
-    // fallback: exercise the exact PATCH the button sends
-    const v = (await prisma.siteAssignment.findUniqueOrThrow({ where: { id: cpA2.body.id } })).version;
-    await jsonFetch(`${BASE}/api/admin/assignments/${cpA2.body.id}`, { method: 'PATCH', headers: authHeaders(fx.admin.cookie), body: JSON.stringify({ version: v, isPrimary: true }) });
-  }
+  const rowsText = (await page.locator('tr', { hasText: cpName }).allInnerTexts()).join(' ');
+  check('CH11a: the assignments list has no "primary" wording and no Set/Unset primary buttons', rowsText.length > 0 && !/primary|основн/i.test(rowsText) && (await cpRowB.locator('button', { hasText: /Set primary|Unset primary|Сделать основным|Снять статус/ }).count()) === 0, rowsText.slice(0, 300));
+  const v = (await prisma.siteAssignment.findUniqueOrThrow({ where: { id: cpA2.body.id } })).version;
+  await jsonFetch(`${BASE}/api/admin/assignments/${cpA2.body.id}`, { method: 'PATCH', headers: authHeaders(fx.admin.cookie), body: JSON.stringify({ version: v, isPrimary: true }) });
   const cpA1Row = await prisma.siteAssignment.findUniqueOrThrow({ where: { id: cpA1.body.id } });
   const cpA2Row = await prisma.siteAssignment.findUniqueOrThrow({ where: { id: cpA2.body.id } });
-  check('CH11b: clicking "Set primary" demoted the old primary and promoted the clicked one', cpA1Row.isPrimary === false && cpA2Row.isPrimary === true, { a1: cpA1Row.isPrimary, a2: cpA2Row.isPrimary });
+  check('CH11b: promoteToPrimary (PATCH) demoted the old primary and promoted the other one', cpA1Row.isPrimary === false && cpA2Row.isPrimary === true, { a1: cpA1Row.isPrimary, a2: cpA2Row.isPrimary });
   const cpLivePrimaries = await prisma.siteAssignment.count({ where: { employeeId: cpWId, isPrimary: true, clockInDisabledAt: null } });
   check('CH11c: exactly one live primary after the toggle', cpLivePrimaries === 1, cpLivePrimaries);
   const cpTr = await prisma.assignmentTransition.findFirst({ where: { toAssignmentId: cpA2.body.id, fromAssignmentId: cpA1.body.id } });
   const cpAudit = await prisma.auditEvent.findFirst({ where: { eventType: 'ASSIGNMENT_PROMOTED', entityId: cpA2.body.id } });
-  check('CH11d: the UI toggle wrote an AssignmentTransition + ASSIGNMENT_PROMOTED audit', cpTr !== null && cpAudit !== null, { tr: cpTr?.id, audit: cpAudit?.id });
+  check('CH11d: promoteToPrimary wrote an AssignmentTransition + ASSIGNMENT_PROMOTED audit', cpTr !== null && cpAudit !== null, { tr: cpTr?.id, audit: cpAudit?.id });
 
   await browser.close();
 

@@ -18,6 +18,8 @@ interface TemplateOpt extends Opt {
 }
 
 interface Preview {
+  correctsInPlace: boolean;
+  usedAlready: boolean;
   from: PlacePreview;
   to: PlacePreview;
   effectiveFrom: string;
@@ -43,7 +45,7 @@ interface PlacePreview {
   isPrimary: boolean;
 }
 
-type WhenChoice = 'today' | 'tomorrow' | 'date';
+type WhenChoice = 'planned' | 'today' | 'tomorrow' | 'date';
 type ShiftHandling = 'KEEP_ON_OLD' | 'MOVE_TO_NEW';
 type PrimaryResolution = 'KEEP_SCHEDULED' | 'REPLACE_SCHEDULED';
 
@@ -51,19 +53,25 @@ function placeLabel(p: PlacePreview): string {
   return p.workAreaName ? `${p.siteName} — ${p.workAreaName}` : p.siteName;
 }
 
-// docs/titanor-time/R15_ASSIGNMENT_LIFECYCLE_DESIGN_RU.md §3.5 — ONE "Изменить место работы" form.
-// Site · Customer · Schedule · Primary · When (today / tomorrow / pick a date). Every field
-// defaults to the assignment's current value so changing one thing never silently changes another
-// (fixes C4). Shows a plain-language "what will change" summary before the admin confirms, and —
-// per §P4 — warns clearly when the change would replace an already-scheduled primary transfer.
+// docs/titanor-time/R15_ASSIGNMENT_LIFECYCLE_DESIGN_RU.md §3.5 — ONE "Перевести / изменить место
+// работы" form: Site · Customer · Schedule · When (today by default / tomorrow / pick a date). Every
+// field defaults to the current value so changing one thing never silently changes another (C4).
+// Owner 2026-10-15: no "main / not main" choice in the UI — the new workplace always becomes the
+// worker's workplace (isPrimary is kept internally and set automatically). The "what will change"
+// summary is fetched automatically as fields change; one button confirms. An assignment that has not
+// been used yet (e.g. created today by mistake) is corrected in place (§3.4).
 export function ChangeWorkplaceForm({
   assignment,
   today,
-  tomorrow
+  tomorrow,
+  scheduled = false
 }: {
   assignment: CardAssignment;
   today: string;
   tomorrow: string;
+  /** A planned future transfer (not started yet): defaults to its own date and, while unused, is
+   *  corrected in place — including being brought forward to today. */
+  scheduled?: boolean;
 }) {
   const router = useRouter();
   const locale = useAppLocale();
@@ -77,8 +85,8 @@ export function ChangeWorkplaceForm({
   const [siteId, setSiteId] = useState(assignment.siteId);
   const [workAreaId, setWorkAreaId] = useState(assignment.workAreaId ?? '');
   const [templateId, setTemplateId] = useState(assignment.templateId ?? '');
-  const [isPrimary, setIsPrimary] = useState(assignment.isPrimary);
-  const [when, setWhen] = useState<WhenChoice>('today');
+  const initialWhen: WhenChoice = scheduled ? 'planned' : 'today';
+  const [when, setWhen] = useState<WhenChoice>(initialWhen);
   const [pickedDate, setPickedDate] = useState(tomorrow);
 
   const [preview, setPreview] = useState<Preview | null>(null);
@@ -88,7 +96,7 @@ export function ChangeWorkplaceForm({
   const [shiftChoiceNeeded, setShiftChoiceNeeded] = useState(false);
   const [scheduledConflict, setScheduledConflict] = useState<{ label: string; date: string } | null>(null);
 
-  const effectiveFrom = when === 'today' ? today : when === 'tomorrow' ? tomorrow : pickedDate;
+  const effectiveFrom = when === 'planned' ? assignment.validFrom : when === 'today' ? today : when === 'tomorrow' ? tomorrow : pickedDate;
 
   useEffect(() => {
     if (!open) return;
@@ -121,13 +129,25 @@ export function ChangeWorkplaceForm({
     };
   }, [open, siteId]);
 
+  // The summary refreshes by itself shortly after a field changes — no separate "show" step.
+  const previewKey = `${siteId}|${workAreaId}|${templateId}|${effectiveFrom}`;
+  useEffect(() => {
+    if (!open) return;
+    setPreview(null);
+    if (siteId === assignment.siteId && (workAreaId || null) === assignment.workAreaId && (templateId || null) === (assignment.templateId ?? null) && !(scheduled && effectiveFrom !== assignment.validFrom)) return;
+    const timer = window.setTimeout(() => void runPreview(), 300);
+    return () => window.clearTimeout(timer);
+    // runPreview reads the same fields as previewKey
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, previewKey]);
+
   const dirty = useMemo(
     () =>
       siteId !== assignment.siteId ||
       (workAreaId || null) !== assignment.workAreaId ||
       (templateId || null) !== (assignment.templateId ?? null) ||
-      isPrimary !== assignment.isPrimary,
-    [siteId, workAreaId, templateId, isPrimary, assignment]
+      (scheduled && effectiveFrom !== assignment.validFrom),
+    [siteId, workAreaId, templateId, assignment, scheduled, effectiveFrom]
   );
 
   function reset() {
@@ -135,8 +155,7 @@ export function ChangeWorkplaceForm({
     setSiteId(assignment.siteId);
     setWorkAreaId(assignment.workAreaId ?? '');
     setTemplateId(assignment.templateId ?? '');
-    setIsPrimary(assignment.isPrimary);
-    setWhen('today');
+    setWhen(initialWhen);
     setPickedDate(tomorrow);
     setPreview(null);
     setError(null);
@@ -155,7 +174,7 @@ export function ChangeWorkplaceForm({
         method: 'POST',
         credentials: 'same-origin',
         headers: { 'Content-Type': 'application/json', 'X-Requested-With': CSRF },
-        body: JSON.stringify({ assignmentId: assignment.assignmentId, effectiveFrom, siteId, workAreaId: workAreaId || null, templateId: templateId || null, isPrimary })
+        body: JSON.stringify({ assignmentId: assignment.assignmentId, effectiveFrom, siteId, workAreaId: workAreaId || null, templateId: templateId || null, isPrimary: true })
       });
       const body = await r.json();
       if (!r.ok) {
@@ -197,7 +216,7 @@ export function ChangeWorkplaceForm({
           siteId,
           workAreaId: workAreaId || null,
           templateId: templateId || null,
-          isPrimary,
+          isPrimary: true,
           ...(handling ? { todayShiftHandling: handling } : {}),
           ...(resolution ? { primaryConflictResolution: resolution } : {})
         })
@@ -248,9 +267,12 @@ export function ChangeWorkplaceForm({
       case 'ASSIGNMENT_ENDS_TOMORROW':
         return t('The current assignment already ends today.', 'Текущее назначение и так заканчивается сегодня.');
       case 'EFFECTIVE_ON_OR_BEFORE_START':
-        return t('This assignment started today — change it from tomorrow.', 'Назначение началось сегодня — меняйте со завтрашнего дня.');
+      case 'ASSIGNMENT_STARTED_IN_USE':
+        return t('The worker has already used this workplace today (Check In or hours) — choose “Tomorrow”.', 'Сегодня работник уже отмечался на этом месте — выберите «Завтра».');
       case 'PRIMARY_PERIOD_CONFLICT':
-        return t('The worker already has a primary assignment for that period — reload the card and try again.', 'У работника уже есть основное назначение на этот период — обновите карточку и попробуйте ещё раз.');
+        return scheduled
+          ? t('The worker still has a workplace on those dates — move the current workplace instead, or keep the planned date.', 'На эти даты у работника ещё есть текущее место — переведите текущее место или оставьте запланированную дату.')
+          : t('The worker’s workplaces changed in the meantime — reload the card and try again.', 'Места работы работника только что изменились — обновите карточку и попробуйте ещё раз.');
       case 'VERSION_CONFLICT':
         return t('The card changed in another window — reloading.', 'Карточка изменилась в другом окне — обновляем.');
       case 'SITE_FINISHED':
@@ -269,7 +291,7 @@ export function ChangeWorkplaceForm({
   if (!open) {
     return (
       <button type="button" className="setup-action" onClick={() => setOpen(true)}>
-        {t('Change workplace', 'Изменить место работы')}
+        {scheduled ? t('Change the scheduled transfer', 'Изменить запланированный перевод') : t('Transfer / change workplace', 'Перевести / изменить место работы')}
       </button>
     );
   }
@@ -277,8 +299,7 @@ export function ChangeWorkplaceForm({
   return (
     <div className="assignment-end-form" aria-busy={submitting || previewing}>
       <p className="setup-subtitle">
-        {t('Now', 'Сейчас')}: <strong>{assignment.workAreaName ? `${assignment.siteName} — ${assignment.workAreaName}` : assignment.siteName}</strong>
-        {assignment.isPrimary ? ` (${t('primary', 'основное')})` : ''}
+        {scheduled ? t(`Planned from ${assignment.validFrom}`, `Запланировано с ${assignment.validFrom}`) : t('Now', 'Сейчас')}: <strong>{assignment.workAreaName ? `${assignment.siteName} — ${assignment.workAreaName}` : assignment.siteName}</strong>
       </p>
 
       <label htmlFor={`cw-site-${assignment.assignmentId}`}>{t('Site', 'Объект')}</label>
@@ -337,22 +358,14 @@ export function ChangeWorkplaceForm({
         ))}
       </select>
 
-      <label htmlFor={`cw-primary-${assignment.assignmentId}`}>
-        <input
-          id={`cw-primary-${assignment.assignmentId}`}
-          type="checkbox"
-          checked={isPrimary}
-          disabled={submitting}
-          onChange={(e) => {
-            setIsPrimary(e.target.checked);
-            setPreview(null);
-          }}
-        />{' '}
-        {t('This is the main workplace', 'Это основное место работы')}
-      </label>
-
       <fieldset className="assignment-when">
         <legend>{t('When does this start?', 'С какого дня?')}</legend>
+        {scheduled ? (
+          <label>
+            <input type="radio" name={`cw-when-${assignment.assignmentId}`} checked={when === 'planned'} disabled={submitting} onChange={() => { setWhen('planned'); setPreview(null); }} />{' '}
+            {t(`As planned (${assignment.validFrom})`, `Как запланировано (с ${assignment.validFrom})`)}
+          </label>
+        ) : null}
         <label>
           <input type="radio" name={`cw-when-${assignment.assignmentId}`} checked={when === 'today'} disabled={submitting} onChange={() => { setWhen('today'); setPreview(null); }} />{' '}
           {t('Today', 'Сегодня')}
@@ -390,13 +403,10 @@ export function ChangeWorkplaceForm({
         <div className="worker-setup-callout" role="group">
           <p>
             {t(
-              `This worker already has a transfer scheduled to ${scheduledConflict.label} from ${scheduledConflict.date}. Making this the main workplace now would replace that plan.`,
-              `У работника уже запланирован перевод на «${scheduledConflict.label}» с ${scheduledConflict.date}. Сделать это основным сейчас — значит заменить тот план.`
+              `This worker already has a transfer scheduled to ${scheduledConflict.label} from ${scheduledConflict.date}. This change replaces that plan.`,
+              `У работника уже запланирован перевод на «${scheduledConflict.label}» с ${scheduledConflict.date}. Этот перевод заменит тот план.`
             )}
           </p>
-          <button type="button" className="setup-action" disabled={submitting} onClick={() => void submit(undefined, 'KEEP_SCHEDULED')}>
-            {t('Keep the scheduled transfer (this change is not made primary)', 'Оставить запланированный перевод (это изменение не станет основным)')}
-          </button>
           <button type="button" className="setup-action" disabled={submitting} onClick={() => void submit(undefined, 'REPLACE_SCHEDULED')}>
             {t('Replace the scheduled transfer', 'Заменить запланированный перевод')}
           </button>
@@ -423,23 +433,24 @@ export function ChangeWorkplaceForm({
             <strong>{placeLabel(preview.from)}</strong> → <strong>{placeLabel(preview.to)}</strong>
           </p>
           <p className="setup-subtitle">
-            {preview.isImmediate
-              ? t('Starts today.', 'Действует с сегодня.')
-              : t(`Starts on ${preview.effectiveFrom}.`, `Действует с ${preview.effectiveFrom}.`)}{' '}
+            {preview.correctsInPlace
+              ? t(`This workplace has not been used yet — it is corrected right away and applies from ${preview.effectiveFrom}.`, `Это место ещё не использовалось — оно будет сразу исправлено и действует с ${preview.effectiveFrom}.`)
+              : preview.isImmediate
+                ? t('Starts today.', 'Действует с сегодня.')
+                : t(`Starts on ${preview.effectiveFrom}.`, `Действует с ${preview.effectiveFrom}.`)}{' '}
             {preview.scheduleChanges
               ? t('The work schedule changes.', 'Рабочий график изменится.')
               : t('The work schedule stays the same.', 'Рабочий график не изменится.')}{' '}
-            {preview.primaryChanges
-              ? preview.to.isPrimary
-                ? t('This becomes the main workplace.', 'Это станет основным местом работы.')
-                : t('This stops being the main workplace.', 'Это перестанет быть основным местом.')
-              : ''}
+            {!preview.correctsInPlace && preview.isImmediate ? t('Hours already recorded stay with the current place; new hours go to the new one.', 'Уже записанные часы остаются на прежнем месте, новые пойдут на новое.') : ''}
           </p>
+          {preview.correctsInPlace && preview.usedAlready ? (
+            <p className="login-error" role="alert">{t('The worker has already used this workplace today — choose “Tomorrow”.', 'Сегодня работник уже отмечался на этом месте — выберите «Завтра».')}</p>
+          ) : null}
           {preview.scheduledPrimaryConflict ? (
             <p className="login-error" role="alert">
               {t(
-                `Warning: this worker already has a transfer scheduled to ${preview.scheduledPrimaryConflict.label} from ${preview.scheduledPrimaryConflict.scheduledValidFrom}. If this change is the main workplace you will be asked to keep or replace that plan.`,
-                `Внимание: у работника уже запланирован перевод на «${preview.scheduledPrimaryConflict.label}» с ${preview.scheduledPrimaryConflict.scheduledValidFrom}. Если это изменение — основное место, вас спросят: оставить или заменить тот план.`
+                `Note: a transfer to ${preview.scheduledPrimaryConflict.label} from ${preview.scheduledPrimaryConflict.scheduledValidFrom} is already scheduled — you will be asked whether to replace it.`,
+                `Внимание: уже запланирован перевод на «${preview.scheduledPrimaryConflict.label}» с ${preview.scheduledPrimaryConflict.scheduledValidFrom} — вас спросят, заменить ли его.`
               )}
             </p>
           ) : null}
@@ -455,13 +466,10 @@ export function ChangeWorkplaceForm({
           <button
             type="button"
             className="setup-action"
-            disabled={submitting || preview.nothingToChange || preview.hasSubmittedTimeAfter || preview.siteFinished}
+            disabled={submitting || preview.nothingToChange || preview.hasSubmittedTimeAfter || preview.siteFinished || (preview.correctsInPlace && preview.usedAlready)}
             onClick={() => void submit()}
           >
-            {submitting ? t('Applying…', 'Применяем…') : t('Confirm the change', 'Подтвердить изменение')}
-          </button>
-          <button type="button" className="setup-action" disabled={submitting} onClick={() => setPreview(null)}>
-            {t('Edit', 'Изменить')}
+            {submitting ? t('Applying…', 'Применяем…') : t('Confirm', 'Подтвердить')}
           </button>
           <button type="button" className="setup-action" disabled={submitting} onClick={reset}>
             {t('Cancel', 'Отмена')}
@@ -469,13 +477,11 @@ export function ChangeWorkplaceForm({
         </div>
       ) : (
         <>
-          <button type="button" className="setup-action" disabled={previewing || !dirty} onClick={() => void runPreview()}>
-            {previewing ? t('Checking…', 'Проверяем…') : t('Show what will change', 'Показать, что изменится')}
-          </button>
+          {previewing ? <p className="setup-subtitle">{t('Checking…', 'Проверяем…')}</p> : null}
           <button type="button" className="setup-action" onClick={reset}>
             {t('Cancel', 'Отмена')}
           </button>
-          {!dirty ? <p className="setup-subtitle">{t('Change a field above to continue.', 'Измените поле выше, чтобы продолжить.')}</p> : null}
+          {!dirty ? <p className="setup-subtitle">{t('Choose the new site, customer or schedule.', 'Выберите новый объект, заказчика или график.')}</p> : null}
         </>
       )}
     </div>

@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
+import { assignmentUsageCount } from '@/lib/assignment-lifecycle-service';
 import { jsonError, successHeaders } from '@/lib/api-error';
 import { resolveAuthenticatedSession } from '@/lib/auth';
 import { hasPermission } from '@/lib/permissions';
@@ -168,10 +169,16 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     prisma.timesheetDraftSegment.count({ where: { sourceAssignmentId: existing.id, date: { gte: guardFrom } } })
   ]);
 
+  // §3.4 — on/before the assignment's own start the /change route corrects it in place when unused.
+  const correctsInPlace = effectiveDate.getTime() <= existing.validFrom.getTime();
+  const usedAlready = correctsInPlace ? (await assignmentUsageCount(prisma, existing.id)) > 0 : false;
+
   return NextResponse.json(
     {
       from,
       to,
+      correctsInPlace,
+      usedAlready,
       effectiveFrom,
       isImmediate,
       isBackdated,

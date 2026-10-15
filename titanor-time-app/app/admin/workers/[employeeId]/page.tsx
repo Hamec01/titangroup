@@ -137,20 +137,23 @@ export default async function WorkerDetailPage({ params }: { params: Promise<{ e
           endDateDefaults={endDateDefaults}
           locale={locale}
         />
-        <ScheduledChangesSection card={assignmentCard} locale={locale} />
+        <ScheduledChangesSection card={assignmentCard} locale={locale} today={todayIso} tomorrow={tomorrowIso} />
         <PastAssignmentsSection card={assignmentCard} locale={locale} />
 
-        <section className="worker-work-setup">
-          <h2>{s.workers.addWork}</h2>
-          <p className="setup-subtitle">{s.workers.addWorkHelp}</p>
-          <NewAssignmentForm
-            initialEmployeeId={worker.id}
-            initialValidFrom={todayIso}
-            initialIsPrimary={assignmentCard.currentAssignments.length === 0}
-            returnEmployeeId={worker.id}
-            lockEmployee
-          />
-        </section>
+        {/* One workplace per worker (owner 2026-10-15): a worker who already has one is moved with
+            "Перевести / изменить место работы" above, not given a second parallel workplace. */}
+        {assignmentCard.currentAssignments.length === 0 ? (
+          <section className="worker-work-setup">
+            <h2>{s.workers.addWork}</h2>
+            <p className="setup-subtitle">{s.workers.addWorkHelp}</p>
+            <NewAssignmentForm
+              initialEmployeeId={worker.id}
+              initialValidFrom={todayIso}
+              returnEmployeeId={worker.id}
+              lockEmployee
+            />
+          </section>
+        ) : null}
 
         {submissionSchedule ? (
           <section id="worker-submission" className="worker-work-setup">

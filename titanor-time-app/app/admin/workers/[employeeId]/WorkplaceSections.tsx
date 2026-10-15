@@ -79,7 +79,6 @@ export function WorkplaceNowSection({
                     <Link href={`/admin/work-areas/${a.workAreaId}`}>{a.workAreaName}</Link>
                   </>
                 ) : null}
-                {a.isPrimary ? ` — ${t('main workplace', 'основное место')}` : ''}
                 {' · '}
                 <span className="assignment-state">{stateLabel(locale, a)}</span>
               </span>
@@ -100,7 +99,7 @@ export function WorkplaceNowSection({
   );
 }
 
-export function ScheduledChangesSection({ card, locale }: { card: WorkerAssignmentCard; locale: AppLocale }) {
+export function ScheduledChangesSection({ card, locale, today, tomorrow }: { card: WorkerAssignmentCard; locale: AppLocale; today: string; tomorrow: string }) {
   const t = (en: string, ru: string) => localeText(locale, en, ru);
   if (card.scheduledChanges.length === 0) {
     return null;
@@ -110,8 +109,8 @@ export function ScheduledChangesSection({ card, locale }: { card: WorkerAssignme
       <h2>{t('Scheduled changes', 'Запланированные изменения')}</h2>
       <p className="setup-subtitle">
         {t(
-          'The worker moves automatically on the date below — nothing else needs doing. To change or cancel a plan, use "Change workplace" on the current assignment.',
-          'Работник перейдёт автоматически в указанную дату — больше ничего делать не нужно. Чтобы изменить или отменить план, используйте «Изменить место работы» у текущего назначения.'
+          'The worker moves automatically on the date below — nothing else needs doing. To change the plan (place, customer, schedule or start it today), use "Change the scheduled transfer".',
+          'Работник перейдёт автоматически в указанную дату — больше ничего делать не нужно. Чтобы изменить план (объект, заказчика, график или начать уже сегодня), нажмите «Изменить запланированный перевод».'
         )}
       </p>
       <ul className="setup-list">
@@ -121,7 +120,6 @@ export function ScheduledChangesSection({ card, locale }: { card: WorkerAssignme
               {t(`From ${s.assignment.validFrom}`, `С ${s.assignment.validFrom}`)}
               {' → '}
               <strong>{assignmentLabel(s.assignment)}</strong>
-              {s.assignment.isPrimary ? ` — ${t('main workplace', 'основное место')}` : ''}
             </span>
             {s.transition ? (
               <span className="setup-subtitle">
@@ -134,6 +132,9 @@ export function ScheduledChangesSection({ card, locale }: { card: WorkerAssignme
             {!s.cancellable ? (
               <span className="setup-subtitle">{t('The worker already has hours against this — it can no longer be cancelled cleanly.', 'По этому назначению уже есть часы — отменить его без последствий уже нельзя.')}</span>
             ) : null}
+            <div className="assignment-actions">
+              <ChangeWorkplaceForm assignment={s.assignment} today={today} tomorrow={tomorrow} scheduled />
+            </div>
           </li>
         ))}
       </ul>

@@ -3,7 +3,7 @@ import { Prisma } from '@prisma/client';
 import type { SiteAssignment, AssignmentTransitionReason } from '@prisma/client';
 import { prisma } from '@/lib/prisma';
 import { createAuditEvent } from '@/lib/audit';
-import { createAssignmentInTx, isExclusionViolation } from '@/lib/assignments';
+import { createAssignmentInTx, isExclusionViolation, materializeAssignmentDraftsInTx } from '@/lib/assignments';
 import { recordAssignmentTransition, reasonFromFreeText, reasonFromPreset } from '@/lib/assignment-transitions';
 import { isAssignmentLiveNow } from '@/lib/assignment-lifecycle';
 import {
@@ -461,6 +461,113 @@ export async function changeWorkplace(input: ChangeWorkplaceInput): Promise<Chan
 // ─────────────────────────────────────────────────────────────────────────────────────────────
 // promoteToPrimary — "сделать основным" (§3.6 — ≤1 primary per overlapping period)
 // ─────────────────────────────────────────────────────────────────────────────────────────────
+
+// ---------------------------------------------------------------------------------------------
+// §3.4 (C) — correcting an assignment that has not been used yet, in place.
+// An assignment that starts today (or later) cannot be "changed from today" the normal way — the
+// old row would have to end before it began. If nothing has been recorded against it yet (no
+// Check-In, open shift, clock shift/fragment, timesheet segment, submitted or correction row), the
+// same row simply gets the new site / customer / schedule, its draft planned shifts are rebuilt,
+// and the correction is recorded (AssignmentTransition CHANGE from = to + AuditEvent).
+// ---------------------------------------------------------------------------------------------
+
+export interface CorrectUnusedAssignmentInput {
+  existing: SiteAssignment;
+  /** New start (>= today, <= the current start) — a scheduled, unused transfer may be brought
+   *  forward, e.g. to today; = existing.validFrom when only site / customer / schedule change. */
+  validFrom: Date;
+  siteId: string;
+  workAreaId: string | null;
+  templateVersionId: string | null;
+  reasonText: string | null;
+  actorUserId: string;
+  requestId: string;
+}
+
+export type CorrectUnusedAssignmentError =
+  | { code: 'ASSIGNMENT_IN_USE' }
+  | { code: 'ASSIGNMENT_OVERLAP' }
+  | { code: 'PRIMARY_PERIOD_CONFLICT' }
+  | { code: 'SITE_FINISHED' }
+  | { code: 'CUSTOMER_DISABLED' };
+
+export class AssignmentInUseError extends Error {
+  constructor() { super('ASSIGNMENT_IN_USE'); }
+}
+
+/** Anything recorded against the assignment that makes an in-place correction unsafe. */
+export async function assignmentUsageCount(db: Prisma.TransactionClient | typeof prisma, assignmentId: string): Promise<number> {
+  const counts = await Promise.all([
+    db.clockEvent.count({ where: { sourceAssignmentId: assignmentId } }),
+    db.employeeOpenShift.count({ where: { sourceAssignmentId: assignmentId } }),
+    db.clockShift.count({ where: { sourceAssignmentId: assignmentId } }),
+    db.clockShiftFragment.count({ where: { sourceAssignmentId: assignmentId } }),
+    db.timesheetDraftSegment.count({ where: { sourceAssignmentId: assignmentId } }),
+    db.workSegment.count({ where: { sourceAssignmentId: assignmentId } }),
+    db.timesheetPlannedShift.count({ where: { sourceAssignmentId: assignmentId } }),
+    db.correctionDraftSegment.count({ where: { sourceAssignmentId: assignmentId } })
+  ]);
+  return counts.reduce((a, b) => a + b, 0);
+}
+
+export async function correctUnusedAssignmentInTx(tx: Prisma.TransactionClient, input: CorrectUnusedAssignmentInput): Promise<{ assignment: SiteAssignment; transitionId: string }> {
+  const { existing, actorUserId, requestId } = input;
+  await acquireEmployeeLifecycleLock(tx, existing.employeeId);
+  if ((await assignmentUsageCount(tx, existing.id)) > 0) throw new AssignmentInUseError();
+
+  const site = await tx.workSite.findUnique({ where: { id: input.siteId }, select: { active: true, finishedAt: true } });
+  if (!site || site.finishedAt !== null || !site.active) throw new SiteOrCustomerUnavailableError('SITE_FINISHED');
+  if (input.workAreaId !== null) {
+    const area = await tx.workArea.findFirst({ where: { id: input.workAreaId, siteId: input.siteId }, select: { active: true } });
+    if (!area || !area.active) throw new SiteOrCustomerUnavailableError('CUSTOMER_DISABLED');
+  }
+
+  // Planned shifts reference (assignment, employee, site); rebuild them for the corrected row.
+  await tx.timesheetDraftPlannedShift.deleteMany({ where: { sourceAssignmentId: existing.id } });
+  const assignment = await tx.siteAssignment.update({
+    where: { id: existing.id },
+    data: { validFrom: input.validFrom, siteId: input.siteId, workAreaId: input.workAreaId, templateVersionId: input.templateVersionId, version: { increment: 1 } }
+  });
+  await materializeAssignmentDraftsInTx(tx, assignment);
+
+  const now = new Date();
+  const { reasonCode, reasonText } = reasonFromFreeText(input.reasonText ?? 'Исправление назначения до начала работы');
+  const transition = await recordAssignmentTransition(tx, {
+    employeeId: existing.employeeId,
+    kind: 'CHANGE',
+    fromAssignmentId: existing.id,
+    toAssignmentId: existing.id,
+    actedAt: now,
+    effectiveFrom: input.validFrom,
+    openShiftHandling: 'NONE',
+    actorUserId,
+    reasonCode,
+    reasonText
+  });
+  await createAuditEvent(tx, {
+    actorUserId,
+    eventType: 'ASSIGNMENT_CORRECTED',
+    entityType: 'SITE_ASSIGNMENT',
+    entityId: existing.id,
+    requestId,
+    beforeValue: { siteId: existing.siteId, workAreaId: existing.workAreaId, templateVersionId: existing.templateVersionId, validFrom: formatDate(existing.validFrom), validTo: existing.validTo ? formatDate(existing.validTo) : null },
+    afterValue: { siteId: assignment.siteId, workAreaId: assignment.workAreaId, templateVersionId: assignment.templateVersionId, validFrom: formatDate(assignment.validFrom), transitionId: transition.id },
+    reason: reasonText
+  });
+  return { assignment, transitionId: transition.id };
+}
+
+export async function correctUnusedAssignment(input: CorrectUnusedAssignmentInput): Promise<{ assignment: SiteAssignment; transitionId: string } | CorrectUnusedAssignmentError> {
+  try {
+    return await prisma.$transaction((tx) => correctUnusedAssignmentInTx(tx, input));
+  } catch (error) {
+    if (error instanceof AssignmentInUseError) return { code: 'ASSIGNMENT_IN_USE' };
+    if (error instanceof SiteOrCustomerUnavailableError) return { code: error.code };
+    if (isPrimaryPeriodConflict(error)) return { code: 'PRIMARY_PERIOD_CONFLICT' };
+    if (isExclusionViolation(error)) return { code: 'ASSIGNMENT_OVERLAP' };
+    throw error;
+  }
+}
 
 export interface PromoteToPrimaryInput {
   existing: SiteAssignment;

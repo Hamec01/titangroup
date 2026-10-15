@@ -397,7 +397,7 @@ function PairOrphanEventsForm({ apiBasePath, exceptionId, namedEvent, candidates
 function assignmentLabel(a: AssignmentCandidate, locale: AppLocale): string {
   const ru = locale === 'RU';
   const range = `${a.validFrom} – ${a.validTo ?? (ru ? 'бессрочно' : 'ongoing')}`;
-  return `${a.siteName}${a.workAreaName ? ` — ${a.workAreaName}` : ''}${a.isPrimary ? (ru ? ' (основное)' : ' (primary)') : ''} · ${range}`;
+  return `${a.siteName}${a.workAreaName ? ` — ${a.workAreaName}` : ''} · ${range}`;
 }
 
 function ConfirmSourceAssignmentForm({ apiBasePath, exceptionId, target, alreadyResolved, candidates }: { apiBasePath: string; exceptionId: string; target: { siteName: string; date: string } | null; alreadyResolved: boolean; candidates: AssignmentCandidate[] }) {

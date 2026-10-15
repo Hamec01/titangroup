@@ -6,8 +6,9 @@ import { buildFixture, authHeaders } from './_test-t9-fixtures';
 // docs/titanor-time/R15_ASSIGNMENT_LIFECYCLE_DESIGN_RU.md §3 / §7 — R15-D7 Deploy B: the redesigned
 // worker card. Real Chromium (production standalone build), disposable PostgreSQL 16, real HTTP, DB
 // assertions, zero mocks. Drives the ACTUAL card UI: the unified "Место работы сейчас" block, the
-// ONE "Изменить место работы" form (site/customer/schedule/primary + today/tomorrow/pick-a-date +
-// the "show what will change" summary), open-shift handling, "Снять с объекта" with reason presets,
+// ONE "Перевести / изменить место работы" form (site/customer/schedule + today/tomorrow/pick-a-date +
+// the automatic "what will change" summary, one Confirm; owner 2026-10-15: no "main workplace" in the
+// UI, an unused assignment that starts today is corrected in place), open-shift handling, "Снять с объекта" with reason presets,
 // "Запланированные изменения", "Прошлые назначения", the timesheet transition marker — AND the six
 // mandatory owner scenarios P1–P6 exercised THROUGH the interface, not only the API.
 
@@ -136,9 +137,15 @@ async function main() {
     const row = siteName
       ? card.locator('#worker-assignments li', { hasText: siteName })
       : card.locator('#worker-assignments li').first();
-    await row.getByRole('button', { name: /Change workplace|Изменить место работы/ }).click();
+    await row.getByRole('button', { name: /change workplace|изменить место работы/i }).click();
     await page.waitForSelector('.assignment-end-form', { timeout: 10000 });
     return page.locator('.assignment-end-form');
+  };
+  // The "what will change" summary loads by itself after a field changes; wait for its Confirm button.
+  const confirmButton = (form: ReturnType<Page['locator']>) => form.getByRole('button', { name: /^(Confirm|Подтвердить)$/ });
+  const waitSummary = async (form: ReturnType<Page['locator']>) => {
+    await confirmButton(form).waitFor({ timeout: 10000 });
+    await page.waitForTimeout(200);
   };
   const pastHtml = async (): Promise<string> => page.locator('.worker-past-assignments').innerHTML().catch(() => '');
 
@@ -157,8 +164,8 @@ async function main() {
     const card = await gotoCard(w);
     const html = await card.innerHTML();
     check('B1a: card has a "Workplace now / Место работы сейчас" section', /Workplace now|Место работы сейчас/.test(html), html.slice(0, 200));
-    check('B1b: the assignment row shows the site + "main workplace" + a state', html.includes(siteA.name) && /main workplace|основное место/.test(html) && /Working here now|Работает здесь сейчас/.test(html));
-    check('B1c: exactly one "Change workplace" and one "Remove from site" button', (await card.getByRole('button', { name: /Change workplace|Изменить место работы/ }).count()) === 1 && (await card.getByRole('button', { name: /Remove from site|Снять с объекта/ }).count()) === 1);
+    check('B1b: the assignment row shows the site + a state, and no "main workplace" wording', html.includes(siteA.name) && !/main workplace|основное место/.test(html) && /Working here now|Работает здесь сейчас/.test(html));
+    check('B1c: exactly one "Transfer / change workplace" and one "Remove from site" button', (await card.getByRole('button', { name: /change workplace|изменить место работы/i }).count()) === 1 && (await card.getByRole('button', { name: /Remove from site|Снять с объекта/ }).count()) === 1);
     check('B1d: no "Past assignments" / "Scheduled changes" blocks yet', !/Past assignments|Прошлые назначения/.test(html) && !/Scheduled changes|Запланированные изменения/.test(html));
     void a;
   }
@@ -170,13 +177,14 @@ async function main() {
     const form = await openChangeForm(w);
     check('B2a: form pre-selects the current site (change one thing only)', (await form.locator('select').first().inputValue()) !== '', null);
     check('B2b: form offers Today / Tomorrow / Pick a date', /Today|Сегодня/.test(await form.innerText()) && /Tomorrow|Завтра/.test(await form.innerText()) && /Pick a date|Выбрать дату/.test(await form.innerText()));
+    check('B2b2: no "main workplace" checkbox and no separate "show what will change" step', (await form.locator('input[type="checkbox"]').count()) === 0 && !/Show what will change|Показать, что изменится/.test(await form.innerText()));
     // change the site to B, keep everything else, preview
     await form.locator('select').first().selectOption({ label: siteB.name });
-    await form.getByRole('button', { name: /Show what will change|Показать, что изменится/ }).click();
+    await waitSummary(form);
     await page.waitForTimeout(800);
     const previewText = await form.innerText();
     check('B2c: preview shows old → new and "starts today"', previewText.includes(siteA.name) && previewText.includes(siteB.name) && /starts today|Действует с сегодня/i.test(previewText), previewText.slice(0, 300));
-    await form.getByRole('button', { name: /Confirm the change|Подтвердить изменение/ }).click();
+    await confirmButton(form).click();
     await page.waitForTimeout(1200);
     const live = await liveAssignments(w);
     check('B2d: after confirm, the worker is now on site B (one live assignment)', live.length === 1 && live[0].siteId === siteB.id, live);
@@ -210,10 +218,10 @@ async function main() {
     await form.locator('select').first().selectOption({ label: siteB.name });
     await form.getByText(/Pick a date|Выбрать дату/).click();
     await form.locator('input[type="date"]').fill(daysFrom(7));
-    await form.getByRole('button', { name: /Show what will change|Показать, что изменится/ }).click();
+    await waitSummary(form);
     await page.waitForTimeout(900);
     check('P1a: the summary says it starts on the future date, not today', new RegExp(`${daysFrom(7)}`).test(await form.innerText()), (await form.innerText()).slice(0, 300));
-    await form.getByRole('button', { name: /Confirm the change|Подтвердить изменение/ }).click();
+    await confirmButton(form).click();
     await page.waitForTimeout(1400);
     const card = await gotoCard(w);
     const html = await card.innerHTML();
@@ -247,51 +255,49 @@ async function main() {
     await form.locator('select').first().selectOption({ label: siteB.name });
     await form.getByText(/Pick a date|Выбрать дату/).click();
     await form.locator('input[type="date"]').fill(daysFrom(5));
-    await form.getByRole('button', { name: /Show what will change|Показать, что изменится/ }).click();
+    await waitSummary(form);
     await page.waitForTimeout(800);
-    await form.getByRole('button', { name: /Confirm the change|Подтвердить изменение/ }).click();
+    await confirmButton(form).click();
     await page.waitForTimeout(1200);
     check('P3a: future transfer keeps BOTH primaries (disjoint) — 2 stored, 1 live', (await storedPrimaryCount(w)) === 2 && (await liveAssignments(w)).length === 1, { stored: await storedPrimaryCount(w), live: (await liveAssignments(w)).length });
     // an immediate change to a THIRD site → the current one is superseded
     form = await openChangeForm(w);
     await form.locator('select').first().selectOption({ label: siteC.name });
-    await form.getByRole('button', { name: /Show what will change|Показать, что изменится/ }).click();
+    await waitSummary(form);
     await page.waitForTimeout(800);
-    await form.getByRole('button', { name: /Confirm the change|Подтвердить изменение/ }).click();
+    await confirmButton(form).click();
     await page.waitForTimeout(1200);
     check('P3b: after an immediate same-period change the primary NOW resolves to C (one live primary)', (await primaryResolvesTo(w)) === siteC.id && (await liveAssignments(w)).filter((x) => x.isPrimary && x.siteId === siteC.id).length === 1, await liveAssignments(w));
   }
 
-  // ── P4 — scheduled-change conflict: the warning + keep/replace choice IN THE UI ───────────
-  // Card path: A is primary + a future transfer to B (primary) is scheduled + C is a second CURRENT
-  // (non-primary) assignment. Ticking "main workplace" on C would overlap the scheduled B → warning.
+  // ── P4 — scheduled-change conflict: the warning + replace / back choice IN THE UI ──────────
+  // A is the workplace + a future transfer to B is scheduled + C is a second CURRENT assignment (old
+  // data). Changing C makes it the workplace (no "main" checkbox any more, owner 2026-10-15), which
+  // overlaps the scheduled B → the form warns and asks whether to replace that plan.
   {
+    const areaC = await mkArea(siteC.id, 'CustC');
     const w = await mkWorker('P4');
     const a = await assign(w, siteA.id, true);
     const c = await assign(w, siteC.id, false);
-    // schedule a future primary transfer A → B
     let form = await openChangeForm(w, siteA.name);
     await form.locator('select').first().selectOption({ label: siteB.name });
     await form.getByText(/Pick a date|Выбрать дату/).click();
     await form.locator('input[type="date"]').fill(daysFrom(7));
-    await form.getByRole('button', { name: /Show what will change|Показать, что изменится/ }).click();
-    await page.waitForTimeout(800);
-    await form.getByRole('button', { name: /Confirm the change|Подтвердить изменение/ }).click();
+    await waitSummary(form);
+    await confirmButton(form).click();
     await page.waitForTimeout(1200);
     const bId = (await prisma.siteAssignment.findFirstOrThrow({ where: { employeeId: w, siteId: siteB.id }, select: { id: true } })).id;
-    // now open the change form on C and tick "main workplace" (change the customer to make it dirty)
     form = await openChangeForm(w, siteC.name);
-    await form.getByText(/This is the main workplace|Это основное место работы/).click();
-    await form.getByRole('button', { name: /Show what will change|Показать, что изменится/ }).click();
-    await page.waitForTimeout(900);
-    check('P4a: the preview WARNS that a transfer is already scheduled to B', /already has a transfer scheduled|уже запланирован перевод/.test(await form.innerText()) && (await form.innerText()).includes(siteB.name), (await form.innerText()).slice(0, 400));
-    await form.getByRole('button', { name: /Confirm the change|Подтвердить изменение/ }).click();
+    await form.locator('select').nth(1).selectOption({ label: areaC.name });
+    await waitSummary(form);
+    check('P4a: the summary WARNS that a transfer is already scheduled to B', /already scheduled|уже запланирован перевод/.test(await form.innerText()) && (await form.innerText()).includes(siteB.name), (await form.innerText()).slice(0, 400));
+    await confirmButton(form).click();
     await page.waitForTimeout(1100);
-    check('P4b: confirming shows the keep / replace choice', /Keep the scheduled transfer|Оставить запланированный перевод/.test(await form.innerText()) && /Replace the scheduled transfer|Заменить запланированный перевод/.test(await form.innerText()), (await form.innerText()).slice(0, 300));
-    await form.getByRole('button', { name: /Keep the scheduled transfer|Оставить запланированный перевод/ }).click();
-    await page.waitForTimeout(1400);
-    const bAfterKeep = await prisma.siteAssignment.findUniqueOrThrow({ where: { id: bId } });
-    check('P4c: "Keep" left the scheduled transfer to B intact (still primary, date unchanged)', bAfterKeep.isPrimary === true && isoDate(bAfterKeep.validFrom) === daysFrom(7), bAfterKeep);
+    check('P4b: confirming offers "replace" (and no "main / not main" choice)', /Replace the scheduled transfer|Заменить запланированный перевод/.test(await form.innerText()) && !/Keep the scheduled transfer|Оставить запланированный перевод/.test(await form.innerText()), (await form.innerText()).slice(0, 300));
+    await form.getByRole('button', { name: /^(Back|Назад)$/ }).click();
+    await page.waitForTimeout(600);
+    const bAfterBack = await prisma.siteAssignment.findUniqueOrThrow({ where: { id: bId } });
+    check('P4c: "Back" leaves the scheduled transfer to B intact (still primary, date unchanged)', bAfterBack.isPrimary === true && isoDate(bAfterBack.validFrom) === daysFrom(7) && (await prisma.siteAssignment.count({ where: { employeeId: w, workAreaId: areaC.id } })) === 0, bAfterBack);
 
     // Replace path on a fresh worker
     const w2 = await mkWorker('P4r');
@@ -301,16 +307,14 @@ async function main() {
     await form.locator('select').first().selectOption({ label: siteB.name });
     await form.getByText(/Pick a date|Выбрать дату/).click();
     await form.locator('input[type="date"]').fill(daysFrom(7));
-    await form.getByRole('button', { name: /Show what will change|Показать, что изменится/ }).click();
-    await page.waitForTimeout(800);
-    await form.getByRole('button', { name: /Confirm the change|Подтвердить изменение/ }).click();
+    await waitSummary(form);
+    await confirmButton(form).click();
     await page.waitForTimeout(1200);
     const b2Id = (await prisma.siteAssignment.findFirstOrThrow({ where: { employeeId: w2, siteId: siteB.id }, select: { id: true } })).id;
     form = await openChangeForm(w2, siteC.name);
-    await form.getByText(/This is the main workplace|Это основное место работы/).click();
-    await form.getByRole('button', { name: /Show what will change|Показать, что изменится/ }).click();
-    await page.waitForTimeout(900);
-    await form.getByRole('button', { name: /Confirm the change|Подтвердить изменение/ }).click();
+    await form.locator('select').nth(1).selectOption({ label: areaC.name });
+    await waitSummary(form);
+    await confirmButton(form).click();
     await page.waitForTimeout(1000);
     await form.getByRole('button', { name: /Replace the scheduled transfer|Заменить запланированный перевод/ }).click();
     await page.waitForTimeout(1400);
@@ -319,6 +323,20 @@ async function main() {
     check('P4d: "Replace" kept the assignment to B but dropped its primary + recorded a transition', b2After.isPrimary === false && isoDate(b2After.validFrom) === daysFrom(7) && replTr !== null && (replTr?.reasonText ?? '').toLowerCase().includes('superseded'), { p: b2After.isPrimary, tr: replTr?.reasonText });
     void a;
     void c;
+  }
+
+  // ── B5 — an assignment created today by mistake is corrected in place from the card ───────
+  {
+    const w = await mkWorker('B5');
+    const a = await assign(w, siteA.id, true, todayIso);
+    const form = await openChangeForm(w);
+    await form.locator('select').nth(1).selectOption({ label: areaB.name });
+    await waitSummary(form);
+    check('B5a: the summary says the unused workplace is corrected right away', /not been used yet|ещё не использовалось/.test(await form.innerText()), (await form.innerText()).slice(0, 300));
+    await confirmButton(form).click();
+    await page.waitForTimeout(1200);
+    const row = await prisma.siteAssignment.findUniqueOrThrow({ where: { id: a } });
+    check('B5b: the same assignment now has the customer — no second assignment, no error', row.workAreaId === areaB.id && (await prisma.siteAssignment.count({ where: { employeeId: w } })) === 1 && (await form.locator('.login-error').count()) === 0, row);
   }
 
   // ── P5 — same-day completed hours: the immediate transfer is NOT blocked ──────────────────
@@ -333,9 +351,9 @@ async function main() {
     await openChangeForm(w);
     const form = page.locator('.assignment-end-form');
     await form.locator('select').first().selectOption({ label: siteB.name });
-    await form.getByRole('button', { name: /Show what will change|Показать, что изменится/ }).click();
+    await waitSummary(form);
     await page.waitForTimeout(800);
-    await form.getByRole('button', { name: /Confirm the change|Подтвердить изменение/ }).click();
+    await confirmButton(form).click();
     await page.waitForTimeout(1200);
     const errVisible = await form.locator('.login-error').count();
     check('P5b: the transfer went through — no error shown in the form', errVisible === 0 || !(await form.innerText()).match(/recorded hours|отметил часы/), await form.innerText().catch(() => ''));
@@ -354,10 +372,10 @@ async function main() {
     await openChangeForm(w);
     let form = page.locator('.assignment-end-form');
     await form.locator('select').first().selectOption({ label: siteB.name });
-    await form.getByRole('button', { name: /Show what will change|Показать, что изменится/ }).click();
+    await waitSummary(form);
     await page.waitForTimeout(700);
     check('P6a: the preview tells the admin the worker is on an open shift', /open shift|идёт смена/.test(await form.innerText()));
-    await form.getByRole('button', { name: /Confirm the change|Подтвердить изменение/ }).click();
+    await confirmButton(form).click();
     await page.waitForTimeout(900);
     check('P6b: confirming shows the "finish today on the old site / move the shift" choice', /Finish today on the current site|Доработать сегодня/.test(await form.innerText()) && /Move today's shift too|Перенести и сегодняшнюю смену/.test(await form.innerText()));
     await form.getByRole('button', { name: /Finish today on the current site|Доработать сегодня/ }).click();
@@ -385,9 +403,9 @@ async function main() {
     await openChangeForm(w2);
     form = page.locator('.assignment-end-form');
     await form.locator('select').first().selectOption({ label: siteB.name });
-    await form.getByRole('button', { name: /Show what will change|Показать, что изменится/ }).click();
+    await waitSummary(form);
     await page.waitForTimeout(700);
-    await form.getByRole('button', { name: /Confirm the change|Подтвердить изменение/ }).click();
+    await confirmButton(form).click();
     await page.waitForTimeout(900);
     await form.getByRole('button', { name: /Move today's shift too|Перенести и сегодняшнюю смену/ }).click();
     await page.waitForTimeout(1200);

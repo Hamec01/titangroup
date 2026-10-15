@@ -2,7 +2,6 @@ import { redirect } from 'next/navigation';
 import Link from 'next/link';
 import { resolveServerSession } from '@/lib/server-session';
 import { listAssignments } from '@/lib/assignments';
-import { AssignmentPrimaryToggle } from './AssignmentPrimaryToggle';
 import { EndAssignmentAction } from './EndAssignmentAction';
 import { resolveAppLocale } from '@/lib/i18n/server';
 import { adminDailyStrings } from '@/lib/i18n/admin-daily';
@@ -65,7 +64,6 @@ export default async function AdminAssignmentsPage() {
                 <tr key={assignment.id}>
                   <td>
                     <Link href={`/admin/workers/${assignment.employeeId}`}>{assignment.employeeName}</Link>
-                    {assignment.isPrimary ? ` (${s.common.primary})` : ''}
                   </td>
                   <td>
                     <Link href={`/admin/sites/${assignment.siteId}`}>{assignment.siteName}</Link>
@@ -75,7 +73,6 @@ export default async function AdminAssignmentsPage() {
                   <td>{assignment.validFrom}</td>
                   <td>{assignment.validTo ?? s.common.indefinite}</td>
                   <td>
-                    <AssignmentPrimaryToggle assignment={assignment} />
                     <EndAssignmentAction assignment={assignment} />
                   </td>
                 </tr>

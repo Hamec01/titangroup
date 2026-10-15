@@ -188,19 +188,35 @@ export async function createAssignmentInTx(
     }
   });
 
+  await materializeAssignmentDraftsInTx(tx, assignment);
+
+  return { assignment, demotedPrimaryIds, demotedScheduledPrimaryIds };
+}
+
+
+/**
+ * Backfills PayrollPeriodParticipant / Timesheet(DRAFT) / TimesheetDraft / TimesheetDraftDay /
+ * TimesheetDraftPlannedShift for every OPEN period intersecting the assignment's [validFrom, validTo]
+ * — the materialisation half of createAssignmentInTx, also used when an unused assignment is
+ * corrected in place (correctUnusedAssignmentInTx) after its own planned shifts were removed.
+ */
+export async function materializeAssignmentDraftsInTx(
+  tx: Prisma.TransactionClient,
+  assignment: { id: string; employeeId: string; siteId: string; templateVersionId: string | null; validFrom: Date; validTo: Date | null }
+): Promise<void> {
   const openPeriodCandidates = await tx.payrollPeriod.findMany({
     where: {
       status: 'OPEN',
-      endDate: { gte: params.validFrom },
-      ...(params.validTo ? { startDate: { lte: params.validTo } } : {})
+      endDate: { gte: assignment.validFrom },
+      ...(assignment.validTo ? { startDate: { lte: assignment.validTo } } : {})
     },
     select: { id: true, startDate: true, endDate: true, submissionScheduleId: true }
   });
   const employeeScheduleWindows = await tx.employeeTimesheetSchedule.findMany({
     where: {
-      employeeId: params.employeeId,
-      effectiveFrom: { lte: params.validTo ?? new Date('9999-12-31T00:00:00.000Z') },
-      OR: [{ effectiveTo: null }, { effectiveTo: { gte: params.validFrom } }]
+      employeeId: assignment.employeeId,
+      effectiveFrom: { lte: assignment.validTo ?? new Date('9999-12-31T00:00:00.000Z') },
+      OR: [{ effectiveTo: null }, { effectiveTo: { gte: assignment.validFrom } }]
     },
     select: { scheduleId: true, effectiveFrom: true, effectiveTo: true }
   });
@@ -214,42 +230,42 @@ export async function createAssignmentInTx(
     )
   );
 
-  const templateDays = params.templateVersionId
-    ? await tx.workScheduleTemplateVersionDay.findMany({ where: { templateVersionId: params.templateVersionId } })
+  const templateDays = assignment.templateVersionId
+    ? await tx.workScheduleTemplateVersionDay.findMany({ where: { templateVersionId: assignment.templateVersionId } })
     : [];
   const templateDayByWeekday = new Map(templateDays.map((d) => [d.weekday, d]));
 
   const absences = await tx.absence.findMany({
     where: {
-      employeeId: params.employeeId,
+      employeeId: assignment.employeeId,
       status: 'APPROVED',
-      endDate: { gte: params.validFrom },
-      ...(params.validTo ? { startDate: { lte: params.validTo } } : {})
+      endDate: { gte: assignment.validFrom },
+      ...(assignment.validTo ? { startDate: { lte: assignment.validTo } } : {})
     },
     select: { id: true, startDate: true, endDate: true, type: true }
   });
 
   for (const period of intersectingOpenPeriods) {
     await tx.payrollPeriodParticipant.upsert({
-      where: { periodId_employeeId: { periodId: period.id, employeeId: params.employeeId } },
-      create: { periodId: period.id, employeeId: params.employeeId, expected: true },
+      where: { periodId_employeeId: { periodId: period.id, employeeId: assignment.employeeId } },
+      create: { periodId: period.id, employeeId: assignment.employeeId, expected: true },
       update: {}
     });
 
     const timesheet = await tx.timesheet.upsert({
-      where: { employeeId_periodId: { employeeId: params.employeeId, periodId: period.id } },
-      create: { employeeId: params.employeeId, periodId: period.id, status: 'DRAFT' },
+      where: { employeeId_periodId: { employeeId: assignment.employeeId, periodId: period.id } },
+      create: { employeeId: assignment.employeeId, periodId: period.id, status: 'DRAFT' },
       update: {}
     });
 
     const draft = await tx.timesheetDraft.upsert({
       where: { timesheetId: timesheet.id },
-      create: { timesheetId: timesheet.id, employeeId: params.employeeId },
+      create: { timesheetId: timesheet.id, employeeId: assignment.employeeId },
       update: {}
     });
 
-    const intersectFrom = period.startDate > params.validFrom ? period.startDate : params.validFrom;
-    const intersectTo = params.validTo && params.validTo < period.endDate ? params.validTo : period.endDate;
+    const intersectFrom = period.startDate > assignment.validFrom ? period.startDate : assignment.validFrom;
+    const intersectTo = assignment.validTo && assignment.validTo < period.endDate ? assignment.validTo : period.endDate;
     const dates = enumerateDates(intersectFrom, intersectTo);
 
     const existingDays = await tx.timesheetDraftDay.findMany({
@@ -275,12 +291,12 @@ export async function createAssignmentInTx(
     }
 
     const plannedShiftRows: Prisma.TimesheetDraftPlannedShiftCreateManyInput[] = dates.map((date) => {
-      const templateDay = params.templateVersionId ? templateDayByWeekday.get(toTemplateWeekday(date)) : undefined;
+      const templateDay = assignment.templateVersionId ? templateDayByWeekday.get(toTemplateWeekday(date)) : undefined;
       return {
         draftId: draft.id,
-        employeeId: params.employeeId,
+        employeeId: assignment.employeeId,
         date,
-        siteId: params.siteId,
+        siteId: assignment.siteId,
         sourceAssignmentId: assignment.id,
         ...computePlannedShiftForAssignmentDate(templateDay, date)
       };
@@ -289,8 +305,6 @@ export async function createAssignmentInTx(
       await tx.timesheetDraftPlannedShift.createMany({ data: plannedShiftRows });
     }
   }
-
-  return { assignment, demotedPrimaryIds, demotedScheduledPrimaryIds };
 }
 
 /**

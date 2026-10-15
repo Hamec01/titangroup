@@ -6,6 +6,7 @@ import { prisma } from '@/lib/prisma';
 import { formatMatrixHours, loadCustomerMonthMatrix } from '@/lib/reporting/monthly-matrix';
 import { resolveTimesheetsV2Context } from '../../admin-gate';
 import { MonthMatrixTable, MonthPicker, monthTitle } from '../../MonthMatrixTable';
+import { MonthMatrixEditor } from '../../MonthMatrixEditor';
 
 export const dynamic = 'force-dynamic';
 
@@ -27,8 +28,18 @@ export default async function TimesheetsV2CustomerPage({ params, searchParams }:
 
   const { locale, month } = ctx;
   const customerName = area?.name ?? localeText(locale, 'No customer', 'Без заказчика');
-  const outcome = await loadCustomerMonthMatrix(month, { siteId, workAreaId }, ctx.actor, ctx.todayIso);
+  const [outcome, siteAreas] = await Promise.all([
+    loadCustomerMonthMatrix(month, { siteId, workAreaId }, ctx.actor, ctx.todayIso),
+    prisma.workArea.findMany({ where: { siteId, active: true }, select: { id: true, name: true }, orderBy: { name: 'asc' } })
+  ]);
+  // "Перенести часы": the other customers of this site, plus "no customer".
+  const moveTargets = [
+    ...siteAreas.filter((a) => a.id !== workAreaId).map((a) => ({ workArea: a.id, name: a.name })),
+    ...(workAreaId ? [{ workArea: 'none', name: localeText(locale, 'No customer', 'Без заказчика') }] : [])
+  ];
   const basePath = `/admin/timesheets-v2/${siteId}/${workArea}`;
+  const viewHref = `${basePath}?month=${month}`;
+  const editing = sp.edit === '1' && outcome.ok && outcome.matrix.rows.length > 0;
 
   return (
     <main className="setup-page">
@@ -36,7 +47,7 @@ export default async function TimesheetsV2CustomerPage({ params, searchParams }:
         <Link href={`/admin/timesheets-v2?month=${month}`} className="tv2-back">← {localeText(locale, 'All customers', 'Все заказчики')}</Link>
         <h1>{customerName}</h1>
         <p className="month-matrix-subtitle">{site.name}</p>
-        <MonthPicker locale={locale} month={month} basePath={basePath} />
+        {editing ? <p className="month-matrix-title month-matrix-title-static">{monthTitle(locale, month)}</p> : <MonthPicker locale={locale} month={month} basePath={basePath} editHref={outcome.ok && outcome.matrix.rows.length > 0 ? `${viewHref}&edit=1` : undefined} />}
         {!outcome.ok ? (
           <p className="login-error" role="alert">
             {localeText(locale, `Too much data for one month (${outcome.totalItems} weekly rows, limit ${outcome.max}).`, `Слишком много данных за месяц (${outcome.totalItems} недельных строк, предел ${outcome.max}).`)}
@@ -48,12 +59,18 @@ export default async function TimesheetsV2CustomerPage({ params, searchParams }:
             <p className="month-matrix-total">
               {localeText(locale, 'Workers', 'Работников')}: <strong>{outcome.matrix.rows.length}</strong> · {localeText(locale, 'Hours', 'Часов')}: <strong>{formatMatrixHours(outcome.matrix.totalMinutes) || '0'}</strong>
             </p>
-            <MonthMatrixTable locale={locale} matrix={outcome.matrix} caption={`${customerName} — ${monthTitle(locale, month)}`} />
-            <div className="month-matrix-actions">
-              <a className="month-matrix-download" href={`/api/admin/timesheets-v2/export?siteId=${siteId}&workArea=${workArea}&month=${month}`} download>
-                ⬇ {localeText(locale, 'Download Excel', 'Скачать Excel')}
-              </a>
-            </div>
+            {editing ? (
+              <MonthMatrixEditor locale={locale} matrix={outcome.matrix} siteId={siteId} workArea={workArea} viewHref={viewHref} />
+            ) : (
+              <>
+                <MonthMatrixTable locale={locale} matrix={outcome.matrix} caption={`${customerName} — ${monthTitle(locale, month)}`} move={{ siteId, fromWorkArea: workArea, fromName: customerName, targets: moveTargets }} />
+                <div className="month-matrix-actions">
+                  <a className="month-matrix-download" href={`/api/admin/timesheets-v2/export?siteId=${siteId}&workArea=${workArea}&month=${month}`} download>
+                    ⬇ {localeText(locale, 'Download Excel', 'Скачать Excel')}
+                  </a>
+                </div>
+              </>
+            )}
           </>
         )}
       </div>

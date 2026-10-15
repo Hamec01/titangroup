@@ -12,6 +12,7 @@ interface WorkerOption {
   employeeNumber: string;
   firstName: string;
   lastName: string;
+  currentAssignments?: Array<{ siteName: string; workAreaName: string | null }>;
 }
 
 interface SiteOption {
@@ -34,7 +35,6 @@ interface TemplateOption {
 interface NewAssignmentFormProps {
   initialEmployeeId?: string;
   initialValidFrom?: string;
-  initialIsPrimary?: boolean;
   returnEmployeeId?: string | null;
   lockEmployee?: boolean;
 }
@@ -42,7 +42,6 @@ interface NewAssignmentFormProps {
 export function NewAssignmentForm({
   initialEmployeeId = '',
   initialValidFrom = '',
-  initialIsPrimary = false,
   returnEmployeeId = null,
   lockEmployee = false
 }: NewAssignmentFormProps) {
@@ -59,8 +58,8 @@ export function NewAssignmentForm({
   const [templateId, setTemplateId] = useState('');
   const [validFrom, setValidFrom] = useState(initialValidFrom);
   const [validTo, setValidTo] = useState('');
-  const [isPrimary, setIsPrimary] = useState(initialIsPrimary);
   const [loading, setLoading] = useState(false);
+  const currentPlaces = workers.find((w) => w.id === employeeId)?.currentAssignments ?? [];
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   const idempotencyKeyRef = useRef<string | null>(null);
@@ -155,7 +154,9 @@ export function NewAssignmentForm({
       templateId: templateId || undefined,
       validFrom,
       validTo: validTo || undefined,
-      isPrimary
+      // Owner 2026-10-15: one workplace per worker, no "main / not main" choice in the UI — a new
+      // assignment is always the worker's workplace (isPrimary kept internally, set automatically).
+      isPrimary: true
     };
 
     try {
@@ -344,18 +345,18 @@ export function NewAssignmentForm({
         />
       </div>
 
-      <div className="login-field">
-        <label htmlFor="assignment-is-primary">
-          <input
-            id="assignment-is-primary"
-            type="checkbox"
-            disabled={loading}
-            checked={isPrimary}
-            onChange={(event) => setIsPrimary(event.target.checked)}
-          />{' '}
-          {localeText(locale, 'Primary assignment', 'Основное назначение')}
-        </label>
-      </div>
+      {currentPlaces.length > 0 ? (
+        <div className="worker-setup-callout" role="alert">
+          <p>
+            {localeText(locale, 'This worker already has a workplace:', 'У работника уже есть место работы:')}{' '}
+            <strong>{currentPlaces.map((p) => (p.workAreaName ? `${p.siteName} — ${p.workAreaName}` : p.siteName)).join(', ')}</strong>.
+          </p>
+          <p>
+            {localeText(locale, 'To move the worker, use “Transfer / change workplace” on the worker card — a second parallel workplace is not created here.', 'Чтобы перевести работника, используйте «Перевести / изменить место работы» в карточке работника — второе параллельное место здесь не создаётся.')}
+          </p>
+          <a className="setup-action" href={`/admin/workers/${employeeId}`}>{localeText(locale, 'Open the worker card', 'Открыть карточку работника')}</a>
+        </div>
+      ) : null}
 
       {errorMessage ? (
         <p className="login-error" role="alert">
@@ -363,7 +364,7 @@ export function NewAssignmentForm({
         </p>
       ) : null}
 
-      <button className="login-submit" type="submit" disabled={loading}>
+      <button className="login-submit" type="submit" disabled={loading || currentPlaces.length > 0}>
         {loading ? s.common.creating : localeText(locale, 'Create assignment', 'Создать назначение')}
       </button>
     </form>

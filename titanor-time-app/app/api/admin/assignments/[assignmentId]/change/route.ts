@@ -7,7 +7,7 @@ import { hasPermission } from '@/lib/permissions';
 import { SESSION_COOKIE_NAME } from '@/lib/session';
 import { checkOverlap } from '@/lib/assignments';
 import { helsinkiToday } from '@/lib/workers';
-import { changeWorkplace } from '@/lib/assignment-lifecycle-service';
+import { assignmentUsageCount, changeWorkplace, correctUnusedAssignment } from '@/lib/assignment-lifecycle-service';
 
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
@@ -19,6 +19,9 @@ export const revalidate = 0;
 // when the change is immediate, re-points the open shift when asked, and writes the
 // AssignmentTransition + AuditEvent — all in one transaction under a per-employee advisory lock.
 // Backdating is forbidden; a submitted timesheet or recorded time on/after the date blocks with 409.
+// A change on/before the assignment's own start (it started today or is scheduled) corrects the
+// unused assignment in place instead (§3.4, correctUnusedAssignment) — 409 ASSIGNMENT_STARTED_IN_USE
+// if the worker has already used it.
 const REQUIRED_CSRF_HEADER_VALUE = 'titanor-time';
 const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -153,17 +156,10 @@ export async function POST(request: NextRequest, { params }: RouteParams): Promi
       { status: 400, headers: successHeaders(requestId) }
     );
   }
-  if (effectiveFromDate <= existing.validFrom) {
-    return jsonError(
-      400,
-      {
-        code: 'EFFECTIVE_ON_OR_BEFORE_START',
-        message: 'The change must take effect after the assignment started. If it started today, change it from tomorrow.',
-        fieldErrors: { effectiveFrom: ['must be after the assignment’s start date'] }
-      },
-      requestId
-    );
-  }
+  // §3.4 — a change on/before the day the assignment starts (it starts today or is still scheduled)
+  // corrects that assignment in place when nothing has been recorded against it yet; its start
+  // becomes `effectiveFrom` (a scheduled transfer can be brought forward, never into the past).
+  const correctInPlace = effectiveFromDate <= existing.validFrom;
   if (existing.validTo !== null && effectiveFromDate > existing.validTo) {
     return NextResponse.json(
       errorBody(
@@ -202,6 +198,41 @@ export async function POST(request: NextRequest, { params }: RouteParams): Promi
       return jsonError(404, { code: 'TEMPLATE_NOT_FOUND', message: 'templateId does not reference an existing template.' }, requestId);
     }
     templateVersionId = latestVersion.id;
+  }
+
+  if (correctInPlace) {
+    if (siteId === existing.siteId && normalizedWorkAreaId === existing.workAreaId && templateVersionId === existing.templateVersionId && effectiveFromDate.getTime() === existing.validFrom.getTime()) {
+      return jsonError(400, { code: 'NOTHING_TO_CHANGE', message: 'The new site, customer and template all match the current assignment.' }, requestId);
+    }
+    if ((await assignmentUsageCount(prisma, existing.id)) > 0) {
+      return jsonError(
+        409,
+        { code: 'ASSIGNMENT_STARTED_IN_USE', message: 'This assignment started today and the worker has already used it (Check In or hours). Change it from tomorrow.' },
+        requestId
+      );
+    }
+    const overlapNow = await checkOverlap({ employeeId: existing.employeeId, siteId: siteId as string, workAreaId: normalizedWorkAreaId, validFrom: effectiveFromDate, validTo: existing.validTo, excludeAssignmentId: existing.id });
+    if (overlapNow.hasOverlap) {
+      return jsonError(409, { code: 'ASSIGNMENT_OVERLAP', message: 'The worker already has another assignment on this site and customer covering that date range.', fieldErrors: { effectiveFrom: ['overlaps an existing assignment'] } }, requestId);
+    }
+    const corrected = await correctUnusedAssignment({ existing, validFrom: effectiveFromDate, siteId: siteId as string, workAreaId: normalizedWorkAreaId, templateVersionId, reasonText: trimmedReason, actorUserId: authenticated.user.id, requestId });
+    if ('code' in corrected) {
+      if (corrected.code === 'ASSIGNMENT_IN_USE') return jsonError(409, { code: 'ASSIGNMENT_STARTED_IN_USE', message: 'This assignment started today and the worker has already used it (Check In or hours). Change it from tomorrow.' }, requestId);
+      if (corrected.code === 'ASSIGNMENT_OVERLAP') return jsonError(409, { code: 'ASSIGNMENT_OVERLAP', message: 'The worker already has another assignment on this site and customer covering that date range.' }, requestId);
+      if (corrected.code === 'PRIMARY_PERIOD_CONFLICT') return jsonError(409, { code: 'PRIMARY_PERIOD_CONFLICT', message: 'The worker already has a workplace for those dates — change the current workplace instead.' }, requestId);
+      if (corrected.code === 'SITE_FINISHED') return jsonError(409, { code: 'SITE_FINISHED', message: 'This site is finished — assign the worker to an active site.' }, requestId);
+      return jsonError(409, { code: 'CUSTOMER_DISABLED', message: 'This customer is disabled — choose an active customer or leave the worker on the site without one.' }, requestId);
+    }
+    const a = corrected.assignment;
+    return NextResponse.json(
+      {
+        correctedInPlace: true,
+        closedAssignmentId: null,
+        effectiveFrom: formatDate(a.validFrom),
+        newAssignment: { id: a.id, employeeId: a.employeeId, siteId: a.siteId, workAreaId: a.workAreaId, templateVersionId: a.templateVersionId, isPrimary: a.isPrimary, validFrom: formatDate(a.validFrom), validTo: a.validTo ? formatDate(a.validTo) : null, version: a.version, createdAt: a.createdAt.toISOString(), updatedAt: a.updatedAt.toISOString() }
+      },
+      { status: 200, headers: successHeaders(requestId) }
+    );
   }
 
   const sameSite = (siteId as string) === existing.siteId;

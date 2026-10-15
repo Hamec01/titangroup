@@ -2,6 +2,7 @@ import Link from 'next/link';
 import type { AppLocale } from '@/lib/i18n/locale';
 import { localeText } from '@/lib/i18n/locale';
 import { formatMatrixHours, shiftMonth, type MatrixCell, type MonthlyMatrix } from '@/lib/reporting/monthly-matrix';
+import { MoveHoursButton, type MoveTarget } from './MoveHoursButton';
 
 // Табель v2 — shared month UI: the month picker and the customer-style month grid (workers down,
 // days across, per-day sums underneath; scrolls sideways with the worker columns pinned). Cell
@@ -34,14 +35,18 @@ function dayTypeLabel(locale: AppLocale, dayType: string | null): string {
 
 function cellTitle(locale: AppLocale, cell: MatrixCell): string {
   const date = `${cell.date.slice(8, 10)}.${cell.date.slice(5, 7)}.${cell.date.slice(0, 4)}`;
-  if (cell.kind === 'WORK') return `${date} · ${formatHoursLabel(locale, cell.workedMinutes)}${cell.draft ? ` · ${localeText(locale, 'not submitted yet', 'ещё не отправлено')}` : ''}`;
+  if (cell.manual) return `${date} · ${cell.kind === 'OFF' ? 'OFF' : formatHoursLabel(locale, cell.workedMinutes)} · ${localeText(locale, 'entered manually', 'вписано вручную')}`;
+  if (cell.kind === 'WORK') {
+    const capped = cell.capped ? ` · ${localeText(locale, 'recorded', 'по факту')} ${formatHoursLabel(locale, cell.recordedMinutes)}, ${localeText(locale, 'counted by the schedule', 'засчитано по графику')}` : '';
+    return `${date} · ${formatHoursLabel(locale, cell.workedMinutes)}${capped}${cell.draft ? ` · ${localeText(locale, 'not submitted yet', 'ещё не отправлено')}` : ''}`;
+  }
   if (cell.kind === 'OFF') return `${date} · ${dayTypeLabel(locale, cell.dayType)}`;
   if (cell.kind === 'WEEKEND') return `${date} · ${cell.dayType ? dayTypeLabel(locale, cell.dayType) : localeText(locale, 'Weekend', 'Выходной')}`;
   return date;
 }
 
 /** Plain GET form: ‹ month › plus a month input; `basePath` keeps the customer the user is on. */
-export function MonthPicker({ locale, month, basePath }: { locale: AppLocale; month: string; basePath: string }) {
+export function MonthPicker({ locale, month, basePath, editHref }: { locale: AppLocale; month: string; basePath: string; editHref?: string }) {
   return (
     <form method="GET" action={basePath} className="month-matrix-toolbar">
       <Link href={`${basePath}?month=${shiftMonth(month, -1)}`} className="month-matrix-step" aria-label={localeText(locale, 'Previous month', 'Предыдущий месяц')}>‹</Link>
@@ -52,11 +57,14 @@ export function MonthPicker({ locale, month, basePath }: { locale: AppLocale; mo
         <input type="month" name="month" defaultValue={month} />
       </label>
       <button type="submit" className="exc-apply-button">{localeText(locale, 'Show', 'Показать')}</button>
+      {editHref && <a href={editHref} className="month-matrix-edit-link">✎ {localeText(locale, 'Edit timesheet', 'Редактировать табель')}</a>}
     </form>
   );
 }
 
-export function MonthMatrixTable({ locale, matrix, caption }: { locale: AppLocale; matrix: MonthlyMatrix; caption: string }) {
+export interface MoveHoursConfig { siteId: string; fromWorkArea: string; fromName: string; targets: MoveTarget[] }
+
+export function MonthMatrixTable({ locale, matrix, caption, move }: { locale: AppLocale; matrix: MonthlyMatrix; caption: string; move?: MoveHoursConfig }) {
   const weekdays = locale === 'RU' ? WEEKDAYS_RU : WEEKDAYS_EN;
   return (
     <>
@@ -75,6 +83,7 @@ export function MonthMatrixTable({ locale, matrix, caption }: { locale: AppLocal
                 </th>
               ))}
               <th className="mm-total" scope="col">{localeText(locale, 'Total', 'Итого')}</th>
+              {move && <th className="mm-actions" scope="col"><span className="sr-only">{localeText(locale, 'Actions', 'Действия')}</span></th>}
             </tr>
           </thead>
           <tbody>
@@ -85,11 +94,16 @@ export function MonthMatrixTable({ locale, matrix, caption }: { locale: AppLocal
                 <td className="mm-sticky mm-first">{row.firstName}</td>
                 <td className="mm-number">{row.employeeNumber}</td>
                 {row.cells.map((cell, i) => (
-                  <td key={cell.date} className={`mm-cell is-${cell.kind.toLowerCase()}${matrix.days[i].weekend ? ' on-weekend' : ''}${cell.draft ? ' is-draft' : ''}`} title={cellTitle(locale, cell)}>
+                  <td key={cell.date} className={`mm-cell is-${cell.kind.toLowerCase()}${matrix.days[i].weekend ? ' on-weekend' : ''}${cell.draft && !cell.manual ? ' is-draft' : ''}${cell.manual ? ' is-manual' : ''}`} title={cellTitle(locale, cell)}>
                     {cell.kind === 'WORK' ? formatMatrixHours(cell.workedMinutes) : cell.kind === 'OFF' ? 'OFF' : ''}
                   </td>
                 ))}
                 <td className="mm-total">{formatMatrixHours(row.totalMinutes)}</td>
+                {move && (
+                  <td className="mm-actions">
+                    <MoveHoursButton locale={locale} employeeId={row.employeeId} workerName={`${row.lastName} ${row.firstName}`} siteId={move.siteId} fromWorkArea={move.fromWorkArea} fromName={move.fromName} targets={move.targets} days={row.cells.filter((c) => c.recordedMinutes > 0).map((c) => ({ date: c.date, minutes: c.recordedMinutes }))} />
+                  </td>
+                )}
               </tr>
             ))}
           </tbody>
@@ -101,6 +115,7 @@ export function MonthMatrixTable({ locale, matrix, caption }: { locale: AppLocal
                 <td key={matrix.days[i].date} className={matrix.days[i].weekend ? 'mm-day-total is-weekend' : 'mm-day-total'}>{formatMatrixHours(total) || '0'}</td>
               ))}
               <td className="mm-total">{formatMatrixHours(matrix.totalMinutes)}</td>
+              {move && <td className="mm-actions" />}
             </tr>
           </tfoot>
         </table>
@@ -110,6 +125,8 @@ export function MonthMatrixTable({ locale, matrix, caption }: { locale: AppLocal
         <li><span className="mm-swatch is-weekend" />{localeText(locale, 'Weekend / public holiday', 'Выходной / праздник')}</li>
         <li><span className="mm-swatch is-off">OFF</span>{localeText(locale, 'Did not work (absence, sick leave, vacation)', 'Не вышел (отсутствие, больничный, отпуск)')}</li>
         <li><span className="mm-swatch is-work is-draft" />{localeText(locale, 'Week not submitted by the worker yet', 'Неделя ещё не отправлена работником')}</li>
+        <li><span className="mm-swatch is-work is-manual" />{localeText(locale, 'Entered manually', 'Вписано вручную')}</li>
+        <li className="month-matrix-legend-note">{localeText(locale, 'Hours count within the schedule template (overtime is entered manually).', 'Часы засчитываются в пределах графика шаблона (переработку вписывают вручную).')}</li>
       </ul>
     </>
   );
