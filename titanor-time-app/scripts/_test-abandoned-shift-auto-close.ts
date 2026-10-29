@@ -108,9 +108,10 @@ async function main() {
     const r3 = resolveAutoCloseEndAt({ openedAt, maxShiftDurationHours: 6, fallbackHours: 8, templateEndTime: null });
     check('no template, fallback > cap -> capped at maxShiftDurationHours', r3.source === 'FALLBACK' && r3.endAt.getTime() === openedAt.getTime() + 6 * HOUR, r3);
 
-    // template end beyond the cap -> fallback
+    // The max-duration threshold must not replace a usable schedule end. This is the production
+    // Aros shape: an early arrival reaches the threshold before the 18:00 planned end.
     const r4 = resolveAutoCloseEndAt({ openedAt, maxShiftDurationHours: 2, fallbackHours: 8, templateEndTime });
-    check('template end beyond cap -> FALLBACK capped', r4.source === 'FALLBACK' && r4.endAt.getTime() === openedAt.getTime() + 2 * HOUR, r4);
+    check('template end beyond threshold -> TEMPLATE planned end', r4.source === 'TEMPLATE' && r4.endAt.toISOString() === '2033-06-15T14:00:00.000Z', r4);
   }
 
   const now = new Date('2033-06-16T09:00:00Z');
@@ -163,6 +164,26 @@ async function main() {
     check('3: a 5h-old shift is left open', openShift !== null, res);
     const shift = await prisma.clockShift.findUnique({ where: { checkInEventId: f.checkInId } });
     check('3: no ClockShift created', shift === null);
+  }
+
+  // ---- 3b. threshold reached before schedule end -> wait, then close at schedule end ----
+  {
+    const policy = await prisma.companyAttendancePolicy.findUniqueOrThrow({ where: { singleton: true } });
+    await prisma.companyAttendancePolicy.update({ where: { singleton: true }, data: { maxShiftDurationHours: 2 } });
+    try {
+      const openedAt = new Date('2033-06-15T11:00:00Z'); // 14:00 Helsinki; planned end is 17:00 Helsinki / 14:00Z
+      const f = await makeOpenShift({ openedAt, withTemplate: true, templateEndHour: 17 });
+      const beforeEnd = await runAbandonedShiftAutoCloseTick({ now: new Date('2033-06-15T13:30:00Z') });
+      const stillOpen = await prisma.employeeOpenShift.findUnique({ where: { employeeId: f.emp.id } });
+      const noFutureShift = await prisma.clockShift.findUnique({ where: { checkInEventId: f.checkInId } });
+      check('3b: threshold reached before planned end -> deferred', beforeEnd.deferredToTemplateEnd >= 1 && stillOpen !== null && noFutureShift === null, beforeEnd);
+
+      const afterEnd = await runAbandonedShiftAutoCloseTick({ now: new Date('2033-06-15T14:01:00Z') });
+      const closed = await prisma.clockShift.findUniqueOrThrow({ where: { checkInEventId: f.checkInId } });
+      check('3b: after planned end -> closes at template end', afterEnd.closedFromTemplate >= 1 && closed.recordedEndAt.toISOString() === '2033-06-15T14:00:00.000Z', { afterEnd, endAt: closed.recordedEndAt });
+    } finally {
+      await prisma.companyAttendancePolicy.update({ where: { singleton: true }, data: { maxShiftDurationHours: policy.maxShiftDurationHours } });
+    }
   }
 
   // ---- 4. annotateAutoClosedShiftWithLateCheckOut stamps the real time ----

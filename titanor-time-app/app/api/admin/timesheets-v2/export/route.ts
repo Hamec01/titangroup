@@ -5,7 +5,7 @@ import { createAuditEvent } from '@/lib/audit';
 import { prisma } from '@/lib/prisma';
 import { helsinkiToday } from '@/lib/workers';
 import { attachmentContentDisposition } from '@/lib/reporting/content-disposition';
-import { isValidMonth, loadCustomerMonthMatrix } from '@/lib/reporting/monthly-matrix';
+import { isValidMonth, loadCustomerCardState, loadCustomerMonthMatrix } from '@/lib/reporting/monthly-matrix';
 import { buildMonthlyMatrixXlsx, monthlyMatrixXlsxFileName } from '@/lib/reporting/monthly-matrix-xlsx';
 
 export const runtime = 'nodejs';
@@ -30,12 +30,14 @@ export async function GET(request: NextRequest) {
   const site = await prisma.workSite.findUnique({ where: { id: siteId }, select: { name: true } });
   const area = workAreaId ? await prisma.workArea.findFirst({ where: { id: workAreaId, siteId }, select: { name: true } }) : null;
   if (!site || (workAreaId && !area)) return jsonError(404, { code: 'CUSTOMER_NOT_FOUND', message: 'Customer not found.' }, requestId);
+  const cardState = await loadCustomerCardState(month, { siteId, workAreaId });
+  if (cardState && cardState.status !== 'ACTIVE') return jsonError(404, { code: 'CUSTOMER_NOT_FOUND', message: 'Customer not found.' }, requestId);
 
   const todayIso = helsinkiToday().toISOString().slice(0, 10);
   const outcome = await loadCustomerMonthMatrix(month, { siteId, workAreaId }, { userId: session.user.id, employeeId: session.user.employeeId }, todayIso);
   if (!outcome.ok) return jsonError(409, { code: 'SELECTION_TOO_LARGE', message: 'Too much data for one month.' }, requestId);
 
-  const customerName = area?.name ?? 'No customer';
+  const customerName = cardState?.displayName ?? area?.name ?? 'No customer';
   const generatedAt = new Intl.DateTimeFormat('en-GB', { timeZone: 'Europe/Helsinki', day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).format(new Date());
   const content = buildMonthlyMatrixXlsx(outcome.matrix, { customerName, siteName: site.name, generatedAt });
 

@@ -8,6 +8,7 @@ import { resolveMissingCheckoutAtCutoffOnLateCheckOut } from '@/lib/attendance-a
 import { annotateAutoClosedShiftWithLateCheckOut } from '@/lib/attendance-abandoned-shift-annotate';
 import { liveAssignmentWhere } from '@/lib/assignment-lifecycle';
 import { acquireEmployeeLifecycleLock } from '@/lib/assignment-lock';
+import { DEFAULT_MAX_GPS_ACCURACY_METERS, effectiveGpsAccuracyMeters } from '@/lib/gps-accuracy';
 
 // docs/titanor-time/T7A_1_ATTENDANCE_CLOCK_DESIGN.md §9.1/§9.2/§9.3/§9.1a — Online clock core
 // (T7A online clock core slice). Route files do HTTP/auth/CSRF/idempotency/validation mapping;
@@ -25,7 +26,7 @@ import { acquireEmployeeLifecycleLock } from '@/lib/assignment-lock';
 // (§9.11), POST /attendance/sync, offline outbox, scheduler/cron, exception resolution endpoints,
 // admin attendance overview.
 
-const MAX_ACCEPTABLE_ACCURACY_METERS = 75;
+const MAX_ACCEPTABLE_ACCURACY_METERS = DEFAULT_MAX_GPS_ACCURACY_METERS;
 const EARTH_RADIUS_METERS = 6371000;
 const LATITUDE_MIN = -90;
 const LATITUDE_MAX = 90;
@@ -103,8 +104,8 @@ export function evaluateGpsReading(
   reading: ClockGpsReading,
   geofence: ClockGeofence | null,
   // GPS step 4 (T11) — the accuracy gate is now CompanyAttendancePolicy.maxGpsAccuracyMeters,
-  // loaded by the caller (loadMaxGpsAccuracyMeters). Defaults to the historic hard-coded 75 so
-  // every pure/test caller that doesn't pass one keeps the old behaviour.
+  // loaded by the caller (loadMaxGpsAccuracyMeters). Defaults to the company fallback when no
+  // custom threshold has been configured.
   maxAccuracyMeters: number = MAX_ACCEPTABLE_ACCURACY_METERS
 ): GpsEvaluation {
   if (!reading.location) {
@@ -118,8 +119,7 @@ export function evaluateGpsReading(
     return { gpsVerification: 'NOT_VERIFIED', gpsUnavailableReason: null, geofenceVersionId: null, gpsAccuracyMeters: accuracyMeters, distanceMeters: null, location: { latitude, longitude } };
   }
   const distanceMeters = haversineDistanceMeters(latitude, longitude, geofence.latitude, geofence.longitude);
-  const effectiveRadius = geofence.radiusMeters + accuracyMeters;
-  const inside = distanceMeters <= effectiveRadius;
+  const inside = distanceMeters <= geofence.radiusMeters;
   return {
     gpsVerification: inside ? 'VERIFIED_INSIDE' : 'VERIFIED_OUTSIDE',
     gpsUnavailableReason: null,
@@ -724,7 +724,7 @@ export async function loadCurrentGeofence(tx: Prisma.TransactionClient, siteId: 
  * same "load fresh server-side, never trust the client" reasoning as loadCurrentGeofence. */
 export async function loadMaxGpsAccuracyMeters(tx: Prisma.TransactionClient): Promise<number> {
   const policy = await tx.companyAttendancePolicy.findFirst({ select: { maxGpsAccuracyMeters: true } });
-  return policy?.maxGpsAccuracyMeters ?? MAX_ACCEPTABLE_ACCURACY_METERS;
+  return effectiveGpsAccuracyMeters(policy?.maxGpsAccuracyMeters);
 }
 
 export function exceptionDetailForGps(evaluation: GpsEvaluation, geofence: ClockGeofence | null): Prisma.InputJsonValue | undefined {

@@ -178,7 +178,7 @@ export function monthDays(month: string): MatrixDay[] {
 }
 
 export function customerKeyOf(siteId: string, workAreaId: string | null): string {
-  return `${siteId}:${workAreaId ?? 'none'}`;
+  return `${siteId.toLowerCase()}:${workAreaId?.toLowerCase() ?? 'none'}`;
 }
 
 /** Customer label: the work area (the customer the hours are billed to) at its site. */
@@ -421,22 +421,42 @@ export interface CustomerCard {
   workAreaId: string | null;
   siteName: string;
   workAreaName: string | null;
+  displayName: string | null;
   peopleCount: number;
   workedMinutes: number;
 }
 
-export type CustomerCardsOutcome = { ok: true; cards: CustomerCard[]; totalMinutes: number } | { ok: false; reason: 'SELECTION_TOO_LARGE'; totalItems: number; max: number };
+export type CustomerCardsOutcome = { ok: true; cards: CustomerCard[]; trashedCards: CustomerCard[]; hiddenCardCount: number; totalMinutes: number } | { ok: false; reason: 'SELECTION_TOO_LARGE'; totalItems: number; max: number };
+
+export async function loadCustomerCardState(month: string, customer: { siteId: string; workAreaId: string | null }, db: Db = prisma) {
+  return db.timesheetV2CardState.findUnique({
+    where: { month_customerKey: { month, customerKey: customerKeyOf(customer.siteId, customer.workAreaId) } },
+    select: { displayName: true, status: true }
+  });
+}
 
 /**
  * Cards for /admin/timesheets-v2: every active customer (work area), plus any customer bucket with
  * attached workers or hours this month. People = attached workers ∪ workers with hours.
  */
 export async function loadCustomerCards(month: string, actor: LedgerActor, todayIso: string, db: Db = prisma): Promise<CustomerCardsOutcome> {
-  const [slices, assigned, workAreas, options] = await Promise.all([
+  const [slices, assigned, workAreas, options, cardStates] = await Promise.all([
     loadSlices(ledgerQuery(month, null, null), actor, db),
     loadAssignedWorkers(month, null, db),
     db.workArea.findMany({ where: { active: true }, select: { id: true, name: true, siteId: true, site: { select: { name: true } } } }),
-    loadMatrixOptions(month, null, db)
+    loadMatrixOptions(month, null, db),
+    db.timesheetV2CardState.findMany({
+      where: { month },
+      select: {
+        customerKey: true,
+        siteId: true,
+        workAreaId: true,
+        displayName: true,
+        status: true,
+        site: { select: { name: true } },
+        workArea: { select: { name: true } }
+      }
+    })
   ]);
   if (!slices.ok) return slices;
   const matrix = buildMonthlyMatrix(month, slices.inputs, todayIso, slices.names, null, assigned, options);
@@ -444,7 +464,7 @@ export async function loadCustomerCards(month: string, actor: LedgerActor, today
   const card = (siteId: string, workAreaId: string | null, siteName: string, workAreaName: string | null) => {
     const key = customerKeyOf(siteId, workAreaId);
     let c = cards.get(key);
-    if (!c) { c = { key, siteId, workAreaId, siteName, workAreaName, peopleCount: 0, workedMinutes: 0, people: new Set() }; cards.set(key, c); }
+    if (!c) { c = { key, siteId, workAreaId, siteName, workAreaName, displayName: null, peopleCount: 0, workedMinutes: 0, people: new Set() }; cards.set(key, c); }
     return c;
   };
   for (const w of workAreas) card(w.siteId, w.id, w.site.name, w.name);
@@ -456,10 +476,45 @@ export async function loadCustomerCards(month: string, actor: LedgerActor, today
     c.workedMinutes += row.totalMinutes;
     if (row.totalMinutes > 0) c.people.add(row.employeeId);
   }
-  const list = [...cards.values()].map(({ people, ...c }) => ({ ...c, peopleCount: people.size }));
+  for (const state of cardStates) {
+    if (!cards.has(state.customerKey)) {
+      cards.set(state.customerKey, {
+        key: state.customerKey,
+        siteId: state.siteId,
+        workAreaId: state.workAreaId,
+        siteName: state.site.name,
+        workAreaName: state.workArea?.name ?? null,
+        displayName: state.displayName,
+        peopleCount: 0,
+        workedMinutes: 0,
+        people: new Set()
+      });
+    }
+  }
+  const stateByKey = new Map(cardStates.map((state) => [state.customerKey, state]));
+  const list = [...cards.values()].map(({ people, ...c }) => ({
+    ...c,
+    displayName: stateByKey.get(c.key)?.displayName ?? null,
+    peopleCount: people.size
+  }));
+  const visible: CustomerCard[] = [];
+  const trashedCards: CustomerCard[] = [];
+  for (const item of list) {
+    const status = stateByKey.get(item.key)?.status ?? 'ACTIVE';
+    if (status === 'TRASHED') trashedCards.push(item);
+    else if (status === 'ACTIVE') visible.push(item);
+  }
   // Real customers first (A–Z), the per-site "no customer" buckets last.
-  list.sort((a, b) => Number(a.workAreaName === null) - Number(b.workAreaName === null) || (a.workAreaName ?? '').localeCompare(b.workAreaName ?? '') || a.siteName.localeCompare(b.siteName));
-  return { ok: true, cards: list, totalMinutes: matrix.totalMinutes };
+  const sortCards = (a: CustomerCard, b: CustomerCard) => Number(a.workAreaName === null) - Number(b.workAreaName === null) || (a.displayName ?? a.workAreaName ?? '').localeCompare(b.displayName ?? b.workAreaName ?? '') || a.siteName.localeCompare(b.siteName);
+  visible.sort(sortCards);
+  trashedCards.sort(sortCards);
+  return {
+    ok: true,
+    cards: visible,
+    trashedCards,
+    hiddenCardCount: cardStates.filter((state) => state.status !== 'ACTIVE').length,
+    totalMinutes: matrix.totalMinutes
+  };
 }
 
 /** One customer's month: attached workers + anyone with hours for it. */

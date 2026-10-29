@@ -25,6 +25,7 @@ const REQUIRED_CSRF_HEADER_VALUE = 'titanor-time';
 const ROUTE_TEMPLATE = '/api/admin/workers';
 const DEFAULT_PAGE_SIZE = 20;
 const MAX_PAGE_SIZE = 100;
+const MAX_SEARCH_LENGTH = 100;
 // Not specified by the contract — pragmatic bounds, same style as
 // MAX_NAME_LENGTH in app/api/admin/sites/route.ts. employeeNumber is a separate HR identifier,
 // independent of User.username (see lib/worker-usernames.ts) — its own cap here is just a
@@ -61,7 +62,8 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   // Default: active workers only. ?archived=1 includes deactivated ("archived") workers. The
   // assignment picker relies on the default — an archived worker cannot be assigned anyway.
   const includeArchived = searchParams.get('archived') === '1';
-  const result = await listWorkers(page, pageSize, { includeArchived });
+  const q = (searchParams.get('q') ?? '').trim().slice(0, MAX_SEARCH_LENGTH);
+  const result = await listWorkers(page, pageSize, { includeArchived, q });
 
   return NextResponse.json(result, { status: 200, headers: successHeaders(requestId) });
 }

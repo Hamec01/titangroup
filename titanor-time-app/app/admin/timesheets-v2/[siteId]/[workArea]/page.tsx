@@ -3,7 +3,7 @@ import { notFound } from 'next/navigation';
 import { isUuid } from '@/lib/api-guard';
 import { localeText } from '@/lib/i18n/locale';
 import { prisma } from '@/lib/prisma';
-import { formatMatrixHours, loadCustomerMonthMatrix } from '@/lib/reporting/monthly-matrix';
+import { formatMatrixHours, loadCustomerCardState, loadCustomerMonthMatrix } from '@/lib/reporting/monthly-matrix';
 import { resolveTimesheetsV2Context } from '../../admin-gate';
 import { MonthMatrixTable, MonthPicker, monthTitle } from '../../MonthMatrixTable';
 import { MonthMatrixEditor } from '../../MonthMatrixEditor';
@@ -27,11 +27,13 @@ export default async function TimesheetsV2CustomerPage({ params, searchParams }:
   if (!site || (workAreaId && !area)) notFound();
 
   const { locale, month } = ctx;
-  const customerName = area?.name ?? localeText(locale, 'No customer', 'Без заказчика');
-  const [outcome, siteAreas] = await Promise.all([
+  const [outcome, siteAreas, cardState] = await Promise.all([
     loadCustomerMonthMatrix(month, { siteId, workAreaId }, ctx.actor, ctx.todayIso),
-    prisma.workArea.findMany({ where: { siteId, active: true }, select: { id: true, name: true }, orderBy: { name: 'asc' } })
+    prisma.workArea.findMany({ where: { siteId, active: true }, select: { id: true, name: true }, orderBy: { name: 'asc' } }),
+    loadCustomerCardState(month, { siteId, workAreaId })
   ]);
+  if (cardState && cardState.status !== 'ACTIVE') notFound();
+  const customerName = cardState?.displayName ?? area?.name ?? localeText(locale, 'No customer', 'Без заказчика');
   // "Перенести часы": the other customers of this site, plus "no customer".
   const moveTargets = [
     ...siteAreas.filter((a) => a.id !== workAreaId).map((a) => ({ workArea: a.id, name: a.name })),

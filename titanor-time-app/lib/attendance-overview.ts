@@ -36,7 +36,16 @@ export const OPERATIONAL_STATE_VALUES = [
 ] as const;
 export type OperationalState = (typeof OPERATIONAL_STATE_VALUES)[number];
 
-const GPS_ISSUE_TYPES = new Set(['GPS_NOT_VERIFIED', 'OUTSIDE_GEOFENCE_CHECKOUT', 'GEOFENCE_VERSION_MISMATCH']);
+// GPS/geofence signals remain visible operational warnings, but they are not the same class of
+// problem as a physically overlapping pair of shifts. Keep this set shared by the summary/state
+// calculation and the per-worker category counters so the dashboard can never mix the two again.
+const GPS_ISSUE_TYPES = new Set([
+  'GPS_NOT_VERIFIED',
+  'OUTSIDE_GEOFENCE_CHECKIN',
+  'OUTSIDE_GEOFENCE_CHECKOUT',
+  'GEOFENCE_VERSION_MISMATCH'
+]);
+const OVERLAPPING_SHIFT_TYPE = 'OVERLAPPING_SHIFT';
 const SYNC_ISSUE_TYPES = new Set(['DOUBLE_CHECK_IN', 'CHECKOUT_WITHOUT_OPEN_SHIFT', 'LATE_SYNC_AFTER_SUBMIT']);
 
 // ---------------------------------------------------------------------------------------------
@@ -250,6 +259,9 @@ export interface OverviewWorkerItem {
   currentVersion: { id: string; versionNumber: number; submissionSource: string; submittedAt: string } | null;
   openExceptionCount: number;
   openExceptionTypes: string[];
+  openGpsWarningCount: number;
+  openOverlapProblemCount: number;
+  openOtherProblemCount: number;
   reviewRoute: { total: number; pending: number; approved: number; returned: number; scopes: { siteName: string | null; status: string }[] } | null;
   finalApprovalBlockedReasons: string[];
   correction: { status: string } | null;
@@ -535,6 +547,9 @@ export async function buildOperationalOverview(tx: Prisma.TransactionClient, fil
 
     const myExceptions = openExceptionsByEmployee.get(employeeId) ?? [];
     const myExceptionTypes = new Set(myExceptions.map((e) => e.type));
+    const openGpsWarningCount = myExceptions.filter((exception) => GPS_ISSUE_TYPES.has(exception.type)).length;
+    const openOverlapProblemCount = myExceptions.filter((exception) => exception.type === OVERLAPPING_SHIFT_TYPE).length;
+    const openOtherProblemCount = myExceptions.length - openGpsWarningCount - openOverlapProblemCount;
     if (myExceptionTypes.has('MISSING_CHECKOUT_AT_CUTOFF')) states.push('MISSING_CHECKOUT');
     if ([...myExceptionTypes].some((t) => GPS_ISSUE_TYPES.has(t))) states.push('GPS_ISSUE');
     if ([...myExceptionTypes].some((t) => SYNC_ISSUE_TYPES.has(t))) states.push('SYNC_ISSUE');
@@ -641,6 +656,9 @@ export async function buildOperationalOverview(tx: Prisma.TransactionClient, fil
         : null,
       openExceptionCount: myExceptions.length,
       openExceptionTypes: [...myExceptionTypes],
+      openGpsWarningCount,
+      openOverlapProblemCount,
+      openOtherProblemCount,
       reviewRoute,
       finalApprovalBlockedReasons,
       correction: correctionDto,

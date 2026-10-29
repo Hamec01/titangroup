@@ -349,8 +349,8 @@ export function PolicyForm({ initialPolicy, canUpdate }: { initialPolicy: Policy
           />
           <p className="policy-readonly-note">
             {ru
-              ? 'Отметка прихода/ухода с точностью хуже этого значения помечается «GPS не подтверждён» и уходит администратору на проверку. По умолчанию 75 м; повысьте, если на объекте стабильно слабый сигнал (например, внутри цеха).'
-              : 'A clock-in/out with accuracy worse than this is flagged “GPS not verified” for admin review. Default 75 m; raise it for a site with chronically weak signal (e.g. inside a workshop).'}
+            ? 'Отметка прихода/ухода с точностью хуже этого значения помечается «GPS не подтверждён» и уходит администратору на проверку. Если порог не задан, применяется стандарт 500 м; заданное значение политики компании имеет приоритет.'
+            : 'A clock-in/out with accuracy worse than this is flagged “GPS not verified” for admin review. The 500 m standard applies when no company threshold is set; a configured company value takes priority.'}
           </p>
           <FieldError fieldErrors={fieldErrors} field="maxGpsAccuracyMeters" />
         </div>

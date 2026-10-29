@@ -13,7 +13,9 @@ export { AUTO_CLOSE_REASON, annotateAutoClosedShiftWithLateCheckOut } from '@/li
 // that has been open longer than CompanyAttendancePolicy.maxShiftDurationHours with no check-out:
 //   - end time = that day's planned end from the worker's schedule template (helsinki wall clock),
 //     falling back to openedAt + autoCloseShiftFallbackHours when the template has no usable end;
-//     always capped at openedAt + maxShiftDurationHours.
+//     the max-duration setting is only the abandoned-shift threshold and never replaces a usable
+//     template end. If the threshold is reached before the planned end, the scheduler waits for the
+//     planned end so it never records a future check-out.
 //   - creates a frozen ClockShift (forceClosed* = SYSTEM, endAtProvisional = true, checkOutEventId
 //     NULL — the ck_clock_shift_close_mechanism "force-closed" branch), deletes the open shift,
 //     materializes inline (same as Check Out), and raises one OPEN SHIFT_AUTO_CLOSED_MAX_DURATION.
@@ -42,8 +44,8 @@ export interface AutoCloseEndAt {
   source: 'TEMPLATE' | 'FALLBACK';
 }
 
-/** Pure. The single place the end-time precedence (template planned end → fallback duration → hard
- *  cap at maxShiftDurationHours) is decided. */
+/** Pure. A usable template end is authoritative. The fallback duration is capped at
+ *  maxShiftDurationHours only when there is no usable end in the schedule. */
 export function resolveAutoCloseEndAt(input: AutoCloseEndAtInput): AutoCloseEndAt {
   const openedMs = input.openedAt.getTime();
   const capMs = openedMs + Math.max(1, Math.round(input.maxShiftDurationHours)) * 3_600_000;
@@ -51,7 +53,7 @@ export function resolveAutoCloseEndAt(input: AutoCloseEndAtInput): AutoCloseEndA
   if (input.templateEndTime) {
     const helsinkiDay = helsinkiCalendarDateAsUtcMidnight(input.openedAt);
     const plannedEnd = helsinkiWallClockToUtc(helsinkiDay, input.templateEndTime).getTime();
-    if (plannedEnd > openedMs && plannedEnd <= capMs) {
+    if (plannedEnd > openedMs) {
       return { endAt: new Date(plannedEnd), source: 'TEMPLATE' };
     }
   }
@@ -99,6 +101,8 @@ export interface AbandonedShiftAutoCloseTickResult {
   closed: number;
   closedFromTemplate: number;
   closedFromFallback: number;
+  /** Threshold reached, but the template's planned end has not happened yet. */
+  deferredToTemplateEnd: number;
   skippedNoLongerEligible: number;
   failed: number;
   failedEmployeeIds: string[];
@@ -141,6 +145,7 @@ export async function runAbandonedShiftAutoCloseTick(input: AbandonedShiftAutoCl
     closed: 0,
     closedFromTemplate: 0,
     closedFromFallback: 0,
+    deferredToTemplateEnd: 0,
     skippedNoLongerEligible: 0,
     failed: 0,
     failedEmployeeIds: []
@@ -171,6 +176,14 @@ export async function runAbandonedShiftAutoCloseTick(input: AbandonedShiftAutoCl
           fallbackHours: policy.autoCloseShiftFallbackHours,
           templateEndTime
         });
+
+        // maxShiftDurationHours decides when a shift becomes suspicious; the schedule decides when
+        // a planned working day ends. An early arrival can reach the threshold before plannedEnd.
+        // Leave that shift open until plannedEnd so a real check-out can still close it normally and
+        // so we never materialize a ClockShift whose recorded end is in the future.
+        if (source === 'TEMPLATE' && endAt.getTime() > now.getTime()) {
+          return { kind: 'DEFERRED' as const };
+        }
 
         const systemActorId = await resolveSystemActorId(tx);
         const closedAt = new Date();
@@ -239,6 +252,8 @@ export async function runAbandonedShiftAutoCloseTick(input: AbandonedShiftAutoCl
 
       if (outcome.kind === 'SKIPPED') {
         result.skippedNoLongerEligible += 1;
+      } else if (outcome.kind === 'DEFERRED') {
+        result.deferredToTemplateEnd += 1;
       } else {
         result.closed += 1;
         if (outcome.source === 'TEMPLATE') result.closedFromTemplate += 1;

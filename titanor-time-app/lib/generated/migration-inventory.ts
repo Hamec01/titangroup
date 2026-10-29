@@ -109,13 +109,15 @@ export const MIGRATION_INVENTORY = [
   '20260906210000_harden_report_files',
   '20260921120000_add_customer_hours_approval',
   '20260924020000_add_shared_document_storage',
-  '20261015090000_add_timesheet_v2_cell_overrides'
+  '20261015090000_add_timesheet_v2_cell_overrides',
+  '20261029090000_manage_timesheet_v2_cards',
+  '20261029113000_gps_accuracy_fallback_500'
 ] as const;
 
-export const MIGRATION_INVENTORY_COUNT = 105;
+export const MIGRATION_INVENTORY_COUNT = 107;
 
 /** sha256 of the newline-joined sorted names — a cheap single-value schema-version fingerprint. */
-export const MIGRATION_INVENTORY_CHECKSUM = '3c9f7b8902f78c20ecf996244d371355757179cc4e5fa02afc7dc276074e4abf';
+export const MIGRATION_INVENTORY_CHECKSUM = '529a53e82aabbb336a80327833b43b722dc5ca193ad35fbbe01d8b37eba679cd';
 
 /** The newest migration this build knows about (informational only — comparisons use the full set). */
-export const LATEST_KNOWN_MIGRATION = '20261015090000_add_timesheet_v2_cell_overrides';
+export const LATEST_KNOWN_MIGRATION = '20261029113000_gps_accuracy_fallback_500';

@@ -116,7 +116,7 @@ async function main(): Promise<void> {
       if (!shuttingDown) {
         try {
           const closeResult = await runAbandonedShiftAutoCloseTick({ now: new Date() });
-          logSafe({ event: 'abandoned_shift_auto_close', outcome: 'ok', scanned: closeResult.scanned, closed: closeResult.closed, closedFromTemplate: closeResult.closedFromTemplate, closedFromFallback: closeResult.closedFromFallback, skipped: closeResult.skippedNoLongerEligible, failed: closeResult.failed });
+          logSafe({ event: 'abandoned_shift_auto_close', outcome: 'ok', scanned: closeResult.scanned, closed: closeResult.closed, closedFromTemplate: closeResult.closedFromTemplate, closedFromFallback: closeResult.closedFromFallback, deferredToTemplateEnd: closeResult.deferredToTemplateEnd, skipped: closeResult.skippedNoLongerEligible, failed: closeResult.failed });
         } catch {
           logSafe({ event: 'abandoned_shift_auto_close', outcome: 'top_level_error', errorCode: 'ABANDONED_SHIFT_AUTO_CLOSE_TOP_LEVEL_ERROR' });
         }

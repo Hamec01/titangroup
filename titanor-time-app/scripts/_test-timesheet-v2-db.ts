@@ -11,6 +11,7 @@ import { NextRequest } from 'next/server';
 import { prisma } from '../lib/prisma';
 import { generateSessionToken, hashSessionToken, SESSION_COOKIE_NAME } from '../lib/session';
 import { POST as cellsPOST, DELETE as cellsDELETE } from '../app/api/admin/timesheets-v2/cells/route';
+import { POST as cardsPOST } from '../app/api/admin/timesheets-v2/cards/route';
 import { GET as exportGET } from '../app/api/admin/timesheets-v2/export/route';
 import { loadCustomerCards, loadCustomerMonthMatrix } from '../lib/reporting/monthly-matrix';
 import { parseCellInput, saveTimesheetV2Cells, TimesheetV2CellError } from '../lib/timesheet-v2-cells';
@@ -176,6 +177,40 @@ async function main() {
   check('reset audited', (await prisma.auditEvent.count({ where: { eventType: 'TIMESHEET_V2_CELLS_RESET' } })) === 1);
   const back = await loadCustomerMonthMatrix(MONTH, customer, { userId: adminUserId, employeeId: null }, TODAY);
   check('after reset the grid is computed again', back.ok && back.matrix.totalMinutes === first.matrix.totalMinutes);
+
+  // ---- monthly card names and reversible trash; source hours are never deleted ----
+  const cardsUrl = 'http://localhost/api/admin/timesheets-v2/cards';
+  const noCustomerBody = { siteId: site.id, workArea: 'none', month: MONTH };
+  check('worker cannot manage cards → 403', (await cardsPOST(req(cardsUrl, worker.token, 'POST', { ...noCustomerBody, action: 'RENAME', displayName: 'Hidden' }))).status === 403);
+  check('card management requires CSRF → 403', (await cardsPOST(req(cardsUrl, admin.token, 'POST', { ...noCustomerBody, action: 'RENAME', displayName: 'Hidden' }, false))).status === 403);
+  check('invalid customer card → 404', (await cardsPOST(req(cardsUrl, admin.token, 'POST', { ...noCustomerBody, siteId: randomUUID(), action: 'TRASH' }))).status === 404);
+  check('empty card name rejected → 400', (await cardsPOST(req(cardsUrl, admin.token, 'POST', { ...noCustomerBody, action: 'RENAME', displayName: '  ' }))).status === 400);
+
+  const rename = await cardsPOST(req(cardsUrl, admin.token, 'POST', { ...noCustomerBody, action: 'RENAME', displayName: 'Transferred workers' }));
+  check('card rename → 200', rename.status === 200);
+  const renamedCards = await loadCustomerCards(MONTH, { userId: adminUserId, employeeId: null }, TODAY);
+  const noCustomerCard = renamedCards.ok ? renamedCards.cards.find((c) => c.workAreaId === null && c.siteId === site.id) : null;
+  check('monthly card name is saved without changing the source customer', noCustomerCard?.displayName === 'Transferred workers' && (await prisma.workArea.findUniqueOrThrow({ where: { id: area.id } })).name.startsWith('TV2 Customer'));
+  const overridesBeforeTrash = await prisma.timesheetV2CellOverride.count({ where: { siteId: site.id } });
+  const totalBeforeTrash = renamedCards.ok ? renamedCards.totalMinutes : -1;
+
+  const movedToTrash = await cardsPOST(req(cardsUrl, admin.token, 'POST', { ...noCustomerBody, action: 'TRASH' }));
+  const inTrash = await loadCustomerCards(MONTH, { userId: adminUserId, employeeId: null }, TODAY);
+  check('move card to trash hides it from active cards', movedToTrash.status === 200 && inTrash.ok && !inTrash.cards.some((c) => c.workAreaId === null && c.siteId === site.id));
+  check('trash shows card and preserves month total', inTrash.ok && inTrash.trashedCards.some((c) => c.displayName === 'Transferred workers') && inTrash.totalMinutes === totalBeforeTrash);
+  check('trashing preserves the source overrides', (await prisma.timesheetV2CellOverride.count({ where: { siteId: site.id } })) === overridesBeforeTrash);
+
+  const restored = await cardsPOST(req(cardsUrl, admin.token, 'POST', { ...noCustomerBody, action: 'RESTORE' }));
+  const restoredCards = await loadCustomerCards(MONTH, { userId: adminUserId, employeeId: null }, TODAY);
+  check('restore returns renamed card to the month', restored.status === 200 && restoredCards.ok && restoredCards.cards.some((c) => c.displayName === 'Transferred workers'));
+
+  await cardsPOST(req(cardsUrl, admin.token, 'POST', { ...noCustomerBody, action: 'TRASH' }));
+  const permanentlyRemoved = await cardsPOST(req(cardsUrl, admin.token, 'POST', { ...noCustomerBody, action: 'DELETE' }));
+  const afterPermanentRemoval = await loadCustomerCards(MONTH, { userId: adminUserId, employeeId: null }, TODAY);
+  check('permanent removal clears the trash but keeps card hidden', permanentlyRemoved.status === 200 && afterPermanentRemoval.ok && !afterPermanentRemoval.cards.some((c) => c.workAreaId === null && c.siteId === site.id) && !afterPermanentRemoval.trashedCards.some((c) => c.siteId === site.id && c.workAreaId === null));
+  check('permanent removal retains source hours and monthly total', afterPermanentRemoval.ok && afterPermanentRemoval.totalMinutes === totalBeforeTrash && (await prisma.timesheetV2CellOverride.count({ where: { siteId: site.id } })) === overridesBeforeTrash);
+  const cardAuditCount = await prisma.auditEvent.count({ where: { eventType: { in: ['TIMESHEET_V2_CARD_RENAMED', 'TIMESHEET_V2_CARD_TRASHED', 'TIMESHEET_V2_CARD_RESTORED', 'TIMESHEET_V2_CARD_DELETED'] } } });
+  check('card actions are audited', cardAuditCount === 5);
 
   console.log(`timesheet v2 db: ${pass}/${pass + fail} passed`);
   if (fail > 0) process.exit(1);

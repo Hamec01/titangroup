@@ -1,5 +1,6 @@
 import { prisma } from '@/lib/prisma';
 import { createAuditEvent } from '@/lib/audit';
+import { effectiveGpsAccuracyMeters } from '@/lib/gps-accuracy';
 
 // docs/titanor-time/T7A_1_ATTENDANCE_CLOCK_DESIGN.md §12.1 + Addendum "T7A.10A" §F —
 // GET/PATCH /api/admin/attendance/policy. Route file owns auth/CSRF/permission/idempotency/HTTP
@@ -56,7 +57,7 @@ interface PolicyRow {
   cutoffTime: Date;
   systemReopenDebounceMinutes: number;
   maxShiftDurationHours: number;
-  maxGpsAccuracyMeters: number;
+  maxGpsAccuracyMeters: number | null;
   autoUnpaidBreakThresholdMinutes: number;
   autoUnpaidBreakMinutes: number;
   autoCloseShiftFallbackHours: number;
@@ -83,7 +84,7 @@ function toView(row: PolicyRow): PolicyView {
     cutoffTime: formatTimeOfDay(row.cutoffTime),
     systemReopenDebounceMinutes: row.systemReopenDebounceMinutes,
     maxShiftDurationHours: row.maxShiftDurationHours,
-    maxGpsAccuracyMeters: row.maxGpsAccuracyMeters,
+    maxGpsAccuracyMeters: effectiveGpsAccuracyMeters(row.maxGpsAccuracyMeters),
     autoUnpaidBreakThresholdMinutes: row.autoUnpaidBreakThresholdMinutes,
     autoUnpaidBreakMinutes: row.autoUnpaidBreakMinutes,
     autoCloseShiftFallbackHours: row.autoCloseShiftFallbackHours,

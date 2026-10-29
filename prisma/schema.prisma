@@ -449,6 +449,7 @@ model User {
   createdDocumentFiles                 DocumentFile[]                @relation("DocumentFileCreatedBy")
   documentUploadReservations           DocumentUploadReservation[]   @relation("DocumentUploadReservationCreatedBy")
   timesheetV2CellOverrides             TimesheetV2CellOverride[]     @relation("TimesheetV2CellOverrideUpdatedBy")
+  timesheetV2CardStates                TimesheetV2CardState[]        @relation("TimesheetV2CardStateUpdatedBy")
 }
 
 model Role {
@@ -943,6 +944,7 @@ model WorkSite {
   shiftPresenceSamples       ShiftPresenceSample[]
   customerHoursApprovalItems CustomerHoursApprovalItem[]
   timesheetV2CellOverrides   TimesheetV2CellOverride[]
+  timesheetV2CardStates      TimesheetV2CardState[]
 
   @@index([cityId])
   @@index([active])
@@ -967,6 +969,7 @@ model WorkArea {
   clockShiftFragments        ClockShiftFragment[]
   customerHoursApprovalItems CustomerHoursApprovalItem[]
   timesheetV2CellOverrides   TimesheetV2CellOverride[]
+  timesheetV2CardStates      TimesheetV2CardState[]
 
   @@unique([siteId, name])
   @@unique([siteId, id])
@@ -1964,11 +1967,9 @@ model CompanyAttendancePolicy {
   cutoffTime                      DateTime @default(dbgenerated("'23:59:00'::time")) @db.Time(0)
   systemReopenDebounceMinutes     Int      @default(30)
   maxShiftDurationHours           Int      @default(16)
-  // GPS step 4 (T11) — server-side geofence-verification accuracy gate. A reading with
-  // accuracyMeters above this becomes GPS_NOT_VERIFIED (reason LOW_ACCURACY). Default 75 keeps
-  // the previous hard-coded MAX_ACCEPTABLE_ACCURACY_METERS; a site with chronically poor indoor
-  // signal (e.g. a shipyard) can be raised here rather than in code.
-  maxGpsAccuracyMeters            Int      @default(75)
+  // GPS step 4 (T11) — optional company override for the server-side geofence accuracy gate.
+  // Null uses the 500 m fallback; a configured value takes precedence.
+  maxGpsAccuracyMeters            Int?
   // T10-D (2026-08-28) — a worked day whose GROSS duration is at least this many minutes AND that
   // has no break logged gets its planned (unpaid) break auto-deducted from worked time
   // (docs/titanor-time/T10_DEF_PLAN.md §D). 360 = Finnish 6 h norm. 0 = always auto-deduct (no
@@ -2350,5 +2351,34 @@ model TimesheetV2CellOverride {
 
   @@index([siteId, workAreaId, date])
   @@index([employeeId, date])
+  @@index([updatedByUserId])
+}
+
+enum TimesheetV2CardStatus {
+  ACTIVE
+  TRASHED
+  DELETED
+}
+
+// A card's name and trash status belong to one month of the owner-facing timesheet. These are
+// presentation settings only: deleting a card never deletes shifts, hours, payroll, or approvals.
+model TimesheetV2CardState {
+  id              String                @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  month           String                @db.VarChar(7)
+  customerKey     String                @db.VarChar(80)
+  siteId          String                @db.Uuid
+  workAreaId      String?               @db.Uuid
+  displayName     String?               @db.VarChar(128)
+  status          TimesheetV2CardStatus @default(ACTIVE)
+  updatedByUserId String                @db.Uuid
+  createdAt       DateTime              @default(now()) @db.Timestamptz(6)
+  updatedAt       DateTime              @updatedAt @db.Timestamptz(6)
+  site            WorkSite              @relation(fields: [siteId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  workArea        WorkArea?             @relation(fields: [workAreaId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  updatedByUser   User                  @relation("TimesheetV2CardStateUpdatedBy", fields: [updatedByUserId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+
+  @@unique([month, customerKey])
+  @@index([month, status])
+  @@index([siteId, workAreaId])
   @@index([updatedByUserId])
 }

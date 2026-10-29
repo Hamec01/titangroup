@@ -1,8 +1,8 @@
-import Link from 'next/link';
 import { localeText } from '@/lib/i18n/locale';
 import { formatMatrixHours, loadCustomerCards } from '@/lib/reporting/monthly-matrix';
 import { resolveTimesheetsV2Context } from './admin-gate';
 import { MonthPicker, monthTitle } from './MonthMatrixTable';
+import { TimesheetV2Cards } from './TimesheetV2Cards';
 
 export const dynamic = 'force-dynamic';
 
@@ -29,27 +29,19 @@ export default async function TimesheetsV2Page({ searchParams }: RouteParams) {
           <p className="login-error" role="alert">
             {localeText(locale, `Too much data for one month (${outcome.totalItems} weekly rows, limit ${outcome.max}).`, `Слишком много данных за месяц (${outcome.totalItems} недельных строк, предел ${outcome.max}).`)}
           </p>
-        ) : outcome.cards.length === 0 ? (
-          <p className="month-matrix-empty">{localeText(locale, 'No customers yet. Create them under Setup → Customers.', 'Заказчиков пока нет. Их создают в разделе «Настройка → Заказчики».')}</p>
         ) : (
           <>
             <p className="month-matrix-total">
               {monthTitle(locale, month)}: <strong>{formatMatrixHours(outcome.totalMinutes) || '0'} {localeText(locale, 'h', 'ч')}</strong> {localeText(locale, 'in total', 'всего')}
             </p>
-            <ul className="tv2-cards">
-              {outcome.cards.map((card) => (
-                <li key={card.key}>
-                  <Link href={`/admin/timesheets-v2/${card.siteId}/${card.workAreaId ?? 'none'}?month=${month}`} className={card.peopleCount === 0 && card.workedMinutes === 0 ? 'tv2-card is-idle' : 'tv2-card'}>
-                    <strong className="tv2-card-name">{card.workAreaName ?? localeText(locale, 'No customer', 'Без заказчика')}</strong>
-                    <span className="tv2-card-site">{card.siteName}</span>
-                    <span className="tv2-card-stats">
-                      <span><b>{card.peopleCount}</b> {localeText(locale, card.peopleCount === 1 ? 'worker' : 'workers', 'чел.')}</span>
-                      <span><b>{formatMatrixHours(card.workedMinutes) || '0'}</b> {localeText(locale, 'h this month', 'ч за месяц')}</span>
-                    </span>
-                  </Link>
-                </li>
-              ))}
-            </ul>
+            {outcome.hiddenCardCount > 0 && (
+              <p className="tv2-hidden-total-note">
+                {localeText(locale,
+                  `The total still includes ${outcome.hiddenCardCount} hidden card(s); source hours are preserved.`,
+                  `Итого по-прежнему включает скрытые карточки (${outcome.hiddenCardCount}); исходные часы сохранены.`)}
+              </p>
+            )}
+            <TimesheetV2Cards locale={locale} month={month} cards={outcome.cards} trashedCards={outcome.trashedCards} />
           </>
         )}
       </div>

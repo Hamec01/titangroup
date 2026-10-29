@@ -136,24 +136,32 @@ const CURRENT_ASSIGNMENT_SELECT = {
   templateVersion: { select: { template: { select: { id: true, name: true } } } }
 } as const;
 
-/**
- * page/pageSize only — search/sort/filter from §0's general pagination
- * convention are out of scope for this task (PROJECT_ROADMAP.md T6.2: "Список
- * работников. Сначала read-only."). Sort order is fixed (lastName, firstName
- * ascending) rather than exposed as a param.
- */
+/** Paginated worker list. `q` is a case-insensitive, whitespace-tokenized search across first
+ * name, last name, employee number and login. Every token must match at least one field, so both
+ * "Oleksandr" and "Oleksandr Iovenko" work. Sort order stays fixed by surname/name. */
 export async function listWorkers(
   page: number,
   pageSize: number,
-  options: { includeArchived?: boolean } = {}
+  options: { includeArchived?: boolean; q?: string } = {}
 ): Promise<WorkerListResult> {
   const today = helsinkiToday();
+  const searchTokens = (options.q ?? '').trim().split(/\s+/).filter(Boolean).slice(0, 8);
 
   // Default: only workers with an active Employment. ?archived=1 drops the filter and shows
   // deactivated ("archived") workers too. Archived workers keep every row they ever had.
-  const where: Prisma.EmployeeWhereInput = options.includeArchived
-    ? {}
-    : { employments: { some: { active: true } } };
+  const and: Prisma.EmployeeWhereInput[] = [];
+  if (!options.includeArchived) and.push({ employments: { some: { active: true } } });
+  for (const token of searchTokens) {
+    and.push({
+      OR: [
+        { firstName: { contains: token, mode: 'insensitive' } },
+        { lastName: { contains: token, mode: 'insensitive' } },
+        { employeeNumber: { contains: token, mode: 'insensitive' } },
+        { user: { is: { username: { contains: token, mode: 'insensitive' } } } }
+      ]
+    });
+  }
+  const where: Prisma.EmployeeWhereInput = and.length > 0 ? { AND: and } : {};
 
   const [totalItems, archivedCount, employees] = await Promise.all([
     prisma.employee.count({ where }),

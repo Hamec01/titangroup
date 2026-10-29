@@ -102,15 +102,26 @@ async function main() {
   const firstEnd = new Date(firstStart.getTime() + 31 * 60_000);
   const secondStart = new Date(today.getTime() + 9 * 3_600_000);
   const secondEnd = new Date(secondStart.getTime() + 29 * 60_000);
+  const finishedShiftIds: string[] = [];
   for (const [start, end] of [[firstStart, firstEnd], [secondStart, secondEnd]] as const) {
     const checkInEventId = await clockEvent(finished.id, beta.id, 'CHECK_IN', start);
     const checkOutEventId = await clockEvent(finished.id, beta.id, 'CHECK_OUT', end);
-    await prisma.clockShift.create({
+    const shift = await prisma.clockShift.create({
       data: { employeeId: finished.id, siteId: beta.id, checkInEventId, checkOutEventId, recordedStartAt: start, recordedEndAt: end }
     });
+    finishedShiftIds.push(shift.id);
   }
   await prisma.attendanceException.create({
     data: { type: 'GPS_NOT_VERIFIED', employeeId: finished.id, occurredAt: asOf, status: 'OPEN' }
+  });
+  await prisma.attendanceException.create({
+    data: { type: 'OUTSIDE_GEOFENCE_CHECKIN', employeeId: finished.id, occurredAt: asOf, status: 'OPEN' }
+  });
+  await prisma.attendanceException.create({
+    data: { type: 'OVERLAPPING_SHIFT', employeeId: finished.id, clockShiftId: finishedShiftIds[0], relatedClockShiftId: finishedShiftIds[1], occurredAt: asOf, status: 'OPEN' }
+  });
+  await prisma.attendanceException.create({
+    data: { type: 'STALE_ASSIGNMENT', employeeId: finished.id, occurredAt: asOf, status: 'OPEN' }
   });
 
   const scope = { siteIds: null, excludeEmployeeId: null, includeConflicts: true };
@@ -131,7 +142,10 @@ async function main() {
   check(workingItem.currentAssignments[0]?.workArea?.name === 'North Hall', 'current work area is present');
   check(workingItem.employee.hasPhoto, 'profile-photo availability is present without exposing its storage path');
   check(finishedItem.todayWorkedMinutes === 60, 'all finished shifts today are summed');
-  check(finishedItem.needsAttention && finishedItem.openExceptionCount === 1, 'worker issue is visible');
+  check(finishedItem.needsAttention && finishedItem.openExceptionCount === 4, 'all worker issues remain visible');
+  check(finishedItem.openGpsWarningCount === 2, 'GPS and outside-geofence check-in are grouped as GPS warnings');
+  check(finishedItem.openOverlapProblemCount === 1, 'overlapping shift is a separate problem category');
+  check(finishedItem.openOtherProblemCount === 1, 'all remaining issues stay in the other-problems category');
 
   for (const q of ['Anna Working', working.employeeNumber, alpha.name, 'North Hall', 'north hall']) {
     const searched = await prisma.$transaction(

@@ -335,13 +335,31 @@ function workerInitials(name: string): string {
     .join('');
 }
 
+function GpsMarkerIcon() {
+  return (
+    <svg className="owner-issue-icon" viewBox="0 0 16 16" aria-hidden="true" focusable="false">
+      <path d="M8 1.25a5 5 0 0 0-5 5c0 3.45 4.35 8.13 4.54 8.33a.63.63 0 0 0 .92 0C8.65 14.38 13 9.7 13 6.25a5 5 0 0 0-5-5Zm0 7a2 2 0 1 1 0-4 2 2 0 0 1 0 4Z" fill="currentColor" />
+    </svg>
+  );
+}
+
+function ShiftOverlapIcon() {
+  return (
+    <svg className="owner-issue-icon" viewBox="0 0 16 16" aria-hidden="true" focusable="false">
+      <rect x="1.75" y="3" width="8" height="8" rx="1.5" fill="none" stroke="currentColor" strokeWidth="1.5" />
+      <rect x="6.25" y="5" width="8" height="8" rx="1.5" fill="none" stroke="currentColor" strokeWidth="1.5" />
+    </svg>
+  );
+}
+
 function OwnerWorkerRow({ item, asOf }: { item: OverviewWorkerItem; asOf: string }) {
   const ru = useAppLocale() === 'RU';
   const workerHref = `/admin/workers/${item.employee.id}`;
   const statusHref = `/admin?employeeId=${item.employee.id}`;
   const assignmentHref = `${workerHref}#worker-assignments`;
   const timelineHref = `${workerHref}/timeline`;
-  const issuesHref = `/admin/attendance/exceptions?employeeId=${item.employee.id}`;
+  const issuesHref = `/admin/attendance/exceptions?status=OPEN&employeeId=${item.employee.id}`;
+  const overlapIssuesHref = `${issuesHref}&type=OVERLAPPING_SHIFT`;
   const profileEditHref = `${workerHref}#worker-profile`;
   const assignment = item.openShift
     ? { site: item.openShift.site, workArea: item.openShift.workArea }
@@ -350,7 +368,6 @@ function OwnerWorkerRow({ item, asOf }: { item: OverviewWorkerItem; asOf: string
   const endedAt = item.openShift ? null : item.latestFinishedShiftToday?.recordedEndAt ?? null;
   const statusLabel = item.todayStatus === 'WORKING' ? (ru ? 'Сейчас работает' : 'Working now') : item.todayStatus === 'FINISHED' ? (ru ? 'Закончил' : 'Finished') : (ru ? 'Не начинал' : 'Not started');
   const statusClass = item.todayStatus === 'WORKING' ? 'owner-status-working' : item.todayStatus === 'FINISHED' ? 'owner-status-finished' : 'owner-status-not-started';
-  const issueLabel = item.openExceptionCount > 0 ? (ru ? `Проблем: ${item.openExceptionCount}` : `${item.openExceptionCount} issue${item.openExceptionCount === 1 ? '' : 's'}`) : item.needsAttention ? (ru ? 'Нужна проверка' : 'Review needed') : (ru ? 'Нет проблем' : 'No issues');
   return (
     <li>
       <div className="owner-worker-row" aria-label={`Open ${item.employee.name}`}>
@@ -391,9 +408,37 @@ function OwnerWorkerRow({ item, asOf }: { item: OverviewWorkerItem; asOf: string
         <Link href={timelineHref} className="owner-cell-link" data-label="Today" aria-label={ru ? `История времени работника ${item.employee.name}` : `Worked-time history for ${item.employee.name}`}>
           <LiveWorkedToday initialMinutes={item.todayWorkedMinutes} initialAsOf={asOf} running={item.todayStatus === 'WORKING'} />
         </Link>
-        <Link href={issuesHref} className={`owner-cell-link ${item.needsAttention ? 'owner-issue' : 'owner-no-issue'}`} data-label="Issues" aria-label={ru ? `Проблемы учёта работника ${item.employee.name}` : `Attendance issues for ${item.employee.name}`}>
-          {issueLabel}
-        </Link>
+        <div className="owner-issues-cell" data-label={ru ? 'Проблемы' : 'Issues'}>
+          <Link href={issuesHref} className={`owner-cell-link ${item.needsAttention ? 'owner-issue' : 'owner-no-issue'}`} aria-label={ru ? `Проблемы учёта работника ${item.employee.name}` : `Attendance issues for ${item.employee.name}`}>
+            {item.openExceptionCount > 0
+              ? (ru ? `Проблем: ${item.openExceptionCount}` : `${item.openExceptionCount} issue${item.openExceptionCount === 1 ? '' : 's'}`)
+              : item.needsAttention
+                ? (ru ? 'Нужна проверка' : 'Review needed')
+                : (ru ? 'Нет проблем' : 'No issues')}
+          </Link>
+          {item.openGpsWarningCount > 0 ? (
+            <Link
+              href={issuesHref}
+              className="owner-gps-indicator"
+              aria-label={ru ? `GPS-предупреждения работника ${item.employee.name}: ${item.openGpsWarningCount}` : `GPS warnings for ${item.employee.name}: ${item.openGpsWarningCount}`}
+              title={ru ? `GPS-предупреждения: ${item.openGpsWarningCount}` : `GPS warnings: ${item.openGpsWarningCount}`}
+            >
+              <GpsMarkerIcon />
+            </Link>
+          ) : null}
+          {item.openOverlapProblemCount > 0 ? (
+            <Link
+              href={overlapIssuesHref}
+              className="owner-overlap-indicator"
+              aria-label={ru ? `Пересечения смен работника ${item.employee.name}: ${item.openOverlapProblemCount}` : `Overlapping shifts for ${item.employee.name}: ${item.openOverlapProblemCount}`}
+              title={ru ? `Пересечение смен: ${item.openOverlapProblemCount}` : `Shift overlap: ${item.openOverlapProblemCount}`}
+            >
+              <ShiftOverlapIcon />
+              <span>{ru ? 'Пересечение' : 'Overlap'}</span>
+              {item.openOverlapProblemCount > 1 ? <strong>{item.openOverlapProblemCount}</strong> : null}
+            </Link>
+          ) : null}
+        </div>
         <Link href={workerHref} className="owner-cell-link owner-worker-open" aria-label={ru ? `Открыть полную карточку ${item.employee.name}` : `Open full profile ${item.employee.name}`}>
           {ru ? 'Открыть →' : 'View →'}
         </Link>
